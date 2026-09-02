@@ -111,6 +111,43 @@ export function getGlobalLlmConcurrency(env: NodeJS.ProcessEnv = process.env): n
   return clamp(Number.isNaN(raw) ? 5 : raw, 1, 20);
 }
 
+/**
+ * Wiki 检索增强摄取开关：提取前把相关既有页正文注入 prompt。
+ * KNOWLEDGE_WIKI_RETRIEVAL_ENABLED，默认 true。
+ */
+export function getWikiRetrievalEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = env.KNOWLEDGE_WIKI_RETRIEVAL_ENABLED;
+  if (raw === undefined || raw === "") return true;
+  return ["1", "true", "yes", "on"].includes(raw.toLowerCase());
+}
+
+/**
+ * Wiki 检索增强摄取：注入提取 prompt 的既有页数上限。
+ * KNOWLEDGE_WIKI_RETRIEVAL_TOP_K，默认 3，clamp 1~10。
+ */
+export function getWikiRetrievalTopK(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = parseInt(env.KNOWLEDGE_WIKI_RETRIEVAL_TOP_K ?? "", 10);
+  return clamp(Number.isNaN(raw) ? 3 : raw, 1, 10);
+}
+
+/**
+ * Wiki 检索增强摄取：注入上下文的总字符预算（含块头）。
+ * KNOWLEDGE_WIKI_RETRIEVAL_MAX_CHARS，默认 12000，clamp 1000~60000。
+ */
+export function getWikiRetrievalMaxChars(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = parseInt(env.KNOWLEDGE_WIKI_RETRIEVAL_MAX_CHARS ?? "", 10);
+  return clamp(Number.isNaN(raw) ? 12000 : raw, 1000, 60000);
+}
+
+/**
+ * Wiki 检索增强摄取：构造搜索 query 时使用的源词数上限。
+ * KNOWLEDGE_WIKI_RETRIEVAL_QUERY_TERMS，默认 24，clamp 4~100。
+ */
+export function getWikiRetrievalQueryTerms(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = parseInt(env.KNOWLEDGE_WIKI_RETRIEVAL_QUERY_TERMS ?? "", 10);
+  return clamp(Number.isNaN(raw) ? 24 : raw, 4, 100);
+}
+
 function envBool(key: string, fallback: boolean): boolean {
   const val = process.env[key];
   if (val === undefined || val === "") return fallback;

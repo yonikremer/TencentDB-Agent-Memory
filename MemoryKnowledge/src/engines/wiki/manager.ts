@@ -41,9 +41,19 @@ import {
 } from "./index-db.js";
 import { createLogger } from "../../logger.js";
 import { withSpan } from "../../telemetry.js";
-import { getIngestConcurrency } from "../../config.js";
+import {
+  getIngestConcurrency,
+  getWikiRetrievalEnabled,
+  getWikiRetrievalTopK,
+  getWikiRetrievalMaxChars,
+  getWikiRetrievalQueryTerms,
+} from "../../config.js";
+import { buildSearchQuery, formatRetrievedPages, type RetrievedPage } from "./ingest-v2/retrieval.js";
 import { slugify } from "./ingest-v2/slug.js";
 import { DEFAULT_SCHEMA, DEFAULT_PURPOSE } from "./ingest-v2/template.js";
+import { tokenize } from "./tokenize.js";
+
+export { tokenize };
 
 const log = createLogger("wiki-mgr");
 
@@ -305,14 +315,6 @@ function resolveTarget(
 
 // ── Search Engine (SQLite FTS5) ──
 
-const STOP_WORDS = new Set([
-  "的", "是", "了", "什么", "在", "有", "和", "与", "对", "从",
-  "the", "is", "a", "an", "what", "how", "are", "was", "were",
-  "do", "does", "did", "be", "been", "being", "have", "has", "had",
-  "it", "its", "in", "on", "at", "to", "for", "of", "with", "by",
-  "this", "that", "these", "those",
-]);
-
 const SNIPPET_CONTEXT = 80;
 
 /**
@@ -327,50 +329,6 @@ function makeSnippet(page: WikiPage): string {
     .replace(/^#+\s+.*$/gm, "")
     .trim();
   return [...body].slice(0, SNIPPET_CONTEXT).join("").replace(/\n/g, " ").trim();
-}
-
-/**
- * 分词器：中英文混合处理。
- * - 英文：按空格/标点切分，保留完整单词，过滤 stop words
- * - 中文：bigram + 单字
- *
- * 导出供 FTS5 预分词复用（006）与 bm25 评测：写入 FTS5 时把 content/title
- * 经此函数分词后以空格拼接存入，查询时对 query 用同一分词，保证中文逻辑一致。
- */
-export function tokenize(text: string): string[] {
-  const rawTokens = text
-    .toLowerCase()
-    .split(/[\s,，。！？、；：""''（）()\-_/\\·~～…\[\]【】{}《》<>]+/)
-    .filter((t) => t.length > 0);
-
-  const result: string[] = [];
-  for (const token of rawTokens) {
-    const hasCJK = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(token);
-    const hasLatin = /[a-z]/.test(token);
-
-    if (hasCJK && hasLatin) {
-      // 混合 token（如 "l0录入"）：拆分中英文部分分别处理
-      const parts = token.split(/(?<=[a-z0-9])(?=[\u4e00-\u9fff])|(?<=[\u4e00-\u9fff])(?=[a-z0-9])/);
-      for (const part of parts) {
-        if (/[\u4e00-\u9fff]/.test(part) && part.length > 1) {
-          const chars = [...part];
-          for (let i = 0; i < chars.length - 1; i++) result.push(chars[i] + chars[i + 1]);
-          result.push(part);
-        } else if (part.length > 0 && !STOP_WORDS.has(part)) {
-          result.push(part);
-        }
-      }
-    } else if (hasCJK && token.length > 1) {
-      // 纯中文：bigram
-      const chars = [...token];
-      for (let i = 0; i < chars.length - 1; i++) result.push(chars[i] + chars[i + 1]);
-      result.push(token);
-    } else if (!STOP_WORDS.has(token) && token.length > 0) {
-      // 纯英文/数字：保留完整 token
-      result.push(token);
-    }
-  }
-  return result;
 }
 
 /**
@@ -564,6 +522,7 @@ export async function runIngestIncremental(
   llmConfig: any,
   onProgress?: ProgressFn,
   globalLlmLimit?: LimitFunction,
+  retrieveContext?: (sourceText: string) => string,
 ): Promise<IngestOutcome> {
   const { extractSource, commitCandidates, scanExistingPages } = await import("./ingest-v2/index.js");
   const report = createThrottledProgressFn(onProgress);
@@ -617,9 +576,19 @@ export async function runIngestIncremental(
     wikiLimit(async () => {
       const t0 = Date.now();
       try {
+        // 检索增强摄取：把相关既有页正文注入提取 prompt。
+        // 任何失败降级为无增强，绝不阻断摄取。
+        let retrievalContext = "";
+        if (retrieveContext) {
+          try {
+            retrievalContext = retrieveContext(readFileSync(d.abs, "utf-8"));
+          } catch (err) {
+            log.warn("检索增强上下文生成失败，降级无增强", { source: d.filename, error: String(err) });
+          }
+        }
         const candidates = await withSpan("ingest-source", async (span) => {
           span.setAttribute("source.name", d.filename);
-          const run = () => extractSource(projectPath, d.abs, llmConfig, existingPages);
+          const run = () => extractSource(projectPath, d.abs, llmConfig, existingPages, { retrievalContext });
           return globalLlmLimit ? globalLlmLimit(run) : run();
         });
         completed++;
@@ -990,6 +959,31 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
       /* 库刚建 / 无 source 行 → 全部视为新增 */
     }
 
+    // 检索增强摄取：启用时构造"源文档 → 相关既有页正文"闭包，复用 searchInternal + readPage
+    // （与 /v3/search、agent tools 同一检索面）。任何失败降级为无增强，绝不阻断摄取。
+    let retrieveContext: ((sourceText: string) => string) | undefined;
+    if (getWikiRetrievalEnabled()) {
+      const topK = getWikiRetrievalTopK();
+      const maxChars = getWikiRetrievalMaxChars();
+      const queryTerms = getWikiRetrievalQueryTerms();
+      retrieveContext = (sourceText) => {
+        try {
+          const query = buildSearchQuery(sourceText, queryTerms);
+          if (!query) return "";
+          const res = searchInternal(name, query, topK, { hop: 0 });
+          const pages: RetrievedPage[] = [];
+          for (const r of res.results) {
+            const content = readPageInternal(name, r.path);
+            if (content) pages.push({ relPath: r.path, title: r.title, content });
+          }
+          return formatRetrievedPages(pages, maxChars);
+        } catch (err) {
+          log.warn("wiki 检索增强摄取失败，降级无增强", { wiki: name, error: err instanceof Error ? err.message : String(err) });
+          return "";
+        }
+      };
+    }
+
     const outcome = await withSpan("wiki-ingest", async (span) => {
       span.setAttribute("wiki.name", name);
       return runIngestIncremental(
@@ -998,6 +992,7 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
         llmConfig,
         opts?.onProgress,
         opts?.globalLlmLimit,
+        retrieveContext,
       );
     });
 
@@ -1044,6 +1039,38 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
     return outcome.results;
   }
 
+  /** 读取既有 wiki 页正文（id 或 relPath 均可）。检索增强摄取复用同一读取路径。 */
+  function readPageInternal(name: string, relPath: string): string | null {
+    const state = sources.get(name);
+    if (!state) return null;
+
+    // 支持 raw/ 前缀：直接从项目根读取
+    if (relPath.startsWith("raw/")) {
+      const fullPath = join(state.path, relPath);
+      if (!fullPath.startsWith(join(state.path, "raw"))) return null; // 防路径穿越
+      try { return readFileSync(fullPath, "utf-8"); } catch {}
+      if (!relPath.endsWith(".md")) {
+        try { return readFileSync(fullPath + ".md", "utf-8"); } catch {}
+      }
+      return null;
+    }
+
+    // 支持多种格式：
+    //   "wiki/concepts/l0-录入.md" → 完整 relPath
+    //   "concepts/l0-录入.md"      → 去掉 wiki/ 前缀
+    //   "concepts/l0-录入"         → id 格式（不带 .md）
+    const cleanPath = relPath.replace(/^wiki\//, "");
+    const base = join(state.path, "wiki");
+    let fullPath = join(base, cleanPath);
+    if (!fullPath.startsWith(base)) return null;
+    // 先直接尝试，再补 .md
+    try { return readFileSync(fullPath, "utf-8"); } catch {}
+    if (!cleanPath.endsWith(".md")) {
+      try { return readFileSync(fullPath + ".md", "utf-8"); } catch {}
+    }
+    return null;
+  }
+
   return {
     register, sync, init, ingest,
     get: (name) => sources.get(name),
@@ -1067,36 +1094,7 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
         return { nodes: [], edges: [], communities: [] };
       }
     },
-    readPage: (name, relPath) => {
-      const state = sources.get(name);
-      if (!state) return null;
-
-      // 支持 raw/ 前缀：直接从项目根读取
-      if (relPath.startsWith("raw/")) {
-        const fullPath = join(state.path, relPath);
-        if (!fullPath.startsWith(join(state.path, "raw"))) return null; // 防路径穿越
-        try { return readFileSync(fullPath, "utf-8"); } catch {}
-        if (!relPath.endsWith(".md")) {
-          try { return readFileSync(fullPath + ".md", "utf-8"); } catch {}
-        }
-        return null;
-      }
-
-      // 支持多种格式：
-      //   "wiki/concepts/l0-录入.md" → 完整 relPath
-      //   "concepts/l0-录入.md"      → 去掉 wiki/ 前缀
-      //   "concepts/l0-录入"         → id 格式（不带 .md）
-      const cleanPath = relPath.replace(/^wiki\//, "");
-      const base = join(state.path, "wiki");
-      let fullPath = join(base, cleanPath);
-      if (!fullPath.startsWith(base)) return null;
-      // 先直接尝试，再补 .md
-      try { return readFileSync(fullPath, "utf-8"); } catch {}
-      if (!cleanPath.endsWith(".md")) {
-        try { return readFileSync(fullPath + ".md", "utf-8"); } catch {}
-      }
-      return null;
-    },
+    readPage: (name, relPath) => readPageInternal(name, relPath),
     getPages: (name) => {
       const state = sources.get(name);
       if (!state) return [];

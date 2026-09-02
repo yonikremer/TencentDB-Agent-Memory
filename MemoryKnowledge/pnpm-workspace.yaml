@@ -1,0 +1,7 @@
+# 原生/构建脚本依赖白名单。better-sqlite3 需编译原生绑定；esbuild / protobufjs
+# 依赖 postinstall 脚本。值为布尔 true 才会放行对应包运行 build scripts；
+# 缺省（或非布尔占位）时 pnpm 11 会忽略并报 ERR_PNPM_IGNORED_BUILDS。
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+  protobufjs: true

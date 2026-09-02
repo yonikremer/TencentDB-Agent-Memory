@@ -37,6 +37,19 @@ function formatExistingPages(existingPages: ExistingPageInfo[]): string {
     : "(wiki is empty — this is the first source)";
 }
 
+/**
+ * 检索增强上下文：非空时渲染为独立小节。
+ * 块头已由 formatRetrievedPages 自带（"## Relevant Existing Knowledge ..."），
+ * 这里只负责在既有清单与源文档之间插入一块空白分隔。
+ */
+function retrievalSection(retrievalContext?: string): string {
+  return retrievalContext && retrievalContext.trim() ? `\n\n${retrievalContext}` : "";
+}
+
+/** 生成阶段对"检索增强上下文"的处理规则（单阶段 / 两阶段生成 prompt 共用）。 */
+const RETRIEVAL_CONTEXT_RULE =
+  '${RETRIEVAL_CONTEXT_RULE}';
+
 // ─── 阶段 A：分析 ────────────────────────────────────────────
 
 /** 分析阶段系统提示词：扮演"抽取规划者"，只产出结构化分析，不写页面。 */
@@ -77,12 +90,14 @@ export function buildAnalysisPrompt(args: {
   sourceName: string;
   sourceText: string;
   existingPages: ExistingPageInfo[];
+  retrievalContext?: string;
 }): string {
-  const { sourceName, sourceText, existingPages } = args;
+  const { sourceName, sourceText, existingPages, retrievalContext } = args;
   return `## Source to analyze: ${sourceName}
 
 ## Existing wiki pages (for deciding what to update vs. create)
 ${formatExistingPages(existingPages)}
+${retrievalSection(retrievalContext)}
 
 ## Source Document
 ${sourceText}
@@ -158,8 +173,9 @@ export function buildGeneratePrompt(args: {
   sourceText: string;
   existingPages: ExistingPageInfo[];
   pagesToUpdate?: PageForUpdate[];
+  retrievalContext?: string;
 }): string {
-  const { sourceName, sourceText, existingPages, pagesToUpdate } = args;
+  const { sourceName, sourceText, existingPages, pagesToUpdate, retrievalContext } = args;
 
   const existingList =
     existingPages.length > 0
@@ -181,6 +197,7 @@ export function buildGeneratePrompt(args: {
 ## Existing wiki pages (for deciding what to create vs. update, to avoid duplicates)
 ${existingList}
 ${updateSection}
+${retrievalSection(retrievalContext)}
 
 ## Source Document
 ${sourceText}
@@ -191,6 +208,7 @@ Read the source, follow the format and protocol in the system prompt, and output
 2. For key entities/concepts in the source, produce or update corresponding entity/concept pages.
 3. If an entity already appears in the existing page list, reuse its path for merging — do NOT create a near-duplicate page.
 4. Use [[wikilink]] generously between pages.
+${RETRIEVAL_CONTEXT_RULE}
 Output ONLY FILE blocks — no extra commentary.`;
 }
 
@@ -205,8 +223,9 @@ export function buildGenerateFromAnalysisPrompt(args: {
   sourceText: string;
   analysis: string;
   existingPages: ExistingPageInfo[];
+  retrievalContext?: string;
 }): string {
-  const { sourceName, sourceText, analysis, existingPages } = args;
+  const { sourceName, sourceText, analysis, existingPages, retrievalContext } = args;
   return `## Source to ingest: ${sourceName}
 
 ## Extraction Plan (from analysis stage — generate pages based on this)
@@ -214,6 +233,7 @@ ${analysis}
 
 ## Existing wiki pages (reuse paths for merging — avoid duplicates)
 ${formatExistingPages(existingPages)}
+${retrievalSection(retrievalContext)}
 
 ## Source Document (for detail verification)
 ${sourceText}
@@ -224,5 +244,6 @@ Based on the Extraction Plan above, follow the format and protocol in the system
 2. For the entities/concepts listed in the extraction plan, produce or update corresponding entity/concept pages.
 3. Items marked as "already exist" in the plan should reuse their existing paths for merging — do NOT create near-duplicates.
 4. Follow the cross-reference suggestions in the plan — use [[wikilink]] generously.
+${RETRIEVAL_CONTEXT_RULE}
 Output ONLY FILE blocks — no extra commentary.`;
 }

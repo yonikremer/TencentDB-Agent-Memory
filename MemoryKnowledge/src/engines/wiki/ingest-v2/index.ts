@@ -88,6 +88,12 @@ export interface IngestOptions {
    *   - "single-stage"：源全文直接产出 FILE 块（少一次 LLM 调用，省 token）。
    */
   mode?: "two-stage" | "single-stage";
+  /**
+   * 检索增强摄取：调用方（manager）注入的"相关既有页正文"上下文块。
+   * 非空时加入提取 prompt，让依赖先前文档的源拿到真实上下文，而不仅是
+   * 逐页元数据清单。默认空 = 不增强（向后兼容）。
+   */
+  retrievalContext?: string;
 }
 
 export interface CommitResult {
@@ -125,6 +131,7 @@ export async function extractSource(
   const template = loadTemplate(projectPath);
   const systemPrompt = buildSystemPrompt(template);
   const mode = options.mode ?? "two-stage";
+  const retrievalContext = options.retrievalContext ?? "";
 
   const chunks =
     sourceText.length > SOURCE_CHAR_BUDGET
@@ -152,18 +159,18 @@ export async function extractSource(
       log.debug("阶段A 分析开始", { chunk: tag });
       const analysis = await llm.chat({
         system: buildAnalysisSystemPrompt(template),
-        prompt: buildAnalysisPrompt({ sourceName: chunkLabel, sourceText: chunks[i], existingPages }),
+        prompt: buildAnalysisPrompt({ sourceName: chunkLabel, sourceText: chunks[i], existingPages, retrievalContext }),
         label: `analysis:${tag}`,
       });
       log.debug("阶段A 分析完成", { chunk: tag, analysisChars: analysis.length, empty: !analysis.trim() });
       log.debug("阶段A 分析内容预览", { chunk: tag, preview: analysis.slice(0, 200) });
       const genPrompt = analysis.trim()
-        ? buildGenerateFromAnalysisPrompt({ sourceName: chunkLabel, sourceText: chunks[i], analysis, existingPages })
-        : buildGeneratePrompt({ sourceName: chunkLabel, sourceText: chunks[i], existingPages });
+        ? buildGenerateFromAnalysisPrompt({ sourceName: chunkLabel, sourceText: chunks[i], analysis, existingPages, retrievalContext })
+        : buildGeneratePrompt({ sourceName: chunkLabel, sourceText: chunks[i], existingPages, retrievalContext });
       if (!analysis.trim()) log.warn("分析为空，降级单阶段生成", { chunk: tag });
       out = await llm.chat({ system: systemPrompt, prompt: genPrompt, label: `generate:${tag}` });
     } else {
-      const prompt = buildGeneratePrompt({ sourceName: chunkLabel, sourceText: chunks[i], existingPages });
+      const prompt = buildGeneratePrompt({ sourceName: chunkLabel, sourceText: chunks[i], existingPages, retrievalContext });
       out = await llm.chat({ system: systemPrompt, prompt, label: `generate:${tag}` });
     }
 
