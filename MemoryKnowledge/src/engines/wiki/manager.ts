@@ -576,19 +576,11 @@ export async function runIngestIncremental(
     wikiLimit(async () => {
       const t0 = Date.now();
       try {
-        // 检索增强摄取：把相关既有页正文注入提取 prompt。
-        // 任何失败降级为无增强，绝不阻断摄取。
-        let retrievalContext = "";
-        if (retrieveContext) {
-          try {
-            retrievalContext = retrieveContext(readFileSync(d.abs, "utf-8"));
-          } catch (err) {
-            log.warn("检索增强上下文生成失败，降级无增强", { source: d.filename, error: String(err) });
-          }
-        }
         const candidates = await withSpan("ingest-source", async (span) => {
           span.setAttribute("source.name", d.filename);
-          const run = () => extractSource(projectPath, d.abs, llmConfig, existingPages, { retrievalContext });
+          // 检索增强摄取：把检索函数注入 extractSource，由其在每个源分块上逐块检索
+          // 相关既有页（函数内部 + extractSource 内均降级为无增强，不阻断摄取）。
+          const run = () => extractSource(projectPath, d.abs, llmConfig, existingPages, { retrieveContext });
           return globalLlmLimit ? globalLlmLimit(run) : run();
         });
         completed++;

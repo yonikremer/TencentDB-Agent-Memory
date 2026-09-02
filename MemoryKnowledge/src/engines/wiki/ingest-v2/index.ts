@@ -75,7 +75,7 @@ const STRUCTURAL_FILES = new Set([
 ]);
 
 /** 粗略上下文预算（字符）：保留余量给 prompt 框架与输出。 */
-const SOURCE_CHAR_BUDGET = 28_000;
+export const SOURCE_CHAR_BUDGET = 28_000;
 
 export interface IngestOptions {
   /** 注入的 LLM 客户端（测试用）；不传则用 llmConfig 构造真实客户端。 */
@@ -89,11 +89,12 @@ export interface IngestOptions {
    */
   mode?: "two-stage" | "single-stage";
   /**
-   * 检索增强摄取：调用方（manager）注入的"相关既有页正文"上下文块。
-   * 非空时加入提取 prompt，让依赖先前文档的源拿到真实上下文，而不仅是
-   * 逐页元数据清单。默认空 = 不增强（向后兼容）。
+   * 检索增强摄取：调用方（manager）注入的检索函数。
+   * 对每个源分块文本调用一次，返回该块相关的既有页正文上下文——实现"逐块检索"，
+   * 而非整文件一次、所有块共用同一上下文。长文档拆块后，每块用自身高频词检索，
+   * 更能命中该块真正依赖的既有页。返回空串 = 该块不增强（任何失败同样降级为空串）。
    */
-  retrievalContext?: string;
+  retrieveContext?: (chunkText: string) => string;
 }
 
 export interface CommitResult {
@@ -131,7 +132,6 @@ export async function extractSource(
   const template = loadTemplate(projectPath);
   const systemPrompt = buildSystemPrompt(template);
   const mode = options.mode ?? "two-stage";
-  const retrievalContext = options.retrievalContext ?? "";
 
   const chunks =
     sourceText.length > SOURCE_CHAR_BUDGET
@@ -153,6 +153,17 @@ export async function extractSource(
   for (let i = 0; i < chunks.length; i++) {
     const chunkLabel = chunks.length > 1 ? `${sourceName} (chunk ${i + 1}/${chunks.length})` : sourceName;
     const tag = chunks.length > 1 ? `${sourceName}#${i + 1}` : sourceName;
+
+    // 检索增强摄取：逐块检索——每块用其自身文本搜相关既有页（而非整文件一次、所有块共用）。
+    // 任何失败降级为该块无增强，绝不阻断该块提取。
+    let retrievalContext = "";
+    if (options.retrieveContext) {
+      try {
+        retrievalContext = options.retrieveContext(chunks[i]);
+      } catch (err) {
+        log.warn("分块检索增强失败，该块降级无增强", { chunk: tag, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
 
     let out: string;
     if (mode === "two-stage") {
