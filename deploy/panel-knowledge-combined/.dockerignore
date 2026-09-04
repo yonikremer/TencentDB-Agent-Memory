@@ -1,11 +1,11 @@
 # panel-knowledge-combined image context ignore list
 #
-# build.sh 会把 panel/（team-memory-control）+ knowledge/（services/knowledge）
-# rsync 到临时 context 目录，本文件在此 context 里生效。
-# 目的：避免把敏感真值 / 内网信息 / 大文件打进镜像。
+# build.sh will rsync panel/ (team-memory-control) + knowledge/ (services/knowledge)
+# to a temporary context directory, where this file takes effect.
+# Purpose: to avoid including sensitive truth values / intranet information / large files in the image.
 
-# ── 真值配置：必须运行时挂载，不入镜像 ──
-# metadata-instances.json 含 tdai kernel Bearer token，见 panel README 部署段。
+# ── Truth Configuration: Must be mounted at runtime, not included in the image ──
+# metadata-instances.json contains tdai kernel Bearer token, see panel README deployment section.
 panel/config/metadata-instances.json
 panel/config/*.yaml
 panel/config/*.yml
@@ -14,19 +14,19 @@ panel/.env.*
 knowledge/.env
 knowledge/.env.*
 
-# ── 文档：非 runtime 必需，且含内部路径引用 ──
-# 两层 docs/ 全排除。runtime 唯一需要的 spec 是 knowledge/openapi.yaml（包根，
-# src/server.ts 读它给 Swagger UI），不在 docs/ 下，不受影响。
+# ── Documentation: not required at runtime, and contains internal path references ──
+# Exclude the two-layer docs/ entirely. The only spec required by runtime is knowledge/openapi.yaml (package root,
+# src/server.ts reads it for Swagger UI), which is not under docs/, so it is unaffected.
 panel/docs/
 knowledge/docs/
 
-# ── 测试脚本：含内部环境硬编码路径，非 runtime 必需 ──
+# ── Test script: contains hardcoded internal environment paths, not required at runtime ──
 panel/tests/
 panel/e2e-*.sh
 knowledge/__tests__/
 knowledge/bin/e2e-*.sh
 
-# ── 依赖 / 构建产物 ──
+# ── Dependencies / Build Artifacts ──
 **/node_modules
 **/dist
 **/build
@@ -39,7 +39,7 @@ knowledge/bin/e2e-*.sh
 **/*.db-wal
 **/*.sqlite
 
-# ── 编辑器/OS 杂物 ──
+# ── Editor/OS Miscellaneous ──
 **/.DS_Store
 **/.idea/
 **/.vscode/

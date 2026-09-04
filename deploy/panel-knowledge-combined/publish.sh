@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# 发布 Memory Hub 多架构镜像到 Docker Hub。
+# Publish Memory Hub multi-arch images to Docker Hub
 #
-# 流程：
-#   1) 检查 MemoryPanel / MemoryKnowledge 的敏感信息泄漏
-#   2) PREPARE_ONLY 准备 context，再检查一遍 context
-#   3) docker buildx 构建 linux/amd64 + linux/arm64 并 push
+# Process:
+#   1) Check for sensitive information leakage in MemoryPanel / MemoryKnowledge
+#   2) PREPARE_ONLY Prepare context, then check the context once more
+#   3) docker buildx build linux/amd64 + linux/arm64 and push
 #
-# 用法：
-#   ./publish.sh                              # 默认 VERSION=1.0.0-beta.1，并推 :beta
-#   VERSION=1.0.0-beta.2 ./publish.sh         # 版本 tag + 浮动 :beta（默认 ALSO_BETA=1）
-#   ALSO_BETA=0 VERSION=1.0.0-beta.2 ./publish.sh   # 只推版本 tag，不挪 :beta
-#   DRY_RUN=1 ./publish.sh                    # 只做泄漏检查 + 准备 context，不 build/push
-#   PUSH=0 ./publish.sh                       # 本地 --load 单架构（默认 amd64）供抽查
-#   ALSO_LATEST=1 ./publish.sh                # 额外打 agentmemory/memory-hub:latest（正式版再用）
+# Usage:
+#   ./publish.sh                              # Default VERSION=1.0.0-beta.1, and push :beta
+#   VERSION=1.0.0-beta.2 ./publish.sh         # Version tag + floating :beta (default ALSO_BETA=1)
+#   ALSO_BETA=0 VERSION=1.0.0-beta.2 ./publish.sh   # Push only version tag, do not move :beta
+#   DRY_RUN=1 ./publish.sh                    # Only do leak check + prepare context, no build/push
+#   PUSH=0 ./publish.sh                       # Local --load single architecture (default amd64) for spot check
+#   ALSO_LATEST=1 ./publish.sh                # Also publish agentmemory/memory-hub:latest (for official release)
 #
-# 前置：
-#   - 已 docker login（账号需有 agentmemory org 推送权限）
-#   - docker buildx 可用；默认 builder 名 multiarch（不存在则自动 create）
+# Preamble:
+#   - docker login has been completed (account needs agentmemory org push permissions)
+#   - docker buildx is available; default builder name is multiarch (auto-created if not exists)
 #
 set -euo pipefail
 
@@ -41,14 +41,14 @@ SECRET_LEAK_CHECK="${SECRET_LEAK_CHECK:-$TMC_DIR/scripts/secret-leak-check.sh}"
 err() { echo "[publish-hub] error: $*" >&2; exit 1; }
 log() { echo "[publish-hub] $*"; }
 
-[[ -f "$TMC_DIR/package.json" ]] || err "MemoryPanel 不在 $TMC_DIR"
-[[ -f "$KNOWLEDGE_DIR/package.json" ]] || err "MemoryKnowledge 不在 $KNOWLEDGE_DIR"
-[[ -f "$SECRET_LEAK_CHECK" ]] || err "secret-leak-check 不在 $SECRET_LEAK_CHECK"
-[[ -f "$SCRIPT_DIR/Dockerfile" ]] || err "Dockerfile 缺失"
-command -v docker >/dev/null || err "需要 docker"
-command -v rsync >/dev/null || err "需要 rsync"
+[[ -f "$TMC_DIR/package.json" ]] || err "MemoryPanel is not in $TMC_DIR"
+[[ -f "$KNOWLEDGE_DIR/package.json" ]] || err "MemoryKnowledge is not in $KNOWLEDGE_DIR"
+[[ -f "$SECRET_LEAK_CHECK" ]] || err "secret-leak-check is not in $SECRET_LEAK_CHECK"
+[[ -f "$SCRIPT_DIR/Dockerfile" ]] || err "Dockerfile is missing"
+command -v docker >/dev/null || err "docker is required"
+command -v rsync >/dev/null || err "rsync is required"
 
-# ── 1) 源码泄漏检查 ───────────────────────────────────────────────────────
+# ── 1) Source Code Leakage Check ───────────────────────────────────────────────────────
 log "secret-leak-check: MemoryPanel"
 (
   cd "$TMC_DIR"
@@ -60,13 +60,13 @@ log "secret-leak-check: MemoryKnowledge"
   bash "$SECRET_LEAK_CHECK" src .env.example package.json
 )
 
-# ── 2) 准备 context ─────────────────────────────────────────────────
+# ── 2) Prepare context ─────────────────────────────────────────────────
 log "prepare context → $CTX_DIR"
 KEEP_CTX=1 PREPARE_ONLY=1 CTX_DIR="$CTX_DIR" IMAGE_TAG="scan-$VERSION" \
   bash "$SCRIPT_DIR/build.sh"
 
 [[ -f "$CTX_DIR/panel/package.json" && -f "$CTX_DIR/knowledge/package.json" ]] \
-  || err "context 准备失败：$CTX_DIR"
+  || err "context preparation failed: $CTX_DIR"
 
 log "secret-leak-check: build context"
 (
@@ -75,13 +75,13 @@ log "secret-leak-check: build context"
 )
 
 if [[ "$DRY_RUN" == "1" ]]; then
-  log "DRY_RUN=1 → 跳过 build/push。context 保留在 $CTX_DIR"
+  log "DRY_RUN=1 → Skip build/push. context preserved in $CTX_DIR"
   exit 0
 fi
 
 # ── 3) buildx multi-arch ────────────────────────────────────────────
-# 注意：--push 只会推 TAG_ARGS 里的名字。本地名 team-memory-panel-knowledge
-# 不能出现在 --push 里，否则会被当成 docker.io/library/... 导致 authorization failed。
+# Note: --push only pushes the names in TAG_ARGS. The local name team-memory-panel-knowledge
+# cannot appear in --push, otherwise it will be treated as docker.io/library/... causing authorization failed.
 HUB_TAGS=(-t "${HUB_IMAGE}:${VERSION}")
 if [[ "$ALSO_BETA" == "1" ]]; then
   HUB_TAGS+=(-t "${HUB_IMAGE}:beta")
@@ -124,11 +124,11 @@ else
   trap cleanup EXIT
   if docker export "$cid" | tar -t 2>/dev/null \
     | grep -E '(\.env$|metadata-instances\.json|/app/panel/\.env)' ; then
-    err "镜像内出现疑似敏感路径，中止"
+    err "Suspected sensitive path found in image, aborting"
   fi
   cleanup
   trap - EXIT
-  log "local image ready: ${LOCAL_NAME}:${VERSION}（未 push）"
+  log "local image ready: ${LOCAL_NAME}:${VERSION} (not pushed)"
 fi
 
-log "done. 验证: docker pull ${HUB_IMAGE}:${VERSION} && docker buildx imagetools inspect ${HUB_IMAGE}:${VERSION}"
+log "done. verify: docker pull ${HUB_IMAGE}:${VERSION} && docker buildx imagetools inspect ${HUB_IMAGE}:${VERSION}"
