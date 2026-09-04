@@ -49,6 +49,8 @@ export const protectedGlobs = [
   'MemoryProxy/src/session/codebuddy/extractor.ts',
   // QA smoke script: Chinese agent name (开发大师) is a runtime default/test value.
   'MemoryProxy/scripts/qa/codex-init.sh',
+  // Fork's own operating plan: Chinese matcher examples are intentional (§4.1 documentation).
+  'ZH_EN_TRANSLATION_PLAN.md',
 ];
 
 // Committed scratch from earlier passes. `git rm` each and it stops showing here.
