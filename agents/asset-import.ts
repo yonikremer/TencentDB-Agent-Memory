@@ -50,7 +50,7 @@ function extractSessionMeta(text: string): { timeRange: string; projectPath: str
   for (const line of text.split('\n')) {
     const t = line.trim();
     if (!t) continue;
-    try { walk(JSON.parse(t)); } catch { /* 跳过非 JSON 行 */ }
+    try { walk(JSON.parse(t)); } catch { /* skip non-JSON lines */ }
   }
   let timeRange = '';
   if (ts.length) {
@@ -76,7 +76,7 @@ export function workspaceRoot(opts?: ScanOptions): string | undefined {
   if (!opts?.workspace?.trim()) return undefined;
   const ws = resolve(opts.workspace.trim());
   if (!existsSync(ws) || !statSync(ws).isDirectory()) {
-    throw new Error(`--workspace 不是有效目录: ${ws}`);
+    throw new Error(`--workspace is not a valid directory: ${ws}`);
   }
   return ws;
 }
@@ -233,7 +233,7 @@ export function isHarnessNoise(role: string, content: string): boolean {
 }
 
 /**
- * 把工具入参对象转成字符串（skill 链路作为结构化 content；也用于 memory 扁平文本）。
+ * Convert the tool input object to a string (the skill chain as structured content; also used for memory flat text).
  */
 function argsToString(raw: unknown): string {
   if (raw === undefined || raw === null) return '';
@@ -261,9 +261,9 @@ function blockText(content: unknown): string {
 const strVal = (v: unknown): string => (typeof v === 'string' ? v : '');
 
 /**
- * 一条内容片段（结构化，供 skill 链路 /v3/skill/conversation/add 使用）。
- * - role 缺省时由调用方按记录角色补 user/assistant；
- * - tool_call / tool_result 自带 role 与 tool_call_id（core 要求的配对锚点，缺失会被 40001 拒绝）。
+ * A content snippet (structured, for use by the skill chain /v3/skill/conversation/add).
+ * - When role is missing, the caller supplements user/assistant based on the record's role;
+ * - tool_call / tool_result carry their own role and tool_call_id (the pairing anchor required by core; missing ones will be rejected with 40001).
  */
 interface ContentFrag {
   role?: string;
@@ -279,10 +279,10 @@ function expandBlock(b: unknown): ContentFrag[] {
     const bb = b as Record<string, unknown>;
     const type = typeof bb.type === 'string' ? bb.type : '';
     switch (type) {
-      // openclaw 工具调用：{type:'toolCall', id, name, arguments}
+      // openclaw tool call: {type:'toolCall', id, name, arguments}
       case 'toolCall':
         return [{ role: 'tool_call', tool_call_id: strVal(bb.id), tool_name: strVal(bb.name) || 'unknown', content: (argsToString(bb.arguments ?? bb.input) as string) ?? '' }];
-      // anthropic / claude / codex / dsh / hermes 工具调用：{type:'tool_use', id, name, input}
+      // anthropic / claude / codex / dsh / hermes tool calls: {type:'tool_use', id, name, input}
       // Anthropic / Claude / Codex / Dsh / Hermes tool call: {type:'tool_use', id, name, input}
       case 'tool_use':
         return [{ role: 'tool_call', tool_call_id: strVal(bb.id), tool_name: strVal(bb.name) || 'unknown', content: (argsToString(bb.input ?? bb.arguments) as string) ?? '' }];
@@ -570,9 +570,9 @@ interface PanelEnvelope<T = unknown> {
 }
 
 interface ClientConfig {
-  /** panel 基地址，如 http://127.0.0.1:8123 */
+  /** panel base address, e.g. http://127.0.0.1:8123 */
   panelUrl: string;
-  /** 实例 spaceId */
+  /** Instance spaceId */
   serviceId: string;
   /** per-user apikey（X-Tdai-User-Key） */
   userKey: string;
@@ -590,7 +590,7 @@ export async function loadConfigFromEnv(interactive: boolean = true): Promise<Cl
   if (missing.length > 0) {
     // If none of the three environment variables are set and running interactively, prompt the user for each input
     if (missing.length === 3 && interactive && process.stdin.isTTY) {
-      console.log('未检测到必需环境变量，请依次输入（留空将报错退出）：');
+      console.log('Required environment variables not detected, please input them in order (leaving empty will cause an error and exit):');
       const inputPanel = (await question('PANEL_URL (panel address, e.g., http://127.0.0.1:8123): ')).trim();
       const inputService = (await question('TDAI_SERVICE_ID (spaceId): ')).trim();
       const inputKey = (await question('TDAI_USER_KEY (sk-mem-...): ')).trim();
@@ -598,11 +598,11 @@ export async function loadConfigFromEnv(interactive: boolean = true): Promise<Cl
       process.env.TDAI_SERVICE_ID = inputService;
       process.env.TDAI_USER_KEY = inputKey;
       if (!inputPanel || !inputService || !inputKey) {
-        throw new Error('PANEL_URL / TDAI_SERVICE_ID / TDAI_USER_KEY 均不可为空，请重新运行并完整输入');
+        throw new Error('PANEL_URL / TDAI_SERVICE_ID / TDAI_USER_KEY must not be empty, please re-run and input them completely');
       }
       return { panelUrl: inputPanel, serviceId: inputService, userKey: inputKey };
     }
-    throw new Error(`缺少必需环境变量: ${missing.join(', ')}（可在命令前 export，或用 --env-file 指定 .env）`);
+    throw new Error(`Missing required environment variable: ${missing.join(', ')} (you can export it before the command, or specify .env with --env-file)`);
   }
   return { panelUrl: panelUrl!, serviceId: serviceId!, userKey: userKey! };
 }
@@ -632,10 +632,10 @@ export class PanelClient {
     try {
       json = JSON.parse(text) as PanelEnvelope<T>;
     } catch {
-      throw new Error(`非 JSON 响应 (${res.status}): ${text.slice(0, 200)}`);
+      throw new Error(`Non JSON response (${res.status}): ${text.slice(0, 200)}`);
     }
     if (typeof json.code !== 'number') {
-      throw new Error(`响应缺少 code 字段 (${res.status}): ${text.slice(0, 200)}`);
+      throw new Error(`Response missing code field (${res.status}): ${text.slice(0, 200)}`);
     }
     // Business envelope (including numeric code) is always returned for the caller to handle; no error is thrown here.
     return json;
@@ -661,7 +661,7 @@ export function loadEnvFile(path: string): void {
       if (!(k in process.env)) process.env[k] = v;
     }
   } catch (err) {
-    throw new Error(`读取 env-file 失败: ${(err as Error).message}`);
+    throw new Error(`Failed to read env-file: ${(err as Error).message}`);
   }
 }
 
@@ -684,13 +684,13 @@ async function resolveUserId(client: PanelClient, userKey: string): Promise<stri
     user_key: userKey,
   });
   if (env.code !== 0 || !env.data) {
-    throw new Error(`auth/verify 失败 code=${env.code} msg=${env.message ?? ''}`);
+    throw new Error(`auth/verify failed code=${env.code} msg=${env.message ?? ''}`);
   }
   const uid =
     (env.data as { user_id?: string }).user_id ??
     (env.data as { id?: string }).id ??
     (env.data as { user?: { user_id?: string } }).user?.user_id;
-  if (!uid) throw new Error('auth/verify 未返回 user_id');
+  if (!uid) throw new Error('auth/verify did not return user_id');
   return uid;
 }
 
@@ -704,21 +704,21 @@ async function resolveTeam(
     const env = await client.post<{ items?: Array<{ team_id: string }> }>('/meta/team/list', {
       user_id: userId,
     });
-    if (env.code !== 0) throw new Error(`team/list 失败 code=${env.code} msg=${env.message ?? ''}`);
+    if (env.code !== 0) throw new Error(`team/list failed code=${env.code} msg=${env.message ?? ''}`);
     const found = (env.data?.items ?? []).find((t) => t.team_id === opts.teamId);
-    if (!found) throw new Error(`team_id ${opts.teamId} 不存在或无权限`);
+    if (!found) throw new Error(`team_id ${opts.teamId} does not exist or no permission`);
     return opts.teamId!;
   }
   if (opts.teamName) {
     const env = await client.post<{ items?: Array<{ team_id: string; name: string }> }>('/meta/team/list', {
       user_id: userId,
     });
-    if (env.code !== 0) throw new Error(`team/list 失败 code=${env.code} msg=${env.message ?? ''}`);
+    if (env.code !== 0) throw new Error(`team/list failed code=${env.code} msg=${env.message ?? ''}`);
     const found = (env.data?.items ?? []).find((t) => t.name === opts.teamName);
-    if (!found) throw new Error(`team「${opts.teamName}」不存在，请先创建或用 --team-id`);
+    if (!found) throw new Error(`team「${opts.teamName}」does not exist, please create it or use --team-id`);
     return found.team_id;
   }
-  throw new Error('必须提供 --team-id 或 --team-name');
+  throw new Error('A --team-id or --team-name must be provided');
 }
 
 interface ResolveAgentOpts {
@@ -734,14 +734,14 @@ async function resolveAgent(client: PanelClient, opts: ResolveAgentOpts): Promis
   if (opts.agentId) {
     const env = await client.post<AgentRaw>('/meta/agent/get', { agent_id: opts.agentId });
     if (env.code === 404 || (env.code === 0 && !env.data)) {
-      throw new Error(`agent_id ${opts.agentId} 不存在`);
+      throw new Error(`agent_id ${opts.agentId} does not exist`);
     }
-    if (env.code !== 0) throw new Error(`agent/get 失败 code=${env.code} msg=${env.message ?? ''}`);
+    if (env.code !== 0) throw new Error(`agent/get failed code=${env.code} msg=${env.message ?? ''}`);
     const agent = env.data!;
-    if (agent.team_id !== teamId) throw new Error(`agent ${opts.agentId} 不属于 team ${teamId}`);
+    if (agent.team_id !== teamId) throw new Error(`agent ${opts.agentId} does not belong to team ${teamId}`);
     if (agent.owner_user_id !== userId) {
       throw new Error(
-        `agent ${opts.agentId} 的 owner(${agent.owner_user_id}) 与当前 userKey 反查用户(${userId}) 不一致`,
+        `agent ${opts.agentId}'s owner(${agent.owner_user_id}) does not match the user(${userId}) resolved from the current userKey`,
       );
     }
     return { agentId: opts.agentId!, ownerUserId: userId };
@@ -752,12 +752,12 @@ async function resolveAgent(client: PanelClient, opts: ResolveAgentOpts): Promis
       owner_user_id: userId,
       status: 'active',
     });
-    if (env.code !== 0) throw new Error(`agent/list 失败 code=${env.code} msg=${env.message ?? ''}`);
+    if (env.code !== 0) throw new Error(`agent/list failed code=${env.code} msg=${env.message ?? ''}`);
     const found = (env.data?.items ?? []).find((a) => a.name === opts.agentName);
-    if (!found) throw new Error(`agent「${opts.agentName}」不存在，请先创建或用 --agent-id`);
+    if (!found) throw new Error(`agent "${opts.agentName}" does not exist, please create it or use --agent-id`);
     return { agentId: found.agent_id, ownerUserId: userId };
   }
-  throw new Error('必须提供 --agent-id 或 --agent-name');
+  throw new Error('--agent-id or --agent-name must be provided');
 }
 
 interface AgentRaw {
@@ -783,13 +783,13 @@ interface ImportMessage {
   /** Structured fields for skill link: core /v3/skill/conversation/add requires tool_call/tool_result to include tool_call_id (pairing anchor). */
   tool_call_id?: string;
   tool_name?: string;
-  /** 来源记录序号，用于 memory 链路还原成"每条记录一条扁平消息"的旧行为。 */
+  /** Source record sequence number, used to restore the old behavior of "one flat message per record" in the memory chain. */
   recIdx?: number;
-  /** memory 链路用的对话流角色（工具片段并入其所在记录的角色）。 */
+  /** Dialogue flow roles used for the memory link (tool fragments are merged into the role of the record they belong to). */
   memRole?: string;
 }
 
-/** 把超长内容按 code unit 切片，避开 UTF-16 代理对边界（借鉴 TDAI proxy 的 chunkConversationMessages）。 */
+/** Slice overly long content into code units, avoiding UTF-16 surrogate pair boundaries (inspired by TDAI proxy's chunkConversationMessages). */
 function splitLongContent(content: string): string[] {
   if (content.length <= MAX_MESSAGE_CHARS) return [content];
   const parts: string[] = [];
@@ -813,7 +813,7 @@ function isLowSurrogate(code: number): boolean {
   return code >= 0xDC00 && code <= 0xDFFF;
 }
 
-/** 合并同 sourceKey 的消息，超长切片，按 100 条/批拆分。返回批次列表。 */
+/** Merge messages with the same sourceKey, split into long slices, and split into batches of 100 items each. Return the list of batches. */
 function batchMessages(messages: ImportMessage[]): ImportMessage[][] {
   const valid = messages.filter((m) => m.role && m.content.trim());
   const flat: ImportMessage[] = [];
@@ -855,7 +855,7 @@ function isDone(cp: Checkpoint, sourceKey: string): boolean {
   return cp.done.includes(sourceKey);
 }
 
-/** checkpoint 去重 key：按 agent 隔离，避免换 agent 后误跳过。 */
+/** checkpoint deduplication key: isolated by agent to avoid mistakenly skipping after agent change. */
 function scopedCheckpointKey(agentId: string, sourceKey: string): string {
   return `${agentId}::${sourceKey}`;
 }
@@ -868,7 +868,7 @@ function saveCheckpoint(path: string, cp: Checkpoint): void {
   writeFileSync(path, JSON.stringify(cp, null, 2), { mode: 0o600 });
 }
 
-/** 稳定的字符串哈希（非加密，仅作去重 key）。 */
+/** Stable string hash (non-cryptographic, used only as a deduplication key). */
 function stableHash(s: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
@@ -884,20 +884,20 @@ interface WriteCtx {
   agentId: string;
   userId: string;
   /**
-   * 导入目标维度。
-   * - 'agent'（默认）：skill 绑定到指定 agent（agent_id = ctx.agentId）。
-   * - 'team'：直导团队资产池（agent_id = ctx.userId 兜底，对齐 UI
-   *   ImportSkillDialog 的 target='team' 语义）。仅 skill 导入支持。
+   * Import the target dimension.
+   * - 'agent' (default): bind the skill to the specified agent (agent_id = ctx.agentId).
+   * - 'team': directly import team assets (agent_id = ctx.userId as fallback, aligning with the target='team' semantics of the UI
+   *   ImportSkillDialog). Only skill imports are supported.
    */
   target: 'agent' | 'team';
 }
 
-/** 解析 skill 实际归属的 agent_id：team 池用 userId 兜底，对齐 UI 语义。 */
+/** Parse the actual agent_id of the skill: use userId as a fallback for the team pool, aligning with UI semantics. */
 function resolveSkillAgentId(ctx: WriteCtx): string {
   return ctx.target === 'team' ? ctx.userId : ctx.agentId;
 }
 
-/** 从 SKILL.md frontmatter 解析 name（若存在）。 */
+/** Parse name from SKILL.md frontmatter (if present). */
 function parseFrontmatterName(content: string): string | null {
   const fm = content.match(/^---\n([\s\S]*?)\n---/);
   if (!fm) return null;
@@ -909,14 +909,14 @@ function parseFrontmatterName(content: string): string | null {
 interface BatchInput {
   msgs: ImportMessage[];
   sourceKey: string;
-  /** 真实 session_id：所有批次共用，避免把同一会话拆成多个伪 session。 */
+  /** Real session_id: shared by all batches, to avoid splitting the same session into multiple fake sessions. */
   sessionId: string;
 }
 
 /**
- * 把结构化片段还原成 memory 链路所需的"每条记录一条扁平消息"（与改造前行为一致：
- * 工具以 [tool_call] / [tool_result] 文本形式并入对话流，且不出现 tool_call/tool_result 角色，
- * 因为 memory 链路 /chat-memory/import → core /v3/conversation/add 的 schema 仅接受 user/assistant/system）。
+ * Convert structured fragments back into the "one flat message per record" required for the memory chain (consistent with pre-refactoring behavior:
+ * The tool is merged into the conversation flow in [tool_call] / [tool_result] text form, and no tool_call/tool_result roles appear,
+ * Because the schema of the memory chain /chat-memory/import → core /v3/conversation/add only accepts user/assistant/system).
  */
 function toMemoryMessages(msgs: ImportMessage[]): ImportMessage[] {
   const groups = new Map<number, ImportMessage[]>();
@@ -962,9 +962,9 @@ function inputSourceKey(msgs: ImportMessage[]): string | undefined {
 }
 
 /**
- * 上传整段会话到 /chat-memory/import（按 100 条/批拆分）。
- * 面板侧转 core /v3/conversation/add → 落 L0 + 异步触发 L1 memory 抽取。
- * 这是 memory 抽取的唯一入口（与 skill 链路相互独立）。
+ * Upload the entire conversation to /chat-memory/import (split into batches of 100).
+ * On the panel side, switch to core /v3/conversation/add → persist L0 + asynchronously trigger L1 memory extraction.
+ * This is the sole entry point for memory extraction (independent from the skill pipeline).
  */
 async function uploadBatches(client: PanelClient, ctx: WriteCtx, input: BatchInput): Promise<void> {
   const mem = toMemoryMessages(input.msgs);
@@ -981,19 +981,19 @@ async function uploadBatches(client: PanelClient, ctx: WriteCtx, input: BatchInp
     };
     const env = await client.post('/chat-memory/import', body);
     if (env.code !== 0) {
-      throw new Error(`chat-memory/import 失败 code=${env.code} msg=${env.message ?? ''}`);
+      throw new Error(`chat-memory/import failed code=${env.code} msg=${env.message ?? ''}`);
     }
   }
 }
 
 /**
- * 把归一化后的会话消息按"每轮真人对话"切分成多个 round，严格对齐 proxy 的
- * final-answer 切分规则（handler-glue.ts + normalize-conversation.ts）：
- *   - proxy 用 isFinalAnswer(msg) 判定 final：assistant 且不含 tool_use/tool_calls 才是 final answer；
- *   - 每遇到一个 final answer 即收尾为一轮，本轮 = 从上一个 final answer 之后到本次 final answer
- *     （user 输入 + 中间 tool 循环 + final answer），与 proxy findLastFinalAssistant 的切片语义一致。
- *   - 中间的 tool 态 assistant（hasToolUse）不收尾，留在同一轮内。
- * 仅保留含 assistant（即含 final answer 或工具态 assistant）的 round，避免提交无效增量。
+ * Split the normalized conversation messages into multiple rounds by "each real human conversation turn", strictly aligning with the proxy's
+ * final-answer splitting rules (handler-glue.ts + normalize-conversation.ts):
+ *   - proxy uses isFinalAnswer(msg) to determine final: assistant and without tool_use/tool_calls is the final answer;
+ *   - Each time a final answer is encountered, it closes as one round, this round = from after the previous final answer to this final answer
+ *     (user input + intermediate tool loop + final answer), consistent with the slicing semantics of proxy findLastFinalAssistant.
+ *   - Intermediate tool-state assistant (hasToolUse) does not close, remains within the same round.
+ * Only keep rounds containing assistant (i.e., containing final answer or tool state assistant), to avoid submitting invalid increments.
  */
 function splitIntoRounds(msgs: ImportMessage[]): ImportMessage[][] {
   const rounds: ImportMessage[][] = [];
@@ -1013,13 +1013,13 @@ function splitIntoRounds(msgs: ImportMessage[]): ImportMessage[][] {
 }
 
 /**
- * 上传会话（skill 链路）：按 final-answer 切片成多个 round，逐轮增量调用 /skill/conversation/add。
- * 触发 skill 抽取（archive + SkillConversationExtractWorker）。单 round 超批上限时再按 batchMessages 拆分。
+ * Upload session (skill chain): Split into multiple rounds based on final-answer slices, and incrementally call /skill/conversation/add per round.
+ * Trigger skill extraction (archive + SkillConversationExtractWorker). If a single round exceeds the batch limit, split further by batchMessages.
  *
- * 与 proxy 实时流对齐：
- *  - 工具消息以结构化 5-role 发送（tool_call/tool_result + tool_call_id 配对锚点），不再压平成文本；
- *  - 导入前先 force-archive 清空该 session 已存在的实时流 buffer，避免与离线全量回放叠加重复
- *    （core 的 conversation-add buffer 不去重）。
+ * Align with proxy real-time stream:
+ *  - Tool messages are sent as structured 5-role (tool_call/tool_result + tool_call_id pairing anchor), no longer flattened into text;
+ *  - Before import, first force-archive to clear the real-time stream buffer of existing data in this session, to avoid duplication when superimposed with offline full replay
+ *    (core's conversation-add buffer does not deduplicate).
  */
 async function uploadViaConversationAdd(client: PanelClient, ctx: WriteCtx, input: BatchInput): Promise<void> {
   // Fix 2: Before import, forcibly archive any existing buffer for the session (best-effort; failures do not block import).
@@ -1033,7 +1033,7 @@ async function uploadViaConversationAdd(client: PanelClient, ctx: WriteCtx, inpu
       reason: 'offline import pre-flush',
     });
   } catch (e) {
-    console.warn(`[warn] force-archive 前置失败（忽略，继续导入）: ${(e as Error).message}`);
+    console.warn(`[warn] force-archive pre-archive failed (ignored, continue import): ${(e as Error).message}`);
   }
 
   const rounds = splitIntoRounds(input.msgs);
@@ -1057,7 +1057,7 @@ async function uploadViaConversationAdd(client: PanelClient, ctx: WriteCtx, inpu
       };
       const env = await client.post('/skill/conversation/add', body);
       if (env.code !== 0) {
-        throw new Error(`skill/conversation/add 失败 code=${env.code} msg=${env.message ?? ''}`);
+        throw new Error(`skill/conversation/add failed code=${env.code} msg=${env.message ?? ''}`);
       }
     }
   }
@@ -1065,7 +1065,7 @@ async function uploadViaConversationAdd(client: PanelClient, ctx: WriteCtx, inpu
 
 
 
-/** Gateway `skill/create` JSON body 上限 1 MiB。 */
+/** Gateway `skill/create` JSON body limit 1 MiB. */
 export const GATEWAY_MAX_BODY_BYTES = 1024 * 1024;
 
 export type OversizedSkill = { name: string; bytes: number };
@@ -1098,13 +1098,13 @@ function buildSkillCreateBody(ctx: WriteCtx, skill: ScannedSkill): { name: strin
   return { name, body };
 }
 
-/** 估算 `skill/create` JSON 体积；超过上限的整条 skill 应跳过。 */
+/** Estimate the size of the `skill/create` JSON; any skill exceeding the limit should be skipped. */
 export function measureSkillCreate(ctx: WriteCtx, skill: ScannedSkill): OversizedSkill {
   const { name, body } = buildSkillCreateBody(ctx, skill);
   return { name, bytes: skillCreateBodyBytes(body) };
 }
 
-/** 创建 skill（含 resources）。同名同 owner 报 42201 → 幂等跳过。超过 1MB 整条跳过、不请求。 */
+/** Create skill (including resources). Report 42201 for same name and owner → skip idempotently. Skip entirely if over 1MB, no request. */
 export async function uploadSkill(
   client: PanelClient,
   ctx: WriteCtx,
@@ -1118,31 +1118,31 @@ export async function uploadSkill(
   const env = await client.post('/skill/create', body);
   if (env.code === 0) return 'created';
   if (env.code === 42201) return 'skipped'; // NAME_DUPLICATE
-  throw new Error(`skill/create 失败 name=${skillName} code=${env.code} msg=${env.message ?? ''}`);
+  throw new Error(`skill/create failed name=${skillName} code=${env.code} msg=${env.message ?? ''}`);
 }
 
 interface SessionInput {
   session: ScannedSession;
-  /** session 导入时的提取范围：memory=仅落库，skill=仅抽取技能，both=都做。 */
+  /** session import extraction scope: memory=only persist, skill=only extract skills, both=do both. */
   extract: 'memory' | 'skill' | 'both';
 }
 
 /**
- * 导入 session：双链路对齐 proxy 实时流。
- *  1) /chat-memory/import（整段）→ 落 L0 + 异步 L1 memory 抽取
- *  2) /skill/conversation/add（按 final-answer 切片增量）→ skill 抽取
- * memory 与 skill 是 core 里相互独立的两条抽取链路，故都跑（除非 extract 指定只跑其一）。
+ * Import session: align proxy real-time stream with dual links.
+ *  1) /chat-memory/import (full segment) → persist to L0 + async L1 memory extraction
+ *  2) /skill/conversation/add (incremental by final-answer slices) → skill extraction
+ * memory and skill are two independent extraction chains in core, so both run (unless extract specifies running only one of them).
  *
- * 关于 tool 消息的处理（两条链路差异见下）：
- *  - skill 链路（uploadViaConversationAdd）：下游 core /v3/skill/conversation/add 接受
- *    5-role，tool_call/tool_result 必须带 tool_call_id 配对锚点（缺失 → 40001）。故结构化透传。
- *  - memory 链路（uploadBatches → toMemoryMessages）：下游 core /v3/conversation/add 的 schema
- *    仅接受 user/assistant/system，无 tool 角色。故 toMemoryMessages 将 tool_call/tool_result
- *    还原为文本（[tool_call] name(...) / [tool_result:name] ...）并入对话流，记忆系统关心的是
- *    工具调用的"内容"而非结构化锚点。
- *  因此 uploadSession 不可按 user/assistant 过滤：必须原样保留 tool 角色消息，再由两条链路
- *  各自处理（一个结构化、一个压平）。否则 skill 链路的 tool_call_id 透传会被架空、memory 链路的
- *  工具内容也会整体丢失。
+ * Handling of tool messages (the differences between the two chains are as follows):
+ *  - skill chain (uploadViaConversationAdd): downstream core /v3/skill/conversation/add accepts
+ *    5-role, tool_call/tool_result must have tool_call_id pairing anchors (missing → 40001). Hence structured passthrough.
+ *  - memory chain (uploadBatches → toMemoryMessages): downstream core /v3/conversation/add's schema
+ *    only accepts user/assistant/system, with no tool role. Hence toMemoryMessages converts tool_call/tool_result
+ *    into text ([tool_call] name(...) / [tool_result:name] ...) and merges them into the conversation flow, the memory system cares about
+ The "content" of tool calls rather than structured anchors.
+ *   Therefore, uploadSession cannot be filtered by user/assistant: tool role messages must be preserved as-is, then by two pipelines
+ *   Handle each separately (one structured, one flattened). Otherwise the tool_call_id pass-through in the skill chain will be rendered useless, and the memory chain's
+ *   The tool content will also be completely lost.
  */
 export async function uploadSession(client: PanelClient, ctx: WriteCtx, input: SessionInput): Promise<void> {
   const { session } = input;
@@ -1194,9 +1194,9 @@ interface CliOpts {
   stateFile: string;
   interactive: boolean;
   yes: boolean;
-  /** session 导入时的提取范围：memory=仅落库，skill=仅抽取技能，both=都做（默认）。 */
+  /** session import extraction scope: memory=only persist to database, skill=only extract skills, both=do both (default). */
   extract: 'memory' | 'skill' | 'both';
-  /** 指定扫描哪个 agent/ide；auto 则按当前 workspace/./ 识别。 */
+  /** Specify which agent/ide to scan; auto identifies based on the current workspace/./ */
   source: string;
   workspace?: string;
 }
@@ -1263,15 +1263,15 @@ async function question(prompt: string): Promise<string> {
 }
 
 /**
- * 交互式选择要导入的项：先列举，再让用户在「全导入 / 不导入 / 部分导入」中选。
- * - interactive=false（--yes / CI）：直接返回全部，等价于全量导入。
- * - 非 TTY（管道输入）：无法交互，安全跳过（返回空）。
- * - 部分导入：输入多个 id（逗号或空格分隔），按 id 过滤。
+ * Interactive selection of items to import: list them first, then let the user choose between "Import All / Do Not Import / Import Partially".
+ * - interactive=false (--yes / CI): return all directly, equivalent to a full import.
+ * - Non-TTY (pipe input): cannot interact, safely skip (return empty).
+ * - Partial import: input multiple ids (separated by commas or spaces), filter by id.
  *
- * @param getId     取出用于部分筛选的 id（skill 用 name，session 用 sessionId）
- * @param getLabel  列举时的展示文案
+ * @param getId      Retrieves the id used for partial filtering (name for skill, sessionId for session)
+ * @param getLabel   Display text when listing
  */
-/** 从 SKILL.md 内容提取描述（优先 frontmatter 的 description，否则取首段正文）。 */
+/** Extract description from SKILL.md content (prioritize description in frontmatter, otherwise take the first paragraph of the body). */
 function skillDescription(content: string): string {
   const fm = content.match(/^---\s*\n([\s\S]*?)\n---/);
   if (fm) {
@@ -1295,41 +1295,41 @@ async function selectItems<T>(
   getDetail?: (item: T) => string[],
 ): Promise<T[]> {
   if (items.length === 0) return [];
-  // 非交互（--yes / CI）：默认全量导入
+  // Non-interactive (--yes / CI): default to full import
   if (!interactive) return items;
-  // 非 TTY（管道输入）无法交互：安全跳过
+  // Non-TTY (pipe input) cannot interact: safely skip
   if (!process.stdin.isTTY) {
-    console.log(`[notice] 非交互终端，跳过: ${label}`);
+    console.log(`[notice] Non-interactive terminal, skip: ${label}`);
     return [];
   }
-  // 先列举
-  console.log(`\n[列举] ${label}（共 ${items.length} 个）:`);
+  // List first
+  console.log(`\n[List] ${label} (${items.length} total):`);
   items.forEach((it, i) => {
     console.log(`  ${String(i + 1).padStart(3)}. [${getId(it)}] ${getLabel(it)}`);
     if (getDetail) for (const d of getDetail(it)) console.log(`       ${d}`);
   });
-  const choice = (await question(`请选择导入方式: 1=全导入 2=不导入 3=部分导入 ? `)).trim();
+  const choice = (await question(`Please select the import method: 1=Full import 2=No import 3=Partial import ? `)).trim();
   if (choice === '2') {
-    console.log(`[跳过] ${label}`);
+    console.log(`[SKIP] ${label}`);
     return [];
   }
   if (choice === '3') {
-    const raw = (await question('输入要导入的编号/id（逗号/空格分隔，可多个）: ')).trim();
+    const raw = (await question('Enter the number/id to import (comma/space separated, can be multiple): ')).trim();
     const wanted = new Set(raw.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean));
     if (wanted.size === 0) {
-      console.log(`[跳过] ${label}（未输入有效编号/id）`);
+      console.log(`[Skip] ${label} (No valid number/id entered)`);
       return [];
     }
-    // 编号（1-based 序号）或 id（名称）均可匹配
+    // Either the number (1-based sequence) or id (name) can be used for matching
     const picked = items.filter((it, i) => wanted.has(getId(it)) || wanted.has(String(i + 1)));
     const missed = [...wanted].filter(
       (id) => !items.some((it, i) => id === getId(it) || id === String(i + 1)),
     );
-    if (missed.length) console.warn(`[warn] 以下编号/id 未匹配到: ${missed.join(', ')}`);
-    console.log(`[部分导入] ${label}: 选中 ${picked.length}/${items.length}`);
+    if (missed.length) console.warn(`[warn] The following numbers/ids were not matched: ${missed.join(', ')}`);
+    console.log(`[Partial import] ${label}: Selected ${picked.length}/${items.length}`);
     return picked;
   }
-  // 1 或默认：全导入
+  // 1 or default: import all
   return items;
 }
 
@@ -1341,10 +1341,10 @@ async function main(): Promise<void> {
 
   const cfg = await loadConfigFromEnv(opts.interactive);
   const client = new PanelClient(cfg);
-  // 单文件专属源：直接锁定为自身 KIND
+  // Single-file exclusive source: directly lock to its own KIND
   const kind: string = KIND;
 
-  // 单一 userKey：反查 user_id，owner 对齐
+  // Single userKey: reverse-lookup user_id, align owner
   const userId = await resolveUserId(client, cfg.userKey);
   const teamId = await resolveTeam(client, userId, { teamId: opts.teamId, teamName: opts.teamName });
   const agent = await resolveAgent(client, {
@@ -1368,17 +1368,17 @@ async function main(): Promise<void> {
   const scanOpts = opts.workspace ? { workspace: opts.workspace } : undefined;
   const workspaceLabel = opts.workspace ? ` workspace=${opts.workspace}` : '';
 
-  // ── 阶段一：选择要导入的 skill（先列举，再全导入/不导入/部分导入）──
+  // ── Phase 1: Select skills to import (list first, then import all / none / some) ──
   const skills = await selectItems(
-    `导入 skill 到 agent ${agent.agentId}`,
+    `Import skill to agent ${agent.agentId}`
     scanSkills(scanOpts),
     (s) => s.name,
     (s) => s.name,
     opts.interactive,
     (s) => [
-      `描述: ${skillDescription(s.content)}`,
-      `来源: ${s.sourceKey.replace(`skill:${KIND}:`, '')}`,
-      `关联脚本: ${s.resources.length}`,
+      `Description: ${skillDescription(s.content)}`,
+      `Source: ${s.sourceKey.replace(`skill:${KIND}:`, '')}`,
+      `Related Script: ${s.resources.length},
     ],
   );
 
@@ -1406,10 +1406,10 @@ async function main(): Promise<void> {
     saveCheckpoint(opts.stateFile, cp);
   }
 
-  // ── 阶段二：选择要导入的 session（先列举，再全导入/不导入/部分导入）──
-  // `--sessions` 有两种语义：
-  //   1) 已存在的目录 → 通用覆盖扫描入口
-  //   2) 逗号分隔的 session id → 在默认扫描结果上按 id 筛选
+  // ── Phase 2: Select sessions to import (list first, then import all / none / some) ──
+  // `--sessions` has two semantics:
+  //   1) An existing directory → a general coverage scanning entry point
+  //   2) Comma-separated session ids → filter by id on the default scan results
   const sessionsDir =
     opts.sessions && existsSync(opts.sessions) && statSync(opts.sessions).isDirectory()
       ? opts.sessions
@@ -1419,20 +1419,20 @@ async function main(): Promise<void> {
     const ids = new Set(opts.sessions.split(',').map((s) => s.trim()).filter(Boolean));
     if (ids.size) sessions = sessions.filter((s) => ids.has(s.sessionId));
   }
-  console.log(`[探测] kind=${kind}${workspaceLabel} skills=${skills.length} sessions=${sessions.length}`);
+  console.log(`[Detect] kind=${kind}${workspaceLabel} skills=${skills.length} sessions=${sessions.length}`);
   sessions = await selectItems(
-    `上传 session 到 agent ${agent.agentId}`,
+    `Upload session to agent ${agent.agentId}`
     sessions,
     (s) => s.sessionId,
     (s) => s.sessionId,
     opts.interactive,
     (s) => {
-      let timeRange = '未知';
+      let timeRange = 'Unknown';
       try {
         const meta = extractSessionMeta(readFileSync(s.origin, 'utf-8'));
         if (meta.timeRange) timeRange = meta.timeRange;
       } catch {
-        /* 读取失败则保持未知 */
+        /* Read as unknown if failed */
       }
       const isWarmup = (c: string) => c.trim().toLowerCase() === 'warmup';
       const isBlank = (c: string) => !c || !c.trim();
@@ -1443,9 +1443,9 @@ async function main(): Promise<void> {
         ? firstUser.content.replace(/\s+/g, ' ').trim().slice(0, 120)
         : (() => {
             const fb = s.messages.find((m) => !isWarmup(m.content ?? '') && !isBlank(m.content ?? ''));
-            return fb ? fb.content.replace(/\s+/g, ' ').trim().slice(0, 120) : '（无实际内容）';
+            return fb ? fb.content.replace(/\s+/g, ' ').trim().slice(0, 120) : 'No actual content';
           })();
-      return [`路径: ${s.origin}`, `时间范围: ${timeRange}`, `摘要: ${summary}`];
+      return [`Path: ${s.origin}`, `Time Range: ${timeRange}`, `Summary: ${summary}`];
     },
   );
 
@@ -1465,12 +1465,12 @@ async function main(): Promise<void> {
   }
 
   if (results.oversized.length > 0) {
-    console.log(`\n[跳过] ${results.oversized.length} 个 skill 超过 gateway 1MB 上限，未导入:`);
+    console.log(`\n[Skipped] ${results.oversized.length} skills exceed the gateway 1MB limit and are not imported:`);
     for (const s of results.oversized) {
       console.log(`- ${s.name} (${formatSkillBytes(s.bytes)})`);
     }
   }
-  console.log('\n=== 结果 ===');
+  console.log('\n=== Result ===');
   console.log(
     JSON.stringify(
       {
@@ -1484,20 +1484,20 @@ async function main(): Promise<void> {
   if (results.failed > 0) process.exitCode = 1;
 }
 
-/** 直接运行本文件（tsx agents/asset-import.ts --source <ide>）时执行主流程。 */
+/** Run the main flow directly by running this file (tsx agents/asset-import.ts --source <ide>). */
 function runIfMain(metaUrl: string): void {
   const self = fileURLToPath(metaUrl);
   const entry = process.argv[1] ? resolve(process.argv[1]) : '';
   if (entry !== self) return;
   main().catch((e) => {
-    console.error(`错误: ${(e as Error).message}`);
+    console.error(`Error: ${(e as Error).message}`);
     process.exit(1);
   });
 }
 
 
 
-// ── 各 IDE 适配器 ──
+// ── IDE Adapters ──
 interface IdeAdapter {
   kind: string;
   scanSkills(opts?: ScanOptions): ScannedSkill[];
@@ -1522,7 +1522,7 @@ function looksLikeOpenClawWorkspace(dir: string): boolean {
   return ['AGENTS.md', 'SOUL.md', 'IDENTITY.md', 'MEMORY.md', 'skills'].some((n) => existsSync(join(dir, n)));
 }
 
-/** 从 openclaw.json 收集 agent workspace 目录（含嵌套 workspace/ 子目录）。 */
+/** Collect agent workspace directory (including nested workspace/ subdirectories) from openclaw.json. */
 function openclawAgentWorkspaces(opts?: ScanOptions): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -1540,7 +1540,7 @@ function openclawAgentWorkspaces(opts?: ScanOptions): string[] {
     }
   };
   add(process.env.OPENCLAW_WORKSPACE_DIR);
-  // 默认 workspace 目录
+  // Default workspace directory
   add(join(openclawHome(), 'workspace'));
   const agents = openclawConfig()?.agents;
   if (agents && typeof agents === 'object' && !Array.isArray(agents)) {
@@ -1561,7 +1561,7 @@ function openclawBundledSkillsDir(): string {
   return join(home(), 'npm-global', 'lib', 'node_modules', 'openclaw', 'skills');
 }
 
-/** 一层 skill 根：<name>/SKILL.md + scripts/references/assets/agents。 */
+/** Layer 1 skill root: <name>/SKILL.md + scripts/references/assets/agents. */
 function collectOpenClawSkillsFromRoot(root: string): ScannedSkill[] {
   if (!existsSync(root) || !statSync(root).isDirectory()) return [];
   const out: ScannedSkill[] = [];
@@ -1585,9 +1585,9 @@ function collectOpenClawSkillsFromRoot(root: string): ScannedSkill[] {
 }
 
 /**
- * OpenClaw skill 两层（同名用户自定义覆盖系统内置）：
- *  1 用户自定义  ~/.agents/skills
- *  2 系统内置    ~/npm-global/lib/node_modules/openclaw/skills
+ * OpenClaw skill two layers (same-named user custom overrides system built-in):
+ *  1 User custom  ~/.agents/skills
+ *  2 System built-in    ~/npm-global/lib/node_modules/openclaw/skills
  */
 function collectOpenClawSkills(): ScannedSkill[] {
   const ranked = [join(home(), '.agents', 'skills'), openclawBundledSkillsDir()];
@@ -1704,7 +1704,7 @@ function make_codebuddyAdapter(): IdeAdapter {
 const KIND = 'codebuddy' as const;
 
 function detect(): boolean {
-  // 仅看 home / 环境变量；cwd 判定统一交给 resolveSource 的 detectByCwdMarker
+  // Only look at home / environment variables; cwd determination is uniformly handed over to resolveSource's detectByCwdMarker
   return Boolean(process.env.CODEBUDDY_HOME) || existsSync(join(home(), '.codebuddy'));
 }
 
@@ -1721,7 +1721,7 @@ function scanMemoryFiles(opts?: ScanOptions): ScannedMemoryFile[] {
   const push = (p: string) => files.push(p);
   push(join(h, '.codebuddy', 'CODEBUDDY.md'));
   if (existsSync(join(cwd, 'CODEBUDDY.md'))) push(join(cwd, 'CODEBUDDY.md'));
-  // codebuddy 记忆目录：memories/（兼容拼写错误 memery/），展开其下所有 .md
+  // codebuddy memory directory: memories/ (compatible with misspelling memery/), expand all .md under it
   for (const base of [join(h, '.codebuddy'), join(cwd, '.codebuddy')]) {
     for (const dirName of ['memories', 'memery']) {
       const mem = join(base, dirName);
@@ -1734,7 +1734,7 @@ function scanMemoryFiles(opts?: ScanOptions): ScannedMemoryFile[] {
 function scanSessions(sessionsDir?: string, _opts?: ScanOptions): ScannedSession[] {
   if (sessionsDir) return scanSessionsOverride(KIND, sessionsDir);
   const out: ScannedSession[] = [];
-  // 真实会话位置：~/.codebuddy/projects/<project>/*.jsonl
+  // Real session location: ~/.codebuddy/projects/<project>/*.jsonl
   const root = join(home(), '.codebuddy', 'projects');
   if (existsSync(root)) {
     for (const proj of readdirSync(root)) {
@@ -1746,7 +1746,7 @@ function scanSessions(sessionsDir?: string, _opts?: ScanOptions): ScannedSession
       }
     }
   }
-  // 回退：旧版 ~/.codebuddy/sessions/*.jsonl
+  // Fallback: old version ~/.codebuddy/sessions/*.jsonl
   const legacy = join(home(), '.codebuddy', 'sessions');
   if (existsSync(legacy)) {
     for (const f of listJsonlRecursive(legacy)) {
@@ -1810,10 +1810,10 @@ function scanSkills(opts?: ScanOptions): ScannedSkill[] {
   const cwd = projectCwd(opts);
   const h = home();
   const roots: string[] = [];
-  // codex 官方用户级 skill：~/.agents/skills
+  // codex official user-level skill: ~/.agents/skills
   roots.push(join(h, '.agents', 'skills'));
   roots.push('/etc/codex/skills');
-  // 仓库级 .agents/skills：从 git 根到 cwd 逐层（覆写优先于基础）
+  // Repository-level .agents/skills: layer by layer from git root to cwd (overwrite takes precedence over base
   for (const d of dirsFromRepoRootToCwd(cwd)) {
     roots.push(join(d, '.agents', 'skills'));
   }
@@ -2006,7 +2006,7 @@ function readZstdUtf8(path: string): string | null {
   }
 }
 
-/** 解析 dsh session（zstd 解压后是事件流 jsonl：每行 type + data）。 */
+/** Parse dsh session (after zstd decompression it is an event stream jsonl: each line type + data). */
 function parseDshSessionLines(text: string): ScannedSession['messages'] {
   const msgs: ScannedSession['messages'] = [];
   for (const line of text.split('\n')) {
@@ -2028,7 +2028,7 @@ function parseDshSessionLines(text: string): ScannedSession['messages'] {
         if (content && !isHarnessNoise(role, content)) msgs.push({ role, content });
       }
     } catch {
-      // 跳过非 JSON 行
+      // Skip non-JSON lines
     }
   }
   return msgs;
@@ -2072,7 +2072,7 @@ function readYamlStringList(text: string | null, key: string): string[] {
   return out;
 }
 
-/** DSH skill 根：目录式 name/SKILL.md 或平铺 name.md（一层，不递归）。 */
+/** DSH skill root: directory-style name/SKILL.md or flat name.md (one level, no recursion). */
 function collectSkillsFromDshRoot(root: string, skipSystem = false): ScannedSkill[] {
   if (!existsSync(root) || !statSync(root).isDirectory()) return [];
   const out: ScannedSkill[] = [];
@@ -2273,7 +2273,7 @@ function isHermesSupportSkillMd(p: string): boolean {
   return HERMES_SKILL_SUPPORT_DIRS.has(parent) || HERMES_SKILL_SUPPORT_DIRS.has(grand);
 }
 
-/** 在 skill 根内递归找所有 SKILL.md（跳过 support 等），<name>/SKILL.md 归到 <name>。 */
+/** Recursively find all SKILL.md within the skill root (skipping support, etc.), and <name>/SKILL.md belongs to <name>. */
 function collectHermesSkillsFromRoot(root: string): ScannedSkill[] {
   if (!existsSync(root) || !statSync(root).isDirectory()) return [];
   const out: ScannedSkill[] = [];
@@ -2331,7 +2331,7 @@ function hermesBundledSkillRoots(): string[] {
   return roots;
 }
 
-/** Hermes skill 两层（用户自定义覆盖系统内置）：HOME/skills + 仓库 skills/optional-skills。 */
+/** Hermes skill two layers (user-defined overrides system-built-in): HOME/skills + repository skills/optional-skills. */
 function collectHermesSkills(): ScannedSkill[] {
   const ranked = [join(hermesHome(), 'skills'), ...hermesBundledSkillRoots()];
   const out: ScannedSkill[] = [];
@@ -2386,14 +2386,14 @@ function scanSessions(sessionsDir?: string, _opts?: ScanOptions): ScannedSession
     try {
       sqlite = require('node:sqlite');
     } catch {
-      // node:sqlite 是 Node >= 22.5 的实验性内置模块；老版本无此模块，
-      // 直接跳过 db 会话扫描（skills/memory 不受影响），不打印警告。
+      // node:sqlite is an experimental built-in module in Node >= 22.5; older versions do not have this module,
+      // so directly skip the db session scan (skills/memory are unaffected), and do not print a warning.
       return out;
     }
     const Database = sqlite.DatabaseSync ?? sqlite.Database ?? sqlite.default?.Database;
     db = new Database(dbPath, { readOnly: true });
   } catch (e) {
-    console.warn(`[warn] 无法打开 state.db (${dbPath}): ${(e as Error).message}`);
+    console.warn(`[warn] Cannot open state.db (${dbPath}): ${(e as Error).message}`);
     return out;
   }
   try {
@@ -2408,12 +2408,12 @@ function scanSessions(sessionsDir?: string, _opts?: ScanOptions): ScannedSession
       bySession.get(r.session_id)!.push(...msgs);
     }
     for (const [sid, msgs] of bySession) {
-      // 补 recIdx：否则 toMemoryMessages 会按 recIdx ?? -1 把所有消息塌缩成一条。
+      // Fill in recIdx: otherwise toMemoryMessages will collapse all messages into one by recIdx ?? -1.
       msgs.forEach((m, i) => { m.recIdx = i; });
       if (msgs.length) out.push({ sessionId: sid, messages: msgs, sourceKey: `session:${KIND}:${dbPath}#${sid}`, origin: dbPath });
     }
   } catch (e) {
-    console.warn(`[warn] 读取 state.db 失败 (${dbPath}): ${(e as Error).message}`);
+    console.warn(`[warn] Failed to read state.db (${dbPath}): ${(e as Error).message}`);
   } finally {
     try { (db as { close?: () => void }).close?.(); } catch { /* ignore */ }
   }
@@ -2421,12 +2421,12 @@ function scanSessions(sessionsDir?: string, _opts?: ScanOptions): ScannedSession
 }
 
 /**
- * 把 hermes state.db 的一行 message 归一化成 pipeline 内部的 ImportMessage[]。
- * 关键点：hermes 把工具结果存为 role='tool'（OpenAI 风格），且把配对信息单独存进
- * tool_call_id / tool_calls / tool_name 列。必须归一化为 tool_call/tool_result + tool_call_id 配对，否则：
- *  - skill 链路收到裸 'tool' 角色（不在 user/assistant/tool_call/tool_result/system）→ 40001；
- *  - memory 链路收到裸 'tool' 角色（不在 user/assistant/system）→ 400。
- * 同时补 memRole，使 memory 链路映射出合法角色（tool_result→user、tool_call→assistant）。
+ * Normalize a row of message from hermes state.db into pipeline's ImportMessage[].
+ * Key points: hermes stores tool results as role='tool' (OpenAI style), and stores pairing info separately in
+ * tool_call_id / tool_calls / tool_name columns. Must normalize into tool_call/tool_result + tool_call_id pairing, otherwise:
+ *  - skill chain receives bare 'tool' role (not in user/assistant/tool_call/tool_result/system) → 40001;
+ *  - memory chain receives bare 'tool' role (not in user/assistant/system) → 400.
+ * Also add memRole, so memory chain maps out legal roles (tool_result→user, tool_call→assistant).
  */
 function hermesRowToMessages(r: {
   role: string;
@@ -2440,7 +2440,7 @@ function hermesRowToMessages(r: {
   if (!content) return [];
   const ts = typeof r.timestamp === 'number' ? Math.round(r.timestamp * 1000) : undefined;
 
-  // assistant 带 tool_calls：拆成 assistant 文本 + 若干 tool_call
+  // assistant with tool_calls: split into assistant text + several tool_calls
   if (r.role === 'assistant' && r.tool_calls) {
     let calls: any[] = [];
     try { calls = JSON.parse(r.tool_calls); } catch { /* ignore */ }
@@ -2463,7 +2463,7 @@ function hermesRowToMessages(r: {
     }
   }
 
-  // 工具结果：hermes 存为 role='tool' → 归一化为 tool_result（带配对锚点）
+  // Tool result: hermes stored as role='tool' → normalized to tool_result (with paired anchors)
   if (r.role === 'tool') {
     return [{
       role: 'tool_result',
@@ -2475,7 +2475,7 @@ function hermesRowToMessages(r: {
     }];
   }
 
-  // user / assistant / system 原样保留，并补 memRole
+  // user / assistant / system memRole
   const memRole = r.role === 'system' ? 'system' : r.role === 'assistant' ? 'assistant' : 'user';
   return [{ role: r.role, content, ts, memRole }];
 }
@@ -2640,7 +2640,7 @@ export const ADAPTERS: Record<string, IdeAdapter> = {
   openclaw: make_openclawAdapter(), codebuddy: make_codebuddyAdapter(), codex: make_codexAdapter(), 'claude-code': make_claude_codeAdapter(), dsh: make_dshAdapter(), hermes: make_hermesAdapter(), workbuddy: make_workbuddyAdapter(),
 };
 
-/** 各 adapter 在项目目录（cwd）下的专属 marker 目录（用于「项目本地优先」判定）。 */
+/** The dedicated marker directory for each adapter under the project directory (cwd), used for the "project-local priority" determination. */
 const CWD_MARKER_DIRS: Record<string, string[]> = {
   openclaw: ['.openclaw'],
   codebuddy: ['.codebuddy'],
@@ -2651,7 +2651,7 @@ const CWD_MARKER_DIRS: Record<string, string[]> = {
   workbuddy: ['.workbuddy', 'workbuddy'],
 };
 
-/** 第一优先：当前项目目录（cwd，或 --workspace 指定目录）里是否存在某个 adapter 的专属 marker 目录（不看 home）。 */
+/** First priority: whether a specific adapter's dedicated marker directory exists in the current project directory (cwd, or the directory specified by --workspace) (ignoring home). */
 function detectByCwdMarker(workspace?: string): string | undefined {
   const cwd = projectCwd(workspace ? { workspace } : undefined);
   for (const k of Object.keys(ADAPTERS)) {
@@ -2661,14 +2661,14 @@ function detectByCwdMarker(workspace?: string): string | undefined {
   return undefined;
 }
 
-/** auto：先检测「当前路径（cwd，或 --workspace 指定目录）」的项目专属目录，再回退到「家目录 / 环境变量」。 */
+/** auto: first detect the project-specific directory for the "current path (cwd, or --workspace specified directory)", then fall back to "home directory / environment variable". */
 export function resolveSource(source: string, workspace?: string): string {
   const s = (source || 'auto').trim();
   if (s !== 'auto' && ADAPTERS[s]) return s;
-  // 第一级：当前路径（cwd / --workspace）的项目专属 marker 目录
+  // Level 1: Project-specific marker directory for the current path (cwd / --workspace)
   const byCwd = detectByCwdMarker(workspace);
   if (byCwd) return byCwd;
-  // 第二级：家目录 / 环境变量 marker（detect 已不含 cwd 判定）
+  // Level 2: Home directory / Environment variable marker (detect no longer contains cwd determination)
   for (const k of Object.keys(ADAPTERS)) {
     const a = ADAPTERS[k];
     if (a.detect && a.detect()) return k;

@@ -1,52 +1,52 @@
-# Codex 资产导入
+# Codex asset import
 
-把本机 Codex 的 **skill / session** 导入 Memory Hub。这一份手册即可完成。
+Import this machine's Codex **skill / session** into Memory Hub. This manual is sufficient to complete it.
 
 
-数据根 `$CODEX_HOME`（默认 `~/.codex`）。
+Data root `$CODEX_HOME` (default `~/.codex`).
 
-## 扫什么
+What to sweep?
 
-| 类型 | 路径 |
+| Type | Path |
 |---|---|
-| Skill | USER `$HOME/.agents/skills/*/SKILL.md`；从 git root 到 cwd 的 `.agents/skills`；ADMIN `/etc/codex/skills` |
+| Skill | USER `$HOME/.agents/skills/*/SKILL.md`; from `.agents/skills` from git root to cwd; ADMIN `/etc/codex/skills` |
 | Session | `$CODEX_HOME/sessions/**/*.jsonl`（`YYYY/MM/DD/rollout-*.jsonl`） |
 
-不扫：`~/.codex/skills`、仓库顶层 `skills/`、`plugins/cache`、仓库内 `memories/`。
+Skip: `~/.codex/skills`, top-level `skills/` in the repo, `plugins/cache`, and `memories/` inside the repo.
 
-`--sessions <dir>` 可改扫 `.jsonl` 与 Responses `.json`。不传 `--sessions` 也会自动扫 `$CODEX_HOME/sessions`。
+`--sessions <dir>` can scan `.jsonl` and Responses `.json`. If `--sessions` is not provided, it will automatically scan `$CODEX_HOME/sessions`.
 
-## 前置
+## Preamble
 
-在仓库根执行。需要 Node >= 22，以及：
+Execute in the repository root. Requires Node >= 22, and:
 
 ```bash
 export PANEL_URL=http://127.0.0.1:8123
 export TDAI_SERVICE_ID=<spaceId>
-export TDAI_USER_KEY=<该 agent owner 的 sk-mem-...>
-# 可选：export CODEX_HOME=/path/to/.codex
+export TDAI_USER_KEY=<the sk-mem-... of the agent owner>
+# Optional: export CODEX_HOME=/path/to/.codex
 ```
 
-`--agent-id` / `--team-id` 必填；owner 必须等于 `TDAI_USER_KEY` 反查用户。
+`--agent-id` / `--team-id` are required; owner must equal `TDAI_USER_KEY` to look up the user.
 
-## 用法
+Usage
 
-统一入口为仓库根 `agents/asset-import.ts`。用 `--source codex` 指定本手册对应的 IDE；省略时默认 `auto` 自动识别当前工作区所用 IDE。
+The unified entry point is the repository root `agents/asset-import.ts`. Use `--source codex` to specify the IDE corresponding to this manual; if omitted, it defaults to `auto` to automatically detect the IDE used in the current workspace.
 
 ```bash
-# 交互式导入：先列举待导入项 —— skill（编号/名称/描述/来源/关联脚本数）、session（id/时间范围/项目路径），再选择「全导入 / 不导入 / 部分导入」（部分导入可填编号或 ID，逗号/空格分隔，可多个）
+# Interactive Import: List items to import first — skill (number/name/description/source/number of related scripts), session (id/time range/project path), then select "Import All / Do Not Import / Import Partially" (for partial import, enter numbers or IDs separated by commas/spaces, can be multiple)
 tsx agents/asset-import.ts --source codex --agent-id <id> --team-id <tid>
 
-# 非交互（脚本/CI，直接全量导入，不询问）
+# Non-interactive (script/CI, direct full import, no prompts)
 tsx agents/asset-import.ts --source codex --agent-id <id> --team-id <tid> -y
 
-# 指定项目目录
+Specify project directory
 tsx agents/asset-import.ts --source codex --workspace /path/to/repo --agent-id <id> --team-id <tid>
 
-# 指定历史 session 目录/文件（覆盖自动扫描）
+# Specify historical session directory/file (override automatic scanning)
 tsx agents/asset-import.ts --source codex --sessions /path/to/sessions --agent-id <id> --team-id <tid>
 
-# 重新导入（忽略断点续传，重导已导入项）
+# Re-import (ignore resume, re-import already imported items)
 tsx agents/asset-import.ts --source codex --agent-id <id> --team-id <tid> --force
 
 ```

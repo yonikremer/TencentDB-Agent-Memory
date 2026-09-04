@@ -41,45 +41,45 @@ tsx agents/asset-import.ts --source claude-code --workspace /path/to/repo --agen
 tsx agents/asset-import.ts --source claude-code --agent-id <id> --team-id <tid> --force
 ```
 
-把本机 Claude Code 的 **skill / session** 导入 Memory Hub。这一份手册即可完成。
+Import this machine's Claude Code **skill / session** into Memory Hub. This manual is sufficient to complete it.
 
 
-## 扫什么
+What to sweep?
 
-| 类型 | 路径 |
+| Type | Path |
 |---|---|
-| Skill | `~/.claude/skills/*/SKILL.md`；项目 `<cwd>/.claude/skills/*/SKILL.md` |
+| Skill | `~/.claude/skills/*/SKILL.md`; project `<cwd>/.claude/skills/*/SKILL.md` |
 | Session | `~/.claude/projects/*/*.jsonl` |
 
-`--workspace` 把项目侧路径改成该目录（不排除 `~/.claude` 全局）。
+`--workspace` changes the project-side path to this directory (without excluding the global `~/.claude`).
 
-## 前置
+## Preamble
 
-在仓库根执行。需要 Node >= 22，以及：
+Execute in the repository root. Requires Node >= 22, and:
 
 ```bash
 export PANEL_URL=http://127.0.0.1:8123
 export TDAI_SERVICE_ID=<spaceId>
-export TDAI_USER_KEY=<该 agent owner 的 sk-mem-...>
+export TDAI_USER_KEY=<the agent owner's sk-mem-...>
 ```
 
-`--agent-id` / `--team-id` 必填；owner 必须等于 `TDAI_USER_KEY` 反查用户。
+`--agent-id` / `--team-id` are required; owner must equal `TDAI_USER_KEY` to look up the user.
 
-## 用法
+Usage
 
-统一入口为仓库根 `agents/asset-import.ts`。用 `--source claude-code` 指定本手册对应的 IDE；省略时默认 `auto` 自动识别当前工作区所用 IDE。
+The unified entry point is the repository root `agents/asset-import.ts`. Use `--source claude-code` to specify the IDE corresponding to this manual; when omitted, it defaults to `auto` to automatically detect the IDE used in the current workspace.
 
 ```bash
-# 交互式导入：先列举待导入项 —— skill（编号/名称/描述/来源/关联脚本数）、session（id/时间范围/项目路径），再选择「全导入 / 不导入 / 部分导入」（部分导入可填编号或 ID，逗号/空格分隔，可多个）
+# Interactive Import: List items to import first — skill (number/name/description/source/number of related scripts), session (id/time range/project path), then select "Import All / Do Not Import / Import Partially" (for partial import, enter numbers or IDs separated by commas/spaces, can be multiple)
 tsx agents/asset-import.ts --source claude-code --agent-id <id> --team-id <tid>
 
-# 非交互（脚本/CI，直接全量导入，不询问）
+# Non-interactive (script/CI, direct full import, no prompts)
 tsx agents/asset-import.ts --source claude-code --agent-id <id> --team-id <tid> -y
 
-# 指定项目目录
+# Specified project directory
 tsx agents/asset-import.ts --source claude-code --workspace /path/to/repo --agent-id <id> --team-id <tid>
 
-# 重新导入（忽略断点续传，重导已导入项）
+# Re-import (ignore resume, re-import already imported items)
 tsx agents/asset-import.ts --source claude-code --agent-id <id> --team-id <tid> --force
 
 ```

@@ -1,55 +1,55 @@
-# OpenClaw 资产导入
+# OpenClaw Asset Import
 
-把本机开源 OpenClaw 的 **skill / session** 导入 Memory Hub。这一份手册即可完成。
+Import the local open-source OpenClaw **skill / session** into Memory Hub. This manual is sufficient to complete it.
 
 
-扫的是客户端原生数据，不是本项目 `~/.openclaw/context-offload/*`。
+It scans the client's native data, not this project's `~/.openclaw/context-offload/*`.
 
-## 扫什么
+What to sweep?
 
-**Skill**（同名：用户自定义覆盖系统内置）
+**Skill** (Same name as: User-defined override system overriding built-in)
 
-| 优先级 | 路径 |
+| Priority | Path |
 |---|---|
 | 1 | `~/.agents/skills/<name>/SKILL.md` |
 | 2 | `~/npm-global/lib/node_modules/openclaw/skills/<name>/SKILL.md` |
 
-可附带 `scripts/` `references/` `assets/` `agents/`。不扫 workspace / `~/.openclaw/skills` / extraDirs。
+With `scripts/` `references/` `assets/` `agents/`. Do not scan workspace / `~/.openclaw/skills` / extraDirs.
 
-**Memory**：不再扫描本地文件；memory 仅由 Session 抽取（见下）。
+**Memory**: No longer scans local files; memory is only extracted from Sessions (see below).
 
-**Session**（`$OPENCLAW_STATE_DIR/agents/<id>/sessions/`，默认 `~/.openclaw`）
+**Session**(`$OPENCLAW_STATE_DIR/agents/<id>/sessions/`, default `~/.openclaw`)
 
-导入下一层 `<sessionId>.jsonl`。不扫 `sessions.json`、`*.trajectory.jsonl`、`*.lock`、sqlite。
+Import the next layer `<sessionId>.jsonl`. Do not scan `sessions.json`, `*.trajectory.jsonl`, `*.lock`, sqlite.
 
-## 前置
+## Preamble
 
-在仓库根执行。需要 Node >= 22，以及：
+Execute in the repository root. Requires Node >= 22, and:
 
 ```bash
 export PANEL_URL=http://127.0.0.1:8123
 export TDAI_SERVICE_ID=<spaceId>
-export TDAI_USER_KEY=<该 agent owner 的 sk-mem-...>
-# 可选：OPENCLAW_STATE_DIR / OPENCLAW_WORKSPACE_DIR
+export TDAI_USER_KEY=<the sk-mem-... of the agent owner>
+# Optional: OPENCLAW_STATE_DIR / OPENCLAW_WORKSPACE_DIR
 ```
 
-`--agent-id` / `--team-id` 必填；owner 必须等于 `TDAI_USER_KEY` 反查用户。
+`--agent-id` / `--team-id` are required; owner must equal `TDAI_USER_KEY` to look up the user.
 
-## 用法
+Usage
 
-统一入口为仓库根 `agents/asset-import.ts`。用 `--source openclaw` 指定本手册对应的 IDE；省略时默认 `auto` 自动识别当前工作区所用 IDE。
+The unified entry point is the repository root `agents/asset-import.ts`. Use `--source openclaw` to specify the IDE corresponding to this manual; when omitted, it defaults to `auto` to automatically identify the IDE used in the current workspace.
 
 ```bash
-# 交互式导入：先列举待导入项 —— skill（编号/名称/描述/来源/关联脚本数）、session（id/时间范围/项目路径），再选择「全导入 / 不导入 / 部分导入」（部分导入可填编号或 ID，逗号/空格分隔，可多个）
+# Interactive Import: List items to import first — skill (number/name/description/source/number of related scripts), session (id/time range/project path), then select "Import All / Do Not Import / Import Partially" (for partial import, enter numbers or IDs separated by commas/spaces, can be multiple)
 tsx agents/asset-import.ts --source openclaw --agent-id <id> --team-id <tid>
 
-# 非交互（脚本/CI，直接全量导入，不询问）
+# Non-interactive (script/CI, direct full import, no prompts)
 tsx agents/asset-import.ts --source openclaw --agent-id <id> --team-id <tid> -y
 
-# 指定项目目录
+Specify project directory
 tsx agents/asset-import.ts --source openclaw --workspace /path/to/workspace --agent-id <id> --team-id <tid>
 
-# 重新导入（忽略断点续传，重导已导入项）
+# Re-import (ignore resume, re-import already imported items)
 tsx agents/asset-import.ts --source openclaw --agent-id <id> --team-id <tid> --force
 
 ```

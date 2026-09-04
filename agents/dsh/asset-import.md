@@ -1,58 +1,58 @@
-# DeepSeek Harness 资产导入
+# DeepSeek Harness Asset Import
 
-把本机 dsh 的 **skill / session** 导入 Memory Hub。这一份手册即可完成。
+Import the **skill / session** of the local dsh into Memory Hub. This manual is sufficient to complete it.
 
-数据根 `$DSH_HOME`（默认 `~/.dsh`）。项目根 = 含 `.git` 的最近祖先，找不到则用 `--workspace` / cwd。
+Data root `$DSH_HOME` (default `~/.dsh`). Project root = nearest ancestor containing `.git`, or `--workspace` / cwd if not found.
 
-## 扫什么
+What to sweep?
 
-**Skill**（同名 rank 数字越小优先；只扫一层，不递归 `**/SKILL.md`）
+**Skill** (same name, lower rank number takes priority; scan only one level, do not recursively scan `**/SKILL.md`)
 
-| Rank | 路径 |
+| Rank | Path |
 |---|---|
-| 100 | `<项目根>/.dsh/skills/` |
-| 200 | `<项目根>/.agents/skills/` |
-| 300 | `settings.yaml` 的 `customSkillDirs`，或 `DSH_CUSTOM_SKILL_DIRS` |
-| 400 | `$DSH_HOME/skills/`（跳过 `.system`） |
-| 500 | `~/.agents/skills/`（可用 `DSH_AGENTS_HOME` 改根） |
-| 600 | `$DSH_BUNDLED_SKILL_DIR` / settings `bundledSkillDir`（未配置则跳过） |
+| 100 | `<project root>/.dsh/skills/` |
+| 200 | `<project root>/.agents/skills/` |
+| 300 | `customSkillDirs` of `settings.yaml`, or `DSH_CUSTOM_SKILL_DIRS` |
+| 400 | `$DSH_HOME/skills/` (skip `.system`) |
+| 500 | `~/.agents/skills/` (root can be changed via `DSH_AGENTS_HOME`) |
+| 600 | `$DSH_BUNDLED_SKILL_DIR` / settings `bundledSkillDir` (skip if not configured) |
 
-目录式 `<name>/SKILL.md` 或平铺 `<name>.md`。
+Directory-style `<name>/SKILL.md` or flat `<name>.md`.
 
-**Memory**：不再扫描本地文件；memory 仅由 Session 抽取（见下）。
+**Memory**: No longer scans local files; memory is only extracted from Sessions (see below).
 
 **Session**
 
-递归 `$DSH_HOME/sessions/**/session.jsonl.zstd`（无压缩则为 `session.jsonl`）。`--workspace` 不影响 session；`--sessions` 可改扫描根。只解析 `user/message` + `assistant/message`，空会话跳过。
+Recursively `$DSH_HOME/sessions/**/session.jsonl.zstd` (or `session.jsonl` if uncompressed). `--workspace` does not affect sessions; `--sessions` can change the scan root. Only parse `user/message` + `assistant/message`, and skip empty sessions.
 
-## 前置
+## Preamble
 
-在仓库根执行。需要 Node >= 22，以及：
+Execute in the repository root. Requires Node >= 22, and:
 
 ```bash
 export PANEL_URL=http://127.0.0.1:8123
 export TDAI_SERVICE_ID=<spaceId>
-export TDAI_USER_KEY=<该 agent owner 的 sk-mem-...>
-# 可选：DSH_HOME / DSH_AGENTS_HOME / DSH_CUSTOM_SKILL_DIRS / DSH_BUNDLED_SKILL_DIR
+export TDAI_USER_KEY=<the sk-mem-... of the agent owner>
+# Optional: DSH_HOME / DSH_AGENTS_HOME / DSH_CUSTOM_SKILL_DIRS / DSH_BUNDLED_SKILL_DIR
 ```
 
-`--agent-id` / `--team-id` 必填。
+`--agent-id` / `--team-id` are required.
 
-## 用法
+Usage
 
-统一入口为仓库根 `agents/asset-import.ts`。用 `--source dsh` 指定本手册对应的 IDE；省略时默认 `auto` 自动识别当前工作区所用 IDE。
+The unified entry point is the repository root `agents/asset-import.ts`. Use `--source dsh` to specify the IDE corresponding to this manual; when omitted, it defaults to `auto` to automatically detect the IDE used in the current workspace.
 
 ```bash
-# 交互式导入：先列举待导入项 —— skill（编号/名称/描述/来源/关联脚本数）、session（id/时间范围/项目路径），再选择「全导入 / 不导入 / 部分导入」（部分导入可填编号或 ID，逗号/空格分隔，可多个）
+# Interactive import: first list the items to import — skill (number/name/description/source/number of related scripts), session (id/time range/project path), then select "import all / do not import / import partially" (for partial import, enter numbers or IDs separated by commas or spaces, can be multiple)
 tsx agents/asset-import.ts --source dsh --agent-id <id> --team-id <tid>
 
-# 非交互（脚本/CI，直接全量导入，不询问）
+# Non-interactive (script/CI, direct full import, no prompts)
 tsx agents/asset-import.ts --source dsh --agent-id <id> --team-id <tid> -y
 
-# 指定项目目录
+Specify project directory
 tsx agents/asset-import.ts --source dsh --workspace /path/to/repo --agent-id <id> --team-id <tid>
 
-# 重新导入（忽略断点续传，重导已导入项）
+# Re-import (ignore resume, re-import already imported items)
 tsx agents/asset-import.ts --source dsh --agent-id <id> --team-id <tid> --force
 
 ```

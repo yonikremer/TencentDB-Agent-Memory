@@ -1,13 +1,13 @@
 # OpenCode
 
-> agentSource: `opencode` | 协议: OpenAI Chat Completions | Handler: `handler.ts` (与 CB / dsh 共享)
+> agentSource: `opencode` | Protocol: OpenAI Chat Completions | Handler: `handler.ts` (Shared with CB / dsh)
 
 ---
 
-## 1. 客户端接入配置
+## 1. Client Access Configuration
 
-OpenCode 是 [SST 出品](https://github.com/sst/opencode) 的开源 AI 编码 CLI，通过
-`~/.config/opencode/opencode.json` 配置自定义 provider 来对接 Proxy：
+OpenCode is the open-source AI coding CLI by [SST](https://github.com/sst/opencode), via
+`~/.config/opencode/opencode.json` configures a custom provider to connect to Proxy:
 
 ```json
 {
@@ -18,7 +18,7 @@ OpenCode 是 [SST 出品](https://github.com/sst/opencode) 的开源 AI 编码 C
       "name": "Proxy Memory (OpenCode)",
       "options": {
         "baseURL": "http://127.0.0.1:8096/opencode/default/v1",
-        "apiKey": "<业务用户的 sk-mem-... user_key>"
+        "apiKey": "<business user's sk-mem-... user_key>"
       },
       "models": {
         "claude-opus-4.7-1m": {
@@ -30,133 +30,133 @@ OpenCode 是 [SST 出品](https://github.com/sst/opencode) 的开源 AI 编码 C
 }
 ```
 
-字段说明：
-- `baseURL` — Proxy 地址 + `/opencode/<spaceId>/v1`；`default` 是 memory 实例 ID（spaceId）
-- `apiKey` — 业务用户的 `user_key`（从 MemoryPanel 面板 → OpenCode 卡片复制）
-- `models.<id>.name` — Proxy 上游支持的模型 ID（如 `claude-opus-4.7-1m`）
-- OpenCode 使用 `@ai-sdk/openai-compatible` provider，走 **OpenAI Chat Completions** 协议
+Field description:
+- `baseURL` — Proxy address + `/opencode/<spaceId>/v1`; `default` is the memory instance ID (spaceId)
+- `apiKey` — The business user's `user_key` (copy from the MemoryPanel panel → OpenCode card)
+- `models.<id>.name` — Model IDs supported by the Proxy upstream (e.g., `claude-opus-4.7-1m`)
+- OpenCode uses the `@ai-sdk/openai-compatible` provider, following the **OpenAI Chat Completions** protocol
 
-启动 OpenCode 后在 `/model` 选择器里选择 `proxy-memory` 下的模型即可。
+After starting OpenCode, select a model under `proxy-memory` in the `/model` selector.
 
-请求路径：
-- 主路径: `POST /opencode/:spaceId/v1/chat/completions`
-- 裸尾变体: `POST /opencode/:spaceId/chat/completions`（`baseURL` 不带 `/v1` 时）
+Request path:
+- Main path: `POST /opencode/:spaceId/v1/chat/completions`
+- Bare tail variant: `POST /opencode/:spaceId/chat/completions` (when `baseURL` does not include `/v1`)
 
 ---
 
 ## 2. Session ID
 
-| 优先级 | Header |
+| Priority | Header |
 |--------|--------|
 | 1 | `x-conversation-id` |
 | 2 | `x-session-id` |
 
-OpenCode 客户端本身**不携带** session ID header，proxy 会自动为每条请求生成
-一个稳定 sessionId（基于 request 上下文），行为上等价于"每次会话独立"。
+OpenCode client itself **does not carry** session ID header, proxy will automatically generate for each request
+A stable sessionId (based on request context), behaviorally equivalent to "each session being independent".
 
-如果通过 wrapper / 代理层附加 `x-conversation-id`，proxy 会优先使用。
+If `x-conversation-id` is attached via the wrapper / proxy layer, the proxy will use it preferentially.
 
 ---
 
-## 3. Session Init（会话初始化 / Form）
+## 3. Session Init (Session Initialization / Form)
 
-### 3.1 机制
+### 3.1 Mechanism
 
-OpenCode 复用 CB 的 **`ask_followup_question`** function_call 机制发起交互式 Form：
+OpenCode reuses CB's **`ask_followup_question`** function_call mechanism to initiate an interactive Form:
 
 - Tool name: `ask_followup_question`
-- Call ID prefix: `call_oc_session_init_`（handler 针对 opencode 使用独立前缀，与 CB `call_session_init_` / dsh `call_dsh_session_init_` 区分）
-- 协议: OpenAI SSE tool_calls chunks
+- Call ID prefix: `call_oc_session_init_` (the handler uses a separate prefix for opencode, distinguishing it from CB `call_session_init_` / dsh `call_dsh_session_init_`)
+- Protocol: OpenAI SSE tool_calls chunks
 
-### 3.2 状态机
+### 3.2 State Machine
 
-复用 CB 状态机：
+Reuse the CB state machine:
 
 ```
 asset_confirm → team_select → agent_task_select → initialized
 ```
 
-### 3.3 分页
+### 3.3 Pagination
 
-无数量限制，所有选项一次性展示。
+Unlimited quantity, all options displayed at once.
 
-### 3.4 跳过 Session Init
+### 3.4 Skip Session Init
 
-- `asset_confirm` 选"否" → 直接透传
-- 任何步骤输入 "跳过" / "skip" → 跳过
+- `asset_confirm` select "No" → pass through directly
+- Any step input "Skip" / "skip" → skip
 
 ---
 
-## 4. Marker 路由（⚠️ 重点）
+## 4. Marker Routing (⚠️ Key Point)
 
-OpenCode 支持通过 URL 段追加 **marker** 来触发 cost-guard 分流或 analyse 请求分类，
-用法与 CB / Codex 完全对齐：
+OpenCode supports appending **marker** via URL segments to trigger cost-guard routing or analyse request classification,
+Usage is fully aligned with CB / Codex:
 
-| Marker | 路径 | 用途 |
+| Marker | Path | Purpose |
 |--------|------|------|
-| （无） | `/opencode/<spaceId>/v1/chat/completions` | 默认走通用管道 |
-| **cost-guard** | `/opencode/<spaceId>/cost-guard/v1/chat/completions` | 强制走 cost-guard 档位 |
-| **analyse** | `/opencode/<spaceId>/analyse/v1/chat/completions` | 请求分类标记为 analyse |
+| （None） | `/opencode/<spaceId>/v1/chat/completions` | Default uses the general pipeline |
+| **cost-guard** | `/opencode/<spaceId>/cost-guard/v1/chat/completions` | Forces use of the cost-guard tier |
+| **analyse** | `/opencode/<spaceId>/analyse/v1/chat/completions` | Marks the request as analyse |
 
-裸尾变体（`baseURL` 不含 `/v1` 时）：
+Naked tail variant (when `baseURL` does not contain `/v1`):
 - `/opencode/<spaceId>/cost-guard/chat/completions`
 - `/opencode/<spaceId>/analyse/chat/completions`
 
-### 4.1 marker 门控
+### 4.1 marker gating
 
-两条 marker 路由都受配置门控 `assetReflection.markerOptIn` 控制：
-- `markerOptIn: true` → 命中并生效
-- `markerOptIn: false` → 返回 `404 {"error":"cost_guard_marker_disabled"}` / 类似
+Both marker routes are controlled by the configuration gate `assetReflection.markerOptIn`:
+- `markerOptIn: true` → hit and take effect
+- `markerOptIn: false` → return `404 {"error":"cost_guard_marker_disabled"}` / similar
 
-见 `MemoryProxy/z_config/config.yaml` → `assetReflection.markerOptIn`。
+See `MemoryProxy/z_config/config.yaml` → `assetReflection.markerOptIn`.
 
-### 4.2 客户端如何使用
+### 4.2 How the Client is Used
 
-在 opencode.json 的 `baseURL` 中直接切换：
+Switch directly in the `baseURL` of opencode.json:
 
 ```jsonc
-// 默认档位
+// Default level
 "baseURL": "http://127.0.0.1:8096/opencode/default/v1"
 
-// 强制 cost-guard
+// Force cost-guard
 "baseURL": "http://127.0.0.1:8096/opencode/default/cost-guard/v1"
 
-// analyse 分类（供后台链路识别）
+// analyse classification (for backend link identification)
 "baseURL": "http://127.0.0.1:8096/opencode/default/analyse/v1"
 ```
 
 ---
 
-## 5. 请求分类
+## 5. Request Classification
 
-OpenCode 的请求分类较简单：
+The request classification of OpenCode is relatively simple:
 
-| 类型 | 说明 |
+| Type | Description |
 |------|------|
-| **main** | 所有请求默认都是 main |
-| **analyse** | URL 带 `/analyse/` marker 时标记为 analyse（供 report 层识别） |
+| **main** | All requests default to main |
+| **analyse** | Mark as analyse when URL has `/analyse/` marker (for report layer to identify) |
 
-OpenCode **没有** fork / sidequery / compact 等辅助请求概念。
-
----
-
-## 6. 用户文本提取
-
-OpenCode 消息体 `message.content` 是**纯字符串**（不是 content block 数组，也不做
-XML 包裹）：
-
-- 不使用 `<user_query>` 包裹（与 CB 不同）
-- 不使用 content block 数组（与 CC 不同）
-- 直接取最后一条 user message 的 content string
-
-图片输入通过 `image_url` content-part 透传（客户端 base64 编码后由 proxy 直接
-转发到上游），proxy 侧不做特殊处理。
+OpenCode **does not** have auxiliary request concepts such as fork / sidequery / compact.
 
 ---
 
-## 7. 注入 Profile
+## 6. User Text Extraction
 
-OpenCode 共享 CB 的 handler 路径（都是 OpenAI Chat Completions），注入方式一致：
+OpenCode message body `message.content` is a **pure string** (not a content block array, and does not
+XML wrapping:
+
+- Do not use `<user_query>` wrapping (different from CB)
+- Do not use content block array (different from CC)
+- Directly take the content string of the last user message
+
+Image input is passed through the `image_url` content-part (the client base64-encodes it and the proxy directly
+Forward to upstream), no special handling on the proxy side.
+
+---
+
+## 7. Inject Profile
+
+The handler path for OpenCode's shared CB (all OpenAI Chat Completions) is consistent in its injection method:
 
 ```xml
 <agent_skills>...</agent_skills>
@@ -164,77 +164,77 @@ OpenCode 共享 CB 的 handler 路径（都是 OpenAI Chat Completions），注�
 <session_context>...</session_context>
 ```
 
-注入点: `messages[0].content`（system message 字符串内追加）。
+Injection point: `messages[0].content` (append within the system message string).
 
 ---
 
-## 8. 特殊行为
+## 8. Special Behaviors
 
-- **共享 Handler**: OpenCode 复用 CB 的 `handleChatCompletions`（与 dsh 同一路径）
-- **agentSource 区分**: 路由层 `/opencode/` 段 → `agentSource=opencode`
-- **无独立 header 指纹**: OpenCode CLI 不带自定义 header，proxy 依赖 URL 段 + user-agent 识别
-- **Marker 路由**: `/cost-guard/` 和 `/analyse/` 两条 URL marker，见 §4
-
----
-
-## 9. 归档触发
-
-- 与 CB / dsh 共享归档机制
-- 对话超阈值自动 `skill/conversation/add`
-- 支持 `skill/conversation/force-archive`
-- 归档数据写入 L0
+- **Shared Handler**: OpenCode reuses CB's `handleChatCompletions` (same path as dsh)
+- **agentSource distinction**: Route layer `/opencode/` segment → `agentSource=opencode`
+- **No independent header fingerprint**: OpenCode CLI does not carry custom headers, proxy relies on URL segment + user-agent for identification
+- **Marker routing**: `/cost-guard/` and `/analyse/` two URL markers, see §4
 
 ---
 
-## 10. 环境变量
+## 9. Archive Trigger
 
-无 OpenCode 专属变量。上游路由由 `resolveForwardTarget` 动态决定
-（通常指向 tokenhub 或直连 provider）。
-
----
-
-## 11. 常见问题
-
-**Q: OpenCode 和 CB / dsh 共享 handler，怎么区分？**  
-A: 路由层面由 `/:agent/` 段区分。进入 handler 后通过 `agentSource=opencode` 触发
-OpenCode 特有行为（marker 路由、session ID 自生成等）。
-
-**Q: opencode.json 里 `baseURL` 必须带 `/v1` 吗？**  
-A: 推荐带（主路径），proxy 也接受裸尾变体（不带 `/v1`）。两种都支持。
-
-**Q: marker 路由 404 怎么办？**  
-A: 检查 `MemoryProxy/z_config/config.yaml` 的 `assetReflection.markerOptIn` 是否为
-`true`。改完后 `./scripts/proxy.sh restart` 加载。
-
-**Q: OpenCode CLI 本身支持 `@image:path` 语法吗？**  
-A: 这是 OpenCode 客户端侧的能力，与 proxy 无关。客户端读文件转 base64 塞进 `image_url`
-content-part 后 proxy 会透明透传到上游。
-
-**Q: 本地历史 session / skill 能导入 Memory Hub 吗？**  
-A: OpenCode 客户端本地不落 skill / session 文件（与 CB / dsh 不同），目前无
-`asset-import.md`。如需导入历史对话，通过 Panel 手动导入或使用 `mem:sync` 命令。
+- Share archive mechanism with CB / dsh
+- Automatically `skill/conversation/add` when conversation exceeds threshold
+- Support `skill/conversation/force-archive`
+- Write archived data to L0
 
 ---
 
-## 12. 与 CB / dsh 的差异
+## 10. Environment Variables
 
-| 维度 | CodeBuddy | dsh | **OpenCode** |
+No OpenCode-specific variables. Upstream routing is dynamically determined by `resolveForwardTarget`
+(usually pointing to tokenhub or direct provider).
+
+---
+
+## 11. Frequently Asked Questions
+
+**Q: How to distinguish OpenCode and CB / dsh sharing the handler?**
+A: At the routing level, it is distinguished by the `/:agent/` segment. After entering the handler, it is triggered via `agentSource=opencode`
+OpenCode-specific behaviors (marker routing, self-generated session IDs, etc.).
+
+**Q: Is `baseURL` in opencode.json required to have `/v1`?**
+**A: It is recommended to include it (main path), and proxy also accepts the bare tail variant (without `/v1`). Both are supported.**
+
+**Q: What to do about marker routing 404?**
+A: Check whether `MemoryProxy/z_config/config.yaml`'s `assetReflection.markerOptIn` is
+`true`. After modifying it, `./scripts/proxy.sh restart` loads it.
+
+**Q: Does OpenCode CLI itself support the `@image:path` syntax?**
+A: This is a capability on the OpenCode client side, and is unrelated to the proxy. The client reads the file, converts it to base64, and inserts it into `image_url`
+content-part, and the proxy transparently forwards it to the upstream.
+
+**Q: Can local historical session / skill be imported into Memory Hub?**
+A: OpenCode client does not persist skill / session files locally (unlike CB / dsh), and there is currently no
+`asset-import.md`. If you need to import historical conversations, manually import them via Panel or use the `mem:sync` command.
+
+---
+
+Differences from CB / dsh
+
+| Dimension | CodeBuddy | dsh | **OpenCode** |
 |---|---|---|---|
-| 协议 | OpenAI Chat Completions | OpenAI Chat Completions | **OpenAI Chat Completions** |
-| 配置文件 | `~/.codebuddy/models.json` | `~/.dsh/settings.yaml` + `.credentials.yaml` | **`~/.config/opencode/opencode.json`** |
-| URL 前缀 | `/codebuddy/<spaceId>` | `/dsh/<spaceId>`（不带 `/v1`） | **`/opencode/<spaceId>`** |
-| Provider 库 | 内置 | 内置 | **`@ai-sdk/openai-compatible`** |
-| Key 传递 | JSON `apiKey` | `.credentials.yaml` 环境变量 | **JSON `provider.*.options.apiKey`** |
-| Form tool | `ask_followup_question` | `ask_user_question` | **`ask_followup_question`**（同 CB） |
-| Session ID | client 带 `x-conversation-id` | client 带 `x-deepseek-harness-session-id` | **proxy 自生成** |
-| Marker 路由 | 无 | 无 | **`/cost-guard/` `/analyse/`** |
-| 本地资产导入 | 有 (`asset-import.md`) | 有 (`asset-import.md`) | **无**（客户端不落文件） |
+| Protocol | OpenAI Chat Completions | OpenAI Chat Completions | **OpenAI Chat Completions** |
+| Config File | `~/.codebuddy/models.json` | `~/.dsh/settings.yaml` + `.credentials.yaml` | **`~/.config/opencode/opencode.json`** |
+| URL Prefix | `/codebuddy/<spaceId>` | `/dsh/<spaceId>` (without `/v1`) | **`/opencode/<spaceId>`** |
+| Provider Library | Built-in | Built-in | **`@ai-sdk/openai-compatible`** |
+| Key Passing | JSON `apiKey` | `.credentials.yaml` environment variable | **JSON `provider.*.options.apiKey`** |
+| Form Tool | `ask_followup_question` | `ask_user_question` | **`ask_followup_question`** (same as CB) |
+| Session ID | client with `x-conversation-id` | client with `x-deepseek-harness-session-id` | **auto-generated by proxy** |
+| Marker routing | none | none | **`/cost-guard/` `/analyse/`** |
+| Local asset import | yes (`asset-import.md`) | yes (`asset-import.md`) | **none** (no file is written by the client) |
 
 ---
 
-## 13. 当前状态
+## 13. Current Status
 
-- ✅ 代码实现完成（handler 复用 CB 路径）
-- ✅ marker 路由（cost-guard / analyse）单测 6/6 通过
-- ✅ 端到端 curl 验证通过（3 条真实上游流式响应）
-- ✅ Panel 已展示 OpenCode 卡片
+- ✅ Code implementation complete (handler reuses CB path)
+- ✅ marker routing (cost-guard / analyse) unit tests 6/6 passed
+- ✅ End-to-end curl verification passed (3 real upstream streaming responses)
+- ✅ Panel has displayed OpenCode card
