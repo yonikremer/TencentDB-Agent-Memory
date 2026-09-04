@@ -127,6 +127,18 @@ if (argv.includes('--file')) {
   console.log(s == null ? `${rel}\t0` : `${rel}\t${hanOf(s)}`);
   process.exit(0);
 }
+if (argv.includes('--lines')) {
+  // Print only the lines that contain Han, numbered, with exact text - so workers
+  // can target their Edits without reading whole (mostly-English) files.
+  const rel = argv[argv.indexOf('--lines') + 1];
+  const s = readTextSyncSafe(resolve(root, rel));
+  if (s == null) process.exit(0);
+  const lines = s.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (hanOf(lines[i]) > 0) console.log(`${i + 1}\t${lines[i]}`);
+  }
+  process.exit(0);
+}
 
 const stat = analyze();
 const top = (() => {

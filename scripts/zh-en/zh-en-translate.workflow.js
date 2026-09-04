@@ -142,6 +142,9 @@ function translatePrompt(cluster, lowRisk) {
   L.push('', `cd to repo root if needed: cd ${repoBash}`);
   L.push('Before editing each file, note its Han count:');
   L.push('   node scripts/zh-en/leak-count.mjs --file "<relpath>"   -> "<relpath>\\t<han>"');
+  L.push('Find the exact Chinese text efficiently - DO NOT read whole files just to locate Chinese:');
+  L.push('   node scripts/zh-en/leak-count.mjs --lines "<relpath>"  -> "lineno\\t<full line text>" for every line that has Han');
+  L.push('Translate by Editing those lines directly (you already have their exact text). Read a short window (Read tool, offset/limit) ONLY when you need surrounding context - e.g. a multi-line JSDoc/comment block or to confirm structure. Small or densely-Chinese files may be read whole.');
   L.push('');
   L.push('Translate ONLY human-readable Chinese: comments, docstrings, JSDoc descriptions (keep tag names), log/console copy, user-facing copy.');
   L.push('NEVER translate: identifiers, variable/function/class/type names, object keys, enum/type values, JSON field names, import paths, file names, URLs, env var names, CLI flags, format specifiers, \\${...} interpolation, or any Chinese string the code matches at runtime (.includes/.startsWith/.test/===/indexOf). If runtime-matched Chinese is all a file has, LEAVE it and set status=skipped.');
