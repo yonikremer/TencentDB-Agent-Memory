@@ -933,13 +933,13 @@ function showOverview(db: DatabaseSync, opts: CliOptions) {
 
     console.log()
     console.log(`📂  L2 · scene_blocks`)
-    console.log(`   文件数: ${files.length}   总热度: ${totalHeat}`)
+    console.log(`   File count: ${files.length}   Total heat: ${totalHeat}`)
     for (const entry of entries) {
       console.log(`   · ${entry.fileName}  (heat: ${entry.meta.heat})  ${truncate(entry.meta.summary, 40)}`)
     }
   } else {
     console.log()
-    console.log(`📂  L2 · scene_blocks  （目录不存在）`)
+    console.log(`📂  L2 · scene_blocks  (directory does not exist)`)
   }
 
   // ── L3 ──
@@ -951,15 +951,15 @@ function showOverview(db: DatabaseSync, opts: CliOptions) {
 
     console.log()
     console.log(`📂  L3 · persona`)
-    console.log(`   大小: ${formatBytes(bytes)}   行数: ${lines}`)
+    console.log(`   Size: ${formatBytes(bytes)}   Lines: ${lines}`)
   } else {
     console.log()
-    console.log(`📂  L3 · persona  （文件不存在）`)
+    console.log(`📂  L3 · persona  (file does not exist)`)
   }
 
   console.log()
   console.log(`${"═".repeat(60)}`)
-  console.log(`💡  使用 -L <层级> 查看详细数据，如: -L L0 --since 7d`)
+  console.log(`💡  Use -L <level> to view detailed data, e.g.: -L L0 --since 7d`)
   console.log()
 }
 
@@ -1002,8 +1002,8 @@ function emptyL0L1Result(opts: CliOptions, level: "L0" | "L1") {
   }
   const label = level === "L0" ? "conversations" : "records"
   console.log()
-  console.log(`📊  查询结果：${level} ${label}（SQLite）`)
-  console.log(`   （数据库尚未生成，暂无数据）`)
+  console.log(`📊  Query Results: ${level} ${label} (SQLite)`)
+  console.log(`   (Database not created yet, no data available)`)
   console.log()
 }
 
@@ -1030,8 +1030,8 @@ function main() {
       return
     }
     // 概览模式：数据库不存在，报错退出
-    console.error(`❌  SQLite 数据库不存在: ${path.join(opts.dataDir, SQLITE_DB_NAME)}`)
-    console.error(`   请确认数据目录下包含 ${SQLITE_DB_NAME}`)
+    console.error(`❌  SQLite database does not exist: ${path.join(opts.dataDir, SQLITE_DB_NAME)}`)
+    console.error(`   Please verify data directory contains ${SQLITE_DB_NAME}`)
     process.exit(1)
   }
 
