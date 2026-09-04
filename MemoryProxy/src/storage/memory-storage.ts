@@ -1,13 +1,14 @@
 /**
- * MemoryStorage —— ProxyStorage 的进程内 Map 实现。
+ * MemoryStorage — the in-process Map implementation of ProxyStorage.
  *
- * 定位：兜底后端。当 cos/sqlite/fs 都不可用时保证 proxy 不 crash，等价于当前
- * "什么都没配"的行为。**不适合生产**。
+ * Purpose: fallback backend. When cos/sqlite/fs are all unavailable, keeps the proxy
+ * from crashing, matching today's "nothing configured" behavior. **Not for production**.
  *
- * TTL：暂不实现 sweeper（memory 后端只用于兜底 / 单元测试，进程重启就没）。
+ * TTL: no sweeper for now (the memory backend is used only as a fallback / for unit tests —
+ * it disappears on process restart).
  *
- * 生产可观测性：每次 write 会以 60s 节流的频率打一条 error 日志，提醒运维当
- * 前是危险的兜底状态。见 docs/design/2026-07-13-proxy-multinode-state-audit.md P0-2。
+ * Production observability: every write logs one error line throttled to 60s intervals, to
+ * remind ops that the current state is a dangerous fallback. See docs/design/2026-07-13-proxy-multinode-state-audit.md P0-2.
  */
 import type { ProxyStorage } from "./proxy-storage.js";
 
@@ -26,9 +27,10 @@ export class MemoryStorage implements ProxyStorage {
   private opsSinceLastWarn = 0;
 
   /**
-   * 60s 一次的节流告警 —— 每次写都调用，累加计数，够 60s 才实际打日志。
-   * 目的：让运维在多节点静默降级到 memory 时能在日志里看到大量 write，不会
-   * 因为 warn-once 而错过（老实现是 factory 只 warn 一次就静默）。
+   * Throttled warning, at most once per 60s — called on every write; it accumulates a
+   * count and only actually logs once 60s have elapsed.
+   * Purpose: when multiple nodes silently degrade to memory, ops can see the write volume
+   * in the logs and won't miss it because of warn-once (the old implementation warned only once, then went silent).
    */
   private warnUsage(op: string): void {
     this.opsSinceLastWarn++;
@@ -53,9 +55,9 @@ export class MemoryStorage implements ProxyStorage {
   }
 
   async putTextIfAbsent(key: string, value: string): Promise<boolean> {
-    // JS 单线程 —— has/set 之间没有 race
+    // JS is single-threaded — no race between has/set
     if (this.data.has(key)) return false;
-    // 走 putText 会重复 warn 计一次，改直接 set 并计一次
+    // putText would double-count the warning, so set directly and count once instead
     this.warnUsage("putTextIfAbsent");
     this.data.set(key, { value: Buffer.from(value, "utf-8"), updatedAt: Date.now() });
     return true;
