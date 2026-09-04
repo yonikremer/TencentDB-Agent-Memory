@@ -36,7 +36,7 @@
  *     { type: "toolCall", id: "call_def456", name: "exec", arguments: { cmd: "..." } },
  *   ],
  *   stopReason: "toolUse",
- *   ...同上
+ *   ...same as above
  * }
  * Note: Anthropic native format uses { type: "tool_use", id, name, input }
  *       OpenClaw internal unified format is { type: "toolCall", id, name, arguments }

@@ -387,8 +387,8 @@ export function createL1Runner(opts: {
   /** StorageAdapter for file operations (COS/local). */
   storage?: StorageAdapter;
   /**
-   * 跨节点保护 checkpoint 读改写的分布式锁配置。
-   * service 模式下必须提供，否则同 instance 的多节点并发会丢失 L1 游标。
+   * Distributed lock config to protect checkpoint read-modify-write across nodes.
+   * Must be provided in service mode, otherwise concurrent multi-node execution of same instance will lose L1 cursor.
    */
   checkpointLock?: import("./checkpoint.js").CheckpointLockOptions;
 }): (params: { sessionKey: string }) => Promise<{
@@ -702,8 +702,8 @@ export function createL2Runner(opts: {
   /** StorageAdapter for file operations (COS/local). */
   storage?: StorageAdapter;
   /**
-   * 跨节点保护 checkpoint 读改写的分布式锁配置。
-   * service 模式下必须提供，否则同instance 的多节点并发会丢失计数器修复结果。
+   * Distributed lock config to protect checkpoint read-modify-write across nodes.
+   * Must be provided in service mode, otherwise concurrent multi-node execution of same instance will lose counter repair results.
    */
   checkpointLock?: import("./checkpoint.js").CheckpointLockOptions;
 }): L2Runner {
@@ -809,7 +809,7 @@ export function createL2Runner(opts: {
         instanceId,
         llmRunner,
         storage: groupStorage,
-        // langfuse: 透传身份四元组，UI 上可按 user/session 列过滤
+          // langfuse: pass identity quadruple, allowing UI column filtering by user/session
         traceContext: { teamId: ctx.teamId, userId: ctx.userId, agentId: ctx.agentId, sessionId: ctx.sessionId },
       });
 
@@ -838,14 +838,14 @@ export function createL2Runner(opts: {
         continue;
       }
 
-      //⚠️ 这里**不能**用 `checkpoint.write({...postState})`：
+          //⚠️ Here we **cannot** use checkpoint.write({...postState}):
       //
-      // postState 是跨越了整个 L2 LLM 抽取（数秒~数十秒）的旧快照，而write()
-      // 是「整对象覆盖 + 只有进程内锁」。用它写回会把这期间其他节点合法推进的
-      // runner_states / pipeline_states 全部抹掉（L1 游标丢失 → 重复抽取）。
+          // postState is a stale snapshot spanning the entire L2 LLM extraction (seconds~tens of seconds), while write()
+          // is "whole object override + in-process lock only". Writing it back would wipe out all runner_states / pipeline_states
+          // legally advanced by other nodes during this time (L1 cursor lost → repeated extraction).
       //
-      // 正确做法：走 repairMonotonicCounters()，在分布式锁保护的临界区内重读，
-      // 只对这两个标量做单调取大，绝不触碰其他字段。
+          // Correct approach: use repairMonotonicCounters(), re-read within critical section protected by distributed lock,
+          // only monotonically maximize these two scalars, never touching other fields.
       const checkpoint = new CheckpointManager(groupDataDir, logger, groupStorage, checkpointLock);
       const repaired = await checkpoint.repairMonotonicCounters({
         scenes_processed: preScenesProcessed,
@@ -1001,7 +1001,7 @@ export function createL3Runner(opts: {
       }
 
       logger.info(`${TAG} [L3] Starting persona generation: ${reason} (scope=${scope})`);
-      // 反解 scope 拿回 teamId/userId/agentId/sessionId 给 langfuse trace 用
+      // Reverse scope to get back teamId/userId/agentId/sessionId for langfuse trace
       const scopeIsolation = parseProfileIsolationScope(scope);
       const l3StartMs = Date.now();
       const resolvedL3Prompt = l3Prompts.get(memoryPromptResolveKey({
@@ -1192,7 +1192,7 @@ export async function createPipeline(opts: PipelineFactoryOptions): Promise<Pipe
 }
 
 // ============================
-// V2: StateBackend-based pipeline factory (需求 #8)
+// V2: StateBackend-based pipeline factory (Requirement #8)
 // ============================
 
 import type { IStateBackend } from "../core/state/types.js";

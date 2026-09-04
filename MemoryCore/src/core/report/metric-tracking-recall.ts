@@ -1,17 +1,17 @@
 /**
- * Recall Metric Reporter — 召回阶段指标上报。
+ * Recall Metric Reporter — Recall phase metric reporting.
  *
- * 在召回完成后非侵入式上报以下指标到 Kafka：
- *   - recall_hit_count   : 本次召回命中的 L1 记忆条数
- *   - recall_top_score   : 召回结果中最高相似度分数（TCVDB RRF score）
- *   - recall_latency_ms  : 召回总耗时（毫秒，整数）
+ * Non-intrusively reports the following metrics to Kafka after recall is completed:
+ *   - recall_hit_count   : Number of L1 memory items hit in this recall
+ *   - recall_top_score   : Highest similarity score in recall results (TCVDB RRF score)
+ *   - recall_latency_ms  : Total recall latency (milliseconds, integer)
  *
- * 设计原则（与 MetricTrackingRunner 完全同构）：
- *   1. 召回完成后，try-catch 做上报（静默失败）
- *   2. 无论上报成功失败，不影响召回结果
- *   3. 召回失败（hasError=true）时不上报
- *   4. 无 instanceId 时不上报
- *   5. 召回 0 条时仍上报 hit_count=0 + latency，但不上报 top_score
+ * Design principles (isomorphic with MetricTrackingRunner):
+ *   1. After recall is completed, try-catch to report (fail silently)
+ *   2. Regardless of report success or failure, recall results are unaffected
+ *   3. Do not report when recall fails (hasError=true)
+ *   4. Do not report when there is no instanceId
+ *   5. Still report hit_count=0 + latency when 0 items recalled, but do not report top_score
  */
 
 import { metricProducer } from "./kafka-metric-producer.js";
@@ -32,15 +32,15 @@ const STRATEGY_CODE: Record<string, number> = {
 // ============================
 
 export interface RecallMetricInput {
-  /** 实例 ID（Kafka key） */
+  /** Instance ID (Kafka key) */
   instanceId: string;
-  /** 召回的 L1 记忆列表（带 score） */
+  /** Recalled L1 memory list (with score) */
   recalledL1Memories: Array<{ content: string; score: number; type: string }> | undefined;
-  /** 生效的召回策略 */
+  /** Effective recall strategy */
   recallStrategy: string;
-  /** 召回总耗时（毫秒） */
+  /** Total recall latency (milliseconds) */
   recallLatencyMs: number;
-  /** 是否召回失败 */
+  /** Whether recall failed */
   hasError: boolean;
 }
 
@@ -49,24 +49,24 @@ export interface RecallMetricInput {
 // ============================
 
 /**
- * 上报召回阶段指标到 Kafka。
+ * Report recall phase metrics to Kafka.
  *
- * 静默安全：任何异常都 try-catch 吞掉，绝不向外抛。
- * 调用时机：在 performAutoRecallCore 返回后、结果传给业务前调用。
+ * Silently safe: any exceptions are try-catched and swallowed, never thrown outwards.
+ * Call timing: called after performAutoRecallCore returns, before passing results to business logic.
  */
 export function reportRecallMetrics(input: RecallMetricInput): void {
   try {
-    // Guard: 失败时不上报
+    // Guard: Do not report on failure
     if (input.hasError) return;
 
-    // Guard: 无 instanceId 不上报
+    // Guard: Do not report without instanceId
     if (!input.instanceId) return;
 
     const memories = input.recalledL1Memories ?? [];
     const hitCount = memories.length;
     const latencyMs = Math.round(input.recallLatencyMs);
 
-    // 1. 上报 recall_hit_count（含 0 条场景）
+    // 1. Report recall_hit_count (including 0 items scenarios)
     try {
       metricProducer.send({
         metric: "recall_hit_count",
@@ -75,10 +75,10 @@ export function reportRecallMetrics(input: RecallMetricInput): void {
         source: "core",
       });
     } catch {
-      // 静默失败
+      // Fail silently
     }
 
-    // 2. 上报 recall_top_score（仅有记忆时）
+    // 2. Report recall_top_score (only when there are memories)
     if (hitCount > 0) {
       try {
         const topScore = Math.max(...memories.map((m) => m.score));
@@ -89,11 +89,11 @@ export function reportRecallMetrics(input: RecallMetricInput): void {
           source: "core",
         });
       } catch {
-        // 静默失败
+        // Fail silently
       }
     }
 
-    // 3. 上报 recall_latency_ms
+    // 3. Report recall_latency_ms
     try {
       metricProducer.send({
         metric: "recall_latency_ms",
@@ -102,10 +102,10 @@ export function reportRecallMetrics(input: RecallMetricInput): void {
         source: "core",
       });
     } catch {
-      // 静默失败
+      // Fail silently
     }
 
-    // 4. 上报 recall_strategy（数值编码：skipped=0, keyword=1, embedding=2, hybrid=3, 未知=-1）
+    // 4. Report recall_strategy (numeric encoding: skipped=0, keyword=1, embedding=2, hybrid=3, unknown=-1)
     try {
       const strategyCode = STRATEGY_CODE[input.recallStrategy] ?? -1;
       metricProducer.send({
@@ -115,9 +115,9 @@ export function reportRecallMetrics(input: RecallMetricInput): void {
         source: "core",
       });
     } catch {
-      // 静默失败
+      // Fail silently
     }
   } catch {
-    // 最外层 catch — 绝不向外抛
+    // Outermost catch — never throw outwards
   }
 }

@@ -1,20 +1,20 @@
 /**
  * Zod schemas for `/skill/*` (v2 redesign, 2026-06-17).
  *
- * 与 docs/design/2026-06-17-skill-redesign-v2.md §3.4 / §3.5 对齐。
+ * Aligns with docs/design/2026-06-17-skill-redesign-v2.md §3.4 / §3.5.
  *
- * team_id / agent_id 约束：
- *   - agent_id 必须以 team_id 为命名空间（有 agent 必须有 team）
- *   - 可以只传 team_id 不传 agent_id（团队维度查询）
- *   - 可以都不传（全局查询，不限制 scope）
- *   - 写接口额外要求 user_id 也必须提供
- *   - user_id / task_id 独立可选
+ * team_id / agent_id constraints:
+ *   - agent_id must use team_id as namespace (having agent requires having team)
+ *   - Can pass only team_id without agent_id (team dimension query)
+ *   - Can pass neither (global query, no scope limitation)
+ *   - Write interfaces additionally require user_id to be provided
+ *   - user_id / task_id independently optional
  */
 
 import { z } from "zod";
 
 // ═════════════════════════════════════════════════════════════════════
-//  公共片段
+// Common fragments
 // ═════════════════════════════════════════════════════════════════════
 
 const idFieldsShape = {
@@ -24,7 +24,7 @@ const idFieldsShape = {
   task_id: z.string().min(1).optional(),
 };
 
-/** agent_id 必须以 team_id 为命名空间：有 agent 必须有 team；team 可以单独存在。 */
+/** agent_id must use team_id as namespace: having agent requires having team; team can exist alone. */
 function refineAgentNeedsTeam(data: { team_id?: string; agent_id?: string }, ctx: z.RefinementCtx) {
   const hasAgent = !!data.agent_id;
   const hasTeam = !!data.team_id;
@@ -49,26 +49,26 @@ export const skillResourcePayloadSchema = z.object({
 });
 
 export const extractMessageSchema = z.object({
-  // 五种 role, 对齐 conversation/add 侧的 conversationMessageSchema
+// Five roles, aligned with conversationMessageSchema on conversation/add side
   role: z.enum(["user", "assistant", "tool_call", "tool_result", "system"]),
   content: z.string().min(1),
   timestamp: z.string().datetime().optional(),
-  // tool_call/tool_result 携带的锚点字段。tool_name 可选（OpenAI 协议无 tool_name
-  // 字段, 见 conversationMessageSchema 上的注释）；tool_call_id 也 optional（schema 层不强制，
-  // 具体校验由 direct-trigger handler 决定；本 schema 只做形状约束）。
+// Anchor fields carried by tool_call/tool_result. tool_name is optional (OpenAI protocol has no tool_name
+// field, see comments on conversationMessageSchema); tool_call_id is also optional (not enforced at schema layer,
+// specific validation is decided by direct-trigger handler; this schema only enforces shape).
   tool_name: z.string().min(1).max(128).optional(),
   tool_call_id: z.string().min(1).max(128).optional(),
 });
 
 /**
- * 与 extractMessageSchema 类似但允许 system role（对齐 /v3/skill/conversation/add
- * §11.1 请求体的 5 种 role）。
+ * Similar to extractMessageSchema but allows system role (aligns with /v3/skill/conversation/add
+ * §11.1 5 roles in request body).
  *
- * tool_name / tool_call_id / timestamp（数值）用于 tool_call/tool_result:
- *   - tool_call_id: schema 上 optional, 但 conversation-add handler 会强制
- *     tool_call/tool_result 必须携带（配对锚点）
- *   - tool_name: schema 和 handler 都 optional —— OpenAI 协议 role=tool 消息
- *     没有 tool_name 字段, 强制反查是绕圈; 对 skill 抽取而言, content 才是关键
+ * tool_name / tool_call_id / timestamp (numeric) are used for tool_call/tool_result:
+ *   - tool_call_id: optional on schema, but conversation-add handler will enforce
+ *     that tool_call/tool_result must carry it (pairing anchor)
+ *   - tool_name: optional in both schema and handler —— OpenAI protocol role=tool messages
+ *     have no tool_name field, forcing a reverse lookup is a detour; for skill extraction, content is what matters
  */
 export const conversationMessageSchema = z.object({
   role: z.enum(["user", "assistant", "tool_call", "tool_result", "system"]),
@@ -84,7 +84,7 @@ export const paginationSchema = z.object({
 });
 
 // ═════════════════════════════════════════════════════════════════════
-//  请求 schemas
+// Request schemas
 // ═════════════════════════════════════════════════════════════════════
 
 export const createRequestSchema = z.object({
@@ -126,19 +126,19 @@ export const getRequestSchema = z.object({
 }).superRefine(refineAgentNeedsTeam);
 
 /**
- * `POST /v3/skill/get-by-name` —— 基于 (team_id, agent_id, skill_name) 唯一定位。
+ * POST /v3/skill/get-by-name —— Uniquely locate based on (team_id, agent_id, skill_name).
  *
- * 存在动机:agent 通过工具调用 skill 时,更自然地使用 skill_name(与
- * `<available_skills>` 块里渲染的 `- name: description` 一致),而不是内部
- * `skl-xxx` id。之前 agent 必须先 skill_list 再解析出 skill_id 才能 get,
- * 一次交互两次调用还费 tokens。新接口让 agent 一次拿到全文。
+ * Motivation: When agent calls skill via tool, it is more natural to use skill_name (consistent with
+ * - name: description rendered in <available_skills> block), rather than internal
+ * skl-xxx id. Previously, agent had to skill_list first and then parse out skill_id to get,
+ * which costs tokens and requires two calls for one interaction. New interface lets agent get full text at once.
  *
- * 唯一性契约:同一 `(team_id, agent_id)` 下 skill_name 唯一(由 skill_create 侧
- * 42201 SKILL_NAME_DUPLICATE 保证)。三个字段都必填:
+ * Uniqueness contract: skill_name is unique under the same (team_id, agent_id) (guaranteed by skill_create side
+ * 42201 SKILL_NAME_DUPLICATE). All three fields are required:
  *   - team_id + agent_id → owner scope
- *   - skill_name          → 具体名字
+ *   - skill_name          → Specific name
  *
- * 缺 team_id 或 agent_id 直接 40001; 找不到 name 返回 40401(与 get 对齐)。
+ * Missing team_id or agent_id directly returns 40001; name not found returns 40401 (aligned with get).
  */
 export const getByNameRequestSchema = z.object({
   user_id: z.string().min(1).optional(),
@@ -212,16 +212,16 @@ export const listingRequestSchema = z.object({
 }).superRefine(refineAgentNeedsTeam);
 
 /**
- * `POST /v3/skill/extract` — direct-trigger 归档一次会话切片，语义等价于
- * 手动触发一次 skill 抽取。契约照搬 `/v3/skill/conversation/add`：
- * 只是不做累计 / 阈值判定, 一次调用产生一个独立 archive + task。
+ * POST /v3/skill/extract — direct-trigger archives a conversation slice, semantically equivalent to
+ * manually triggering a skill extraction. Contract copied from /v3/skill/conversation/add:
+ * just without accumulation / threshold evaluation, one call generates an independent archive + task.
  *
- * `space_id`：跟其他 12 个 skill 接口对齐 —— 从 `x-tdai-service-id` header 得到
- * (gateway 解析为 `auth.serviceId`)；body 里也接受，handler 优先用 body 值，
- * 缺省时回退到 `auth.serviceId`。两个值在设计上就该相等（都是"当前登录实例"），
- * 不等表明调用方传错实例。
+ * space_id: aligned with other 12 skill interfaces —— obtained from x-tdai-service-id header
+ * (gateway parses as uth.serviceId); also accepted in body, handler prefers body value,
+ * falls back to uth.serviceId if missing. Both values should be equal by design (both are "currently logged in instance"),
+ * inequality indicates caller passed wrong instance.
  *
- * 详见 `docs/design/2026-07-17-skill-extract-direct-trigger-plan.md`。
+ * See docs/design/2026-07-17-skill-extract-direct-trigger-plan.md for details.
  */
 export const extractRequestSchema = z.object({
   space_id: z.string().min(1)
@@ -232,7 +232,7 @@ export const extractRequestSchema = z.object({
   agent_id: z.string().min(1).refine((v) => !v.includes("|"), "agent_id must not contain '|'"),
   session_id: z.string().min(1).optional()
     .refine((v) => !v || !v.includes("|"), { message: "session_id must not contain '|'" }),
-  task_id: z.string().min(1).max(128).optional(),   // 业务 task_ref_id, 透传到 SkillTaskEntry
+  task_id: z.string().min(1).max(128).optional(),   // Business task_ref_id, passed through to SkillTaskEntry
   messages: z.array(extractMessageSchema).min(1).max(500),
   reason: z.string().min(1).max(500).optional(),
   options: z.object({
@@ -241,15 +241,15 @@ export const extractRequestSchema = z.object({
 });
 
 /**
- * `POST /v3/skill/conversation/add` — 每轮对话结束后, Client 传本轮增量 messages。
+ * POST /v3/skill/conversation/add — After each conversation round, Client passes incremental messages for this round.
  *
- * 强约束（对齐 `docs/design/2026-07-15-skill-trigger-in-core-design.md` §11.1 & §13）：
- *   - session_id / user_id / team_id / agent_id 必填
- *   - 上述 4 个 ID 字段都不能包含 `|`（跟 Redis 队列元素分隔符冲突）
- *   - `space_id` 可选：跟其他 skill 接口对齐, 从 `x-tdai-service-id` header 得到
- *     (`auth.serviceId`); body 里传了也接受, handler 优先 body、缺省回落 auth
- *   - messages 非空; 每条 role 合法; tool_call/tool_result 必须带 tool_name + tool_call_id
- *   - 单次 messages 数量最多 500（防单请求过大, 上层还有字节兜底）
+ * Strong constraints (aligned with docs/design/2026-07-15-skill-trigger-in-core-design.md §11.1 & §13):
+ *   - session_id / user_id / team_id / agent_id are required
+ *   - None of the 4 ID fields above can contain | (conflicts with Redis queue element separator)
+ *   - space_id optional: aligned with other skill interfaces, obtained from x-tdai-service-id header
+ *     (uth.serviceId); also accepted if passed in body, handler prefers body, falls back to auth if missing
+ *   - messages non-empty; each role valid; tool_call/tool_result must include tool_name + tool_call_id
+ *   - Maximum of 500 messages per call (prevents single request being too large, upper layer also has byte limit)
  */
 export const conversationAddRequestSchema = z.object({
   session_id: z.string().min(1).refine((v) => !v.includes("|"), "session_id must not contain '|'"),
@@ -264,7 +264,7 @@ export const conversationAddRequestSchema = z.object({
 });
 
 // ═════════════════════════════════════════════════════════════════════
-//  类型导出
+// Type exports
 // ═════════════════════════════════════════════════════════════════════
 
 export type CreateRequest = z.infer<typeof createRequestSchema>;
@@ -285,7 +285,7 @@ export type ExtractRequest = z.infer<typeof extractRequestSchema>;
 export type ConversationAddRequest = z.infer<typeof conversationAddRequestSchema>;
 
 // ═════════════════════════════════════════════════════════════════════
-//  force-archive (手动强制归档，跳过阈值)
+// force-archive (manual force archive, skip threshold)
 // ═════════════════════════════════════════════════════════════════════
 
 export const forceArchiveRequestSchema = z.object({

@@ -1,8 +1,8 @@
 # ============================================================
-# TDAI Gateway — Standalone 单机版配置
+# TDAI Gateway — Standalone (single-machine) configuration
 # ============================================================
-# 适用场景: 本地开发 / Hermes sidecar / 单 Agent 单机部署
-# 特点: 零外部依赖 (不需要 Redis/Shark), 进程内状态管理
+# Use cases: local development / Hermes sidecar / single-agent standalone deployment
+# Highlights: zero external dependencies (no Redis/Shark), in-process state management
 # ============================================================
 
 deployMode: standalone
@@ -15,15 +15,15 @@ server:
 data:
   baseDir: "~/.memory-tencentdb/memory-tdai"
 
-# ── LLM (必填) ──
+# ── LLM (required) ──
 llm:
   baseUrl: "https://api.openai.com/v1"
-  apiKey: "${TDAI_LLM_API_KEY}"    # 通过环境变量注入
+  apiKey: "${TDAI_LLM_API_KEY}"    # injected via environment variable
   model: "gpt-4o"
   maxTokens: 4096
   timeoutMs: 120000
 
-# ── Memory 引擎配置 ──
+# ── Memory engine configuration ──
 memory:
 
   capture:
@@ -53,12 +53,12 @@ memory:
     strategy: "hybrid"
     timeoutMs: 5000
 
-  # ── 存储后端 ──
-  # sqlite: 本地 SQLite (默认, 零配置)
-  # tcvdb:  腾讯云向量数据库 (需填 tcvdb 配置)
+  # ── Storage backend ──
+  # sqlite: local SQLite (default, zero config)
+  # tcvdb:  Tencent Cloud Vector Database (requires the tcvdb config below)
   storeBackend: "sqlite"
 
-  # 如需使用 TCVDB, 取消注释并填写:
+  # To use TCVDB, uncomment and fill in:
   # storeBackend: "tcvdb"
   # tcvdb:
   #   url: "http://10.0.1.1:80"
@@ -69,8 +69,8 @@ memory:
   #   timeout: 10000
 
   embedding:
-    provider: "none"               # 默认关闭向量搜索, 仅用 BM25
-    # 开启向量搜索示例:
+    provider: "none"               # vector search off by default; BM25 only
+    # Example for enabling vector search:
     # provider: "openai"
     # baseUrl: "https://api.openai.com/v1"
     # apiKey: "${TDAI_LLM_API_KEY}"
@@ -81,17 +81,17 @@ memory:
     enabled: true
     language: "zh"
 
-# ── Skill 模块（可选，默认关闭）──
-# Skill 是额外能力的加入，不影响上面的 Memory 引擎。
-# 启用后 skill 数据存储在 {baseDir}/skills/ 目录下。
-# 也可通过环境变量 TDAI_SKILL_ENABLED=true 启用。
+# ── Skill module (optional; off by default) ──
+# Skill adds extra capabilities and does not affect the Memory engine above.
+# When enabled, skill data is stored under {baseDir}/skills/.
+# Can also be enabled via env var TDAI_SKILL_ENABLED=true.
 # skill:
 #   enabled: true
 #   routing:
 #     mode: "bm25"
-#     searchTopK: 20        # listing 接口最多注入多少条 skill（name+description）
+#     searchTopK: 20        # max skills injected into the listing API (name+description)
 #   extraction:
-#     enabled: true         # 需要 llm 配置有效
+#     enabled: true         # requires a valid llm config
 #     maxIterations: 16
 #   resources:
 #     maxResourceSizeBytes: 5000000

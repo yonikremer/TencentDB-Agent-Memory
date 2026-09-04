@@ -188,7 +188,7 @@ export function formatBatchConflictPrompt(matches: CandidateMatch[]): string {
 
   let poolSection: string;
   if (poolList.length === 0) {
-    poolSection = "## 统一候选记忆池\n\n（空，没有已有记忆，所有新记忆直接 store）";
+    poolSection = "## Unified Candidate Pool\n\n(Empty, no existing memories, all new memories store directly)";
   } else {
     const poolStr = JSON.stringify(poolList, null, 2);
     poolSection = `## Unified Candidate Pool (${poolList.length} existing memories)\n\n${poolStr}`;
@@ -214,7 +214,7 @@ export function formatBatchConflictPrompt(matches: CandidateMatch[]): string {
       2,
     );
 
-    return `### 第 ${idx + 1} 条新记忆 (record_id: ${m.newMemory.record_id})\n${memStr}\n\n【关联候选 ID】${relatedNote}`;
+    return `### No. ${idx + 1} New Memory (record_id: ${m.newMemory.record_id})\n${memStr}\n\n[Related Candidate IDs]${relatedNote}`;
   });
 
   const newMemoriesText = memoryParts.join(
@@ -222,7 +222,7 @@ export function formatBatchConflictPrompt(matches: CandidateMatch[]): string {
   );
 
   // Step 4: Assemble final prompt
-  return `**输出语言**：\`merged_content\` 使用与候选池中已有记忆相同的语言。
+  return `**Output Language**: \`merged_content\` uses the same language as existing memories in the candidate pool.
 
 ${poolSection}
 

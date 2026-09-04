@@ -1,18 +1,18 @@
 /**
- * Credit 上报策略 —— 决定内核 L1/L2/L3 抽取完成时上报给 UpdateMemoryPlusUsage
- * 的 CreditDelta 数值。
+ * Credit report policy —— determines the CreditDelta value reported to UpdateMemoryPlusUsage
+ * when core L1/L2/L3 extraction is completed.
  *
- * 背景：当 llm.provider="proxy" 时，context_proxy 已经在 LLM 应答完成后向同一
- * 个 UpdateMemoryPlusUsage 上报了一次 CreditDelta = total_tokens（见
- * context_proxy/src/credit-reporter.ts）。如果内核再上报一次同一次调用的 token，
- * 会导致重复计费。
+ * Background: when llm.provider="proxy", context_proxy has already reported a CreditDelta = total_tokens
+ * to the same UpdateMemoryPlusUsage after the LLM response is completed (see
+ * context_proxy/src/credit-reporter.ts). If the core reports the tokens for the same call again,
+ * it will result in double billing.
  *
- * 策略：
- *   - provider="openai"：原样返回 —— 内核是唯一 credit 上报方
- *   - provider="proxy": 返回 0 —— proxy 已经报过，内核跳过
+ * Policy:
+ *   - provider="openai": return as-is —— core is the sole credit reporter
+ *   - provider="proxy": return 0 —— proxy has already reported, core skips
  *
- * memoryDelta 与此策略无关：memory 是内核独有的语义（写入了几条记忆），
- * proxy 完全不知情，必须由内核负责上报。
+ * memoryDelta is unrelated to this policy: memory is a core-exclusive semantic (how many memories written),
+ * proxy is completely unaware, the core must be responsible for reporting it.
  */
 
 export type LlmProvider = "openai" | "proxy";
@@ -22,11 +22,11 @@ export function shouldSkipCreditReport(provider: LlmProvider | undefined): boole
 }
 
 /**
- * 计算实际应该上报的 CreditDelta。
+ * Calculate the actual CreditDelta that should be reported.
  *
- * @param rawCreditUsed  内核 llmRunner.accumulatedCredit 累积的 token 数
+ * @param rawCreditUsed  The accumulated token count in core llmRunner.accumulatedCredit
  * @param provider       llm.provider
- * @returns 应该上报的 CreditDelta（provider=proxy 时恒为 0）
+ * @returns The CreditDelta to report (always 0 when provider=proxy)
  */
 export function resolveReportedCredit(
   rawCreditUsed: number,

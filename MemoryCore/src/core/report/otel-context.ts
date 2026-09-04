@@ -1,19 +1,19 @@
 /**
- * OTel context helpers。
+ * OTel context helpers.
  *
- * 背景（为什么需要它）：
- *   skill 抽取 worker 的 `runLoop()` 是在某个 HTTP 请求 handler 里被**懒启动**的
- *   （`resolveConversationAdd` → `wireConversationAdd` → `worker.start()`）。
- *   OTel 用 AsyncLocalStorageContextManager 传播上下文——一个**永不退出**的
- *   `runLoop()` 会永久继承"启动那一刻"的 active span（即那次请求的 span），
- *   于是之后每一次 LLM `generateText` 都成了那条请求 trace 的子 span，被
- *   Langfuse 合并成一条（tags 跨多个 agent、sessionId 混乱）。
+ * Background (why we need it):
+ *   The skill extraction worker's `runLoop()` is **lazy started** inside an HTTP request handler
+ *   (`resolveConversationAdd` -> `wireConversationAdd` -> `worker.start()`).
+ *   OTel uses AsyncLocalStorageContextManager to propagate context - a `runLoop()` that **never exits**
+ *   will permanently inherit the active span from "the moment it was started" (i.e., the span of that request),
+ *   so every subsequent LLM `generateText` becomes a child span of that request's trace, being
+ *   merged into a single one by Langfuse (tags span across multiple agents, sessionId confused).
  *
- *   `runInRootContext` 把 fn 放到 OTel ROOT_CONTEXT 里执行，切断这种寄生，
- *   使 fn 内新建的 span（如 ai.generateText）成为独立 root（各自 traceId）。
+ *   `runInRootContext` executes fn within the OTel ROOT_CONTEXT, cutting off this parasitism,
+ *   so that newly created spans inside fn (like ai.generateText) become independent roots (each with their own traceId).
  *
- * 防御式加载 @opentelemetry/api：包缺失（开源/精简部署）时降级为直接执行 fn，
- * 语义等价，不报错。加载方式对齐 otel-sdk-init.ts。
+ * Defensive loading of @opentelemetry/api: When the package is missing (open source / minimal deployment), it degrades to directly executing fn,
+ * with equivalent semantics, without throwing errors. Loading method aligns with otel-sdk-init.ts.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -26,14 +26,14 @@ try {
   _context = api.context;
   _rootContext = api.ROOT_CONTEXT;
 } catch {
-  // @opentelemetry/api 不可用 → 保持 null，runInRootContext 降级为直接执行 fn
+  // @opentelemetry/api is unavailable -> remains null, runInRootContext degrades to directly executing fn
 }
 
 /**
- * 在 OTel ROOT_CONTEXT 中执行 fn，切断对调用点 active span 的继承。
+ * Execute fn in OTel ROOT_CONTEXT, cutting off inheritance from the active span at the calling point.
  *
- * 典型用途：启动永不退出的后台循环时包一层，避免循环把"启动时"的 trace
- * 上下文一直带下去。otel 不可用时直接执行 fn（无 context 隔离，但行为等价）。
+ * Typical use case: wrap it when starting a background loop that never exits, to prevent the loop from carrying
+ * the trace context from "startup time" indefinitely. When otel is unavailable, execute fn directly (no context isolation, but behavior is equivalent).
  */
 export function runInRootContext<T>(fn: () => T): T {
   if (_context && _rootContext) {

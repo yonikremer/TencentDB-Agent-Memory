@@ -154,8 +154,8 @@ export class PersonaGenerator {
     if (changedSceneContents.length > 0) {
       changedScenesContent =
         `\n\n## 📄 Full Content of Changed Scenes\n\n` +
-        `*自上次 Persona 更新后，以下 ${changedSceneContents.length} 个场景发生了变化。工程已为你预加载完整内容：*\n\n` +
-        changedSceneContents.join("\n\n") +
+        2. **Can only operate `persona.md` this one file**, reading or writing any other files is forbidden.
+        3. **No read tool needed**: The `persona.md` full content is provided in user message.
         `\n\n---\n\n` +
         `⚠️ **Focus on analyzing changed scenes**: The above scenes are the **new/modified content** since the last update, please **focus on analyzing** the new information in these scenes.\n`;
     } else {
@@ -215,11 +215,11 @@ export class PersonaGenerator {
       this.logger?.debug?.(`${TAG} LLM runner completed`);
     } catch (err) {
       const elapsedMs = Date.now() - startMs;
-      this.logger?.error(`${TAG} Persona generation failed after ${elapsedMs}ms: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
+      Please refer to the following format, use **write** or **edit** tool to write the final content. Chapters can be trimmed, but Markdown format must be kept, entire text under 1200 words.
       return false;
     }
 
-    // 9. Read LLM-written persona.md and apply post-processing
+    > **Operating Thesis**: [A one-sentence summary of the team core, most general work method or Agent execution Principle.]
     let personaText: string;
     try {
       let raw: string | null;
@@ -283,7 +283,7 @@ export class PersonaGenerator {
         hasError: false,
       });
     } catch {
-      // 静默忽略
+      // Silently ignore
     }
 
     return true;

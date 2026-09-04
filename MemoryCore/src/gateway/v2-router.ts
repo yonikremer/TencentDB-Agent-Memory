@@ -99,33 +99,33 @@ const TAG = "[tdai-gateway][v2]";
 const V2_PREFIX = "/v2";
 
 /**
- * /v3 是 L0–L3 数据面接口的"严格 isolation 版本"：
+ * /v3 is the "strict isolation version" of L0-L3 data plane interfaces:
  *
- *   - 必填 team_id + agent_id + user_id（缺一即 422）
- *   - session_id 可选：传入则按 session 收敛；不传则按 (team, agent, user) 维度聚合
- *     —— 满足"agent 跨 session 聚合视图"（如治理面板的 L0/L1 总数）和
- *     "L2/L3 团队级聚合"（profile scope 公式忽略 session）两类场景
- *   - 不接受 legacy_compat_mode 退化
- *   - 与 /v2 共享 handler 实现，仅在 dispatch 层换一套 isolation 校验
+ *   - Required team_id + agent_id + user_id (missing one yields 422)
+ *   - session_id optional: if passed, converges by session; if not, aggregates by (team, agent, user) dimension
+ *     —— Satisfies "agent cross-session aggregate view" (like L0/L1 totals in governance panel) and
+ *     "L2/L3 team-level aggregation" (profile scope formula ignores session) scenarios
+ *   - Does not accept legacy_compat_mode fallback
+ *   - Shares handler implementation with /v2, only swaps isolation validation at dispatch layer
  *
- * 同名 /v2 路径保持现有行为（team_id 可选、user_id fallback、可走 legacyCompatMode），
- * 这样调用方按需选 v2/v3，互不影响。
+ * Same-name /v2 paths retain existing behavior (team_id optional, user_id fallback, allows legacyCompatMode),
+ * so callers can choose v2/v3 on demand without interference.
  *
- * L0–L3 数据面 endpoint（含 count）上 v3；team/user/agent/task/pipeline 等管理面接口保留 v2 唯一入口。
+ * L0-L3 data plane endpoints (including count) mount v3; management plane interfaces like team/user/agent/task/pipeline retain v2 sole entry.
  */
 const V3_PREFIX = "/v3";
 
 /**
- * /v3 严格 isolation 必填字段。从 request body 或 x-tdai-* header 任一来源取到即可。
+ * /v3 strict isolation required fields. Can be obtained from either request body or x-tdai-* headers.
  *
- * v3 全部 L0–L3 接口仅强制 team + agent + user 三元组。
- * session_id 一律可选：
- *   - L0 conversation/* 与 L1 atomic/*：传 session 走 session 内收敛；不传按
- *     (team, agent, user) 跨 session 聚合（便于"agent 维度全量视图"，如
- *     team-memory-control 治理面的 layer-counts 展示总量）
- *   - L2 scenario/* 与 L3 core/*：原本就是 team+agent 级 profile 聚合，session 忽略
+ * v3 all L0-L3 interfaces only enforce team + agent + user triad.
+ * session_id is always optional:
+ *   - L0 conversation/* and L1 atomic/*: passing session converges within session; not passing aggregates
+ *     across sessions by (team, agent, user) (facilitates "agent-dimension full view", like
+ *     layer-counts totals on team-memory-control governance plane)
+ *   - L2 scenario/* and L3 core/*: inherently team+agent level profile aggregation, session ignored
  *
- * 返回缺失字段列表（空数组表示全齐）。
+ * Returns missing field list (empty array means fully complete).
  */
 function collectV3Missing(
   _subpath: string,
@@ -145,11 +145,11 @@ function collectV3Missing(
   if (!get("team_id", "x-tdai-team-id")) missing.push("team_id");
   if (!get("agent_id", "x-tdai-agent-id")) missing.push("agent_id");
   if (!get("user_id", "x-tdai-user-id")) missing.push("user_id");
-  // session_id 不再强制：底层 handler 在缺 session 时按 (team,agent,user) 聚合查询。
+  // session_id no longer required: underlying handler queries aggregated by (team,agent,user) when session missing.
   return missing;
 }
 
-/** /v3 强 isolation 覆盖的 L0–L3 子路径（去掉前缀后的 path）。 */
+/** L0-L3 subpaths covered by /v3 strong isolation (path after removing prefix). */
 const V3_ALLOWED_SUBPATHS = new Set<string>([
   "/conversation/add",
   "/conversation/query",
@@ -172,13 +172,13 @@ const V3_ALLOWED_SUBPATHS = new Set<string>([
 ]);
 
 /**
- * 写一条审计事件到 store.appendAudit。失败不阻塞主请求（容忍 audit 丢失）。
+ * Write an audit event to store.appendAudit. Failure does not block main request (tolerates audit loss).
  *
- * 调用约定（per user 决策）：
- *   - 原始 L0/L1/L2/L3 表完全不动，本函数只追加事件
- *   - team/agent/user/task 来自外部请求 IdFields（resolveIsolation 后的 ctx）
- *   - L0 不参与（不可变流水）
- *   - 5 个 mutation handler 各调一次：
+ * Calling convention (per user decision):
+ *   - Original L0/L1/L2/L3 tables completely untouched, this function only appends events
+ *   - team/agent/user/task comes from external request IdFields (ctx after resolveIsolation)
+ *   - L0 does not participate (immutable stream)
+ *   - The 5 mutation handlers call this once each:
  *     atomic/update + atomic/delete + scenario/write + scenario/rm + core/write
  */
 async function recordAudit(
@@ -193,7 +193,7 @@ async function recordAudit(
     logger?: { warn?: (msg: string) => void };
   },
 ): Promise<void> {
-  if (!store?.appendAudit) return; // store 不支持 audit → 跳过
+  if (!store?.appendAudit) return; // store does not support audit → skip
   try {
     await store.appendAudit({
       audit_id: `audit-${randomUUID().replace(/-/g, "").slice(0, 16)}`,
@@ -263,10 +263,10 @@ export interface V2RouterDeps {
   quotaManager?: import("../core/quota/quota-manager.js").QuotaManager;
 
   /**
-   * 拿到 (per instance) 的 MetadataService。仅当 `/v2/conversation/add` 首次
-   * 写入某 (team, agent) 时用来自动登记 chat_memory 资产并绑定到 agent。
-   * 未注入时该功能优雅降级：conversation 依旧正常写入，只是资产不会被自动
-   * 创建 —— 老部署完全兼容。
+   * Get (per instance) MetadataService. Used only when /v2/conversation/add first
+   * writes to a (team, agent) to automatically register chat_memory asset and bind to agent.
+   * When not injected, this feature degrades gracefully: conversation still writes normally, just assets will not be automatically
+   * created —— fully compatible with old deployments.
    */
   getMetadataService?: (instanceId: string) => Promise<import("../metadata/service/metadata-service.js").MetadataService>;
 
@@ -319,7 +319,7 @@ export function makeRequestId(): string {
   return `req-${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 }
 
-/** 优先使用上游 x-request-id / x-qcloud-transaction-id，否则本地生成。 */
+/** Prioritize upstream x-request-id / x-qcloud-transaction-id, otherwise generate locally. */
 export function resolveRequestId(
   headers: Record<string, string | string[] | undefined>,
 ): string {
@@ -407,8 +407,8 @@ type RouteHandler = (
 ) => Promise<ApiResponseEnvelope>;
 
 /**
- * L0–L3 数据面 handler 映射（子路径 → handler）。历史接口同时挂载 /v2/* 与 /v3/*；
- * count 接口按 sdk-v3.yaml 仅挂载 /v3/*。/v3 走严格 isolation 校验；/v2 沿用现有 enforce/legacyCompat 配置。
+ * L0-L3 data plane handler mapping (subpath → handler). Historical interfaces mounted simultaneously on /v2/* and /v3/*;
+ * count interface mounted only on /v3/* according to sdk-v3.yaml. /v3 uses strict isolation validation; /v2 uses existing enforce/legacyCompat config.
  */
 const DATAPLANE_HANDLERS: Record<string, RouteHandler> = {
   "/conversation/add": handleConversationAdd,
@@ -432,7 +432,7 @@ const DATAPLANE_HANDLERS: Record<string, RouteHandler> = {
 };
 
 const routeTable: Record<string, RouteHandler> = {
-  // L0–L3 数据面：历史读写接口保留 /v2 与 /v3 双入口；count 仅按 sdk-v3.yaml 暴露 /v3。
+// L0-L3 data plane: historical read/write interfaces retain /v2 and /v3 dual entries; count exposed only on /v3 per sdk-v3.yaml.
   ...Object.fromEntries(
     Object.entries(DATAPLANE_HANDLERS).flatMap(([sub, h]) => {
       const v3Route = [`${V3_PREFIX}${sub}`, h] as const;
@@ -441,30 +441,30 @@ const routeTable: Record<string, RouteHandler> = {
     }),
   ),
   // ──────────────────────────────────────────────────────────────────────────
-  // @deprecated v2 entity 路由（team/user/agent/task，16 条）。仅 /v2。
-  // 元数据已由 v3 `/v3/meta/*`（规范化 meta_* 表 + MetadataService）接管，control
-  // 面板 remote 模式直接走 v3。以下路由仍走旧 `entity_*` 聚合数组模型，**仅为兼容现网
-  // 保留、行为不变**，不再演进，新接入方一律改用 v3。计划在确认无外部调用方后整体删除。
-  // 决策（2026-06-26，per user）：标记废弃、代码暂留，不适配 MetadataService。
-  // 见 team-memory-control/docs/architecture/08-metadata-migration-and-permission-design.md §8.5。
+// @deprecated v2 entity routes (team/user/agent/task, 16 entries). /v2 only.
+// Metadata already taken over by v3 /v3/meta/* (normalized meta_* tables + MetadataService), control
+// panel remote mode routes directly to v3. Routes below still use old entity_* aggregate array model, **only for compatibility with existing network
+  // retain, unchanged behavior**, no longer evolve, new integrators must switch to v3. Planned to be entirely deleted after confirming no external callers.
+  // Decision (2026-06-26, per user): Mark as deprecated, keep code temporarily, do not adapt MetadataService.
+  // See team-memory-control/docs/architecture/08-metadata-migration-and-permission-design.md §8.5.
   // ──────────────────────────────────────────────────────────────────────────
-  [`${V2_PREFIX}/team/create`]: handleTeamCreate, // @deprecated 改用 /v3/meta/team/create
-  [`${V2_PREFIX}/team/get`]: handleTeamGet, // @deprecated 改用 /v3/meta/team/get
-  [`${V2_PREFIX}/team/update`]: handleTeamUpdate, // @deprecated 改用 /v3/meta/team/update
-  [`${V2_PREFIX}/team/delete`]: handleTeamDelete, // @deprecated 改用 /v3/meta/team/delete
-  [`${V2_PREFIX}/user/create`]: handleUserCreate, // @deprecated 改用 /v3/meta/user/create
-  [`${V2_PREFIX}/user/get`]: handleUserGet, // @deprecated 改用 /v3/meta/user/get
-  [`${V2_PREFIX}/user/update`]: handleUserUpdate, // @deprecated 改用 /v3/meta/user/update
-  [`${V2_PREFIX}/user/delete`]: handleUserDelete, // @deprecated 改用 /v3/meta/user/delete
-  [`${V2_PREFIX}/agent/create`]: handleAgentCreate, // @deprecated 改用 /v3/meta/agent/create
-  [`${V2_PREFIX}/agent/get`]: handleAgentGet, // @deprecated 改用 /v3/meta/agent/get
-  [`${V2_PREFIX}/agent/update`]: handleAgentUpdate, // @deprecated 改用 /v3/meta/agent/update
-  [`${V2_PREFIX}/agent/delete`]: handleAgentDelete, // @deprecated 改用 /v3/meta/agent/delete
-  [`${V2_PREFIX}/task/create`]: handleTaskCreate, // @deprecated 改用 /v3/meta/task/create
-  [`${V2_PREFIX}/task/get`]: handleTaskGet, // @deprecated 改用 /v3/meta/task/get
-  [`${V2_PREFIX}/task/update`]: handleTaskUpdate, // @deprecated 改用 /v3/meta/task/update
-  [`${V2_PREFIX}/task/delete`]: handleTaskDelete, // @deprecated 改用 /v3/meta/task/delete
-  // ── end @deprecated v2 entity 路由 ──
+  [`${V2_PREFIX}/team/create`]: handleTeamCreate, // @deprecated Switch to /v3/meta/team/create
+  [`${V2_PREFIX}/team/get`]: handleTeamGet, // @deprecated Switch to /v3/meta/team/get
+  [`${V2_PREFIX}/team/update`]: handleTeamUpdate, // @deprecated Switch to /v3/meta/team/update
+  [`${V2_PREFIX}/team/delete`]: handleTeamDelete, // @deprecated Switch to /v3/meta/team/delete
+  [`${V2_PREFIX}/user/create`]: handleUserCreate, // @deprecated Switch to /v3/meta/user/create
+  [`${V2_PREFIX}/user/get`]: handleUserGet, // @deprecated Switch to /v3/meta/user/get
+  [`${V2_PREFIX}/user/update`]: handleUserUpdate, // @deprecated Switch to /v3/meta/user/update
+  [`${V2_PREFIX}/user/delete`]: handleUserDelete, // @deprecated Switch to /v3/meta/user/delete
+  [`${V2_PREFIX}/agent/create`]: handleAgentCreate, // @deprecated Switch to /v3/meta/agent/create
+  [`${V2_PREFIX}/agent/get`]: handleAgentGet, // @deprecated Switch to /v3/meta/agent/get
+  [`${V2_PREFIX}/agent/update`]: handleAgentUpdate, // @deprecated Switch to /v3/meta/agent/update
+  [`${V2_PREFIX}/agent/delete`]: handleAgentDelete, // @deprecated Switch to /v3/meta/agent/delete
+  [`${V2_PREFIX}/task/create`]: handleTaskCreate, // @deprecated Switch to /v3/meta/task/create
+  [`${V2_PREFIX}/task/get`]: handleTaskGet, // @deprecated Switch to /v3/meta/task/get
+  [`${V2_PREFIX}/task/update`]: handleTaskUpdate, // @deprecated Switch to /v3/meta/task/update
+  [`${V2_PREFIX}/task/delete`]: handleTaskDelete, // @deprecated Switch to /v3/meta/task/delete
+  // ── end @deprecated v2 entity routes ──
   [`${V2_PREFIX}/pipeline/status`]: handlePipelineStatus,
 };
 
@@ -517,8 +517,8 @@ export async function handleV2Route(
   );
   if (!isV2 && !isV3) return false;
 
-  // /v3 暴露 L0–L3 数据面 14 条（V3_ALLOWED_SUBPATHS）+ /v3/skill/* + /v3/knowledge/*（extraRouteTable）；
-  // 其他 /v3 子路径直接走 404
+  // /v3 exposes L0-L3 data plane 14 routes (V3_ALLOWED_SUBPATHS) + /v3/skill/* + /v3/knowledge/* (extraRouteTable);
+  // Other /v3 subpaths route directly to 404
   if (isV3 && !isV3Extra) {
     const sub = pathname.slice(V3_PREFIX.length);
     if (!V3_ALLOWED_SUBPATHS.has(sub)) return false;
@@ -529,12 +529,12 @@ export async function handleV2Route(
   if (!handler && !extra) return false;
 
   const requestId = makeRequestId();
-  // [skill-perf 2026-07-21] 只对 /v3/skill/ 打分段耗时，避免污染其他链路 log。
-  // T0 从 server.ts socket-level 埋点取；没有则用 dispatch 进入时刻兜底。
+  // [skill-perf 2026-07-21] Only record segment latency for /v3/skill/, avoiding pollution of other link logs.
+  // T0 taken from server.ts socket-level instrumentation; fallback to dispatch entry time if missing.
   const isSkillPerf = pathname.startsWith("/v3/skill/");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const perfT0 = isSkillPerf ? ((req as any).__skillPerfT0 as number | undefined) ?? Date.now() : 0;
-  // 把 request_id 挂到 res 上，让 server.ts 的 res.on('finish') 也能带上
+  // Attach request_id to res, so server.ts res.on(finish) can include it
   if (isSkillPerf) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (res as any).__skillReqId = requestId;
@@ -587,8 +587,8 @@ export async function handleV2Route(
     // to each handler (some endpoints don't need isolation at all, e.g.
     // /v2/pipeline/status). See resolveIsolation() in v2-schemas.
     //
-    // /v3 走严格校验：必须同时提供 team_id + agent_id + user_id + session_id，
-    // 缺任意一个直接 422，且不走 legacyCompatMode 退化。
+    // /v3 strictly validates: must simultaneously provide team_id + agent_id + user_id + session_id,
+    // Missing any directly returns 422, and no fallback to legacyCompatMode.
     const headers = (req.headers ?? {}) as Record<string, string | string[] | undefined>;
     const isoLegacyCompat = isV3 ? false : (deps.isolationConfig?.legacyCompatMode ?? false);
     const isoResolved = resolveIsolation(body as Record<string, unknown> | undefined, headers, {
@@ -618,7 +618,7 @@ export async function handleV2Route(
 
     const depsWithIsolation: V2RouterDeps = {
       ...resolvedDeps,
-      // /v3 路径强制覆盖 isolationConfig.enforce，确保 handler 内部一致地走严格分支
+      // /v3 path forcibly overrides isolationConfig.enforce, ensuring handlers internally consistently hit strict branch
       isolationConfig: isV3
         ? { enforce: true, legacyCompatMode: false, legacyPlaceholder: resolvedDeps.isolationConfig?.legacyPlaceholder ?? "" }
         : resolvedDeps.isolationConfig,
@@ -691,10 +691,10 @@ async function handleConversationAdd(body: unknown, auth: V2AuthContext, request
     }
   }
 
-  // 自动登记 chat_memory 资产（team+agent 粒度）并绑定到 agent。首次触发
-  // 会 create asset + append 绑定；后续同 (team, agent) 走进程内 LRU 短路。
-  // 失败降级：只打 warn，不阻塞 conversation 写入 —— 记忆数据的可用性优先
-  // 于资产登记的一致性（asset 登记失败时下次调用会自动重试）。
+  // Automatically register chat_memory asset (team+agent level) and bind to agent. First trigger
+  // creates asset + appends binding; subsequent same (team, agent) hits in-process LRU short-circuit.
+  // Failure degradation: log warn only, do not block conversation write —— memory data availability takes precedence
+  // over asset registration consistency (asset registration failure will auto-retry on next call).
   if (deps.getMetadataService && iso?.teamId && iso?.agentId) {
     try {
       const metaSvc = await deps.getMetadataService(auth.serviceId);
@@ -748,7 +748,7 @@ async function handleConversationAdd(body: unknown, auth: V2AuthContext, request
 
   // Notify pipeline: trigger async L1 extraction (service mode).
   // Each role=user message counts as one conversation round for threshold/timer logic.
-  // teamId/agentId 透传给 captureAtomic 决定 hash slot 与锁粒度。
+  // teamId/agentId passed to captureAtomic deciding hash slot and lock granularity.
   if (deps.notifyPipeline) {
     const rounds = messages.filter((m) => m.role === "user").length;
     if (rounds > 0) {
@@ -919,15 +919,15 @@ async function handleConversationSearch(body: unknown, auth: V2AuthContext, requ
   const limit = parsed.data.limit ?? 5;
 
   const tStart = performance.now();
-  // 搜索场景：只使用显式传入的 isolation 维度作为 filter，避免默认 sessionId="default" 错误过滤真实 session 数据。
-  // 当请求未传 session_id 时，搜索应跨 session；当传了 session_id 时，由 sessionKey 参数单独过滤。
+  // Search scenario: Only use explicitly passed isolation dimensions as filter, to avoid default sessionId="default" erroneously filtering real session data.
+  // When request misses session_id, search should span sessions; when session_id is passed, filter by sessionKey parameter alone.
   const iso = deps.requestIsolation;
   const searchFilter = iso ? {
     ...(iso.teamId ? { teamId: iso.teamId } : {}),
     ...(iso.userId ? { userId: iso.userId } : {}),
     ...(iso.agentId ? { agentId: iso.agentId } : {}),
     ...(iso.taskId ? { taskId: iso.taskId } : {}),
-    // 不传 sessionId：全局搜索不应被默认 sessionId 限制
+    // Missed sessionId: global search should not be restricted by default sessionId
   } : undefined;
   const result = await executeConversationSearch({
     query,
@@ -940,8 +940,8 @@ async function handleConversationSearch(body: unknown, auth: V2AuthContext, requ
   });
   const recallLatencyMs = performance.now() - tStart;
 
-  // 非侵入式上报召回指标（service 模式，静默失败，绝不影响业务返回）
-  // L0 conversation search 同样属于"召回"行为，strategy 映射逻辑与 L1 相同
+  // Non-invasive recall metric reporting (service mode, silent failure, never affect business return)
+  // L0 conversation search also belongs to "recall" action, strategy mapping logic identical to L1
   try {
     reportRecallMetrics({
       instanceId: auth.serviceId,
@@ -951,10 +951,10 @@ async function handleConversationSearch(body: unknown, auth: V2AuthContext, requ
       hasError: false,
     });
   } catch {
-    // 静默失败
+    // Silent failure
   }
 
-  // 非侵入式在当前 Span 上记录 recall query 和 results
+  // Non-invasive record of recall query and results on current Span
   try {
     const otelApi = await import("@opentelemetry/api");
     const activeSpan = otelApi.trace.getSpan(otelApi.context.active());
@@ -975,7 +975,7 @@ async function handleConversationSearch(body: unknown, auth: V2AuthContext, requ
       }
     }
   } catch {
-    // 静默失败
+    // Silent failure
   }
 
   const messages: ConversationSearchHit[] = result.results.map((r) => ({
@@ -988,23 +988,23 @@ async function handleConversationSearch(body: unknown, auth: V2AuthContext, requ
 async function handleConversationDelete(body: unknown, auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
   const parsed = conversationDeleteRequestSchema.safeParse(body);
   if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
-  // schema 已归一：message_ids / session_ids 都是去重后的数组（单数 session_id 已合并进来）。
+  // schema is normalized: message_ids / session_ids are both deduplicated arrays (singular session_id merged in).
   const { message_ids, session_ids } = parsed.data;
 
   const store = deps.getStore();
   if (!store) return errorEnvelope(503, "Store not available", requestId);
 
-  // 删除的作用域是 (team, user, agent)，**不含 session**。
-  // /v3 严格 isolation 要求请求头带 session_id，但删除语义是"删指定的
-  // message / session"，若把 requestIsolation.sessionId 也塞进 filter，
-  // 就只能删当前会话 —— 批量删多个 session 会被静默过滤成 0 条。
+  // Deletion scope is (team, user, agent), **excluding session**.
+  // /v3 strict isolation requires request header with session_id, but deletion semantics is "delete specific
+  // message / session", if requestIsolation.sessionId is also stuffed into filter,
+  // it can only delete current session —— batch deleting multiple sessions silently filtered to 0 entries.
   const iso = deps.requestIsolation;
   const scope = iso
     ? { teamId: iso.teamId, userId: iso.userId, agentId: iso.agentId, taskId: iso.taskId }
     : undefined;
 
-  // message_ids 与 session_ids 可同时给出；两条路径都跑，用 id 集合去重避免
-  // 同一条消息被session 路径重复计数。
+  // message_ids and session_ids can both be provided; both paths run, use id set deduplication to avoid
+  // same message being repeatedly counted by session path.
   const deletedRecordIds = new Set<string>();
 
   for (const id of message_ids) {
@@ -1018,7 +1018,7 @@ async function handleConversationDelete(body: unknown, auth: V2AuthContext, requ
       sessionDeletedCount += await store.deleteL0BySession(sessionId, scope);
       continue;
     }
-    // Fallback：store 未实现按 session 删除时逐条删。
+    // Fallback: if store has not implemented delete by session, delete one by one.
     const rows = await store.queryL0ForL1(sessionId, undefined, 10000);
     const sessionRows = rows.filter((r) => r.session_key === sessionId || r.session_id === sessionId);
     for (const row of sessionRows) {
@@ -1028,9 +1028,9 @@ async function handleConversationDelete(body: unknown, auth: V2AuthContext, requ
     }
   }
 
-  // deleteL0BySession 只回行数（无法回id），所以两条路径的计数相加。
-  // 同一批请求里message_ids 与 session_ids 重叠时可能轻微重复计数，
-  // 这是 store 接口的既有限制，不影响实际删除的正确性。
+  // deleteL0BySession only returns row count (no ids), so counts of both paths are added.
+  // In the same request batch, overlap between message_ids and session_ids might lightly repeat count,
+  // this is an existing limitation of store interface, not affecting actual deletion correctness.
   const deletedCount = deletedRecordIds.size + sessionDeletedCount;
 
   // Report memory deletion (non-fatal)
@@ -1096,7 +1096,7 @@ async function handleAtomicUpdate(body: unknown, _auth: V2AuthContext, requestId
 
   await store.upsertL1(updated, emb);
 
-  // 审计：L1 update — 用外部请求的 IdFields 而非 record 原值（per user 决策）
+  // Audit: L1 update — use external request IdFields instead of record original value (per user decision)
   await recordAudit(store, {
     record_id: id,
     layer: "L1",
@@ -1196,16 +1196,16 @@ async function handleAtomicSearch(body: unknown, auth: V2AuthContext, requestId:
   const limit = parsed.data.limit ?? 5;
 
   const tStart = performance.now();
-  // L1 召回为 agent 维度（跨 session）：filter 只取 team/user/agent/task，
-  // **不带 sessionId**，否则会把其它 session 写入的 L1 记忆过滤掉，导致
-  // 新会话里召不回历史记忆（与 conversation/search 的处理保持一致）。
+  // L1 recall is agent dimension (cross-session): filter only takes team/user/agent/task,
+  // **without sessionId**, otherwise it will filter out L1 memories written by other sessions, causing
+  // new session unable to recall history memories (consistent with conversation/search handling).
   const iso = deps.requestIsolation;
   const searchFilter = iso ? {
     ...(iso.teamId ? { teamId: iso.teamId } : {}),
     ...(iso.userId ? { userId: iso.userId } : {}),
     ...(iso.agentId ? { agentId: iso.agentId } : {}),
     ...(iso.taskId ? { taskId: iso.taskId } : {}),
-    // 不传 sessionId：L1 召回应跨 session（agent 维度）
+    // Missed sessionId: L1 recall should span session (agent dimension)
   } : undefined;
   const result = await executeMemorySearch({
     query, limit, type,
@@ -1216,7 +1216,7 @@ async function handleAtomicSearch(body: unknown, auth: V2AuthContext, requestId:
   });
   const recallLatencyMs = performance.now() - tStart;
 
-  // 非侵入式上报召回指标（service 模式，静默失败，绝不影响业务返回）
+  // Non-invasive recall metric reporting (service mode, silent failure, never affect business return)
   try {
     reportRecallMetrics({
       instanceId: auth.serviceId,
@@ -1226,15 +1226,15 @@ async function handleAtomicSearch(body: unknown, auth: V2AuthContext, requestId:
       hasError: false,
     });
   } catch {
-    // 静默失败
+    // Silent failure
   }
 
-  // 非侵入式在当前 Span 上记录 recall query 和 results，供在线评测系统消费
+// Non-invasive record of recall query and results on current Span, for online evaluation system consumption
   try {
     const { getObservabilityBackend } = await import("../core/report/factory.js");
     const ctx = getObservabilityBackend().tracePropagation.serializeTraceContext();
     if (ctx && (ctx as any)._traceId) {
-      // 通过 OTel API 在当前 span 上添加属性
+      // Add attributes to current span via OTel API
       try {
         const otelApi = await import("@opentelemetry/api");
         const activeSpan = otelApi.trace.getSpan(otelApi.context.active());
@@ -1244,7 +1244,7 @@ async function handleAtomicSearch(body: unknown, auth: V2AuthContext, requestId:
           activeSpan.setAttribute("tdai.recall.strategy", result.strategy || "unknown");
           if (result.results.length > 0) {
             activeSpan.setAttribute("tdai.recall.topScore", Math.max(...result.results.map(r => r.score)));
-            // 限制 results 属性长度（OTel 属性不宜过长），最多前 5 条
+            // Limit results attribute length (OTel attributes shouldn	 be too long), at most first 5 entries
             const truncatedResults = result.results.slice(0, 5).map(r => ({
               content: r.content.substring(0, 200),
               score: r.score,
@@ -1257,11 +1257,11 @@ async function handleAtomicSearch(body: unknown, auth: V2AuthContext, requestId:
           activeSpan.setAttribute("tdai.recall.level", type === "l0" ? "l0" : "l1");
         }
       } catch {
-        // OTel API 不可用时静默降级
+        // Silent degradation when OTel API unavailable
       }
     }
   } catch {
-    // 静默失败
+    // Silent failure
   }
 
   const items: AtomicSearchHit[] = result.results.map((r) => ({
@@ -1288,15 +1288,15 @@ async function handleAtomicDelete(body: unknown, auth: V2AuthContext, requestId:
 
   // deleteL1Batch returns bool, but we need actual count
   // Fall back to per-id deletion for accurate counting
-  // 按 id 删除时，只使用显式传入的 isolation 维度作为 filter。
-  // 避免默认 sessionId="default" 导致真实 session 下的 L1 记录无法删除。
+  // When deleting by id, only use explicitly passed isolation dimension as filter.
+  // Avoid default sessionId="default" causing real sessions L1 records unable to delete.
   const iso = deps.requestIsolation;
   const deleteFilter = iso ? {
     ...(iso.teamId ? { teamId: iso.teamId } : {}),
     ...(iso.userId ? { userId: iso.userId } : {}),
     ...(iso.agentId ? { agentId: iso.agentId } : {}),
     ...(iso.taskId ? { taskId: iso.taskId } : {}),
-    // 不传 sessionId：按 id 删除不应被默认 sessionId 限制
+    // Missed sessionId: deletion by id should not be restricted by default sessionId
   } : undefined;
   let deletedCount = 0;
   const deletedIds: string[] = [];
@@ -1308,14 +1308,14 @@ async function handleAtomicDelete(body: unknown, auth: V2AuthContext, requestId:
     }
   }
 
-  // 审计：L1 delete — 每条删除一行 audit
+  // Audit: L1 delete — one row of audit per deleted entry
   for (const id of deletedIds) {
     await recordAudit(store, {
       record_id: id,
       layer: "L1",
       action: "delete",
       iso: deps.requestIsolation,
-      version: 0, // 已删除，无新版本
+      version: 0, // deleted, no new version
       requestId,
       logger: deps.logger,
     });
@@ -1361,16 +1361,16 @@ function missingEntityStore(requestId: string): ApiResponseEnvelope {
 }
 
 /* ============================================================================
- * @deprecated v2 entity handlers（team/user/agent/task，下方 16 个）。
+ * @deprecated v2 entity handlers (team/user/agent/task, 16 below).
  *
- * 这些 handler 走旧 `entity_*` 聚合数组模型（EntityStore 可选方法）。元数据已迁移到
- * v3 规范化模型（`/v3/meta/*` + MetadataService），control 面板 remote 模式直连 v3。
- * 保留这些 handler 仅为兼容现网既有调用方，**行为冻结、不再演进**；新接入方一律用 v3。
- * 计划：确认无外部调用方后，连同 routeTable 中对应条目与 `entity_*` 表一并删除。
- * 决策（2026-06-26，per user）：标记废弃 + 代码暂留，不适配 MetadataService。
+ * These handlers use old entity_* aggregate array model (EntityStore optional method). Metadata migrated to
+ * v3 normalized model (/v3/meta/* + MetadataService), control panel remote mode connects v3 directly.
+ * Retaining these handlers only for compatibility with existing network callers, **behavior frozen, no longer evolving**; new integrators uniformly use v3.
+ * Plan: after confirming no external callers, delete altogether with corresponding entries in routeTable and entity_* table.
+ * Decision (2026-06-26, per user): Mark as deprecated + temporarily retain code, do not adapt MetadataService.
  * ========================================================================== */
 
-/** @deprecated 改用 `/v3/meta/team/create`（MetadataService.createTeam）。 */
+/** @deprecated Switch to /v3/meta/team/create (MetadataService.createTeam). */
 async function handleTeamCreate(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
   const parsed = teamCreateRequestSchema.safeParse(body);
   if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
@@ -1379,7 +1379,7 @@ async function handleTeamCreate(body: unknown, _auth: V2AuthContext, requestId: 
   return successEnvelope<TeamData>(await store.createTeam(parsed.data), requestId);
 }
 
-/** @deprecated 改用 `/v3/meta/team/get`。 */
+/** @deprecated Switch to /v3/meta/team/get. */
 async function handleTeamGet(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
   const parsed = teamGetRequestSchema.safeParse(body);
   if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
@@ -1389,7 +1389,7 @@ async function handleTeamGet(body: unknown, _auth: V2AuthContext, requestId: str
   return data ? successEnvelope<TeamData>(data, requestId) : errorEnvelope(404, "Team not found", requestId);
 }
 
-/** @deprecated 改用 `/v3/meta/team/update`。 */
+/** @deprecated Switch to /v3/meta/team/update. */
 async function handleTeamUpdate(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
   const parsed = teamUpdateRequestSchema.safeParse(body);
   if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
@@ -1400,7 +1400,7 @@ async function handleTeamUpdate(body: unknown, _auth: V2AuthContext, requestId: 
   return data ? successEnvelope<TeamData>(data, requestId) : errorEnvelope(404, "Team not found", requestId);
 }
 
-/** @deprecated 改用 `/v3/meta/team/delete`。 */
+/** @deprecated Switch to /v3/meta/team/delete. */
 async function handleTeamDelete(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
   const parsed = teamBatchDeleteRequestSchema.safeParse(body);
   if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
@@ -1409,7 +1409,7 @@ async function handleTeamDelete(body: unknown, _auth: V2AuthContext, requestId: 
   return successEnvelope<BatchDeleteResult>(await store.deleteTeams(parsed.data.team_ids), requestId);
 }
 
-/** @deprecated 改用 `/v3/meta/user/create`。 */
+/** @deprecated Switch to /v3/meta/user/create. */
 async function handleUserCreate(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
   const parsed = userCreateRequestSchema.safeParse(body);
   if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
@@ -1418,7 +1418,7 @@ async function handleUserCreate(body: unknown, _auth: V2AuthContext, requestId: 
   return successEnvelope<UserData>(await store.createUser(parsed.data), requestId);
 }
 
-/** @deprecated 改用 `/v3/meta/user/get`。 */
+/** @deprecated Switch to /v3/meta/user/get. */
 async function handleUserGet(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
   const parsed = userGetRequestSchema.safeParse(body);
   if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
@@ -1428,7 +1428,7 @@ async function handleUserGet(body: unknown, _auth: V2AuthContext, requestId: str
   return data ? successEnvelope<UserData>(data, requestId) : errorEnvelope(404, "User not found", requestId);
 }
 
-/** @deprecated 改用 `/v3/meta/user/update`。 */
+/** @deprecated Switch to /v3/meta/user/update. */
 async function handleUserUpdate(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
   const parsed = userUpdateRequestSchema.safeParse(body);
   if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
@@ -1439,7 +1439,7 @@ async function handleUserUpdate(body: unknown, _auth: V2AuthContext, requestId: 
   return data ? successEnvelope<UserData>(data, requestId) : errorEnvelope(404, "User not found", requestId);
 }
 
-/** @deprecated 改用 `/v3/meta/user/delete`。 */
+/** @deprecated Switch to /v3/meta/user/delete. */
 async function handleUserDelete(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
   const parsed = userBatchDeleteRequestSchema.safeParse(body);
   if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
@@ -1448,7 +1448,7 @@ async function handleUserDelete(body: unknown, _auth: V2AuthContext, requestId: 
   return successEnvelope<BatchDeleteResult>(await store.deleteUsers(parsed.data.user_ids), requestId);
 }
 
-/** @deprecated 改用 `/v3/meta/agent/create`。 */
+/** @deprecated Switch to /v3/meta/agent/create. */
 async function handleAgentCreate(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
   const parsed = agentCreateRequestSchema.safeParse(body);
   if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
@@ -1457,7 +1457,7 @@ async function handleAgentCreate(body: unknown, _auth: V2AuthContext, requestId:
   return successEnvelope<AgentData>(await store.createAgent(parsed.data), requestId);
 }
 
-/** @deprecated 改用 `/v3/meta/agent/get`。 */
+/** @deprecated Switch to /v3/meta/agent/get. */
 async function handleAgentGet(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
   const parsed = agentGetRequestSchema.safeParse(body);
   if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
@@ -1469,7 +1469,7 @@ async function handleAgentGet(body: unknown, _auth: V2AuthContext, requestId: st
   return successEnvelope<AgentData>(data, requestId);
 }
 
-/** @deprecated 改用 `/v3/meta/agent/update`。 */
+/** @deprecated Switch to /v3/meta/agent/update. */
 async function handleAgentUpdate(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
   const parsed = agentUpdateRequestSchema.safeParse(body);
   if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
@@ -1483,7 +1483,7 @@ async function handleAgentUpdate(body: unknown, _auth: V2AuthContext, requestId:
   return data ? successEnvelope<AgentData>(data, requestId) : errorEnvelope(404, "Agent not found", requestId);
 }
 
-/** @deprecated 改用 `/v3/meta/agent/delete`。 */
+/** @deprecated Switch to /v3/meta/agent/delete. */
 async function handleAgentDelete(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
   const parsed = agentBatchDeleteRequestSchema.safeParse(body);
   if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
@@ -1492,7 +1492,7 @@ async function handleAgentDelete(body: unknown, _auth: V2AuthContext, requestId:
   return successEnvelope<BatchDeleteResult>(await store.deleteAgents(parsed.data.agent_ids), requestId);
 }
 
-/** @deprecated 改用 `/v3/meta/task/create`。 */
+/** @deprecated Switch to /v3/meta/task/create. */
 async function handleTaskCreate(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
   const parsed = taskCreateRequestSchema.safeParse(body);
   if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
@@ -1501,7 +1501,7 @@ async function handleTaskCreate(body: unknown, _auth: V2AuthContext, requestId: 
   return successEnvelope<TaskData>(await store.createTask(parsed.data), requestId);
 }
 
-/** @deprecated 改用 `/v3/meta/task/get`。 */
+/** @deprecated Switch to /v3/meta/task/get. */
 async function handleTaskGet(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
   const parsed = taskGetRequestSchema.safeParse(body);
   if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
@@ -1511,7 +1511,7 @@ async function handleTaskGet(body: unknown, _auth: V2AuthContext, requestId: str
   return data ? successEnvelope<TaskData>(data, requestId) : errorEnvelope(404, "Task not found", requestId);
 }
 
-/** @deprecated 改用 `/v3/meta/task/update`。 */
+/** @deprecated Switch to /v3/meta/task/update. */
 async function handleTaskUpdate(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
   const parsed = taskUpdateRequestSchema.safeParse(body);
   if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
@@ -1522,7 +1522,7 @@ async function handleTaskUpdate(body: unknown, _auth: V2AuthContext, requestId: 
   return data ? successEnvelope<TaskData>(data, requestId) : errorEnvelope(404, "Task not found", requestId);
 }
 
-/** @deprecated 改用 `/v3/meta/task/delete`。 */
+/** @deprecated Switch to /v3/meta/task/delete. */
 async function handleTaskDelete(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
   const parsed = taskBatchDeleteRequestSchema.safeParse(body);
   if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
@@ -1577,7 +1577,7 @@ async function getProfileVersion(
   const scope = buildIsolationScope(isolation);
   const id = buildProfileStableId(scope, type, filename);
   try {
-    // 优先使用轻量按 id 查询，避免全量 pullProfiles()
+    // Prioritize lightweight by-id query, avoid full pullProfiles()
     if (typeof store.queryProfilesByIds === "function") {
       const results = await store.queryProfilesByIds([id]);
       return results[0]?.version ?? 0;
@@ -1593,8 +1593,8 @@ async function getProfileVersion(
 }
 
 /**
- * 批量获取多个 profile 的 version，一次查询。
- * 优先使用 queryProfilesByIds（轻量），fallback 到 pullProfiles（全量）。
+ * Batch obtain multiple profile versions, one query.
+ * Prioritize queryProfilesByIds (lightweight), fallback to pullProfiles (full).
  */
 async function getProfileVersionBatch(
   store: IMemoryStore | undefined,
@@ -1781,7 +1781,7 @@ async function handleScenarioLs(body: unknown, _auth: V2AuthContext, requestId: 
   const sceneIndex = await readSceneIndex("", storage);
   const indexMap = new Map(sceneIndex.map((e) => [e.filename, e]));
 
-  // 批量获取所有 L2 文件的 profile version（一次查询，避免 N+1）
+  // Batch get all L2 file profile versions (one query, avoid N+1)
   const l2Filenames = allEntries.filter((e) => !e.isDirectory).map((e) => {
     return e.key.startsWith(StoragePaths.sceneBlocksDir)
       ? e.key.slice(StoragePaths.sceneBlocksDir.length)
@@ -1955,7 +1955,7 @@ async function handleScenarioWrite(body: unknown, _auth: V2AuthContext, requestI
   const version = await syncProfileToVdb(store, "l2", path, finalContent, deps.logger, undefined, deps.requestIsolation);
   await refreshSceneIndex(storage, deps.logger);
 
-  // 审计：L2 update — record_id 用 path（L2 主键 = 文件路径）
+  // Audit: L2 update — record_id uses path (L2 primary key = file path)
   await recordAudit(store, {
     record_id: path,
     layer: "L2",
@@ -2003,7 +2003,7 @@ async function handleScenarioRm(body: unknown, _auth: V2AuthContext, requestId: 
   await deleteProfilesFromVdb(store, "l2", removedFilenames, deps.logger, deps.requestIsolation);
   await refreshSceneIndex(storage, deps.logger);
 
-  // 审计：L2 delete — 每个被删的 path 一行
+  // Audit: L2 delete — one row per deleted path
   for (const fname of removedFilenames) {
     await recordAudit(store, {
       record_id: fname,
@@ -2100,7 +2100,7 @@ async function handleCoreWrite(body: unknown, _auth: V2AuthContext, requestId: s
   const store = deps.getStore();
   const version = await syncProfileToVdb(store, "l3", StoragePaths.persona, personaBody, deps.logger, undefined, deps.requestIsolation);
 
-  // 审计：L3 update — record_id 用 persona 的 storage path
+  // Audit: L3 update — record_id uses personas storage path
   await recordAudit(store, {
     record_id: StoragePaths.persona,
     layer: "L3",

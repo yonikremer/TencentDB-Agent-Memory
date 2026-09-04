@@ -1,16 +1,16 @@
 /**
- * L1 Latency Metric Reporter — L1 提取阶段延迟指标上报。
+ * L1 Latency Metric Reporter — L1 extraction phase latency metric reporting.
  *
- * 在 L1 提取完成后非侵入式上报以下指标到 Kafka：
- *   - l1_extraction_latency_ms : L1 提取端到端总耗时（毫秒）
- *   - l1_dedup_latency_ms     : 去重阶段耗时（毫秒）
+ * Non-intrusively reports the following metrics to Kafka after L1 extraction is completed:
+ *   - l1_extraction_latency_ms : L1 extraction end-to-end total latency (milliseconds)
+ *   - l1_dedup_latency_ms     : deduplication phase latency (milliseconds)
  *
- * 设计原则（与 metric-tracking-recall 完全同构）：
- *   1. 提取完成后，try-catch 做上报（静默失败）
- *   2. 无论上报成功失败，不影响提取结果
- *   3. 提取失败（hasError=true）时不上报
- *   4. 无 instanceId 时不上报
- *   5. dedupLatencyMs 为 null 表示未走去重路径，不上报 dedup 指标
+ * Design principles (isomorphic with metric-tracking-recall):
+ *   1. After extraction is completed, try-catch to report (fail silently)
+ *   2. Regardless of report success or failure, extraction results are unaffected
+ *   3. Do not report when extraction fails (hasError=true)
+ *   4. Do not report when there is no instanceId
+ *   5. dedupLatencyMs being null means deduplication path was not taken, dedup metric is not reported
  */
 
 import { metricProducer } from "./kafka-metric-producer.js";
@@ -20,13 +20,13 @@ import { metricProducer } from "./kafka-metric-producer.js";
 // ============================
 
 export interface L1LatencyMetricInput {
-  /** 实例 ID（Kafka key） */
+  /** Instance ID (Kafka key) */
   instanceId: string;
-  /** L1 提取端到端总耗时（毫秒） */
+  /** L1 extraction end-to-end total latency (milliseconds) */
   extractionLatencyMs: number;
-  /** 去重阶段耗时（毫秒）。null 表示未走去重路径 */
+  /** Deduplication phase latency (milliseconds). null means deduplication path was not taken */
   dedupLatencyMs: number | null;
-  /** 是否提取失败 */
+  /** Whether extraction failed */
   hasError: boolean;
 }
 
@@ -35,19 +35,19 @@ export interface L1LatencyMetricInput {
 // ============================
 
 /**
- * 上报 L1 提取阶段延迟指标到 Kafka。
+ * Report L1 extraction phase latency metrics to Kafka.
  *
- * 静默安全：任何异常都 try-catch 吞掉，绝不向外抛。
+ * Silently safe: any exceptions are try-catched and swallowed, never thrown outwards.
  */
 export function reportL1LatencyMetrics(input: L1LatencyMetricInput): void {
   try {
-    // Guard: 失败时不上报
+    // Guard: Do not report on failure
     if (input.hasError) return;
 
-    // Guard: 无 instanceId 不上报
+    // Guard: Do not report without instanceId
     if (!input.instanceId) return;
 
-    // 1. 上报 l1_extraction_latency_ms
+    // 1. Report l1_extraction_latency_ms
     try {
       metricProducer.send({
         metric: "l1_extraction_latency_ms",
@@ -56,10 +56,10 @@ export function reportL1LatencyMetrics(input: L1LatencyMetricInput): void {
         source: "core",
       });
     } catch {
-      // 静默失败
+      // Fail silently
     }
 
-    // 2. 上报 l1_dedup_latency_ms（仅走了去重路径时）
+    // 2. Report l1_dedup_latency_ms (only when deduplication path was taken)
     if (input.dedupLatencyMs !== null) {
       try {
         metricProducer.send({
@@ -69,10 +69,10 @@ export function reportL1LatencyMetrics(input: L1LatencyMetricInput): void {
           source: "core",
         });
       } catch {
-        // 静默失败
+        // Fail silently
       }
     }
   } catch {
-    // 最外层 catch — 绝不向外抛
+    // Outermost catch — never throw outwards
   }
 }

@@ -175,7 +175,7 @@ export const shouldCapture = shouldExtractL1;
  * 3. System/developer boundary probing — "system prompt", "developer message"
  * 4. XML/tag injection — opening tags that match our context boundaries
  * 5. Tool/command invocation tricks — "run command X", "execute tool Y"
- * 6. Multi-language variants — Chinese prompt-injection patterns
+ * 6. Multi-language variants — Chinese prompt-injection patterns (each mirrored in English below)
  */
 const PROMPT_INJECTION_PATTERNS: RegExp[] = [
   // ── Instruction override ──
@@ -205,7 +205,13 @@ const PROMPT_INJECTION_PATTERNS: RegExp[] = [
   /忽略(?:所有|之前|以上|先前)?(?:的)?(?:指令|规则|指示|说明)/,
   /无视(?:所有|之前|以上)?(?:的)?(?:指令|规则|限制)/,
   /(?:显示|输出|告诉我|给我看)(?:你的)?(?:系统|初始|隐藏)?(?:提示词|指令|规则|prompt)/,
-  /你(?:现在|从现在开始)是/,            // "你现在是 DAN"
+  /你(?:现在|从现在开始)是/,            // "You are now DAN"
+
+  // ── English mirrors of the Chinese patterns above ──
+  /ignore\s+(?:(?:all|any|the)\s+)?(?:previous|above|prior|earlier|foregoing)?\s*(?:instructions?|rules?|directions?|statements?)/i, // "ignore all/previous instructions"
+  /disregard\s+(?:(?:all|any|the)\s+)?(?:previous|above|prior|earlier|foregoing)?\s*(?:instructions?|rules?|restrictions?|constraints?)/i, // "disregard the above instructions"
+  /(?:show|output|tell me|give me|display|print)\s+(?:your\s+)?(?:system|initial|hidden)?\s*(?:prompt|instructions?|rules?)/i, // "show your system prompt"
+  /\byou\s+are\s+now\s+(?!going|about|ready)/i, // "you are now DAN"
 ];
 
 /**

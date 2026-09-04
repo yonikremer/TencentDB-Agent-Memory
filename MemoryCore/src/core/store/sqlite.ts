@@ -264,16 +264,16 @@ export function buildFtsQuery(raw: string): string | null {
  *
  * Using `cutForSearch` (instead of `cut`) ensures that the index contains
  * the same sub-word tokens that `buildFtsQuery()` produces on the query side.
- * For example, "人工智能" is indexed as "人工 智能 人工智能", so queries for
+ * For example, "Artificial Intelligence" is indexed as "Artificial Intelligence", so queries for
  * either the full term or sub-words will match.
  *
  * Falls back to the original text if jieba is unavailable.
  *
  * Example (with jieba):
- *   "用户五月去日本旅行" → "用户 五月 去 日本 旅行"
- *   "人工智能的分支"     → "人工 智能 人工智能 的 分支"
+ *   "user travels to Japan in May" → "user travels to Japan in May"
+ *   "branch of artificial intelligence"     → "branch of artificial intelligence"
  * Example (fallback):
- *   "用户五月去日本旅行" → "用户五月去日本旅行" (unchanged)
+ *   "user travels to Japan in May" → "user travels to Japan in May" (unchanged)
  */
 export function tokenizeForFts(raw: string): string {
   const jieba = getJieba();

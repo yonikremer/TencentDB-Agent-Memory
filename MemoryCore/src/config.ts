@@ -213,27 +213,27 @@ export interface StandaloneLLMOverrideConfig {
   /** Request timeout in milliseconds (default: 120000). */
   timeoutMs: number;
   /**
-   * LLM 访问模式：
-   *   - "openai": 直连 OpenAI 兼容服务（默认）
-   *   - "proxy":  走 context_proxy，运行时把 baseUrl 拼成
-   *               `${baseUrl}/proxy/<instanceId>/v1`，Authorization 用 memory 系统用户 key
-   * gateway 层负责在构造 runner 前把 baseUrl / apiKey 换成解析后的最终值，
-   * 因此 runner 无需感知 provider 字段。
+   * LLM access mode:
+   *   - "openai": Direct connect to OpenAI compatible service (default)
+   *   - "proxy":  Goes through context_proxy, assembles baseUrl at runtime into
+   *               `${baseUrl}/proxy/<instanceId>/v1`, Authorization uses memory system user key
+   * The gateway layer is responsible for replacing baseUrl / apiKey with final parsed values before constructing runner,
+   * therefore the runner does not need to be aware of the provider field.
    */
   provider?: "openai" | "proxy";
-  /** provider=proxy 时的可选配置。 */
+  /** Optional config when provider=proxy. */
   proxy?: {
-    /** 是否用 memory systemUser.userKey 作为 Authorization（默认 true）。 */
+    /** Whether to use memory systemUser.userKey as Authorization (default true). */
     useMemorySystemUserKey?: boolean;
   };
   /**
-   * 是否用流式请求(streamText)调用上游。默认 false(generateText 非流式)。
-   * 个别 OpenAI 兼容上游只接受流式请求时置 true。
+   * Whether to use streaming request (streamText) to call upstream. Default false (generateText non-streaming).
+   * Set to true when individual OpenAI compatible upstreams only accept streaming requests.
    *
-   * ⚠️ 仅在 standalone LLM 路径生效(即 llm.enabled=true 时,memory 用自带的
-   * StandaloneLLMRunner 调用上游);未启用 standalone 时走 OpenClaw host runner,
-   * 该开关被忽略。也不会把增量 token 透传给调用方,只是"以流式协议请求上游后
-   * 等待完整文本",给只接受流式的兼容后端做兼容层用。
+   * ⚠️ Only effective in standalone LLM path (i.e. when llm.enabled=true, memory uses its built-in
+   * StandaloneLLMRunner to call upstream); when standalone is not enabled it uses OpenClaw host runner,
+   * this switch is ignored. It also won't pass incremental tokens to the caller, just "requests upstream with streaming protocol
+   * and waits for full text", acting as a compatibility layer for backends that only accept streaming.
    */
   stream?: boolean;
 }
@@ -257,12 +257,12 @@ export interface OffloadConfig {
   /** LLM temperature (default: 0.2) */
   temperature: number;
   /**
-   * 是否用流式请求(streamText)调用上游(仅 mode="local" 生效)。默认 false(非流式)。
-   * 个别只接受流式请求的 OpenAI 兼容上游需置 true。
+   * Whether to use streaming request (streamText) to call upstream (only effective in mode="local"). Default false (non-streaming).
+   * Set to true for individual OpenAI compatible upstreams that only accept streaming requests.
    *
-   * ⚠️ mode="backend"/"client"/"collect" 由远端 offload server 主导调用,
-   * 本地 stream 开关被忽略。也不会把增量 token 透传给调用方,只是"以流式协议
-   * 请求上游后等待完整文本",给只接受流式的兼容后端做兼容层用。
+   * ⚠️ mode="backend"/"client"/"collect" are initiated by remote offload server,
+   * local stream switch is ignored. It also won't pass incremental tokens to the caller, just "requests with streaming protocol
+   * upstream and waits for full text", acting as a compatibility layer for backends that only accept streaming.
    */
   stream?: boolean;
   /** Force-trigger L1 when pending tool pairs >= this threshold (default: 4) */
@@ -651,7 +651,7 @@ export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTda
         provider,
         stream: bool(llmGroup, "stream") ?? false,
         proxy: {
-          // 默认 true：走 proxy 时用 memory 系统用户 key 作为 Authorization。
+          // Default true: when going through proxy use memory system user key as Authorization.
           useMemorySystemUserKey: bool(proxyGroup, "useMemorySystemUserKey") ?? true,
         },
       };

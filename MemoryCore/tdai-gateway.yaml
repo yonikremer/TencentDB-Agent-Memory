@@ -1,19 +1,19 @@
 # ============================================================
-# TDAI Gateway — 默认配置（Standalone + Skill）
+# TDAI Gateway — default configuration (Standalone + Skill)
 # ============================================================
-# 基于 standalone 单机模式，同时启用 Skill 模块。
-# Memory 引擎和 Skill 模块共享同一个 baseDir，互不干扰：
-#   - Memory 数据: {baseDir}/conversations/, records/, scene_blocks/, persona.md ...
-#   - Skill 数据:  {baseDir}/skills/<name>/SKILL.md + files/
-#   - 共享 DB:     {baseDir}/vectors.db
+# Based on standalone single-machine mode, with the Skill module enabled.
+# The Memory engine and Skill module share the same baseDir without interfering:
+#   - Memory data: {baseDir}/conversations/, records/, scene_blocks/, persona.md ...
+#   - Skill data:  {baseDir}/skills/<name>/SKILL.md + files/
+#   - Shared DB:   {baseDir}/vectors.db
 #
-# 启动：
-#   export TDAI_LLM_API_KEY="sk-..."           # 必填
-#   export TDAI_LLM_BASE_URL="https://..."     # 可选（覆盖 yaml）
-#   export TDAI_LLM_MODEL="gpt-4o-mini"        # 可选
+# Startup:
+#   export TDAI_LLM_API_KEY="sk-..."           # required
+#   export TDAI_LLM_BASE_URL="https://..."     # optional (overrides yaml)
+#   export TDAI_LLM_MODEL="gpt-4o-mini"        # optional
 #   node --import tsx src/gateway/server.ts
 #
-# 自检：
+# Self-check:
 #   curl -s http://127.0.0.1:8420/health | jq
 #   curl -s -X POST http://127.0.0.1:8420/v3/skill/list \
 #     -H "x-tdai-service-id: default" \
@@ -26,14 +26,14 @@ stateBackend: "local"
 server:
   port: 8420
   host: "127.0.0.1"
-  # apiKey: "skill-mvp"   # 可选；不填则所有 v2 接口默认开放（仅本机）
+  # apiKey: "skill-mvp"   # optional; when unset all v2 APIs are open by default (local only)
 
 data:
   baseDir: "~/.memory-tencentdb/memory-tdai"
 
-# ── LLM (必填) ──
-# provider 默认 "openai" 即直连；若要走 context_proxy（统一鉴权/账务/观测），
-# 见 tdai-gateway.proxy.yaml 或 docs/llm-via-proxy.md
+# ── LLM (required) ──
+# provider defaults to "openai" for direct connection; to use context_proxy (unified auth/billing/observability),
+# see tdai-gateway.proxy.yaml or docs/llm-via-proxy.md
 llm:
   baseUrl: "https://api.lkeap.cloud.tencent.com/v1"
   apiKey: "${TDAI_LLM_API_KEY}"
@@ -41,7 +41,7 @@ llm:
   maxTokens: 32000
   timeoutMs: 300000
 
-# ── Memory 引擎配置 ──
+# ── Memory engine configuration ──
 memory:
   promptMode: code
 
@@ -72,12 +72,12 @@ memory:
     strategy: "hybrid"
     timeoutMs: 5000
 
-  # ── 存储后端 ──
+  # ── Storage backend ──
   storeBackend: "sqlite"
 
   embedding:
-    provider: "none"               # 默认关闭向量搜索, 仅用 BM25
-    # 开启向量搜索示例:
+    provider: "none"               # vector search off by default; BM25 only
+    # Example for enabling vector search:
     # provider: "openai"
     # baseUrl: "https://api.openai.com/v1"
     # apiKey: "${TDAI_LLM_API_KEY}"
@@ -88,69 +88,69 @@ memory:
     enabled: true
     language: "zh"
 
-# ── Skill 模块 ──
-# Skill 是额外能力，数据存储在 {baseDir}/skills/ 下，不影响 Memory 引擎。
-# 设 enabled: false 或删除此段即可完全关闭 skill，Memory 功能不受任何影响。
+# ── Skill module ──
+# Skill is an extra capability; data is stored under {baseDir}/skills/ and does not affect the Memory engine.
+# Set enabled: false or delete this section to fully disable skill; Memory is unaffected.
 skill:
   enabled: true
 
-  # 【复用】storeBackend 不填则继承 memory.storeBackend（此处即 sqlite）；
-  #        tcvdb 需 TCVDB 凭证（memory.tcvdb），缺失时自动降级 sqlite。
+  # [reuse] If storeBackend is unset it inherits memory.storeBackend (here, sqlite);
+  #         tcvdb requires TCVDB credentials (memory.tcvdb); falls back to sqlite when missing.
   # storeBackend: "sqlite"
-  # 【探针】contentBackend 不填则 auto-probe：有 COS 凭证(cos.*)→cos，否则→local。
+  # [probe] If contentBackend is unset it auto-probes: COS credentials (cos.*) present → cos, otherwise → local.
   # contentBackend: "local"
 
   routing:
-    mode: "bm25"          # bm25 | embedding | hybrid（后两者需 memory.embedding 启用，否则降级 bm25）
-    searchTopK: 20        # listing 接口最多注入多少条 skill（name+description）
-    # 以下为预留字段：resolver 有默认值但运行时暂无消费者，保持默认即可。
+    mode: "bm25"          # bm25 | embedding | hybrid (the latter two require memory.embedding enabled, otherwise fall back to bm25)
+    searchTopK: 20        # max skills injected into the listing API (name+description)
+    # Reserved fields below: resolver has defaults but no runtime consumers yet; leave them as-is.
     # hybridAlpha: 0.3
     # charBudgetPercent: 0.01
     # fastPathMinNameLength: 4
 
   extraction:
-    enabled: true                 # 需要顶层 llm 配置有效（baseUrl + apiKey）
-    maxIterations: 16             # Review Agent tool-calling 最大迭代轮数
-    # model: "deepseek-v3.2"      # 【复用】不填则复用顶层 llm.model
-    # toolCallThreshold: 10       # 预留字段，暂无消费者
-    # 说明：headChars / tailChars 在 service 模式的 per-instance extractor 路径不透传，
-    #      因此不在 yaml 暴露；如需调整请改 skill-extractor.ts 默认或补 server.ts 透传。
+    enabled: true                 # requires a valid top-level llm config (baseUrl + apiKey)
+    maxIterations: 16             # Review Agent tool-calling max iterations
+    # model: "deepseek-v3.2"      # [reuse] unset → reuse top-level llm.model
+    # toolCallThreshold: 10       # reserved field, no consumers yet
+    # Note: headChars / tailChars are not forwarded on the per-instance extractor path in service mode,
+    #       so they are not exposed in yaml; to tune them, change skill-extractor.ts defaults or add server.ts forwarding.
     queue:
-      backend: "local"            # standalone 用进程内队列；service 改 "redis"
-      keyPrefix: "tdai"           # Redis key 前缀（redis 后端）
-      resultTtlSeconds: 86400     # 抽取结果 hash 的 TTL（秒）
-      lockTtlMs: 600000           # agent 级锁 TTL（毫秒，10min）
-      maxRetries: 2               # 抽取失败最大重试次数
-      retryBackoffsMs: [5000, 15000]  # 每次重试的退避间隔（毫秒）
-      # 【复用】service 模式复用顶层 redis 共享客户端，redisUrl 留空即可；
-      #        探测到共享客户端时即使 backend=local 也会自动切 redis。
+      backend: "local"            # standalone uses an in-process queue; switch to "redis" in service mode
+      keyPrefix: "tdai"           # Redis key prefix (redis backend)
+      resultTtlSeconds: 86400     # TTL of the extraction-result hash (seconds)
+      lockTtlMs: 600000           # agent-level lock TTL (ms, 10min)
+      maxRetries: 2               # max retries when extraction fails
+      retryBackoffsMs: [5000, 15000]  # backoff between each retry (ms)
+      # [reuse] service mode reuses the top-level shared redis client; leave redisUrl empty;
+      #         if a shared client is detected, it automatically switches to redis even with backend=local.
       # redisUrl: "redis://:password@host:6379/0"
 
   resources:
-    maxResourceSizeBytes: 5000000  # ✅ 生效：单个资源文件上限（5MB），超限拒写
-    # 以下为未接线字段，已从活跃配置移除：
-    #   allowExecutable — 本意为可执行资源安全开关，但未传入 SkillResourceStore，不拦截
-    #   downloadDir     — 本意为资源落盘临时目录，但资源读取走内存返回，无消费者
+    maxResourceSizeBytes: 5000000  # ✅ active: single resource file size cap (5MB); rejects writes beyond it
+    # The following unwired fields were removed from the active config:
+    #   allowExecutable — intended as an executable-resource safety switch, but not passed to SkillResourceStore, so nothing is blocked
+    #   downloadDir     — intended as a temp dir for downloaded resources, but resource reads return in-memory, so no consumer
 
-  # versionTtlDays: 0             # 旧（非 head）版本过期天数，0=永不过期
+  # versionTtlDays: 0             # old (non-head) version expiry in days; 0 = never expires
 
-# ── 可观测性配置（本地开发） ──
+# ── Observability config (local development) ──
 observability:
   otel:
-    enabled: false                    # 本地不接智研，关掉 OTel gRPC
+    enabled: false                    # no local link to Zhiyan; OTel gRPC off
   clickhouse:
     enabled: false
   kafka:
     enabled: false
   langfuse:
     enabled: true
-    # 生产端点 / 凭证从 env 注入，避免明文提交进仓入镜像。
-    # 空值下 core 会自动 skip langfuse 上报（不 fail），本地开发按需 export。
+    # Production endpoint / credentials injected from env to avoid committing them to the repo or image.
+    # With empty values core auto-skips langfuse reporting (no fail); export as needed for local dev.
     host: "${LANGFUSE_HOST:-}"
     publicKey: "${LANGFUSE_PUBLIC_KEY:-}"
     secretKey: "${LANGFUSE_SECRET_KEY:-}"
 
-# ── 元数据模块（v3 store + 密码 pepper；敏感项 ${} 由 .env 注入）──
+# ── Metadata module (v3 store + password pepper; sensitive ${} injected from .env) ──
 metadata:
   maxUsersPerInstance: 500
   maxTeamsPerInstance: 100

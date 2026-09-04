@@ -422,7 +422,7 @@ export class PipelineWorker {
             releasePermitOnce();
             return;
           }
-          // 重投失败则退回到丢弃路径，避免消息悬挂
+          // Requeue failed → fall back to the drop path to avoid a hanging message
         } else {
           this.logger?.error?.(
             `${TAG} Lock conflict exhausted [${task.type}] (task=${task.id}): ${lockKey}, ` +
@@ -592,7 +592,7 @@ export class PipelineWorker {
     const aid = task.agentId ?? (task.data as any)?.agentId;
 
     if (task.type === "L1" || task.type === "flush") {
-      // L1 完成 → reset session-level L1 state, then advance agent/profile-level L2 timers.
+      // L1 complete → reset session-level L1 state, then advance agent/profile-level L2 timers.
       await this.backend.updateSessionState(task.instanceId, task.sessionId, {
         conversation_count: 0,
       }, tid, aid);

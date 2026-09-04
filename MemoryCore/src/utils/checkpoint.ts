@@ -179,58 +179,58 @@ async function withFileLock<T>(filePath: string, fn: () => Promise<T>): Promise<
 }
 
 /**
- * 跨节点互斥所需的最小锁接口。
+ * Minimal lock interface required for cross-node mutual exclusion.
  *
- * 由 IStateBackend（Redis）天然满足；standalone 模式不注入即可，
- * 因为单进程下 withFileLock 已足够。
+ * Naturally satisfied by IStateBackend (Redis); in standalone mode simply do not inject it,
+ * because withFileLock is sufficient in a single process.
  */
 export interface CheckpointDistributedLock {
   acquireLock(key: string, ownerId: string, ttlMs: number): Promise<boolean>;
   releaseLock(key: string, ownerId: string): Promise<void>;
   /**
-   * 续约（只能续自己持有的锁）。
+   * Renew (can only renew a lock held by self).
    *
-   * 必须提供：checkpoint 临界区含 2 次对象存储 IO，COS 抖动时可能超过 ttlMs。
-   * 没有续约时锁会静默过期 → 后来者合法抢到 → 两节点同时在临界区，
-   * 而 releaseLock 的 owner 校验会让先者「删不掉别人的锁」从而毫无报错，
-   * 形成最难排查的静默双写。
+   * Must provide: checkpoint critical section contains 2 object storage IOs, may exceed ttlMs on COS jitter.
+ * Without renewal, lock expires silently → latecomer acquires it legally → two nodes in critical section simultaneously,
+ * and owner validation in releaseLock prevents the earlier one from "deleting someone else's lock" thus yielding no errors,
+ * resulting in the hardest to debug silent dual-writes.
    */
   renewLock(key: string, ownerId: string, ttlMs: number): Promise<boolean>;
 }
 
-/** checkpoint 写入的可观测计数器（由调用方注入，便于上报到既有 metric 通道） */
+/** Observable counters for checkpoint writes (injected by caller for reporting to existing metric channels) */
 export interface CheckpointLockMetrics {
-  /** 抢锁失败后放弃写入并要求上层重试的次数 */
+  /** Number of times write is abandoned after lock failure, requesting upper layer retry */
   onRequeueRequired?(key: string, waitedMs: number): void;
-  /** 锁后端异常导致降级（无锁执行）的次数 */
+  /** Number of times backend anomaly causes degradation (lockless execution) */
   onBackendError?(key: string, err: unknown): void;
-  /** 续约失败导致放弃写入的次数 */
+  /** Number of times write is abandoned due to renewal failure */
   onLockLost?(key: string): void;
-  /** 每次成功抢锁的等待耗时，用于算p50/p95/p99 */
+  /** Wait time for each successful lock acquisition, used to calculate p50/p95/p99 */
   onAcquireWait?(key: string, waitedMs: number): void;
 }
 
 export interface CheckpointLockOptions {
-  /** 分布式锁后端；缺省表示仅依赖进程内锁 */
+  /** Distributed lock backend; defaults to relying solely on in-process locks */
   lock: CheckpointDistributedLock;
-  /** 锁 key，必须能唯一标识该 checkpoint 对象（通常用 instanceId） */
+  /** Lock key, must uniquely identify this checkpoint object (usually instanceId) */
   lockKey: string;
-  /** 锁持有时长上限，防止进程崩溃后死锁 */
+  /** Upper limit for lock holding duration to prevent deadlock after process crash */
   ttlMs?: number;
-  /** 抢锁最长等待时间 */
+  /** Maximum wait time for lock acquisition */
   maxWaitMs?: number;
-  /** 续约间隔，默认 ttlMs/3 */
+  /** Renewal interval, default ttlMs/3 */
   renewIntervalMs?: number;
-  /** 可观测计数器 */
+  /** Observable counters */
   metrics?: CheckpointLockMetrics;
 }
 
 /**
- * 抢不到锁 / 锁中途丢失时抛出。
+ * Thrown when lock cannot be acquired / is lost mid-way.
  *
- * 语义：本次 checkpoint **没有写入**，上层必须重新入队而不是当作成功。
- * 旧实现在这里降级为「无锁硬写」，那等于明知会覆盖别人仍然写，
- * 是 L1 游标丢失的直接来源之一。
+ * Semantics: This checkpoint **was not written**, upper layer must re-enqueue instead of treating as successful.
+ * The old implementation degraded to "lockless hard write" here, which equals writing knowing it will overwrite others,
+ * directly causing L1 cursor loss.
  */
 export class CheckpointLockUnavailableError extends Error {
   readonly code = "CHECKPOINT_LOCK_UNAVAILABLE";
@@ -241,12 +241,12 @@ export class CheckpointLockUnavailableError extends Error {
 }
 
 /**
- * TTL 取 60s：临界区虽以「一次 GET + 一次 PUT」为主，但 COS 抖动 / 大文件
- * 序列化都可能拉长耗时，配合 renewLock 续约后TTL 只作为「进程崩溃后的
- * 兜底自愈上限」，不再是「临界区必须在此内完成」的硬约束。
+ * TTL 60s: Although critical section is mainly "one GET + one PUT", COS jitter / large file
+ * serialization can prolong duration; combined with renewLock, TTL serves only as "post-crash
+ * self-healing upper limit", no longer a hard constraint that "critical section must finish within".
  */
 const DEFAULT_LOCK_TTL_MS = 60_000;
-/** 抢锁最长等待。必须 < 任务锁 TTL（600s），避免把上层任务锁一起拖爆。 */
+/** Maximum wait for lock acquisition. Must be < Task lock TTL (600s) to avoid dragging down upper layer task lock. */
 const DEFAULT_LOCK_MAX_WAIT_MS = 30_000;
 
 export class CheckpointManager {
@@ -362,10 +362,10 @@ export class CheckpointManager {
    * the updated checkpoint is atomically written back.
    */
   private async mutate(fn: (cp: Checkpoint) => void | Promise<void>): Promise<Checkpoint> {
-    // 进程内锁先行：同进程内的并发直接串行，避免无谓的分布式锁往返。
+    // In-process lock first: concurrency within same process is serialized directly to avoid meaningless distributed lock roundtrips.
     return withFileLock(this.filePath, () =>
       this.withDistributedLock(async () => {
-        // 必须在持有分布式锁后再读，否则读到的仍是他人临界区外的旧快照。
+        // Must read after holding distributed lock, otherwise still reads stale snapshot outside others' critical section.
         const cp = await this.readRaw();
         await fn(cp);
         await this.writeRaw(cp);
@@ -375,15 +375,15 @@ export class CheckpointManager {
   }
 
   /**
-   * 跨节点串行化 checkpoint 的 read-modify-write。
+ * Serialize checkpoint read-modify-write across nodes.
    *
-   * 背景：service 模式下同一 instance 的所有 agent/session 共享同一个
-   * checkpoint 对象（`{pathPrefix}/{instanceId}/.metadata/checkpoint.json`），
-   * 而 writeRaw 是整对象覆盖。L1 的 Redis 锁是 session 级，不同session /
-   * 不同 agent 可跨节点并发，因此若不额外互斥，后写者会用自己读到的旧快照
-   * 覆盖先写者已提交的 runner_states，导致 L1 游标丢失。
+ * Background: in service mode, all agents/sessions of same instance share the same
+ * checkpoint object ({pathPrefix}/{instanceId}/.metadata/checkpoint.json),
+ * and writeRaw overrides entire object. L1 Redis lock is session-level, different sessions /
+ * agents can concur across nodes, thus without extra mutual exclusion, late writer would overwrite
+ * earlier writer's submitted runner_states using its stale snapshot, losing L1 cursors.
    *
-   * 未注入锁时（standalone / 单进程）直接执行：此时 withFileLock 已足够。
+ * Executes directly when no lock injected (standalone / single-process): withFileLock is sufficient here.
    */
   private async withDistributedLock<T>(fn: () => Promise<T>): Promise<T> {
     const opts = this.lockOptions;
@@ -402,8 +402,8 @@ export class CheckpointManager {
       try {
         acquired = await opts.lock.acquireLock(key, this.ownerId, ttlMs);
       } catch (err) {
-        // 锁后端故障：无法保证互斥。此时**不写**，交由上层重新入队。
-        // （旧实现在这里无锁硬写，会覆盖其他节点的 runner_states。）
+        // Lock backend fault: cannot guarantee mutual exclusion. **Do not write** at this time, delegate to upper layer to re-enqueue.
+        // (Old implementation wrote lockless here, overwriting other nodes' runner_states.)
         opts.metrics?.onBackendError?.(key, err);
         throw new CheckpointLockUnavailableError(
           `checkpoint lock backend error for ${key}: ${err instanceof Error ? err.message : String(err)}`,
@@ -418,9 +418,9 @@ export class CheckpointManager {
     if (!acquired) {
       const waitedMs = Date.now() - startedAt;
       opts.metrics?.onRequeueRequired?.(key, waitedMs);
-      // 关键行为变更：不再降级无锁写。
-      // 无锁写会用旧快照覆盖他人已提交的数据（丢 L1 游标 → 永久重复抽取），
-      // 代价远高于「本次放弃、重新入队后重跑」。
+      // Critical behavior change: no longer degrades to lockless write.
+        // Lockless write would overwrite others' submitted data with stale snapshot (lose L1 cursor → permanent repeated extraction),
+        // the cost is far higher than "abandon this time, re-run after re-enqueue".
       throw new CheckpointLockUnavailableError(
         `failed to acquire ${key} within ${waitedMs}ms; skipping write (caller should requeue)`,
         key,
@@ -428,7 +428,7 @@ export class CheckpointManager {
     }
     opts.metrics?.onAcquireWait?.(key, Date.now() - startedAt);
 
-    // ── 续约：防止临界区超过 TTL 后锁被别人抢走造成静默双写 ──
+    // ── Renewal: prevent lock being snatched after critical section exceeds TTL causing silent dual-writes ──
     let lockLost = false;
     const renewTimer = setInterval(() => {
       void (async () => {
@@ -450,12 +450,12 @@ export class CheckpointManager {
         }
       })();
     }, renewIntervalMs);
-    // 不要让续约 timer 阻止进程退出
+    // Do not let renewal timer prevent process exit
     (renewTimer as unknown as { unref?: () => void }).unref?.();
 
     try {
       const result = await fn();
-      // 临界区执行期间锁曾丢失 → 本次写入可能与他人交错，不能当作成功。
+      // Lock was lost during critical section execution → this write may interleave with others, cannot be treated as success.
       if (lockLost) {
         throw new CheckpointLockUnavailableError(
           `lock ${key} was lost during the critical section; write is not trustworthy`,
@@ -466,11 +466,11 @@ export class CheckpointManager {
     } finally {
       clearInterval(renewTimer);
       try {
-        // 仅在仍持有锁时释放（丢锁后释放会误删新持有者的锁 —— 虽然后端有
-        // owner 校验兜底，这里显式跳过更清晰）。
+        // Only release when still holding lock (releasing after losing lock would mistakenly delete new holder's lock — although backend has
+          // owner validation fallback, explicit skip here is clearer).
         if (!lockLost) await opts.lock.releaseLock(key, this.ownerId);
       } catch {
-        // 锁会随 TTL 自动过期，释放失败无需中断主流程
+        // Lock automatically expires with TTL, release failure does not need to interrupt main flow
       }
     }
   }
@@ -623,12 +623,12 @@ export class CheckpointManager {
     await this.mutate((cp) => {
       const state = this.getRunnerState(cp, sessionKey);
       if (cursorRecordedAtMs) {
-        // P0-2: 单调递增，绝不回退。
+      // P0-2: Monotonically increasing, never fallback.
         //
-        // cursorRecordedAtMs 由调用方基于 createL1Runner 开头那次**无锁快照**
-        // 算出，中间跨越了整个 L1 LLM 抽取。若期间该session 的游标已被推进
-        // （重投、drain、并发节点），直接赋值会把游标往回拨→ 同一批 L0 被
-        // 反复抽取，新数据永远排不上。取大后写入天然幂等。
+      // cursorRecordedAtMs is calculated by caller based on the **lockless snapshot** at createL1Runner start,
+      // spanning entire L1 LLM extraction. If cursor for this session was advanced during this time
+      // (re-submit, drain, concurrent nodes), direct assignment would dial cursor back → same batch of L0
+      // repeatedly extracted, new data never queues up. Taking max before write is naturally idempotent.
         if (cursorRecordedAtMs > state.last_l1_cursor) {
           state.last_l1_cursor = cursorRecordedAtMs;
         } else if (cursorRecordedAtMs < state.last_l1_cursor) {
@@ -656,14 +656,14 @@ export class CheckpointManager {
   }
 
   /**
-   * 单调修复全局计数器：仅当持久值 < 期望值时抬高到期望值。
+   * Monotonically repair global counters: only elevate to expected value when persistent value < expected value.
    *
-   * 用于替代此前 L2 runner 里的 `write({...staleSnapshot})` —— 后者是整对象
-   * 覆盖且不受分布式锁保护，会抹掉其他节点并发写入的 runner_states。
+   * Replaces write({...staleSnapshot}) previously in L2 runner —— which was a whole-object
+   * overwrite unprotected by distributed locks, erasing concurrent runner_states writes from other nodes.
    *
-   * 本方法在 mutate 的临界区内重读，只写入参列出的标量字段，其余字段原样保留。
+   * This method re-reads within mutate critical section, writing only scalar fields listed in params, preserving others as-is.
    *
-   * @returns 是否实际发生了修复（用于上层决定是否告警）
+   * @returns Whether repair actually occurred (for upper layer deciding to alert)
    */
   async repairMonotonicCounters(expected: {
     scenes_processed?: number;
@@ -696,10 +696,10 @@ export class CheckpointManager {
    * two concurrent `agent_end` events could both read the same stale cursor
    * and record duplicate messages.
    *
-   * ⚠️ 注意：`fn` 是业务回调（recordConversation → 写 L0），**必须**留在临界区内，
-   * 否则「读游标 → 捕获 → 推进游标」的原子性被破坏，并发 agent_end 会重复记录。
-   * 这使本方法的临界区显著长于其他 mutate 调用；安全性依赖 withDistributedLock
-   * 的**续约机制**（renewLock）持续持锁，而不是依赖 TTL 覆盖最坏耗时。
+   * ⚠️ Note: n is business callback (recordConversation → write L0), **must** stay within critical section,
+   * otherwise atomicity of "read cursor → capture → advance cursor" is broken, concurrent agent_end will record repeatedly.
+   * This makes this method's critical section significantly longer than other mutate calls; safety relies on withDistributedLock's
+   * **renewal mechanism** (renewLock) holding lock continuously, instead of relying on TTL to cover worst duration.
    *
    * The callback receives `afterTimestamp` (the current per-session cursor)
    * and must return either:

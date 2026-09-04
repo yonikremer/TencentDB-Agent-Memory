@@ -96,7 +96,7 @@ export interface SkillTaskEntry {
   last_error?: string;
 }
 
-/** _tasks.json 整体结构。 */
+/** Overall structure of `_tasks.json`. */
 export interface AgentTasksDoc {
   team_id: string;
   agent_id: string;
@@ -116,7 +116,7 @@ export interface SkillDeadTaskEntry extends SkillTaskEntry {
   dead_lettered_at_ms: number;
 }
 
-/** `_tasks_dlq.json` 整体结构。 */
+/** Overall structure of `_tasks_dlq.json`. */
 export interface AgentDeadTasksDoc {
   team_id: string;
   agent_id: string;

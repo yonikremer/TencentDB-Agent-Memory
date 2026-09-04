@@ -437,11 +437,11 @@ export function loadGatewayConfig(overrides?: Partial<GatewayConfig>): GatewayCo
 
   // LLM config
   //
-  // provider 支持两种模式：
-  //   - "openai"（默认）：直连 OpenAI 兼容服务
-  //   - "proxy"：走 context_proxy，运行期把 baseUrl 拼成 `${baseUrl}/proxy/<iid>/v1`，
-  //             Authorization 用 memory 系统用户 key。gateway 层负责最终解析，
-  //             见 src/gateway/llm-resolver.ts 的 resolveEffectiveLlmConfig。
+  // provider supports two modes:
+  //   - "openai" (default): connects directly to OpenAI compatible services
+  //   - "proxy": routes through context_proxy, concatenates baseUrl at runtime into ${baseUrl}/proxy/<iid>/v1,
+  //             Authorization uses memory system user key. gateway layer is responsible for final resolution,
+  //             see resolveEffectiveLlmConfig in src/gateway/llm-resolver.ts.
   const llmConfig = obj(fileConfig, "llm");
   const llmProxyConfig = obj(llmConfig, "proxy");
   const rawLlmProvider = env("TDAI_LLM_PROVIDER") ?? str(llmConfig, "provider");

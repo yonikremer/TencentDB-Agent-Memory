@@ -65,10 +65,10 @@ import {
   resolveSkillConfig,
   SKILL_REVIEW_PROMPT,
 } from "./skill/index.js";
-// Skill async-extract 现在完全走 conversation-add 侧的 agent 队列 + Worker
-// (SkillTriggerService.archive → agent 队列 → SkillConversationExtractWorker),
-// 由 gateway/openclaw host wiring 的 wireConversationAdd 起。tdai-core 只负责
-// 构造 SkillExtractor 单例给 wire 层用。
+// Skill async-extract now completely goes through the agent queue + Worker on the conversation-add side
+// (SkillTriggerService.archive → agent queue → SkillConversationExtractWorker),
+// initiated by wireConversationAdd of gateway/openclaw host wiring. tdai-core is only responsible for
+// constructing the SkillExtractor singleton for the wire layer to use.
 import type {
   ResolvedSkillConfig,
   SkillEnvProbe,
@@ -79,24 +79,24 @@ import type { Skill } from "./skill/types.js";
 const TAG = "[memory-tdai] [core]";
 
 /**
- * Skill 生命周期钩子的注入点。用于把 skill 的 create/access/archive 事件同步到
- * 上层的资产注册表（`meta_assets` + `meta_agent_fixed_assets`），实现「skill 创建
- * 后前端管控页立即可见」「skill 归档后 agent 绑定被清」等语义。
+ * Injection point for Skill lifecycle hooks. Used to sync skill create/access/archive events to
+ * the upper asset registry (`meta_assets` + `meta_agent_fixed_assets`), realizing semantics like "skill is
+ * immediately visible on the frontend control page after creation" and "agent binding is cleared after skill archiving".
  *
- * 契约与 `SkillVersioningOptions.onSkillCreated` / `SkillCoreOptions.onSkillArchived`
- * / `SkillCoreOptions.onSkillAccessed` 完全一致（详见 skill-versioning.ts 与
- * skill-core.ts 的 doc）：
- *   - onSkillCreated：v1 首创前置 await，抛异常 = create 失败
- *   - onSkillAccessed：fire-and-forget，抛异常 SkillCore 内部吞掉
- *   - onSkillArchived：fire-and-forget，抛异常 SkillCore 内部吞掉
+ * Contract is identical with `SkillVersioningOptions.onSkillCreated` / `SkillCoreOptions.onSkillArchived`
+ * / `SkillCoreOptions.onSkillAccessed` (see docs in skill-versioning.ts and
+ * skill-core.ts):
+ *   - onSkillCreated: v1 initial creation pre-await, throw exception = create failed
+ *   - onSkillAccessed: fire-and-forget, throw exception swallowed inside SkillCore
+ *   - onSkillArchived: fire-and-forget, throw exception swallowed inside SkillCore
  *
- * 存在的必要性（standalone / OpenClaw 模式）：
- *   service 模式下 gateway/server.ts:resolveSkillCore 已经挂了同名钩子；
- *   standalone / OpenClaw 模式下 SkillCore 由 TdaiCore 全局构造，之前不挂钩子
- *   导致：绕过 gateway handler 的任何调用路径（CLI / 未来内嵌 / skill.extract 同步分支）
- *   都不会登记 asset，且 handleGet / handleFilesRead 完全没有兜底，读时自愈失效。
- *   通过这个 options 让上层（如 gateway 或 openclaw 插件）可以选择性注入 hooks，
- *   把 asset 联动语义带进 standalone / OpenClaw 路径。
+ * Necessity of existence (standalone / OpenClaw mode):
+ *   in service mode gateway/server.ts:resolveSkillCore has already hooked the same name;
+ *   in standalone / OpenClaw mode SkillCore is globally constructed by TdaiCore, previously not hooked
+ *   causing: any call path bypassing the gateway handler (CLI / future embedded / skill.extract sync branch)
+ *   would not register asset, and handleGet / handleFilesRead had no fallback, making read self-healing fail.
+ *   Through these options, the upper layer (like gateway or openclaw plugin) can selectively inject hooks,
+ *   bringing asset linkage semantics into the standalone / OpenClaw path.
  */
 export interface SkillAssetHooks {
   onSkillCreated?: (params: {
@@ -127,14 +127,14 @@ export interface TdaiCoreOptions {
   /** StorageAdapter for file operations (COS/local). When absent, modules fall back to fs. */
   storage?: StorageAdapter;
   /**
-   * 可选：把 skill 生命周期事件同步到上层资产注册表的钩子。
+   * Optional: hooks to sync skill lifecycle events to the upper asset registry.
    *
-   * 由 host wiring 层（gateway/openclaw 插件）在构造 TdaiCore 时按需注入，注入后
-   * standalone / OpenClaw 模式下的 SkillCore 与 service 模式行为对齐。详见
-   * `SkillAssetHooks` 的 doc。
+   * Injected on demand by the host wiring layer (gateway/openclaw plugin) when constructing TdaiCore, after which
+   * SkillCore in standalone / OpenClaw mode aligns with service mode behavior. See
+   * doc of `SkillAssetHooks`.
    *
-   * 不注入（undefined）→ SkillCore/SkillVersioning 不挂任何钩子，保持既有行为
-   * （零耦合：OpenClaw 无 MetadataService 场景仍可安全构造）。
+   * Not injected (undefined) → SkillCore/SkillVersioning does not attach any hooks, keeping existing behavior
+   * (zero coupling: can still safely construct in OpenClaw scenarios without MetadataService).
    */
   skillAssetHooks?: SkillAssetHooks;
 }
@@ -185,8 +185,8 @@ export class TdaiCore {
   private skillExtractor?: SkillExtractor;
   private resolvedSkillConfig?: ResolvedSkillConfig;
   /**
-   * 可选：skill 生命周期钩子，用来把 create/access/archive 同步到上层 asset 注册表。
-   * 见 `SkillAssetHooks` 的 doc。undefined = 不挂钩子（既有 standalone 老行为）。
+   * Optional: skill lifecycle hooks, used to sync create/access/archive to upper asset registry.
+   * See doc of `SkillAssetHooks`. undefined = no hooks (existing standalone old behavior).
    */
   private skillAssetHooks?: SkillAssetHooks;
   /**
@@ -304,9 +304,9 @@ export class TdaiCore {
       this.logger.debug?.(`${TAG} Scheduler destroyed`);
     }
 
-    // Skill async-extract worker + queue 由 gateway/openclaw 侧 wireConversationAdd
-    // 起, 也在各自的 WiredConversationAdd.stop() 里 graceful shutdown。tdai-core
-    // 无需在这里 stop skill 侧的 worker/queue (它已经不再持有它们)。
+    // Skill async-extract worker + queue is initiated by wireConversationAdd on gateway/openclaw side
+    // and also gracefully shutdown in their respective WiredConversationAdd.stop(). tdai-core
+    // does not need to stop the worker/queue on the skill side here (it no longer holds them).
 
     // Drain fire-and-forget background tasks started by auto-capture
     // (currently: deferred L0 embedding writes).  We must wait for
@@ -388,7 +388,7 @@ export class TdaiCore {
     });
     const recallLatencyMs = performance.now() - tStart;
 
-    // 非侵入式上报召回指标（静默失败，绝不影响业务返回）
+    // Non-intrusively report recall metrics (silent failure, absolutely no impact on business return)
     try {
       const recallResult = result ?? {};
       reportRecallMetrics({
@@ -399,7 +399,7 @@ export class TdaiCore {
         hasError: !!recallResult.error,
       });
     } catch {
-      // 静默失败
+      // silent failure
     }
 
     return result ?? {};
@@ -621,9 +621,9 @@ export class TdaiCore {
   }
 
   /**
-   * 把 this.cfg.llm 按 provider 解析成运行时可直接用的 (baseUrl, apiKey, model)。
-   * provider=openai 时透传；provider=proxy 时替换 baseUrl 为 `${baseUrl}/proxy/<iid>/v1`，
-   * apiKey 用 env.TDAI_MEMORY_SYSTEM_USER_KEY。四个 runner factory 构造点共用。
+   * Parse this.cfg.llm by provider into directly usable (baseUrl, apiKey, model) at runtime.
+   * when provider=openai pass through; when provider=proxy replace baseUrl with `${baseUrl}/proxy/<iid>/v1`,
+   * apiKey uses env.TDAI_MEMORY_SYSTEM_USER_KEY. Shared by four runner factory construction points.
    */
   private resolveRuntimeLlm(): {
     baseUrl: string;
@@ -715,8 +715,8 @@ export class TdaiCore {
       }
     }
 
-    // 用 MetricTrackingRunnerFactory 装饰器包装（非侵入式 credit 上报）
-    // Kafka 未配置时 metricProducer.send() 是 no-op，零开销
+    // Wrap with MetricTrackingRunnerFactory decorator (non-intrusive credit reporting)
+    // When Kafka is not configured metricProducer.send() is no-op, zero overhead
     const trackingFactory = new MetricTrackingRunnerFactory(runnerFactory, () => this.instanceId);
 
     const l1LlmRunner = useStandaloneRunner
@@ -890,8 +890,8 @@ export class TdaiCore {
         maxResourceSizeBytes: resolved.resources.maxResourceSizeBytes,
       });
 
-      // 资产联动钩子（可选注入）——与 service 模式 gateway/server.ts:resolveSkillCore
-      // 挂的三钩子完全对齐。未注入时保持零耦合老行为。
+      // Asset linkage hooks (optional injection) —— fully aligned with the three hooks
+      // attached in service mode gateway/server.ts:resolveSkillCore. Maintains zero coupling old behavior when not injected.
       const assetHooks = this.skillAssetHooks;
 
       const skillVersioning = new SkillVersioning({
@@ -911,25 +911,25 @@ export class TdaiCore {
 
       // ── Extraction wiring (queue + worker + optional single-tenant extractor) ──
       //
-      // 队列构造与 LLM runner **解耦**：队列只是 Redis / local 数据结构，
-      // 与 llm 是否可构造无关。之前把它塞在 `if (llmRunner)` 里，导致
-      // service 模式下 llm runner 因 `provider=proxy + instanceId=__unset__`
-      // 抛错时，整段 skill wiring（含队列）都被 catch 掉，handler 端拿不到
-      // queue 就永远回 QUEUE_UNAVAILABLE。
+      // Queue construction is **decoupled** from LLM runner: queue is just Redis / local data structure,
+      // irrelevant to whether llm is constructible. Previously it was stuffed in `if (llmRunner)`, causing
+      // in service mode llm runner throws error due to `provider=proxy + instanceId=__unset__`,
+      // the entire skill wiring (including queue) gets caught, handler cannot get
+      // queue and will always return QUEUE_UNAVAILABLE.
       //
-      // 新顺序：
-      //   1. 先构造 queue（前置条件：extraction.enabled && queue.enabled）
-      //   2. 再尝试构造单例 llm runner + extractor（standalone 模式必需；
-      //      service 模式失败也没关系——worker 走 extractorFactory 现场构造）
-      //   3. 起 worker：constructSkillWorker=true 且有 queue 就起
-      //      - 有单例 extractor → 用单例（standalone）
-      //      - 没有单例 extractor → 让 host wiring（server.ts）负责起带 factory 的 worker，
-      //        tdai-core 这里跳过
+      // New order:
+      //   1. First construct queue (precondition: extraction.enabled && queue.enabled)
+      //   2. Then try to construct singleton llm runner + extractor (necessary for standalone mode;
+      //      failure in service mode is fine——worker goes through extractorFactory for on-site construction)
+      //   3. Start worker: if constructSkillWorker=true and there is a queue then start
+      //      - Has singleton extractor → use singleton (standalone)
+      //      - No singleton extractor → let host wiring (server.ts) be responsible for starting worker with factory,
+      //        tdai-core skips here
       if (resolved.extraction.enabled) {
-        // 只构造 SkillExtractor 单例 —— worker + queue 现在由 gateway/openclaw
-        // 侧 wireConversationAdd 起 (SkillConversationExtractWorker + agent 队列),
-        // 见 2026-07-17 skill_extract 收敛方案。standalone 模式下 wire 层
-        // 通过 core.getSkillExtractor() 拿这个单例; service 模式忽略, 走
+        // Only construct SkillExtractor singleton —— worker + queue are now initiated by wireConversationAdd
+        // on the gateway/openclaw side (SkillConversationExtractWorker + agent queue),
+        // see 2026-07-17 skill_extract convergence plan. In standalone mode the wire layer
+        // gets this singleton via core.getSkillExtractor(); ignored in service mode, goes through
         // per-instance factory (buildSkillExtractorForInstance)。
         let llmRunner: ExtractorLLMRunner | undefined;
         try {
@@ -955,8 +955,8 @@ export class TdaiCore {
           });
         } else {
           this.logger.warn(
-            `${TAG} Skill singleton extractor not constructed — service mode 会走 per-instance factory；` +
-              `standalone/openclaw 模式下 /skill/extract 会因缺 extractor 无法抽取, 请检查 cfg.llm。`,
+            `${TAG} Skill singleton extractor not constructed — service mode will use per-instance factory;` +
+              `in standalone/openclaw mode /skill/extract will fail to extract due to missing extractor, please check cfg.llm.`,
           );
         }
       }
@@ -992,8 +992,8 @@ export class TdaiCore {
   private buildSkillLlmRunner(): ExtractorLLMRunner | undefined {
     const cfg = this.cfg.llm;
     if (!cfg?.enabled) return undefined;
-    // provider=proxy 时 cfg.apiKey 可能为空（真正的 apiKey 由 resolver 从 env 注入），
-    // 因此只要 provider=proxy 就允许构造；provider=openai 时保留原有 baseUrl+apiKey 检查。
+    // when provider=proxy cfg.apiKey might be empty (true apiKey is injected by resolver from env),
+    // thus construction is allowed as long as provider=proxy; keeps original baseUrl+apiKey check when provider=openai.
     if (!cfg.baseUrl) return undefined;
     if ((cfg.provider ?? "openai") === "openai" && !cfg.apiKey) return undefined;
     const logger = this.logger;
@@ -1043,12 +1043,12 @@ export class TdaiCore {
     embedding: EmbeddingService,
     storage?: StorageAdapter,
     /**
-     * service 模式必须传：跨节点保护 checkpoint 读改写的分布式锁。
+     * service mode must pass: distributed lock protecting checkpoint read/modify/write across nodes.
      *
-     * 同 instance 的 checkpoint 是**同一个** COS 对象，而 L1 的任务锁是
-     * session 级 —— 不同 session / 不同 agent 会在多节点合法并发，
-     * 若不额外互斥，后写者会用旧快照覆盖先写者的 runner_states（L1 游标丢失）。
-     * standalone 单进程不需要传（进程内 withFileLock 已足够）。
+     * the checkpoint of the same instance is the **same** COS object, while the L1 task lock is
+     * session level —— different sessions / different agents will legally concur across multiple nodes,
+     * if not mutually excluded additionally, the late writer will overwrite the early writer's runner_states with an old snapshot (L1 cursor lost).
+     * standalone single process does not need to pass (in-process withFileLock is sufficient).
      */
     checkpointLock?: import("../utils/checkpoint.js").CheckpointLockOptions,
   ): Promise<{ storedCount: number; creditUsed: number; hasMore: boolean; hasFullBacklog: boolean; profileScopes: string[] }> {
@@ -1069,7 +1069,7 @@ export class TdaiCore {
         `model=${runtimeLlm.model}, baseUrl=${runtimeLlm.baseUrl}`,
       );
     }
-    // 用 MetricTrackingRunnerFactory 装饰器包装（非侵入式 credit 上报）
+    // Wrap with MetricTrackingRunnerFactory decorator (non-intrusive credit reporting)
     const trackingFactory = new MetricTrackingRunnerFactory(runnerFactory, () => this.instanceId);
     const llmRunner = useStandaloneRunner
       ? trackingFactory.createRunner({ enableTools: false })
@@ -1089,7 +1089,7 @@ export class TdaiCore {
     });
     const result = await runner({ sessionKey, msg: [], bg_msg: [] });
 
-    // Read accumulated credit from the tracking runner (原始浮点数，与监控侧严格一致)
+    // Read accumulated credit from the tracking runner (original float, strictly consistent with monitoring side)
     const creditUsed: number = (llmRunner as any)?.accumulatedCredit ?? 0;
     const storedCount = result?.storedCount ?? 0;
     const hasMore = result?.hasMore ?? false;
@@ -1119,7 +1119,7 @@ export class TdaiCore {
         `model=${runtimeLlm.model}, baseUrl=${runtimeLlm.baseUrl}`,
       );
     }
-    // 用 MetricTrackingRunnerFactory 装饰器包装（非侵入式 credit 上报）
+    // Wrap with MetricTrackingRunnerFactory decorator (non-intrusive credit reporting)
     const trackingFactory = new MetricTrackingRunnerFactory(runnerFactory, () => this.instanceId);
     const llmRunner = useStandaloneRunner
       ? trackingFactory.createRunner({ enableTools: true })
@@ -1163,7 +1163,7 @@ export class TdaiCore {
         `model=${runtimeLlm.model}, baseUrl=${runtimeLlm.baseUrl}`,
       );
     }
-    // 用 MetricTrackingRunnerFactory 装饰器包装（非侵入式 credit 上报）
+    // Wrap with MetricTrackingRunnerFactory decorator (non-intrusive credit reporting)
     const trackingFactory = new MetricTrackingRunnerFactory(runnerFactory, () => this.instanceId);
     const llmRunner = useStandaloneRunner
       ? trackingFactory.createRunner({ enableTools: true })
