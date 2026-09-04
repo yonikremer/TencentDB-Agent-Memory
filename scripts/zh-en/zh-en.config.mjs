@@ -51,6 +51,8 @@ export const protectedGlobs = [
   'MemoryProxy/scripts/qa/codex-init.sh',
   // Fork's own operating plan: Chinese matcher examples are intentional (§4.1 documentation).
   'ZH_EN_TRANSLATION_PLAN.md',
+  // .gitignore rules that reference real Chinese-named local docs (keep the patterns intact).
+  '.gitignore',
 ];
 
 // Committed scratch from earlier passes. `git rm` each and it stops showing here.

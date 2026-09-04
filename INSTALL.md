@@ -1,6 +1,6 @@
 # TencentDB Agent Memory — Installation Guide
 
-← Back to [README.md](./README.md) · 简体中文: [INSTALL_CN.md](./INSTALL_CN.md)
+← Back to [README.md](./README.md) · Simplified Chinese: [INSTALL_CN.md](./INSTALL_CN.md)
 
 This document covers three installation modes:
 
@@ -338,8 +338,8 @@ only lists the Tasks the user actually created in the panel. If they
 haven't created any, or they simply don't want to bind this session to
 any Task, the form gets stuck / bypasses. Setting
 `sessionInit.defaultTaskId` fixes that: the proxy **prepends a virtual
-Task entry** — labeled `本次不关联任务` (*"Don't bind a task this
-time"*) — to the head of every team's task list. Picking it registers
+Task entry** — labeled "Don't bind a task this time" — to the head of
+every team's task list. Picking it registers
 the session against that fallback `task_id`, so the flow completes
 cleanly without any real Task being attached.
 
@@ -411,7 +411,7 @@ asset tool it actually invoked this turn** (`<skill_tools>`,
 or not (what key info it got, what detour it avoided, or why the call
 missed). Tools that were **not** invoked are omitted; if nothing was
 invoked, the reply must still emit the fixed line
-`【资产反思】本轮未使用任何云端资产工具。`
+[Asset Reflection] This round, no cloud asset tools were used.
 
 This is designed as an **internal effectiveness probe**: you point a
 subset of traffic (a benchmark run, an ad-hoc curl, a Team's staging
