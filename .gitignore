@@ -136,3 +136,7 @@ coverage/
 # Local-only: parity snapshots & runtime configs (never commit)
 MemoryProxy/.archive-tmp/
 z_config/
+
+# Offline dependency bundle (large machine-generated stores/caches/wheels — never commit)
+offline-deps/
+offline-deps.zip
