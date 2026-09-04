@@ -101,11 +101,14 @@ const VERIFY_SCHEMA = {
 };
 
 // ---- prompts --------------------------------------------------------------
-function scanPrompt(perRound, claimedIds, order) {
+function scanPrompt(perRound, claimedIds, order, prefixFilter) {
   const claimedJson = claimedIds.length ? JSON.stringify(claimedIds) : 'none';
   const pick = order === 'large'
     ? `the ${perRound} LARGEST unclaimed clusters (front of the array)`
     : `the ${perRound} SMALLEST unclaimed clusters (end of the array)`;
+  const scope = prefixFilter
+    ? `IMPORTANT SCOPE: only consider files under the path prefix "${prefixFilter}". Filter both translatable and clusters to paths starting with "${prefixFilter}/". If NO unclaimed clusters remain under this prefix, set done=true.`
+    : 'Consider the whole repo.';
   return [
     `You are the SCANNER for a ZH->EN translation run in the repo at ${repoWin}.`,
     `1) cd to repo root if needed: cd ${repoBash}`,
@@ -115,9 +118,10 @@ function scanPrompt(perRound, claimedIds, order) {
     `   translatable = [{path,han}] of every still-translatable file;`,
     `   clusters = [{id,han,files:[...]}] where files whose Chinese is byte-identical are grouped.`,
     `   NEVER split a cluster: its files must be translated together to the same English.`,
+    scope,
     `3) Claim whole clusters only. Skip every cluster whose id is in CLAIMED below.`,
     `4) Return take[] = ${pick}, each {id, han, files}.`,
-    `5) done=true ONLY if no unclaimed clusters remain. totalRemainingHan = summary.translatableHan.`,
+    `5) done=true ONLY if no unclaimed clusters remain in scope. totalRemainingHan = summary.translatableHan.`,
     `CLAIMED (excluded): ${claimedJson}`,
   ].join('\n');
 }
@@ -195,6 +199,7 @@ const TARGET = (args && args.targetClusters) || [];
 const DYNAMIC = !!(args && args.all);
 const translateModel = (args && args.translateModel) || undefined;
 const lowRisk = !!(args && args.lowRisk); // lean prompt, no plan re-read (pure-comment batches)
+const prefixFilter = (args && args.prefixFilter) || null; // dynamic mode: restrict scan to this path prefix
 const perRound = (args && args.perRound) || 5;
 const maxRounds = (args && args.maxRounds) || (DYNAMIC ? 300 : 1);
 const order = (args && args.order) || 'small';
@@ -234,7 +239,7 @@ if (TARGET.length) {
   while (!done && stats.rounds < maxRounds) {
     stats.rounds++;
     phase('Scan');
-    const scan = await agent(scanPrompt(perRound, [...claimed], order), { schema: SCAN_SCHEMA, phase: 'Scan', label: `scan:${stats.rounds}` });
+    const scan = await agent(scanPrompt(perRound, [...claimed], order, prefixFilter), { schema: SCAN_SCHEMA, phase: 'Scan', label: `scan:${stats.rounds}` });
     if (!scan) { log(`round ${stats.rounds}: scanner returned nothing - stopping`); break; }
     const take = (scan.take || []).filter((c) => !claimed.has(c.id));
     log(`round ${stats.rounds}: remaining translatable Han=${scan.totalRemainingHan}; claiming ${take.length} cluster(s)`);
