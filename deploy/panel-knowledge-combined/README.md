@@ -311,9 +311,9 @@ VERSION=1.0.0-beta.1 ./publish.sh
 
 `publish.sh` 会依次：
 
-1. 对 `MemoryPanel` / `MemoryKnowledge` 跑 `scripts/secret-scan.sh`
+1. 对 `MemoryPanel` / `MemoryKnowledge` 跑 `scripts/secret-leak-check.sh`
 2. `PREPARE_ONLY=1 ./build.sh` 生成 rsync context（已排除 `.env*`、`metadata-instances.json` 等）
-3. 再扫一遍 context
+3. 再检查一遍 context
 4. `docker buildx build --platform linux/amd64,linux/arm64 --push` 到 `agentmemory/memory-hub:<VERSION>`（默认再打 `:beta`；本地名 `team-memory-panel-knowledge` 只用于 `PUSH=0`，不会 push）
 
 推送后自检：
@@ -333,7 +333,7 @@ docker pull agentmemory/memory-hub:beta
 | `HUB_IMAGE` | `agentmemory/memory-hub` | 仓库名 |
 | `PLATFORMS` | `linux/amd64,linux/arm64` | buildx 目标 |
 | `BUILDER` | `multiarch` | buildx builder 名（不存在则自动 create） |
-| `DRY_RUN` | `0` | `1` = 只扫描 |
+| `DRY_RUN` | `0` | `1` = 只做泄漏检查 |
 | `PUSH` | `1` | `0` = 本地 `--load` 单架构 |
 | `ALSO_BETA` | `1` | `1` = 额外推浮动 `:beta` |
 | `ALSO_LATEST` | `0` | `1` = 额外推 `:latest` |

@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# secret-scan.sh — 扫描仓库工作树里是否有 secret 泄漏
+# secret-leak-check.sh — 检查仓库工作树是否泄漏敏感信息
 #
 # 用法：
-#   scripts/secret-scan.sh                  # 扫仓库根，命中即 exit 1
-#   scripts/secret-scan.sh path1 path2 ...  # 只扫指定路径
+#   scripts/secret-leak-check.sh                  # 检查仓库根，命中即 exit 1
+#   scripts/secret-leak-check.sh path1 path2 ...  # 只检查指定路径
 #
 # 集成方式（三选一）：
 #   1. Git pre-commit hook：
-#        cp scripts/secret-scan.sh .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
-#      （只扫本次 staged 变更即可，脚本会自动检测）
-#   2. Docker build 前手动执行：`bash scripts/secret-scan.sh docker/`
-#   3. CI 里在 build 步骤前跑：`bash scripts/secret-scan.sh || exit 1`
+#        cp scripts/secret-leak-check.sh .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+#      （只检查本次 staged 变更即可，脚本会自动检测）
+#   2. Docker build 前手动执行：`bash scripts/secret-leak-check.sh docker/`
+#   3. CI 里在 build 步骤前跑：`bash scripts/secret-leak-check.sh || exit 1`
 #
 # 命中规则（正则 OR）：
 #   - 高熵字符串 32+ char base64/hex（可能是 Bearer / api_key / secret）
@@ -26,7 +26,7 @@ set -u
 STRICT=0
 [[ "${1:-}" == "--strict" ]] && { STRICT=1; shift; }
 
-# 默认扫的目录（避免扫 node_modules / dist / .git 等）
+# 默认检查的目录（跳过 node_modules / dist / .git 等）
 if [[ $# -eq 0 ]]; then
   TARGETS=(src web/src tests config docker README.md package.json)
 else
@@ -82,13 +82,13 @@ if git rev-parse --show-toplevel >/dev/null 2>&1 && [[ -n "$final" ]]; then
 fi
 
 if [[ -n "$final" ]]; then
-  echo "❌ secret-scan: 命中可能的敏感信息（$(echo "$final" | wc -l | tr -d ' ') 处）"
+  echo "❌ secret-leak-check: 命中可能的敏感信息（$(echo "$final" | wc -l | tr -d ' ') 处）"
   echo
   echo "$final"
   echo
-  echo "如果确认是误报，加进 EXEMPT_PATH 或用 // secret-scan-ignore 注释豁免所在行"
+  echo "如果确认是误报，加进 EXEMPT_PATH 或用 // secret-leak-check-ignore 注释豁免所在行"
   exit 1
 fi
 
-echo "✓ secret-scan: 未发现敏感信息（扫描目标：${TARGETS[*]}）"
+echo "✓ secret-leak-check: 未发现敏感信息（扫描目标：${TARGETS[*]}）"
 exit 0

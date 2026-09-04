@@ -1,84 +1,78 @@
-# Docker Hub 镜像发布
+# Docker Hub Image Publishing
 
-把三件套镜像构建并推送到 Docker Hub 的
-[`agentmemory`](https://hub.docker.com/u/agentmemory) namespace。
+Build and push the triple suite images to the Docker Hub [`agentmemory`](https://hub.docker.com/u/agentmemory) namespace.
 
-`publish.sh` 是自包含的：只依赖各组件自己的 Dockerfile、
-`deploy/panel-knowledge-combined/build.sh` 和 `MemoryPanel/scripts/secret-scan.sh`。
+`publish.sh` is self-contained: it only depends on the respective components' Dockerfiles, `deploy/panel-knowledge-combined/build.sh`, and `MemoryPanel/scripts/secret-leak-check.sh`.
 
-## 组件与镜像名
+## Components and Image Names
 
-| 组件 | 构建上下文 | 镜像 |
+| Component | Build Context | Image |
 |---|---|---|
 | `memory-core` | `MemoryCore/` | `agentmemory/memory-core` |
-| `memory-proxy` | `MemoryProxy/`（rsync 到临时 context） | `agentmemory/memory-proxy` |
-| `memory-hub` | `MemoryPanel/` + `MemoryKnowledge/` 合并 | `agentmemory/memory-hub` |
+| `memory-proxy` | `MemoryProxy/` (rsync to a temporary context) | `agentmemory/memory-proxy` |
+| `memory-hub` | `MemoryPanel/` + `MemoryKnowledge/` combined | `agentmemory/memory-hub` |
 
-## 前置
+## Prerequisites
 
 ```bash
-docker login docker.io          # 账号需有 agentmemory 推送权限
-docker buildx version           # 需要 buildx（脚本会自动创建 builder）
+docker login docker.io          # Account must have agentmemory push permissions
+docker buildx version           # buildx is required (the script will automatically create a builder)
 ```
 
-## 使用
+## Usage
 
 ```bash
 cd deploy/dockerhub
 
-# 三件套一次发布
+# Publish the triple suite at once
 VERSION=1.0.0 ./publish.sh all
 
-# 单个组件
+# Single component
 VERSION=1.0.0 ./publish.sh memory-core
 VERSION=1.0.0 ./publish.sh memory-proxy
 VERSION=1.0.0 ./publish.sh memory-hub
 
-# 干跑：只做 secret-scan 和 context 准备，不构建不推送
+# Dry run: only perform secret-leak-check and context preparation, no build or push
 DRY_RUN=1 VERSION=1.0.0 ./publish.sh all
 
-# 本地单架构构建并抽查镜像内容，不推送
+# Local single-architecture build and spot check image content, no push
 PUSH=0 VERSION=1.0.0 ./publish.sh memory-core
 
-# 同时更新 :latest
+# Simultaneously update :latest
 ALSO_LATEST=1 VERSION=1.0.0 ./publish.sh all
 ```
 
-`VERSION` 必填，且不接受 `dev-` 开头的值，避免把开发 tag 推上公网。
+`VERSION` is required, and does not accept values starting with `dev-` to avoid pushing development tags to the public internet.
 
-## 环境变量
+## Environment Variables
 
-| 变量 | 默认值 | 说明 |
+| Variable | Default Value | Description |
 |---|---|---|
-| `VERSION` | 无（必填） | 镜像 tag |
+| `VERSION` | None (Required) | Image tag |
 | `NAMESPACE` | `agentmemory` | Docker Hub namespace |
-| `REGISTRY` | `docker.io` | 目标 registry |
-| `PLATFORMS` | `linux/amd64,linux/arm64` | 多架构构建目标 |
-| `ALSO_LATEST` | `0` | 是否同时推 `:latest` |
-| `PUSH` | `1` | 置 `0` 则本地 `--load` 单架构，不推送 |
-| `DRY_RUN` | `0` | 置 `1` 只跑扫描与 context 准备 |
-| `LOAD_PLATFORM` | `linux/amd64` | `PUSH=0` 时本地构建的架构 |
-| `KEEP_CTX` | `0` | 置 `1` 复用上次的临时 context |
-| `APT_MIRROR` | `deb.debian.org` | 构建期 apt 源，内网可设为加速镜像 |
+| `REGISTRY` | `docker.io` | Target registry |
+| `PLATFORMS` | `linux/amd64,linux/arm64` | Multi-architecture build targets |
+| `ALSO_LATEST` | `0` | Whether to also push `:latest` |
+| `PUSH` | `1` | Set to `0` to locally `--load` single architecture, no push |
+| `DRY_RUN` | `0` | Set to `1` to only run scanning and context preparation |
+| `LOAD_PLATFORM` | `linux/amd64` | Architecture for local build when `PUSH=0` |
+| `KEEP_CTX` | `0` | Set to `1` to reuse the previous temporary context |
+| `APT_MIRROR` | `deb.debian.org` | Build-time apt source, can be set to an accelerated mirror in intranet |
 
-## 构建期 apt 加速
+## Build-time apt Acceleration
 
-四个 Dockerfile 都通过 `APT_MIRROR` build-arg 控制 apt 源，默认走 Debian 官方，
-公网环境开箱可用。内网构建想加速时统一传一个变量即可，镜像产物本身不受影响：
+All four Dockerfiles control the apt source via the `APT_MIRROR` build-arg, which defaults to the official Debian source, working out of the box in public network environments. If you want to accelerate the build in an intranet, just pass one variable globally; the image artifacts themselves are not affected:
 
 ```bash
 APT_MIRROR=<your-debian-mirror> VERSION=1.0.0 ./publish.sh all
 ```
 
-## 关于可选私有模块
+## About Optional Private Modules
 
-- `MemoryProxy/packages/cost-guard` 是可选扩展，不进公开镜像。`publish.sh` 会在
-  临时 context 里生成一个 stub 包让依赖图能解析；运行时 `src/guard-adapter.ts`
-  的动态 import 失败后自动降级为直通转发。
-- `MemoryCore/src/integrations` 同理，已在 `MemoryCore/.dockerignore` 中排除，
-  运行时走 fallback。
+- `MemoryProxy/packages/cost-guard` is an optional extension and is not included in the public image. `publish.sh` will generate a stub package in the temporary context so the dependency graph can resolve; at runtime, the dynamic import in `src/guard-adapter.ts` will fail and automatically degrade to passthrough routing.
+- The same applies to `MemoryCore/src/integrations`, which has been excluded in `MemoryCore/.dockerignore`, falling back to default behavior at runtime.
 
-## 验证
+## Verification
 
 ```bash
 docker pull agentmemory/memory-core:1.0.0

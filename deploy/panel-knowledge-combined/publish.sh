@@ -2,15 +2,15 @@
 # 发布 Memory Hub 多架构镜像到 Docker Hub。
 #
 # 流程：
-#   1) secret-scan 源码（MemoryPanel + MemoryKnowledge）
-#   2) PREPARE_ONLY 准备 context，再扫一遍 context
+#   1) 检查 MemoryPanel / MemoryKnowledge 的敏感信息泄漏
+#   2) PREPARE_ONLY 准备 context，再检查一遍 context
 #   3) docker buildx 构建 linux/amd64 + linux/arm64 并 push
 #
 # 用法：
 #   ./publish.sh                              # 默认 VERSION=1.0.0-beta.1，并推 :beta
 #   VERSION=1.0.0-beta.2 ./publish.sh         # 版本 tag + 浮动 :beta（默认 ALSO_BETA=1）
 #   ALSO_BETA=0 VERSION=1.0.0-beta.2 ./publish.sh   # 只推版本 tag，不挪 :beta
-#   DRY_RUN=1 ./publish.sh                    # 只扫描 + 准备 context，不 build/push
+#   DRY_RUN=1 ./publish.sh                    # 只做泄漏检查 + 准备 context，不 build/push
 #   PUSH=0 ./publish.sh                       # 本地 --load 单架构（默认 amd64）供抽查
 #   ALSO_LATEST=1 ./publish.sh                # 额外打 agentmemory/memory-hub:latest（正式版再用）
 #
@@ -36,28 +36,28 @@ DRY_RUN="${DRY_RUN:-0}"
 PUSH="${PUSH:-1}"
 ALSO_BETA="${ALSO_BETA:-1}"
 ALSO_LATEST="${ALSO_LATEST:-0}"
-SECRET_SCAN="${SECRET_SCAN:-$TMC_DIR/scripts/secret-scan.sh}"
+SECRET_LEAK_CHECK="${SECRET_LEAK_CHECK:-$TMC_DIR/scripts/secret-leak-check.sh}"
 
 err() { echo "[publish-hub] error: $*" >&2; exit 1; }
 log() { echo "[publish-hub] $*"; }
 
 [[ -f "$TMC_DIR/package.json" ]] || err "MemoryPanel 不在 $TMC_DIR"
 [[ -f "$KNOWLEDGE_DIR/package.json" ]] || err "MemoryKnowledge 不在 $KNOWLEDGE_DIR"
-[[ -f "$SECRET_SCAN" ]] || err "secret-scan 不在 $SECRET_SCAN"
+[[ -f "$SECRET_LEAK_CHECK" ]] || err "secret-leak-check 不在 $SECRET_LEAK_CHECK"
 [[ -f "$SCRIPT_DIR/Dockerfile" ]] || err "Dockerfile 缺失"
 command -v docker >/dev/null || err "需要 docker"
 command -v rsync >/dev/null || err "需要 rsync"
 
-# ── 1) 源码 secret-scan ─────────────────────────────────────────────
-log "secret-scan: MemoryPanel"
+# ── 1) 源码泄漏检查 ───────────────────────────────────────────────────────
+log "secret-leak-check: MemoryPanel"
 (
   cd "$TMC_DIR"
-  bash "$SECRET_SCAN" src web/src config package.json
+  bash "$SECRET_LEAK_CHECK" src web/src config package.json
 )
-log "secret-scan: MemoryKnowledge"
+log "secret-leak-check: MemoryKnowledge"
 (
   cd "$KNOWLEDGE_DIR"
-  bash "$SECRET_SCAN" src .env.example package.json
+  bash "$SECRET_LEAK_CHECK" src .env.example package.json
 )
 
 # ── 2) 准备 context ─────────────────────────────────────────────────
@@ -68,10 +68,10 @@ KEEP_CTX=1 PREPARE_ONLY=1 CTX_DIR="$CTX_DIR" IMAGE_TAG="scan-$VERSION" \
 [[ -f "$CTX_DIR/panel/package.json" && -f "$CTX_DIR/knowledge/package.json" ]] \
   || err "context 准备失败：$CTX_DIR"
 
-log "secret-scan: build context"
+log "secret-leak-check: build context"
 (
   cd "$CTX_DIR"
-  bash "$SECRET_SCAN" panel knowledge Dockerfile start-combined.sh .dockerignore
+  bash "$SECRET_LEAK_CHECK" panel knowledge Dockerfile start-combined.sh .dockerignore
 )
 
 if [[ "$DRY_RUN" == "1" ]]; then
