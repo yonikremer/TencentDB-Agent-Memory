@@ -30,6 +30,8 @@ export const protectedGlobs = [
   'MemoryKnowledge/src/engines/wiki/tokenize.ts',
   'MemoryKnowledge/src/engines/wiki/**/*.test.ts',
   'MemoryKnowledge/src/engines/wiki/**/*.spec.ts',
+  'MemoryKnowledge/src/engines/wiki/ingest-v2/slug.ts', // docstring example must show CJK -> CJK slug output
+  'MemoryKnowledge/docs/retrieval-augmented-ingestion-reimplementation.md', // code-fence CJK literals/stop-words/ranges
   // Functional Chinese tokens, user decision 2026-09-04 (EN mirror added alongside).
   'MemoryCore/src/utils/sanitize.ts',
   'MemoryCore/src/core/skill/skill-extractor.ts',

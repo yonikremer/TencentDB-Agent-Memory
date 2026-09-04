@@ -114,7 +114,7 @@ export function createLlmClient(config: NormalizedLlmConfig): LlmClient {
       const label = params.label ?? "chat";
       const promptChars = params.system.length + params.prompt.length;
       const startMs = Date.now();
-      log.info(`LLM 调用开始 [${label}]`, {
+      log.info(`LLM call started [${label}]`, {
         model: config.model,
         protocol: config.protocol,
         promptChars,

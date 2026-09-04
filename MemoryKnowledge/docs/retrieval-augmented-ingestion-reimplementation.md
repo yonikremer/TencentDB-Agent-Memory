@@ -259,7 +259,7 @@ if (getWikiRetrievalEnabled()) {
       }
       return formatRetrievedPages(pages, maxChars);
     } catch (err) {
-      log.warn("wiki 检索增强摄取失败，降级无增强", { wiki: name, error: err instanceof Error ? err.message : String(err) });
+      log.warn("wiki retrieval-augmented ingestion failed, degrading to no augmentation", { wiki: name, error: err instanceof Error ? err.message : String(err) });
       return "";
     }
   };
@@ -314,9 +314,9 @@ has only the function):
 
 ```ts
 /**
- * 检索增强摄取：调用方（manager）注入的检索函数。
- * 对每个源分块文本调用一次，返回该块相关的既有页正文上下文——逐块检索。
- * 返回空串 = 该块不增强（任何失败同样降级为空串）。
+ * Retrieval-augmented ingestion: retrieval function injected by the caller (manager).
+ * Called once per source chunk text; returns existing page body context relevant to that chunk — per-chunk retrieval.
+ * Empty string = that chunk is not augmented (any failure degrades to empty string).
  */
 retrieveContext?: (chunkText: string) => string;
 ```
@@ -325,13 +325,13 @@ retrieveContext?: (chunkText: string) => string;
 Inside the chunk loop, after computing `chunkLabel`/`tag`, before building prompts:
 
 ```ts
-// 逐块检索：每块用其自身文本搜相关既有页（而非整文件一次、所有块共用）。
+// Per-chunk retrieval: each chunk searches relevant existing pages with its own text (rather than once for the whole file, shared by all chunks).
 let retrievalContext = "";
 if (options.retrieveContext) {
   try {
     retrievalContext = options.retrieveContext(chunks[i]);
   } catch (err) {
-    log.warn("分块检索增强失败，该块降级无增强", { chunk: tag, error: err instanceof Error ? err.message : String(err) });
+    log.warn("Per-chunk retrieval augmentation failed, chunk degraded to no augmentation", { chunk: tag, error: err instanceof Error ? err.message : String(err) });
   }
 }
 ```

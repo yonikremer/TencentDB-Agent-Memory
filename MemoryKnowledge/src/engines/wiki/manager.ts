@@ -528,11 +528,11 @@ export async function runIngestIncremental(
   const report = createThrottledProgressFn(onProgress);
   const sourcesDir = join(projectPath, "raw", "sources");
   if (!existsSync(sourcesDir)) {
-    log.warn("runIngest: raw/sources 不存在，跳过", { projectPath });
+    log.warn("runIngest: raw/sources does not exist, skipping", { projectPath });
     return { results: [], processed: [], deletedSources: [...oldStates.keys()] };
   }
 
-  // 扫描磁盘源，算 sha。filename = 相对 sourcesDir 的 posix 路径（与 rawWrite 的 filename 对齐）。
+  // Scan disk sources and compute sha. filename = posix path relative to sourcesDir (aligned with rawWrite's filename).
   const disk = findMdFiles(sourcesDir).map((abs) => {
     const content = readFileSync(abs, "utf-8");
     return {
@@ -547,7 +547,7 @@ export async function runIngestIncremental(
   const skippedCount = skipped.length;
   const toIngestSet = new Set(toIngest);
   const toIngestDisk = disk.filter((d) => toIngestSet.has(d.filename));
-  log.info("runIngest 增量分类", {
+  log.info("runIngest incremental classification", {
     projectPath,
     disk: disk.length,
     toIngest: toIngest.length,
@@ -559,7 +559,7 @@ export async function runIngestIncremental(
   const concurrency = getIngestConcurrency();
   const wikiLimit = pLimit(concurrency);
 
-  // ── 阶段1：并行 LLM 抽取 ──
+  // ── Phase 1: parallel LLM extraction ──
   report?.({
     phase: "extracting",
     total: toIngestDisk.length,
@@ -593,7 +593,7 @@ export async function runIngestIncremental(
           skipped: skippedCount,
           percent: Math.round(((completed + failed) / Math.max(toIngestDisk.length, 1)) * 90),
         });
-        log.info("runIngest 单源抽取完成", {
+        log.info("runIngest per-source extraction complete", {
           source: d.filename,
           candidates: candidates.size,
           ms: Date.now() - t0,
@@ -609,7 +609,7 @@ export async function runIngestIncremental(
           skipped: skippedCount,
           percent: Math.round(((completed + failed) / Math.max(toIngestDisk.length, 1)) * 90),
         });
-        log.error("runIngest 单源抽取失败", {
+        log.error("runIngest per-source extraction failed", {
           source: d.filename,
           ms: Date.now() - t0,
           error: String(err),
@@ -626,7 +626,7 @@ export async function runIngestIncremental(
 
   const extractResults = await Promise.all(tasks);
 
-  // ── 已删源级联清理（与现有逻辑对齐）──
+  // ── Cascade cleanup of deleted sources (aligned with existing logic) ──
   if (deleted.length > 0) {
     try {
       const { deleteSourceFiles } = await import("./ingest-v2/cascade.js");
@@ -636,11 +636,11 @@ export async function runIngestIncremental(
         { logReason: "wiki/ingest/removed-source" },
       );
     } catch (err) {
-      log.warn("已删源级联清理失败", { error: String(err) });
+      log.warn("cascade cleanup of deleted sources failed", { error: String(err) });
     }
   }
 
-  // ── 阶段2：串行落盘合并 ──
+  // ── Phase 2: serial disk merge ──
   report?.({
     phase: "merging",
     total: toIngestDisk.length,
@@ -656,31 +656,31 @@ export async function runIngestIncremental(
     candidates: r.candidates,
   }));
 
-  // B-1：仅在有候选需 merge/overview 时建 client；失败不 throw，保证上层仍能写 source 状态。
-  // 纯 no-op（toIngest=0）或抽取全失败时不建 client（commit 只 rebuild index，不调 LLM）。
+  // B-1: Only create client when there are candidates needing merge/overview; failures don't throw, so the caller can still write source status.
+  // Don't create client when it is a pure no-op (toIngest=0) or all extractions failed (commit only rebuilds index, no LLM call).
   let llm: import("./ingest-v2/llm.js").LlmClient | undefined;
   if (allCandidates.length > 0) {
     try {
       const { createLlmClient } = await import("./ingest-v2/llm.js");
       llm = createLlmClient(llmConfig);
     } catch (err) {
-      log.error("创建 LLM client 失败（阶段2 merge/overview 将降级，source 状态仍会落库）", {
+      log.error("failed to create LLM client (phase 2 merge/overview will degrade, source status will still be persisted)", {
         error: String(err),
       });
     }
   }
 
-  // 无成功抽取时仍可能需要在级联删除后重建 index.md；skipLog 避免空 batch 日志
+  // With no successful extraction, index.md may still need rebuilding after cascade deletion; skipLog avoids empty-batch logs
   const { written, mergeErrors } = await commitCandidates(projectPath, allCandidates, llm, {
     globalLlmLimit,
     skipLog: allCandidates.length === 0,
   });
 
   if (mergeErrors.length > 0) {
-    log.warn("阶段2 合并部分页失败", { count: mergeErrors.length, errors: mergeErrors });
+    log.warn("phase 2 failed to merge some pages", { count: mergeErrors.length, errors: mergeErrors });
   }
 
-  // ── 源状态判定（必须在 commitCandidates 之后）──
+  // ── Source status determination (must run after commitCandidates) ──
   const processed: ProcessedSource[] = extractResults.map((r) => {
     if (!r.ok) {
       return { filename: r.filename, sha256: r.sha256, size: r.size, ok: false, error: r.error };
@@ -699,7 +699,7 @@ export async function runIngestIncremental(
     };
   });
 
-  // ── 阶段3：overview（FTS 索引由上层 ingest 写事务完成）──
+  // ── Phase 3: overview (FTS index built by the upper-layer ingest write transaction) ──
   report?.({
     phase: "indexing",
     total: toIngestDisk.length,
@@ -711,14 +711,14 @@ export async function runIngestIncremental(
 
   if (successResults.length > 0) {
     if (!llm) {
-      log.warn("overview 跳过：LLM client 不可用（不影响摄取）");
+      log.warn("overview skipped: LLM client unavailable (does not affect ingestion)");
     } else {
       try {
         const { generateOverview } = await import("./ingest-v2/overview.js");
         const runOverview = () => generateOverview(projectPath, llm);
         await (globalLlmLimit ? globalLlmLimit(runOverview) : runOverview());
       } catch (err) {
-        log.warn("overview 生成失败（不影响摄取）", { error: String(err) });
+        log.warn("overview generation failed (does not affect ingestion)", { error: String(err) });
       }
     }
   }
@@ -731,14 +731,14 @@ export async function runIngestIncremental(
   });
 
   const okCount = processed.filter((p) => p.ok).length;
-  log.info("runIngest 全部完成", {
+  log.info("runIngest complete", {
     total: results.length,
     ok: okCount,
     failed: results.length - okCount,
     written: written.length,
   });
 
-  // 全部失败检测：不在此处 throw（由上层写事务后判定，保证 source 状态已持久化）。
+  // All-failure detection: don't throw here (the upper-layer write transaction decides afterwards, ensuring source status is persisted).
   return { results, processed, deletedSources: deleted };
 }
 
@@ -804,9 +804,9 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
   function rebuildIndex(name: string, pages: WikiPage[]) {
     const state = sources.get(name);
     if (!state) throw new Error(`rebuildIndex: unknown wiki ${name}`);
-    initIndexDb(state.path); // 幂等：首次注册即建库+4表；已存在则无操作
+    initIndexDb(state.path); // Idempotent: first register creates DB + 4 tables; if already present, no-op
     withWriteDb(state.path, (db) => writeIndex(db, pages));
-    evictWikiDb(name); // 丢弃可能持有旧快照的读连接，下次查询重开
+    evictWikiDb(name); // Drop read connections that may hold a stale snapshot; reopen on next query
   }
 
   function searchInternal(name: string, query: string, limit: number, options: SearchOptions): SearchResponse {
@@ -924,10 +924,10 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
       const pages = scanWikiDir(state.path);
       rebuildIndex(name, pages);
       state.status = "ready"; state.pageCount = pages.length; state.lastSyncAt = new Date().toISOString(); state.error = undefined;
-      log.info("sync 完成（索引已重建）", { name, pageCount: pages.length, ms: Date.now() - t0 });
+      log.info("sync complete (index rebuilt)", { name, pageCount: pages.length, ms: Date.now() - t0 });
     } catch (err) {
       state.status = "error"; state.error = String(err);
-      log.error("sync 失败", { name, path: state.path, error: String(err) });
+      log.error("sync failed", { name, path: state.path, error: String(err) });
     }
     persist();
     return state;
@@ -942,18 +942,19 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
     const state = sources.get(name);
     if (!state) throw new Error(`Not found: ${name}`);
     const projectPath = state.path;
-    initIndexDb(projectPath); // 确保 index.db 存在（register 通常已建，幂等）
+    initIndexDb(projectPath); // Ensure index.db exists (register usually creates it already; idempotent)
 
-    // 读上次 source 状态（增量判断基线）——须在抽取前读取。
+    // Read the last source states (baseline for incremental detection) - must be read before extraction.
     let oldStates = new Map<string, { sha256: string; status: SourceStatus }>();
     try {
       oldStates = readSourceStates(getReadDb(name, projectPath));
     } catch {
-      /* 库刚建 / 无 source 行 → 全部视为新增 */
+      /* DB just created / no source rows -> treat all as new */
     }
 
-    // 检索增强摄取：启用时构造"源文档 → 相关既有页正文"闭包，复用 searchInternal + readPage
-    // （与 /v3/search、agent tools 同一检索面）。任何失败降级为无增强，绝不阻断摄取。
+    // Retrieval-augmented ingestion: when enabled, build a "source doc -> related existing page body"
+    // closure reusing searchInternal + readPage (same retrieval surface as /v3/search and agent tools).
+    // Any failure degrades to no augmentation and never blocks ingestion.
     let retrieveContext: ((sourceText: string) => string) | undefined;
     if (getWikiRetrievalEnabled()) {
       const topK = getWikiRetrievalTopK();
@@ -971,7 +972,7 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
           }
           return formatRetrievedPages(pages, maxChars);
         } catch (err) {
-          log.warn("wiki 检索增强摄取失败，降级无增强", { wiki: name, error: err instanceof Error ? err.message : String(err) });
+          log.warn("wiki retrieval-augmented ingestion failed, degrading to no augmentation", { wiki: name, error: err instanceof Error ? err.message : String(err) });
           return "";
         }
       };
@@ -1014,7 +1015,7 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
       state.pageCount = pages.length;
       state.lastSyncAt = new Date().toISOString();
       state.error = undefined;
-      log.info("ingest 完成（增量抽取 + 索引/源状态同事务重建）", {
+      log.info("ingest complete (incremental extraction + index/source status rebuilt in same transaction)", {
         name,
         pageCount: pages.length,
         extracted: outcome.processed.length,
@@ -1024,7 +1025,7 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
     } catch (err) {
       state.status = "error";
       state.error = String(err);
-      log.error("ingest 失败", { name, path: projectPath, error: String(err) });
+      log.error("ingest failed", { name, path: projectPath, error: String(err) });
       persist();
       throw err;
     }
