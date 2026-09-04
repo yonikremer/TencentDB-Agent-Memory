@@ -17,12 +17,13 @@ import { PATH_SEP, SKIP_LABEL, MORE_LABEL } from "./form.js";
 
 const SKIP_RE = /跳过|不关联|skip/i;
 
-/** Bypass 标记：用户选了"本次不关联"，整个 session-init 直接跳过。 */
+/** Bypass marker: the user chose "do not associate this time", so the whole session-init is skipped directly. */
 export const BYPASS_MARKER = "__bypass__" as const;
 
 /**
- * 分页"更多"标记：Claude Code 分页流里，用户点"更多 →"会触发 handler 把
- * agentPageIndex+1 并重发下一页 form。状态保持 pending_agent_task，不算 retry。
+ * Paging "More" marker: in the Claude Code paging flow, clicking "More →" makes the
+ * handler bump agentPageIndex by 1 and resend the next page of the form. The state
+ * stays pending_agent_task, which does not count as a retry.
  */
 export const MORE_MARKER = "__more__" as const;
 
@@ -35,9 +36,9 @@ export const MORE_MARKER = "__more__" as const;
  *   <title>...</title>
  *   <questions>
  *   <question_item id="agent">
- *   <question>请选择本次会话使用的 Agent：</question>
+ *   <question>Please select the Agent to use for this session:</question>
  *   <answers>
- *   Bug Fixer — 自动定位并修复代码缺陷
+ *   Bug Fixer — automatically locates and fixes code defects
  *   </answers>
  *   </question_item>
  *   <question_item id="task">...</question_item>
@@ -64,8 +65,8 @@ function parseQuestionAnswerXml(
     /<question_item\s+id="([^"]+)"\s*>[\s\S]*?<answers>\s*([\s\S]*?)\s*<\/answers>/g;
   let m: RegExpExecArray | null;
   let index = 0;
-  // 先扫描所有 question_item，判断总共有几个 question。
-  // 轮1 form 只有 1 个 question（team），轮2 form 有 2 个（agent + task）。
+  // First scan all question_items to determine how many questions there are in total.
+  // Round 1 form has 1 question (team); round 2 form has 2 (agent + task).
   const allIds: string[] = [];
   const idRe = /<question_item\s+id="([^"]+)"\s*>/g;
   let idM: RegExpExecArray | null;
@@ -81,7 +82,7 @@ function parseQuestionAnswerXml(
       index++;
       continue;
     }
-    // 已知 id：team / agent / task；未知 id 走索引兜底
+    // Known ids: team / agent / task; unknown ids fall back to the positional index
     if (id === "team") {
       result.teamAnswer = result.teamAnswer ?? answer;
     } else if (id === "agent") {
@@ -90,16 +91,16 @@ function parseQuestionAnswerXml(
       result.taskAnswer = result.taskAnswer ?? answer;
     } else if (id === "q1") {
       if (isSingleQuestion) {
-        // 轮1 form 只有 1 个 question — q1 就是 team
+        // Round 1 form has only 1 question — q1 is team
         result.teamAnswer = result.teamAnswer ?? answer;
       } else {
-        // 轮2 form 有 2 个 question — q1 是 agent
+        // Round 2 form has 2 questions — q1 is agent
         result.agentAnswer = result.agentAnswer ?? answer;
       }
     } else if (id === "q2" && !isSingleQuestion) {
       result.taskAnswer = result.taskAnswer ?? answer;
     } else if (index === 0 && !result.teamAnswer && !result.agentAnswer) {
-      // 兜底：第一个 question 且 id 未知，归到 team
+      // Fallback: the first question with an unknown id goes to team
       result.teamAnswer = answer;
     }
     index++;
@@ -109,16 +110,18 @@ function parseQuestionAnswerXml(
 }
 
 /**
- * 轮1 提取：从用户答复中识别选定的 team_id。
+ * Round 1 extraction: identify the selected team_id from the user's reply.
  *
- * 解析策略按 agentSource 分叉：
- * - **CodeBuddy**: 用户选择在 `role: "user"` 消息中（`<question_answer>` XML 或纯文本），
- *   直接走 XML 解析 + substring fallback。不做 JSON 解析，避免误读 tool 空壳。
- * - **Claude Code**: 用户选择在 `role: "tool"` 消息中（`multi_question_result` JSON
- *   或 `AskUserQuestion` tool_result），走 JSON 解析 + substring fallback。
+ * The parsing strategy branches on agentSource:
+ * - **CodeBuddy**: the user's choice lives in a `role: "user"` message
+ *   (`<question_answer>` XML or plain text), so parse the XML + substring fallback.
+ *   No JSON parsing, to avoid misreading an empty tool-call shell.
+ * - **Claude Code**: the user's choice lives in a `role: "tool"` message
+ *   (`multi_question_result` JSON or `AskUserQuestion` tool_result), so parse the
+ *   JSON + substring fallback.
  *
  * @param agentSource  "codebuddy" | "claude-code"
- * @returns team_id，或 BYPASS_MARKER（用户选了"本次不关联"），或 null（未识别）
+ * @returns team_id, or BYPASS_MARKER (user chose "do not associate this time"), or null (unrecognized)
  */
 export function extractTeamFromOptionText(
   content: string,
@@ -175,17 +178,18 @@ export function extractTeamFromOptionText(
     }
   }
 
-  // 检测"本次不关联"→ 直接 bypass（只在已提取到 teamText 时判断，
-  // 避免 content 中表单选项文本里的 "跳过/不关联" 误触发 bypass）
+  // Detect "do not associate this time" → bypass directly (only judged once teamText
+  // is extracted, so "skip / do not associate" inside the form option text in content
+  // won't spuriously trigger bypass)
   if (teamText && (teamText.includes(SKIP_LABEL) || SKIP_RE.test(teamText.trim()))) {
     return BYPASS_MARKER;
   }
 
-  // 匹配策略（team 选项 label 格式: "team名 (id尾8位)"）：
-  //   1. 精确匹配完整 label（含 id 后缀）
-  //   2. 精确匹配纯 team_name
-  //   3. 按 id 后缀匹配 "(xxxxxxxx)" 部分
-  //   4. substring fallback（按名称长度降序）
+  // Matching strategy (team option label format: "team name (id trailing 8 chars)"):
+  //   1. Exact match on the full label (including the id suffix)
+  //   2. Exact match on team_name alone
+  //   3. Match the "(xxxxxxxx)" part by id suffix
+  //   4. substring fallback (by name length, descending)
   const hay = teamText ?? content;
   const trimmed = hay.trim();
 
@@ -214,13 +218,14 @@ export function extractTeamFromOptionText(
 }
 
 /**
- * 在指定 team 内匹配 agent。轮2 form 把 team 已经定死，没有跨 team 误匹配的可能。
+ * Match an agent within a given team. The round 2 form already pins the team, so there
+ * is no chance of a cross-team mismatch.
  *
- * 匹配策略（agent 选项 label 格式: "agent名 (id尾8位)"）：
- *   1. 精确匹配完整 label（含 id 后缀）
- *   2. 精确匹配纯 agent_name
- *   3. 按 id 后缀匹配 "(xxxxxxxx)" 部分
- *   4. substring fallback（按 agent_name 长度倒序避免短名误匹配）
+ * Matching strategy (agent option label format: "agent name (id trailing 8 chars)"):
+ *   1. Exact match on the full label (including the id suffix)
+ *   2. Exact match on agent_name alone
+ *   3. Match the "(xxxxxxxx)" part by id suffix
+ *   4. substring fallback (by agent_name length descending, to avoid short-name false matches)
  */
 function matchAgentInTeam(text: string, team: TeamOption): string | null {
   const trimmed = text.trim();
@@ -250,10 +255,10 @@ function matchAgentInTeam(text: string, team: TeamOption): string | null {
 }
 
 /**
- * 在指定 team 内匹配 task。task 选项 label 格式: "任务名 (id尾8位)"。
- *   - 先尝试精确匹配完整 label（含 id 后缀）
- *   - 再尝试仅匹配 task_name
- *   - substring fallback（按名称长度降序，优先长名）
+ * Match a task within a given team. Task option label format: "task name (id trailing 8 chars)".
+ *   - First try an exact match on the full label (including the id suffix)
+ *   - Then try matching task_name alone
+ *   - substring fallback (by name length descending, longer names first)
  */
 function matchTaskInTeam(
   text: string,
@@ -263,28 +268,28 @@ function matchTaskInTeam(
   if (!text) return undefined;
   const trimmed = text.trim();
 
-  // 1) 精确匹配完整 label: "任务名 (xxxxxxxx)"
+  // 1) Exact match on the full label: "task name (xxxxxxxx)"
   const exactFull = team.tasks.find((t) => `${t.task_name} (${t.task_id.slice(-8)})` === trimmed);
   if (exactFull) return exactFull.task_id;
 
-  // 2) 精确匹配纯 task_name（可能有多个同名，返回第一个）
+  // 2) Exact match on task_name alone (may have several same-name entries; return the first)
   const exactName = team.tasks.find((t) => t.task_name === trimmed);
   if (exactName) return exactName.task_id;
 
-  // 3) 按 id 后缀精确匹配 "(xxxxxxxx)" 部分
+  // 3) Exact match on the "(xxxxxxxx)" part by id suffix
   const suffixMatch = trimmed.match(/\((\w{8})\)$/);
   if (suffixMatch) {
     const exactSuffix = team.tasks.find((t) => t.task_id.slice(-8) === suffixMatch[1]);
     if (exactSuffix) return exactSuffix.task_id;
   }
 
-  // 4) substring fallback：按 task_name 长度降序
+  // 4) substring fallback: by task_name length descending
   const sorted = [...team.tasks].sort((a, b) => b.task_name.length - a.task_name.length);
   for (const t of sorted) {
     if (trimmed.includes(t.task_name)) return t.task_id;
   }
 
-  // 5) 宽松匹配：trimmed 中任意 8 字符子串匹配 id 后缀
+  // 5) Loose match: any 8-character substring of trimmed matching the id suffix
   for (const t of team.tasks) {
     if (trimmed.includes(t.task_id.slice(-8))) return t.task_id;
   }
@@ -292,7 +297,7 @@ function matchTaskInTeam(
   return undefined;
 }
 
-/** @deprecated 旧扁平结构，仅保留供老测试调用。 */
+/** @deprecated Legacy flat structure, kept only for old tests to call. */
 function matchAgent(text: string, agents: AgentOption[]): string | null {
   const exact = agents.find((a) => a.name === text);
   if (exact) return exact.id;
@@ -303,7 +308,7 @@ function matchAgent(text: string, agents: AgentOption[]): string | null {
   return null;
 }
 
-/** @deprecated 旧扁平结构，仅保留供老测试调用。 */
+/** @deprecated Legacy flat structure, kept only for old tests to call. */
 function matchTask(text: string, tasks: TaskOption[]): string | undefined {
   const exact = tasks.find((t) => t.name === text);
   if (exact) return exact.id;
@@ -315,17 +320,20 @@ function matchTask(text: string, tasks: TaskOption[]): string | undefined {
 }
 
 /**
- * 轮2 提取：从用户答复中识别 agent + task，**强制限定在已选定的 team 内**。
- * 跨 team 错配从协议层杜绝（轮1 form 已经把 team 定死）。
+ * Round 2 extraction: identify agent + task from the user's reply, **strictly limited
+ * to the already-selected team**. Cross-team mismatches are ruled out at the protocol
+ * layer (the round 1 form already pins the team).
  *
- * 解析策略按 agentSource 分叉：
- * - **CodeBuddy**: 用户选择在 `role: "user"` 消息中，走 `<question_answer>` XML 解析
- *   + substring fallback。不做 JSON 解析，避免误读 tool 空壳。
- * - **Claude Code**: 用户选择在 `role: "tool"` 消息中（`multi_question_result` JSON
- *   或 `AskUserQuestion` tool_result），走 JSON 解析 + substring fallback。
+ * The parsing strategy branches on agentSource:
+ * - **CodeBuddy**: the user's choice lives in a `role: "user"` message, so parse the
+ *   `<question_answer>` XML + substring fallback. No JSON parsing, to avoid misreading
+ *   an empty tool-call shell.
+ * - **Claude Code**: the user's choice lives in a `role: "tool"` message
+ *   (`multi_question_result` JSON or `AskUserQuestion` tool_result), so parse the
+ *   JSON + substring fallback.
  *
  * @param agentSource  "codebuddy" | "claude-code"
- * @returns `{ agent_id: BYPASS_MARKER }` 表示用户选了"本次不关联"。
+ * @returns `{ agent_id: BYPASS_MARKER }` if the user chose "do not associate this time".
  */
 export function extractFromOptionText(
   content: string,
@@ -333,7 +341,7 @@ export function extractFromOptionText(
   selectedTeamId?: string,
   agentSource: string = "codebuddy",
 ): SessionInitData | null {
-  // 必须有已选 team 才进入轮2 解析；否则视为非法状态。
+  // Round 2 parsing requires an already-selected team; otherwise treat as invalid state.
   const team = selectedTeamId
     ? cachedTeams.find((t) => t.team_id === selectedTeamId)
     : cachedTeams.length === 1
@@ -400,24 +408,24 @@ export function extractFromOptionText(
     }
   }
 
-  // 检测 Agent 选了"更多 →"→ 翻页（仅在已提取到 agentText 时判断，
-  // 避免 content 中表单选项文本里的 label 误触发）
+  // Detect that the Agent selected "More →" → page (only judged once agentText is
+  // extracted, so a label inside the form option text in content won't spuriously trigger it)
   if (agentText && agentText.includes(MORE_LABEL)) {
     return { agent_id: MORE_MARKER };
   }
 
-  // 检测 Agent 选了"本次不关联"→ bypass（同上，仅在明确提取到 agentText 时判断）
+  // Detect that the Agent selected "do not associate this time" → bypass (same as above, only judged when agentText was clearly extracted)
   if (agentText && (agentText.includes(SKIP_LABEL) || SKIP_RE.test(agentText.trim()))) {
     return { agent_id: BYPASS_MARKER };
   }
 
-  // Resolve agent —— 严格只在 team.agents 内匹配
+  // Resolve agent —— match strictly within team.agents only
   let agentId: string | null = null;
   if (agentText) agentId = matchAgentInTeam(agentText, team);
   if (!agentId) agentId = matchAgentInTeam(content, team);
   if (!agentId) return null;
 
-  // Resolve task —— 同 team 内匹配；显式 skip 时返回 undefined
+  // Resolve task —— match within the same team; return undefined on an explicit skip
   let taskId: string | undefined;
   const taskHay = taskText ?? content;
   if (!SKIP_RE.test(taskHay)) {
@@ -448,7 +456,7 @@ export function extractStructured(content: string): SessionInitData | null {
 
 /**
  * Resolve user's agent selection from a possibly numeric / partial label.
- * 数字按所选 team 的 agents 1-based 取索引；字符串原样返回。
+ * Numbers index into the selected team's agents (1-based); strings are returned as-is.
  */
 export function resolveAgent(
   rawAgentId: string,
@@ -460,9 +468,9 @@ export function resolveAgent(
     : cachedTeams.length === 1
       ? cachedTeams[0]
       : null;
-  // 仅在 rawAgentId 是 **纯数字**（"1" / "2" 这种序号回复）时按 1-based 索引解析。
-  // 严禁用 parseInt 容忍前缀数字 —— ULID 以 "01..." 开头，parseInt 会拿到 1，
-  // 把所有真实 agent_id 错误地映射成 team.agents[0]（团队首个 agent）。
+  // Resolve via a 1-based index only when rawAgentId is a **pure number** (a rank reply such as "1" / "2").
+  // Never use parseInt to tolerate a leading digit —— ULIDs start with "01...", so parseInt would yield 1
+  // and wrongly map every real agent_id to team.agents[0] (the team's first agent).
   if (team && /^\d+$/.test(rawAgentId)) {
     const num = parseInt(rawAgentId, 10);
     if (num > 0 && num <= team.agents.length) {
@@ -474,7 +482,8 @@ export function resolveAgent(
 
 /**
  * Resolve user's task selection from a possibly numeric / raw value.
- * 数字按所选 team 内的 task 列表 1-based 取索引，agentHintId 优先；字符串原样返回。
+ * Numbers index into the effective team's task list (1-based, agentHintId preferred);
+ * strings are returned as-is.
  */
 export function resolveTask(
   rawTaskId: string | undefined,
@@ -488,7 +497,7 @@ export function resolveTask(
     : cachedTeams.length === 1
       ? cachedTeams[0]
       : null;
-  // 同 resolveAgent：只接受纯数字序号，避免 parseInt 容忍 "01KV..." 前缀的 "0" 误判。
+  // Same as resolveAgent: only accept a pure-numeric rank, so parseInt won't misread the leading "0" of an "01KV..." prefix.
   if (team && /^\d+$/.test(rawTaskId)) {
     const num = parseInt(rawTaskId, 10);
     if (num > 0 && num <= team.tasks.length) {

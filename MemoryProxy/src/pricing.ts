@@ -1,13 +1,14 @@
 /**
  * Credit pricing lookup for LLM usage → cost calculation.
  *
- * TDAI 下发的计费规则以 Credit / 1K Token 为单位，按不同 token 类型
- * (input / output / cacheRead / cacheWrite5m / cacheWrite1h) 分别定价。
- * 定价表放在 config.yaml 的 `creditPricing.models`，支持热更新。
+ * TDAI-issued billing rules are quoted in Credit / 1K Token units, priced separately
+ * by token type (input / output / cacheRead / cacheWrite5m / cacheWrite1h).
+ * The pricing table lives in `creditPricing.models` in config.yaml and supports hot reload.
  *
- * 匹配规则（`getModelPricing`）：
- *   大小写不敏感的全词匹配 —— modelId 与 config.name 忽略大小写后必须完全相等。
- *   未匹配时返回 null，调用方降级为 raw token count。
+ * Matching rule (`getModelPricing`):
+ *   Case-insensitive full-word match — after ignoring case, modelId and config.name
+ *   must be exactly equal.
+ *   When there is no match, returns null and the caller falls back to raw token count.
  */
 
 import type { CreditPricingConfig, CreditPricingEntry } from "./types.js";
@@ -30,19 +31,19 @@ export function getModelPricing(
 }
 
 /**
- * 解析 model 的展示名（用于 UI/报表）。
+ * Resolve a model's display name (for UI/reporting).
  *
- * 匹配逻辑：
- * 1. `modelId` 空/null/undefined → 返回 `""`
- * 2. 定价表命中且 entry.modelName 非空 → 返回 entry.modelName（如 "Claude Sonnet 4"）
- * 3. 定价表未命中 或 命中但 modelName 未配置/为空 → **回落 modelId 本身**
- *    （前端始终有非空展示；unknown model 至少能看到内部 ID）
+ * Matching logic:
+ * 1. `modelId` is empty/null/undefined → returns `""`
+ * 2. Pricing table hit and entry.modelName is non-empty → returns entry.modelName (e.g. "Claude Sonnet 4")
+ * 3. Pricing table miss, or hit but modelName is not configured/empty → **falls back to modelId itself**
+ *    (the frontend always has a non-empty display; an unknown model can at least see its internal ID)
  *
- * 与 `getModelPricing` 共用一份匹配逻辑（大小写不敏感全词匹配）。
+ * Shares the same matching logic as `getModelPricing` (case-insensitive full-word match).
  *
  * @param config - Credit pricing configuration.
  * @param modelId - Model identifier from usage.
- * @returns 展示名字符串（永远非 null，可能为 ""）。
+ * @returns The display-name string (never null, may be "").
  */
 export function resolveModelName(
   config: CreditPricingConfig | null | undefined,
@@ -54,24 +55,24 @@ export function resolveModelName(
 }
 
 /**
- * 反向解析：把客户端侧的展示名（`modelName`）翻译回真实 `model_id`（`entry.name`）。
+ * Reverse resolution: map a client-side display name (`modelName`) back to the real `model_id` (`entry.name`).
  *
- * 用于请求拦截阶段——客户端可以在 `model` 字段填易辨认的 `modelName`
- * （如 `claude-opus-4.7`），代理转发上游前将其换成对应的 model_id
- * （如 `ep-pksklwtb`）。是 `resolveModelName` 的逆操作，复用同一份
- * `creditPricing.models` 映射，避免双份维护。
+ * Used at the request interception stage — a client may put a recognizable `modelName`
+ * (e.g. `claude-opus-4.7`) in the `model` field; before forwarding upstream the proxy
+ * swaps it for the corresponding model_id (e.g. `ep-pksklwtb`). This is the inverse of
+ * `resolveModelName`, reusing the same `creditPricing.models` mapping to avoid dual maintenance.
  *
- * 匹配逻辑（与 `getModelPricing` 保持大小写不敏感）：
- * 1. `requested` 空/null/undefined → 原样返回（空串）
- * 2. 命中某条 entry 的 `modelName`（忽略大小写、非空）→ 返回该 entry 的 `name`
- * 3. 未命中（含 requested 本身已是真实 model_id、或未知模型）→ **原样返回**
- *    （保证向后兼容：直接传真实 model_id 的客户端不受影响）
+ * Matching logic (case-insensitive, consistent with `getModelPricing`):
+ * 1. `requested` is empty/null/undefined → return as-is (empty string)
+ * 2. Matches some entry's `modelName` (case-insensitive, non-empty) → return that entry's `name`
+ * 3. No match (including requested already being a real model_id, or an unknown model) → **return as-is**
+ *    (for backward compatibility: clients passing a real model_id directly are unaffected)
  *
- * 同一 `modelName` 若对应多条 entry，取第一条命中的（`Array.find` 语义）。
+ * If the same `modelName` maps to multiple entries, the first match is used (`Array.find` semantics).
  *
  * @param config - Credit pricing configuration.
- * @param requested - 客户端请求中的 `model` 字段值。
- * @returns 真实 model_id；无匹配时回落 `requested` 本身。
+ * @param requested - The `model` field value from the client request.
+ * @returns The real model_id; falls back to `requested` itself when there is no match.
  */
 export function resolveModelId(
   config: CreditPricingConfig | null | undefined,
@@ -88,33 +89,36 @@ export function resolveModelId(
 }
 
 /**
- * 校验客户端请求的 `model` 是否已在价目表的 **`modelName`（展示名）** 中登记。
+ * Check whether a client-requested `model` is registered under the pricing table's
+ * **`modelName` (display name)**.
  *
- * 用于请求入口的门禁：价目表配置存在时，客户端只能用展示名（`modelName`）
- * 请求，真实 `model_id`（`entry.name`）视为内部细节，不再作为公开入口。
- * 未匹配的 model 一律拒绝，避免"转发成功但无法计费"的静默漏计费问题。
+ * Used as a gate at the request entry: when a pricing table is configured, clients may only
+ * request by display name (`modelName`); the real `model_id` (`entry.name`) is treated as an
+ * internal detail and is no longer a public entry point. Any unmatched model is rejected, to
+ * avoid the silent un-billed problem of "forwarded successfully but cannot be billed".
  *
- * 规则：
- * 1. `config` / `config.models` 为空 → **返回 true**（价目表未配置时跳过校验，
- *    向后兼容旧部署；由 `computeCreditDelta` 走 raw 追溯路径处理）。
- * 2. `requested` 空/null/undefined → **返回 false**（必须显式提供 model 才允许放行）。
- * 3. 命中任意 entry 的**非空** `modelName`（大小写不敏感全词匹配）→ true。
- * 4. 否则 → false。
+ * Rules:
+ * 1. `config` / `config.models` is empty → **returns true** (skip the check when no pricing
+ *    table is configured; backward compatible with old deployments; handled by the raw
+ *    reconciliation path in `computeCreditDelta`).
+ * 2. `requested` is empty/null/undefined → **returns false** (a model must be explicitly provided to allow it through).
+ * 3. Matches any entry's **non-empty** `modelName` (case-insensitive full-word match) → true.
+ * 4. Otherwise → false.
  *
- * 注：未配置 `modelName` 的 entry 不可被客户端请求命中（此时该模型属"内部专用"，
- * 仅供内部转发使用，不对客户端暴露）。
+ * Note: an entry without `modelName` configured cannot be hit by a client request (such a model
+ * is "internal-only", used solely for internal forwarding and not exposed to clients).
  *
  * @param config - Credit pricing configuration.
- * @param requested - 客户端请求中的 `model` 字段值。
- * @returns 是否允许放行。
+ * @param requested - The `model` field value from the client request.
+ * @returns Whether the request is allowed through.
  */
 export function isModelInPricing(
   config: CreditPricingConfig | null | undefined,
   requested: string | null | undefined,
 ): boolean {
-  // 价目表未配置：跳过校验（向后兼容）
+  // No pricing table configured: skip the check (backward compatible)
   if (!config?.models?.length) return true;
-  // 显式要求非空 model
+  // A non-empty model is required explicitly
   if (!requested) return false;
 
   const lower = requested.toLowerCase();

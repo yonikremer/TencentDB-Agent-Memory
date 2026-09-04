@@ -1,30 +1,32 @@
 /**
- * CosStorage —— ProxyStorage 的对象存储实现（COS / S3-compatible）。
+ * CosStorage —— the object-storage implementation of ProxyStorage (COS / S3-compatible).
  *
- * 定位：生产多实例首选。
+ * Positioning: the first choice for production multi-instance deployments.
  *
- * 依赖注入：不直接 `import COS from "cos-nodejs-sdk-v5"`，而是接一个最小
- * `CosLikeBackend` 接口（PUT / GET / HEAD / DELETE / LIST），由 factory 层
- * 用真实 SDK 实例注入。这样单元测试可以用 mock backend 全流程验证 CosStorage
- * 逻辑，不打真桶；生产环境注入的是 openclaw 插件的 SharedCosClient wrapper。
+ * Dependency injection: instead of directly `import COS from "cos-nodejs-sdk-v5"`, it plugs
+ * into a minimal `CosLikeBackend` interface (PUT / GET / HEAD / DELETE / LIST); the factory
+ * layer injects a real SDK instance. This way unit tests can verify all CosStorage logic
+ * end-to-end with a mock backend, without touching a real bucket. In production, the
+ * injected backend is the SharedCosClient wrapper of the openclaw plugin.
  *
- * 语义要点：
- *   - putIfAbsent 走 COS `If-None-Match: "*"` header —— 存在返回 412
- *   - TTL 由桶 lifecycle rule 兜底（按 lastModified）
- *   - 凭据 403 / 重试逻辑由底层 backend 负责，不在这层处理
+ * Semantics at a glance:
+ *   - putIfAbsent sends a COS `If-None-Match: "*"` header —— 412 if the key exists
+ *   - TTL is enforced as a fallback by the bucket lifecycle rule (based on lastModified)
+ *   - credential 403s / retry logic are the backend's responsibility, not handled here
  */
 import type { ProxyStorage } from "./proxy-storage.js";
 
 /**
- * CosLikeBackend 契约 —— **定义在 cos-types.ts，这里 re-export 保持向后兼容**。
+ * CosLikeBackend contract —— **defined in cos-types.ts; re-exported here for backward
+ * compatibility**.
  *
- * 生产实现：cost-guard submodule 里的 CosStorageBackendMultiSpace（走
- * `await import("@context-proxy/cost-guard")`）。测试：用 in-memory mock
- * （见 cos-storage.test.ts）。
+ * Production implementation: CosStorageBackendMultiSpace in the cost-guard submodule (loaded
+ * via `await import("@context-proxy/cost-guard")`). Tests use an in-memory mock backend
+ * (see cos-storage.test.ts).
  *
- * 2026-07-13 抽 submodule 后新增 cos-types.ts 承载 CosLikeBackend +
- * KernelStsCosOptions；本文件只 re-export，签名不变，避免破坏老 caller
- * `import { CosLikeBackend } from "./cos-storage.js"`。
+ * After the 2026-07-13 submodule split, cos-types.ts was added to carry CosLikeBackend +
+ * KernelStsCosOptions; this file only re-exports them with unchanged signatures, so existing
+ * callers `import { CosLikeBackend } from "./cos-storage.js"` are not broken.
  */
 export type { CosLikeBackend } from "./cos-types.js";
 import type { CosLikeBackend } from "./cos-types.js";

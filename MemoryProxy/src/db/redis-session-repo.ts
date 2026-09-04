@@ -53,7 +53,7 @@ export class RedisSessionRepo implements SessionRepo {
     try {
       await this.redis.setex(key, this.ttl, JSON.stringify(state));
     } catch {
-      /* silent — L1 authoritative fast path 仍然生效 */
+      /* silent — L1 authoritative fast path remains in effect */
     }
   }
 

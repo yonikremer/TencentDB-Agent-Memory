@@ -1,16 +1,18 @@
 /**
- * SqliteStorage —— ProxyStorage 的 better-sqlite3 实现。
+ * SqliteStorage —— a better-sqlite3 implementation of ProxyStorage.
  *
- * 定位：单实例本地开发 / CI / 兜底。生产多实例必须走 CosStorage。
+ * Purpose: single-instance local development / CI / fallback. Multi-instance
+ * production must use CosStorage.
  *
- * 表结构（proxy_kv）：
+ * Table schema (proxy_kv):
  *   k          TEXT PRIMARY KEY
- *   v          BLOB NOT NULL          -- 存 utf-8 字节
- *   bucket     TEXT NOT NULL          -- "ttl" 或 "nottl"（从 key prefix 推断）
- *   updated_at INTEGER NOT NULL       -- ms epoch, put 时刷新（续期）
+ *   v          BLOB NOT NULL          -- stores utf-8 bytes
+ *   bucket     TEXT NOT NULL          -- "ttl" or "nottl" (inferred from key prefix)
+ *   updated_at INTEGER NOT NULL       -- ms epoch, refreshed on put (renewal)
  *
- * TTL：由 sweep() 显式触发（只清 ttl 桶），或由 factory 起定时器。
- * CAS：`INSERT OR IGNORE` 天然原子，无需事务。
+ * TTL: explicitly triggered by sweep() (clears only the ttl bucket), or via a
+ * timer started by the factory.
+ * CAS: `INSERT OR IGNORE` is naturally atomic, no transaction needed.
  */
 import type Database from "better-sqlite3";
 import type { ProxyStorage } from "./proxy-storage.js";
@@ -32,7 +34,7 @@ export function applySqliteStorageSchema(db: Database.Database): void {
 }
 
 export interface SweepOptions {
-  /** ttl bucket 生存期（毫秒）。nottl 桶不清。 */
+  /** ttl bucket lifetime (ms). The nottl bucket is not cleared. */
   ttlMs: number;
   /** Injectable for tests. */
   now?: number;

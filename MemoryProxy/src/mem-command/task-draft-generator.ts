@@ -159,13 +159,13 @@ Given the recent conversation, generate ONE task that captures what the user is 
 STRICT rules (violations will be rejected):
 - title: MUST be 1 to 40 characters. NEVER exceed 40. Imperative form preferred.
 - description: MUST be 1 to 300 characters, plain text. Cover three parts in order:
-    背景 (background) → 目标 (goal) → 已知约束 (known constraints)
+    background → goal → known constraints
 - suggestedStatus: short lowercase word (e.g. "running", "completed").
 - NEVER return an empty object {}. If the conversation is unclear, infer a reasonable
   task from the most recent user message and produce a best-effort title + description.
 
 Examples of GOOD output:
-  {"title":"Refactor auth module","description":"背景：现有 auth 逻辑分散在 3 个文件。目标：合并到 auth-service。约束：不改动对外 API。","suggestedStatus":"running"}
+  {"title":"Refactor auth module","description":"background: existing auth logic is split across 3 files; goal: merge into auth-service; constraint: keep the external API unchanged.","suggestedStatus":"running"}
 
 Examples of BAD output (DO NOT produce these):
   {}                                                     // ❌ empty object
@@ -182,7 +182,7 @@ based on the recent conversation that matches this title.
 
 STRICT rules:
 - description: MUST be 1 to 300 characters, plain text. Cover three parts:
-    背景 → 目标 → 已知约束
+    background → goal → known constraints
 - NEVER return an empty object {}. If unclear, infer a best-effort description from the title
   and most recent messages.
 - Do NOT include title in the output (it is fixed by the user).
@@ -197,11 +197,11 @@ Given an existing task and recent conversation, decide:
 2. If yes, produce an updated description and a suggested status.
 
 Classify what changed into ONE OR MORE of these five categories (only if applicable):
-  - 目标调整 (goal changes)
-  - 约束 (constraint changes)
-  - 进展 (progress)
-  - 关联链接 (linked resources / references)
-  - 参与 Agent (collaborating agents)
+  - goal changes
+  - constraint changes
+  - progress
+  - linked resources / references
+  - collaborating agents
 
 STRICT rules:
 - If NO meaningful update → return {"changed": false}

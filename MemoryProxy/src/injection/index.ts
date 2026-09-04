@@ -210,7 +210,7 @@ export function tryActivateRedis(config: ProxyConfig): boolean {
  */
 export function ensureBindingRepoPersistent(config: ProxyConfig): void {
   const store = getSessionStore();
-  if (store.getBindingRepo()) return; // 已有（storage/redis 激活过了）
+  if (store.getBindingRepo()) return; // already present (storage/redis was activated)
 
   const home = process.env.HOME || process.env.USERPROFILE || "/tmp";
   const defaultFsRoot = `${home}/.memory-tencentdb/proxy-state`;

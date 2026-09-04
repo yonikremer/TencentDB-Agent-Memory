@@ -15,7 +15,7 @@
  *
  *   [N-2] role=assistant  tool_calls=[{id:"call_session_init_...", function:{name:"ask_followup_question"}}]
  *   [N-1] role=tool       tool_call_id=call_session_init_...  content=<multi_question_result JSON>
- *   [N]   role=user       content=<additional_data> 或其他普通 user 消息
+ *   [N]   role=user       content=<additional_data> or other ordinary user message
  *
  * multi_question_result JSON (actual packet capture format):
  *   Empty intermediate state (form just displayed, user hasn't clicked):
@@ -62,7 +62,7 @@ interface AnthropicBlock {
 export function getLastUserMessageText(messages: RawMessage[]): string {
   // Sweep from end: the last message (user or tool) that relates to
   // session init is what we want. Tool messages are preferred because
-  // CB writes "是，关联团队资产" etc. into tool_result content.
+  // CB writes "Yes, associate team assets" etc. into tool_result content.
   let best = "";
   for (let i = messages.length - 1; i >= 0; i--) {
     const role = messages[i].role;

@@ -35,8 +35,10 @@ const DEFAULT_TTL_MS = 30 * 60 * 1000; // 30 minutes
 /**
  * Identity tuple used by every Repo call (SessionRepo / BindingRepo).
  *
- * `spaceId` 是 P4 (kernel-sts) 新增字段，用于 STS 权限按 space 隔离时的 key 拼接。
- * 老 caller 不传时视作 `""`（空串），Repo 内部会用 `_default` 兜底段处理。
+ * `spaceId` is a new field added by P4 (kernel-sts) for composing the key when
+ * STS permissions are isolated per space. When a legacy caller omits it, it is
+ * treated as `""` (empty string), and the Repo handles it via the `_default`
+ * fallback segment internally.
  */
 export interface SessionIdentity {
   userId: string;
@@ -90,10 +92,11 @@ export class SessionStore {
   }
 
   /**
-   * 让 skill/memory bridge 拿到同一份 BindingRepo 实例。
+   * Lets the skill/memory bridge obtain the same BindingRepo instance.
    *
-   * bridge L2 fallthrough 从这里拿 —— 保证 injection pipeline 装配时的 Kv/Redis
-   * 实例、单元测试注入的 mock 都能被 bridge 直接读到,不用重新构造。
+   * The bridge's L2 fallthrough reads it from here — so the Kv/Redis instances
+   * wired up during injection pipeline assembly and the mocks injected by unit
+   * tests can all be read directly by the bridge without being reconstructed.
    */
   getBindingRepo(): BindingRepo | undefined {
     return this.bindingRepo;
@@ -133,10 +136,11 @@ export class SessionStore {
   }
 
   /**
-   * 把 recovery source 挂到 state 的**非可枚举**字段上——handler 侧读取
-   * `state.__recoverySource` 语义不变，但 `deepEqual` / `JSON.stringify` /
-   * `Object.keys` 都不会看到这一枚 transient marker，避免测试断言"恢复后
-   * state 与原 state 完全等价"因新增字段挂掉。
+   * Attaches the recovery source to a **non-enumerable** field on state — the
+   * handler-side read of `state.__recoverySource` keeps its semantics, but
+   * `deepEqual` / `JSON.stringify` / `Object.keys` never see this transient
+   * marker, so test assertions that "the recovered state is fully equivalent
+   * to the original state" don't break because of the added field.
    */
   private tagRecoverySource<T extends SessionInitState>(
     state: T,
@@ -153,34 +157,42 @@ export class SessionStore {
   }
 
   /**
-   * L1 write + L2a await write-through + L2b fire-and-forget binding。
+   * L1 write + L2a awaited write-through + L2b fire-and-forget binding.
    *
-   * ⚠ 契约：`await store.set(...)` 完成时，L2a repo 已被 await（成功或静默失败）。
-   * 见 2026-07-13 修复：原来 fire-and-forget 语义在多节点部署下会让 pod A
-   * 关流时 COS PUT 还在飞，pod B 的 turn-2 因 L2a miss 直接掉进 tryHistoryScan
-   * 兜底 → bypass → 请求透传 LLM。
+   * ⚠ Contract: when `await store.set(...)` returns, the L2a repo has already
+   * been awaited (success or silent failure). See the 2026-07-13 fix: the
+   * original fire-and-forget semantics under multi-node deployment let a COS
+   * PUT still be in flight when pod A closed its stream, so pod B's turn-2 fell
+   * straight into the tryHistoryScan fallback on an L2a miss → bypass → request
+   * forwarded verbatim to the LLM.
    *
-   * L2b binding 仍是 fire-and-forget —— 只在 `initialized` 状态写入，属于
-   * "小纸条"型持久化，用于长睡对话唤醒；写延迟不影响 pending 状态跨节点恢复。
+   * The L2b binding is still fire-and-forget — it is only written in the
+   * `initialized` state and is a "sticky note" style persistence used to wake
+   * long-sleeping conversations; write latency does not affect pending-state
+   * recovery across nodes.
    */
   async set(keyId: string, state: SessionInitState): Promise<void> {
     // `__recoverySource` is a transient hint produced by getOrRecover() only,
     // and must not leak into L1/L2a/L2b persistence. Strip it defensively here
     // so future callers who forward a getOrRecover() result into set() don't
-    // pollute the repo (业务 caller 目前都从 store.get() 拿 state，本身没有该
-    // 字段；这里是最后一道兜底).
+    // pollute the repo (business callers currently all read state from
+    // store.get(), which never carries this field; this is the last backstop).
     if (state.__recoverySource !== undefined) {
       const { __recoverySource: _drop, ...clean } = state;
       void _drop;
       state = clean as SessionInitState;
     }
-    // resetFlow / resetEpoch 自动继承 —— pre-hook 写入这两个字段后,form 流程会
-    // 经过多次 state 转换（pending_asset_confirm → pending_team_select → ...）,
-    // 每次转换点若手工 new 一个 state 对象很容易漏掉这俩字段,导致 completeRegistration
-    // 拿到 resetFlow=undefined,handler 侧就无法识别"这是 reset 引导的完成回合"→
-    // 请求被透传给 LLM 产生幻觉响应。
-    // 保守做法：只在新 state 未显式声明这俩字段（值为 undefined）时,从旧 state
-    // 继承一次。显式传 false / 具体值的 caller 不会被覆盖。
+    // resetFlow / resetEpoch auto-inherit — after the pre-hook writes these two
+    // fields, the form flow passes through many state transitions
+    // (pending_asset_confirm → pending_team_select → ...). If each transition
+    // point hand-creates a new state object it is easy to drop these two
+    // fields, so completeRegistration receives resetFlow=undefined and the
+    // handler side can't tell that this is the reset-guided completion turn →
+    // the request gets forwarded to the LLM and produces a hallucinated
+    // response.
+    // Conservative approach: only inherit once from the old state when the new
+    // state doesn't explicitly declare these two fields (value is undefined).
+    // Callers that explicitly pass false / a concrete value are not overridden.
     const prev = this.states.get(keyId);
     if (prev) {
       if (state.resetFlow === undefined && prev.resetFlow !== undefined) {
@@ -198,11 +210,14 @@ export class SessionStore {
       // fabricating a partial identity.
       return;
     }
-    // L2a write-through —— MUST await；见方法头注释。
-    // 二次防御性 catch：契约要求实现方（KvSessionRepo / RedisSessionRepo /
-    // SqliteSessionRepo）内部静默降级不抛，但接口层再兜一层，保证任何后来
-    // 新增的 repo 或 test-mock 都不会把异常泄给 44 处 `await store.set(...)`
-    // caller —— L1 已成功写入，主流程不因 L2a 写失败挂掉。
+    // L2a write-through — MUST await; see the method header comment.
+    // Second defensive catch: the contract requires implementors
+    // (KvSessionRepo / RedisSessionRepo / SqliteSessionRepo) to degrade
+    // silently without throwing internally, but the interface layer adds
+    // another backstop so any repo or test-mock added later never leaks an
+    // exception to the 44 `await store.set(...)` callers — L1 was already
+    // written successfully, so the main flow doesn't break on an L2a write
+    // failure.
     if (this.repo) {
       try {
         await this.repo.upsert(spaceOf(id), id.userId, id.agentSource, id.sessionId, state);
@@ -214,13 +229,15 @@ export class SessionStore {
       }
     }
     // L2b: only write binding on terminal states
-    // await 而非 fire-and-forget，保持与 L2a 一致的契约：
-    // `await store.set(...)` return 时，L1 / L2a / L2b 三层都已 durable。
-    // 每个 session 只会在初始化终态触发一次，成本可控。
+    // Await rather than fire-and-forget, keeping the same contract as L2a:
+    // when `await store.set(...)` returns, all three layers — L1 / L2a / L2b —
+    // are durable. Each session triggers this only once at its initialized
+    // terminal state, so the cost is bounded.
     if (state.status === "initialized" && this.bindingRepo) {
-      // agentSource / userKey 现在存进 binding 内部字段(不再在 key 里),
-      // 让 bridge 只凭 (spaceId, sessionId) 就能反查回完整身份。
-      // 见 docs/design/2026-08-03-binding-flatten.md。
+      // agentSource / userKey are now stored in the binding's internal fields
+      // (no longer in the key), letting the bridge reverse-look-up the full
+      // identity from just (spaceId, sessionId).
+      // See docs/design/2026-08-03-binding-flatten.md.
       const binding: SessionBinding = state.bypassed
         ? {
             outcome: "bypassed",
@@ -331,58 +348,70 @@ export class SessionStore {
 
     // Step 1: L1
     //
-    // ⚠ Terminal 状态（`initialized`，含 `bypassed`）L1 才权威 —— 一旦定型
-    // 不会再改；pending_* 状态**不能**在 L1 命中就短路，否则会踩到多节点跨
-    // pod 陈旧读 bug（2026-07-14）：
-    //   turn-1 打 pod A → 写 L1(A)=pending_asset_confirm + L2a
-    //   turn-2 打 pod B → L2a probe 读到 pending_asset_confirm → advance 到
-    //                     pending_agent_select → 写 L1(B) + L2a
-    //   turn-3 又打 pod A → L1(A) 仍然是 pending_asset_confirm（pod 间无
-    //                       cache-invalidation 通知）→ 若这里短路就用陈旧
-    //                       state 去处理 turn-3 的 agent 答复 → extract 拿
-    //                       "agent 选项文本" 去 asset_confirm 分支 →
-    //                       unrecognized → session bypass → 请求原样透传给
-    //                       LLM（用户观感：不选 task 就走了）。
+    // ⚠ Only terminal states (`initialized`, incl. `bypassed`) are authoritative
+    // in L1 — once finalized they never change; pending_* states must NOT
+    // short-circuit on an L1 hit, or you hit the multi-node cross-pod stale-read
+    // bug (2026-07-14):
+    //   turn-1 hits pod A → writes L1(A)=pending_asset_confirm + L2a
+    //   turn-2 hits pod B → L2a probe reads pending_asset_confirm → advances to
+    //                     pending_agent_select → writes L1(B) + L2a
+    //   turn-3 hits pod A again → L1(A) is still pending_asset_confirm (no
+    //                       cache-invalidation notification between pods) → if
+    //                       it short-circuits here, the stale state processes
+    //                       turn-3's agent reply → extract feeds "agent option
+    //                       text" into the asset_confirm branch →
+    //                       unrecognized → session bypass → request forwarded
+    //                       verbatim to the LLM (user sees: left without
+    //                       choosing a task).
     //
-    // 修法：pending_* 无论 L1 是否命中，都必须走 probeL2a 拿权威值；probeL2a
-    // 内部会 promote 覆盖 L1，之后 init.ts 的 `store.get(compositeKey)` 就能
-    // 读到最新状态。L1 pending 命中作为 L2a 失败/miss 时的 last-resort fallback
-    // 保留（见 Step 2 后的分支），保证同 pod 场景下 L2a 尚未落盘时不倒退。
+    // Fix: pending_* must go through probeL2a for the authoritative value no
+    // matter whether L1 hits; probeL2a promotes and overwrites L1 internally,
+    // so init.ts's `store.get(compositeKey)` reads the latest state. An L1
+    // pending hit is kept as a last-resort fallback when L2a fails/misses (see
+    // the branch after Step 2), so the same-pod scenario doesn't regress
+    // before L2a has been flushed.
     //
-    // 代价：每轮多一次 storage GET（~50ms COS）。
-    // 多节点无状态设计：L1 仅作为 L2a miss 时的降级 fallback（COS 抖动），
-    // 不作为权威源。session-reset 可能在任意 pod 执行，L1 initialized 不可信。
+    // Cost: one extra storage GET per turn (~50ms COS).
+    // Multi-node stateless design: L1 only serves as a degraded fallback on an
+    // L2a miss (COS jitter), never as the authoritative source. session-reset
+    // may run on any pod, so an L1 initialized entry is not trustworthy.
     const l1 = this.get(keyId);
-    // 不对 initialized 做 L1 短路 —— 一律走 L2a 拿权威状态。
+    // Do not short-circuit L1 for initialized — always go through L2a for the
+    // authoritative state.
 
     // Step 2: L2a SessionRepo (Redis / SQLite / ProxyStorage) — full SessionInitState.
     // Startup `hydrateFromDb()` covers the single-node case, but in multi-node
     // deployments a session initialized on node A won't be in node B's L1.
     // Without this probe every such request falls through to L2b + a fresh
     // `metadataClient.getAgent/getTask` roundtrip, even though the full
-    // agentDetail/taskDetail is sitting in the storage layer. Pending 状态也
-    // 必须命中就返回 —— 见上面 Step 1 的多节点陈旧 L1 注释。
+    // agentDetail/taskDetail is sitting in the storage layer. Pending states
+    // must also return on a hit — see the multi-node stale-L1 comment in
+    // Step 1 above.
     if (this.repo) {
       const l2a = await this.probeL2a(keyId, identity);
       if (l2a) {
-        // 只有 L1 存在**且**status 不同才算真"override stale L1"。相同 status
-        // 只是 L2a 权威读回来复核一遍，属正常路径（pending_* 每轮都会走 L2a
-        // probe），日志里没必要拉警报，之前的无条件 "override stale L1" 会误
-        // 导观察者以为有一致性问题。
+        // Only when L1 exists **and** has a different status is it a genuine
+        // "override stale L1". The same status just means L2a read back
+        // authoritatively for a re-check — a normal path (pending_* runs the
+        // L2a probe every turn) — so there is no need to raise an alarm in the
+        // logs; the previous unconditional "override stale L1" misled observers
+        // into thinking there was a consistency problem.
         const stale = l1 && l1.status !== l2a.status ? " (override stale L1)" : "";
         console.log(`[cache] session=${keyId} L2a hit → promote L1${stale}`);
         return this.tagRecoverySource(l2a, "l2a");
       }
     }
 
-    // Step 2.5: L2a miss 时的 L1 降级兜底。
+    // Step 2.5: L1 degraded fallback when L2a misses.
     //
-    // L2a(COS) 抖动 / 短暂不可用时，继续走 L2b 只能拿到 binding（只在
-    // initialized 写），最终 `tryHistoryScan` 无条件 bypass —— 反而更糟。
-    // 这里回退到 L1 是 "宁可用略旧但可用的状态" 的 graceful degradation。
+    // When L2a (COS) jitters / is briefly unavailable, continuing to L2b only
+    // yields a binding (written only on initialized), and `tryHistoryScan`
+    // ultimately bypasses unconditionally — actually worse. Falling back to L1
+    // here is a graceful degradation of "rather use a slightly stale but usable
+    // state".
     //
-    // zombie / user-mismatch 已在 `this.get()` 与 `probeL2a` 内部各自 invalidate，
-    // 走到这里的 l1 一定是 fresh + user 匹配的。
+    // zombie / user-mismatch are each invalidated inside `this.get()` and
+    // `probeL2a`, so an l1 reaching this point is always fresh + user-matched.
     if (l1) {
       console.log(`[cache] session=${keyId} L1 fallback (L2a miss, status=${l1.status})`);
       return this.tagRecoverySource(l1, "l1");
@@ -461,14 +490,16 @@ export class SessionStore {
         identity.sessionId,
       );
     } catch (err) {
-      // 诊断: probeL2a 报错时也 log，之前静默吞掉导致多节点 L2 miss 无迹可循
+      // Diagnostic: log probeL2a errors too; previously swallowing them
+      // silently made multi-node L2 misses untraceable.
       console.log(
         `[cache] session=${keyId} L2a probe error space=${spaceOf(identity)} user=${identity.userId} src=${identity.agentSource} sid=${identity.sessionId}: ${(err as Error).message}`,
       );
       return undefined;
     }
     if (!row) {
-      // 诊断: 打出实际用来查的 4 段, 方便对着 COS 里的 key 手工比对
+      // Diagnostic: print the 4 segments actually used for the lookup so they
+      // can be compared by hand against the key in COS.
       console.log(
         `[cache] session=${keyId} L2a miss space=${spaceOf(identity)} user=${identity.userId} src=${identity.agentSource} sid=${identity.sessionId}`,
       );
@@ -620,9 +651,10 @@ export class SessionStore {
     }
 
     // Step 4.4: construct rebuilt state
-    // user_key / space_id 从 binding 恢复(2 段拍平后 binding 里也存了),
-    // 让 bridge L2 fallthrough 恢复出的 SessionInfo 字段完整,memory-bridge
-    // 恢复 chat_memory 检索时不再降级为 self-only。
+    // user_key / space_id are restored from the binding (they are also stored
+    // in the binding after the 2-segment flatten), so the SessionInfo recovered
+    // via bridge L2 fallthrough has complete fields, and memory-bridge no
+    // longer degrades to self-only when restoring chat_memory lookups.
     const sessionInfo: SessionInfo = {
       session_id: identity.sessionId,
       user_id: binding.userId || identity.userId,
@@ -648,10 +680,11 @@ export class SessionStore {
 
     // Step 4.5: write back to L1 + L2a
     this.states.set(keyId, rebuilt);
-    // await write-through 与 SessionStore.set 保持一致契约（见其头注释）：
-    // 让恢复出的 rebuilt 状态在返回前已落 L2a，避免同 session 后续轮次
-    // 若又打到别的 pod 时再走一次 rebuildFromBinding 的开销。
-    // 防御性 catch 见 `set()` 头注释。
+    // Await write-through keeps the same contract as SessionStore.set (see its
+    // header comment): the rebuilt state is flushed to L2a before returning, so
+    // later turns of the same session that land on a different pod don't pay
+    // the rebuildFromBinding cost again. Defensive catch as in `set()`'s
+    // header comment.
     if (this.repo) {
       try {
         await this.repo.upsert(spaceOf(identity), identity.userId, identity.agentSource, identity.sessionId, rebuilt);
@@ -697,13 +730,16 @@ export class SessionStore {
     if (messages.length === 0) return undefined;
 
     // Count user messages and check for assistant/tool existence.
-    // dsh (deepseek-harness) 首帧 body 里塞 3 条**非用户输入**的 role=user 元数据:
-    //   - <system-reminder> 工作区指令
-    //   - "Current runtime context." 快照
-    //   - <available_skills> 列表
-    // 若原样计数 userCount>1 会把 dsh 首帧误判为"有历史",触发 markerless
-    // one-shot bypass,session-init form 永远不弹。这里跳过 dsh 元数据 user 消息,
-    // 只计"真用户输入"。见 docs/dsh-recon/2026-08-14-dsh-capture-analysis.md §2.3。
+    // dsh (deepseek-harness) stuffs 3 **non-user-input** role=user metadata
+    // entries into its first-frame body:
+    //   - <system-reminder> workspace directives
+    //   - a "Current runtime context." snapshot
+    //   - the <available_skills> list
+    // Counting them verbatim would push userCount>1 and misjudge the dsh first
+    // frame as "has history", triggering the markerless one-shot bypass so the
+    // session-init form never pops. Skip the dsh metadata user messages here
+    // and count only "true user input". See
+    // docs/dsh-recon/2026-08-14-dsh-capture-analysis.md §2.3.
     let userCount = 0;
     let hasAssistantOrTool = false;
     for (const m of messages) {
@@ -713,8 +749,9 @@ export class SessionStore {
         continue;
       }
       if (role !== "user") continue;
-      // dsh 元数据签名:content 是 str 且以已知锚点开头(dsh 内部固定文本)。
-      // 只在有明确签名时跳过,避免误伤客户端真用户输入。
+      // dsh metadata signature: content is a str starting with a known anchor
+      // (fixed text internal to dsh). Only skip on an explicit signature to
+      // avoid falsely dropping real client user input.
       const c = (m as { content?: unknown }).content;
       if (typeof c === "string") {
         if (
@@ -792,9 +829,11 @@ export class SessionStore {
     }
 
     if (!foundAgentId) {
-      // 无论是"历史里选了否"还是"完全没有 form marker"，只要无法恢复 agent
-      // 身份就视为未初始化 → 返回 undefined 让上层走 session-init 弹表单。
-      // 与 mem:session-reset 语义对齐：session 未 initialized = 必须 init。
+      // Whether the history picked "no" or there's no form marker at all, as
+      // long as the agent identity can't be recovered, treat it as
+      // uninitialized → return undefined so the upper layer runs session-init
+      // to pop the form. Aligns with mem:session-reset semantics: a session
+      // that isn't initialized must be initialized.
       console.log(`[session-recover] ${keyId} history scan → no agent marker, treating as uninitialized`);
       return undefined;
     }

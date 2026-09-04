@@ -1,13 +1,14 @@
 /**
- * Bridge-side tool-call 埋点 helper（memory-bridge + skill-bridge 共用）。
+ * Bridge-side tool-call telemetry helper (shared by memory-bridge + skill-bridge).
  *
- * 设计：每次 upstream fetch 完成（成功或失败）都发一条 kind='bridge_call'。
- *      调用方负责把 body 脱敏到 <= 512 字节（本函数不再清洗），只做透传。
+ * Design: emit one kind='bridge_call' row whenever an upstream fetch completes (success or failure).
+ *      The caller is responsible for redacting the body to <= 512 bytes (this function does no more
+ *      cleaning), it only passes it through.
  *
- * 硬约束（§7.-1）：
- *   - 同步返回 void
- *   - sink 异常静默吞掉
- *   - body/sub 已由调用方准备好，绝不额外读 session store
+ * Hard constraints (§7.-1):
+ *   - synchronously return void
+ *   - silently swallow sink exceptions
+ *   - body/sub are already prepared by the caller, never read the session store again
  */
 import { writeToolCallRow, type ToolCallLogInput } from "../clickhouse.js";
 
@@ -18,28 +19,29 @@ export interface BridgeCallTelemetryInput {
   userId?: string;
   teamId?: string;
   agentId?: string;
-  /** "claude-code" | "codebuddy" | "unknown" — 从 sessionKey 前缀反解 */
+  /** "claude-code" | "codebuddy" | "unknown" — derived from the sessionKey prefix */
   agentSource: string;
   /** "memory-bridge" | "skill-bridge" */
   bridgeSource: string;
-  /** 具体 sub 字符串（"atomic/search" / "skill/get" 等） */
+  /** concrete sub string ("atomic/search" / "skill/get" etc.) */
   executedEndpoint: string;
-  /** 已脱敏、已截断的 outbound body（<= 512 字节） */
+  /** redacted, truncated outbound body (<= 512 bytes) */
   requestBody: string;
-  /** upstream HTTP status（网络失败可传 0 或 502） */
+  /** upstream HTTP status (pass 0 or 502 on network failure) */
   upstreamStatus: number;
-  /** upstream 耗时毫秒 */
+  /** upstream elapsed time in ms */
   elapsedMs: number;
   /**
-   * 前置校验失败原因。空/未传 = 请求打到了上游（成功或 4xx/5xx）。
-   * 非空 = proxy 前置早退，没到 fetcher。见 clickhouse.ts ToolCallLogInput 注释。
+   * Reason for the pre-flight validation failure. Empty/omitted = the request reached upstream
+   * (success or 4xx/5xx). Non-empty = the proxy exited early during pre-flight and never reached
+   * the fetcher. See the ToolCallLogInput comment in clickhouse.ts.
    */
   rejectReason?: string;
 }
 
 /**
- * 发一条 bridge_call 埋点。sink 默认走 clickhouse.writeToolCallRow。
- * 内部自吞异常，绝不 throw。
+ * Emit one bridge_call telemetry row. The sink defaults to clickhouse.writeToolCallRow.
+ * Exceptions are swallowed internally; it never throws.
  */
 export function emitBridgeToolCallTelemetry(
   input: BridgeCallTelemetryInput,
@@ -67,18 +69,18 @@ export function emitBridgeToolCallTelemetry(
     try {
       sink(row);
     } catch {
-      // sink 抛 → 埋点绝不阻塞业务
+      // if sink throws, telemetry must never block business
     }
   } catch {
-    // input 构造异常也吞掉
+    // also swallow input construction exceptions
   }
 }
 
 /**
- * 从 proxy session-key 反解 agentSource。
+ * Derive agentSource from a proxy session-key.
  *   "claude-code:conv-abc" → "claude-code"
  *   "codebuddy:conv-abc"   → "codebuddy"
- *   "conv-abc"（无前缀）    → "unknown"
+ *   "conv-abc" (no prefix) → "unknown"
  */
 export function agentSourceFromSessionKey(sessionKey: string): string {
   const idx = sessionKey.indexOf(":");
@@ -87,28 +89,29 @@ export function agentSourceFromSessionKey(sessionKey: string): string {
 }
 
 /**
- * 前置校验失败埋点 helper —— proxy 层拒绝了请求, 没能打到上游 fetcher。
+ * Pre-flight rejection telemetry helper — the proxy layer rejected the request and it never reached
+ * the upstream fetcher.
  *
- * 前置早退大部分连 session ids 都还没解析出来 (missing header / bad content-type /
- * invalid json ...), 能拿到的稳定字段有限。剩下的字段按可选透传。
+ * Most pre-flight exits happen before the session ids are even parsed (missing header / bad content-type /
+ * invalid json ...), so few stable fields are available. The remaining fields are passed through as optional.
  *
- * 内部套 emitBridgeToolCallTelemetry, kind 仍是 'bridge_call', 通过 rejectReason
- * 非空来区分。老 dashboard 全部 kind='bridge_call' 的 SQL 一字不动仍能跑,
- * 新增维度靠 `WHERE reject_reason != ''` 反查。
+ * It wraps emitBridgeToolCallTelemetry, so kind is still 'bridge_call'; rows are told apart by rejectReason
+ * being non-empty. Old dashboard SQL filtering on kind='bridge_call' keeps working unchanged;
+ * the new dimension is queried back via `WHERE reject_reason != ''`.
  *
- * 硬约束: 同步返回 void, 埋点绝不阻塞业务; sessionKey 允许空串。
+ * Hard constraints: return void synchronously, telemetry must never block business; sessionKey may be empty.
  */
 export interface BridgeRejectTelemetryInput {
-  /** derive 出来就填, 前置阶段 (missing header) 派生不了填 "" */
+  /** fill it in if it was derived; in the pre-flight stage (missing header) it can't be, so pass "" */
   sessionKey: string;
   bridgeSource: "memory-bridge" | "skill-bridge";
-  /** 稳定枚举值, 供 GROUP BY —— 详见 tool_call_logs.reject_reason 注释 */
+  /** stable enum value, for GROUP BY — see the tool_call_logs.reject_reason comment */
   rejectReason: string;
-  /** proxy 返给客户端的 HTTP status (401/415/400/...); 存到 upstream_status 列 */
+  /** HTTP status the proxy returns to the client (401/415/400/...); stored in the upstream_status column */
   httpStatus: number;
-  /** subpath 若已能算出就填, 否则 "" */
+  /** fill the subpath if it can already be computed, otherwise "" */
   executedEndpoint?: string;
-  /** body 若已解析可填 (调用方负责 <=512 截断), 否则 "" */
+  /** body may be filled if parsed (the caller truncates it to <=512), otherwise "" */
   requestBody?: string;
   spaceId?: string;
   userId?: string;

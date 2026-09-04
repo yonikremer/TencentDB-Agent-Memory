@@ -276,7 +276,7 @@ export function extractFromOptionText(
       : null;
   if (!team) return null;
 
-  // opencode: 剥壳 tool-result 包裹（见 extractOpencodeAnswers 头部）。
+  // opencode: Unwrap the tool-result wrapper (see the header of extractOpencodeAnswers).
   const opencodeAnswer = extractOpencodeAnswers(content);
   if (opencodeAnswer !== null) content = opencodeAnswer;
 
@@ -345,7 +345,7 @@ export function extractAgentOnly(
       ? cachedTeams[0]
       : null;
   if (!team) return null;
-  // opencode: 剥壳 tool-result 包裹（见 extractOpencodeAnswers 头部）。
+  // opencode: Unwrap the tool-result wrapper (see the header of extractOpencodeAnswers).
   const opencodeAnswer = extractOpencodeAnswers(content);
   if (opencodeAnswer !== null) content = opencodeAnswer;
   const trimmed = content.trim();
@@ -374,7 +374,7 @@ export function extractTaskOnly(
       ? cachedTeams[0]
       : null;
   if (!team) return null;
-  // opencode: 剥壳 tool-result 包裹（见 extractOpencodeAnswers 头部）。
+  // opencode: Unwrap the tool-result wrapper (see the header of extractOpencodeAnswers).
   const opencodeAnswer = extractOpencodeAnswers(content);
   if (opencodeAnswer !== null) content = opencodeAnswer;
   const trimmed = content.trim();

@@ -59,20 +59,23 @@ export type AclAction = "read" | "write" | "delete" | "grant";
 
 export interface AclCheckParams {
   /**
-   * 请求发起者的 user_key（原始 `sk-mem-...`）。
+   * The requesting caller's user_key (the raw `sk-mem-...`).
    *
-   * tdai `/v3/meta/*` 路由要求 `x-tdai-user-key` header 才能通过 Layer 3
-   * 用户鉴权（否则 401 missing_user_key）。这里传入的 user_key 会：
-   *   1. 作为 `x-tdai-user-key` header 走鉴权（"你是谁"）
-   *   2. tdai 服务端会用它解析出 user_id，用于 checkAssetPermission 判定
+   * The tdai `/v3/meta/*` routes require the `x-tdai-user-key` header to pass
+   * Layer 3 user auth (otherwise 401 missing_user_key). The user_key passed
+   * here will:
+   *   1. Ride through auth as the `x-tdai-user-key` header ("who you are")
+   *   2. The tdai server uses it to resolve user_id for the
+   *      checkAssetPermission decision
    *
-   * 因此 body 里**不再需要** user_id —— tdai 从 header 自解析。
+   * So user_id is **no longer needed** in the body -- tdai resolves it from
+   * the header itself.
    */
   user_key: string;
-  /** 目标资产 id，如 `chat_memory-{team}-{agent}`。 */
+  /** Target asset id, e.g. `chat_memory-{team}-{agent}`. */
   asset_id: string;
   action: AclAction;
-  /** 可选：显式限定检查作用于哪个 agent。 */
+  /** Optional: explicitly scope the check to a specific agent. */
   agent_id?: string;
 }
 
@@ -135,8 +138,8 @@ export class TdaiClient {
   /**
    * Multi-agent variant: search L1 against a specific (team, user, agent)
    * triplet, while keeping the caller's session/task on the wire.
-   *   - 用于"自有 + 借入"召回中的某一个 agent
-   *   - 不带 query 直接返空（与原行为一致）
+   *   - Used for a given agent in an "own + borrowed" recall
+   *   - Returns empty when query is absent (consistent with the original behavior)
    */
   async searchL1ForCtx(
     ctx: TdaiAgentCtx,
@@ -303,23 +306,28 @@ export class TdaiClient {
 
   // ── ACL check ──────────────────────────────────────────────────────────
   //
-  // 与 memory 数据面调用（postForCtx）**语义相反**：
-  //   - postForCtx 网络/HTTP/envelope 错都吞掉返回空 —— 让注入路径静默降级
-  //   - checkAcl 网络/HTTP/envelope 错要抛出 —— 让上层 fail-closed 拒绝注入
-  //     并打 error 日志（否则 acl 服务挂了会静默变成"全部允许"，越权）
+  // The semantics are **the opposite** of the memory data-plane call (postForCtx):
+  //   - postForCtx swallows network/HTTP/envelope errors and returns empty so
+  //     the injection path degrades silently
+  //   - checkAcl throws on network/HTTP/envelope errors so the caller
+  //     fail-closes and refuses injection, plus logs an error (otherwise a
+  //     downed ACL service silently becomes "allow everything" -- over-privilege)
   //
-  // 因此本方法不复用 postForCtx，独立实现 —— 但仍然复用同一份 config
-  // （endpoint / apiKey / serviceId / timeoutMs）。
+  // Therefore this method does not reuse postForCtx and is implemented
+  // independently -- it still shares the same config
+  // (endpoint / apiKey / serviceId / timeoutMs).
 
   /**
-   * 校验 user_id 对某 asset 的权限。
+   * Check whether user_id has permission on a given asset.
    *
-   * 抛错场景（fetch/超时/HTTP 非 2xx/envelope code≠0/data.allowed 非 boolean）
-   * 应当由调用方 catch 后按业务需要处理 —— 注入路径请用 checkAclOrDeny 便捷函数。
+   * Error scenarios (fetch failure/timeout/non-2xx HTTP/envelope code≠0/
+   * data.allowed not boolean) should be caught by the caller and handled per
+   * business needs -- the injection path should use the checkAclOrDeny
+   * convenience function.
    */
   async checkAcl(params: AclCheckParams): Promise<AclCheckResult> {
     if (!this.isEnabled()) {
-      // 未启用 tdai 时按"通过"处理，与其他 memory 方法在 disabled 下的返回一致。
+      // When tdai is disabled, treat as "allowed", consistent with the other memory methods while disabled.
       return { allowed: true, reason: "tdai_disabled" };
     }
     const base = this.config.endpoint.replace(/\/$/, "");
@@ -333,15 +341,16 @@ export class TdaiClient {
           "Content-Type": "application/json",
           Authorization: `Bearer ${this.config.apiKey || "local-proxy"}`,
           "x-tdai-service-id": this.config.serviceId || "default",
-          // Layer 3 用户鉴权：tdai v3 meta 路由要求此 header 才能通过，否则
-          // 401 missing_user_key。Proxy 侧的当前请求发起者 user_key 直接用作
-          // 调用者身份。
+          // Layer 3 user auth: tdai v3 meta routes require this header to pass,
+          // otherwise 401 missing_user_key. The current request initiator's
+          // user_key on the proxy side is used directly as the caller identity.
           "x-tdai-user-key": params.user_key,
         },
         body: JSON.stringify({
-          // body user_key = 要**检查权限的目标用户**（这里跟调用者是同一个人 —— proxy
-          // 场景下永远是自己给自己校验）。schema (userIdOrKeyFields.refine)
-          // 要求 user_id 或 user_key 至少一个 —— 我们复用 header 那个 key。
+          // body user_key = the **target user whose permission is being checked**
+          // (here it is the same person as the caller -- in the proxy scenario
+          // you always validate yourself). The schema (userIdOrKeyFields.refine)
+          // requires at least one of user_id or user_key -- we reuse that header key.
           user_key: params.user_key,
           asset_id: params.asset_id,
           action: params.action,
@@ -368,15 +377,16 @@ export class TdaiClient {
 }
 
 /**
- * 注入路径便捷函数：包一层 try/catch + error 日志。
+ * Convenience function for the injection path: wraps a try/catch + error log.
  *
- * 语义：
- *   - allowed=true                  → 放行
- *   - allowed=false                 → 拒绝（正常，由调用方决定是否 warn）
- *   - 底层调用抛错                  → 拒绝 + error 日志（fail-closed）
+ * Semantics:
+ *   - allowed=true                  → allow
+ *   - allowed=false                 → deny (normal; the caller decides whether to warn)
+ *   - underlying call throws        → deny + error log (fail-closed)
  *
- * 使用场景：resolveFixedAssetCtxs 里逐个 ctx 过滤时，不希望一次网络错就
- * 让整个注入路径抛异常，用这个便捷函数把异常转成"拒绝"信号即可。
+ * Use case: while filtering each ctx in resolveFixedAssetCtxs, you do not want
+ * a single network error to throw the whole injection path -- use this
+ * convenience function to turn the exception into a "deny" signal.
  */
 export async function checkAclOrDeny(
   client: TdaiClient,
@@ -398,7 +408,7 @@ function stripUndefined(body: Record<string, unknown>): Record<string, unknown> 
   return Object.fromEntries(Object.entries(body).filter(([, value]) => value !== undefined));
 }
 
-/** 打印敏感 userKey 时脱敏：只保留前 6 位 + 后 4 位。 */
+/** Mask sensitive userKeys when printing: keep only the first 6 + last 4 characters. */
 function maskUserKey(key: string | undefined): string {
   if (!key) return "";
   if (key.length <= 12) return "***";

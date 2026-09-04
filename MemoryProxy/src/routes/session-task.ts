@@ -1,24 +1,24 @@
 /**
- * mem:create-task / mem:update-task 的核心业务：
- * 从当前 session 上下文出发，生成 Task 并写入 metadata，绑定到 session。
+ * Core flow for mem:create-task / mem:update-task:
+ * start from the current session context, generate a Task, write it to metadata, and bind it to the session.
  *
- * 交互模型（"用户确认"闸门 —— 破坏性操作前必须先 draft、后 confirm）：
+ * Interaction model ("user confirmation" gate — destructive operations require draft first, then confirm):
  *   - createTaskFromSession
- *       未绑真实 task → LLM 生成 title+description → 直接落库+绑定（一步到位）
- *       已绑真实 task → 生成新 draft → 写 pending → 返 pending，等用户 confirm/cancel
+ *       Not bound to a real task → LLM generates title+description → persist and bind directly (done in one step)
+ *       Bound to a real task → generate a new draft → write pending → return pending, wait for the user to confirm/cancel
  *   - updateTaskFromSession
- *       未绑 task_id → 拦截返错，引导用户先 mem:create-task
- *       已绑：拉当前 task → 生成 draft（含 status 建议）→ 写 pending → 返 pending
- *              非 creator 不再拒绝，改为把 warning 挂到 pending 上,confirm 时告知用户
+ *       No task_id bound → intercept and return an error, guide the user to run mem:create-task first
+ *       Bound: fetch the current task → generate a draft (incl. status suggestion) → write pending → return pending
+ *               non-creator is no longer rejected; instead the warning is attached to pending and reported to the user on confirm
  *   - confirmPendingTaskAction / cancelPendingTaskAction
- *       从 pending-store 取出 payload,执行真正的创建 / 更新 / 覆盖绑定 / 清 pending
+ *       Take the payload from the pending-store and perform the real create / update / rebind / clear pending
  *
- * 关键约束（kernel 对齐）：
- *   - create 时传 agent_id,让 kernel 关联当前 Agent (TAPD 需求原文)
- *   - 落库时**不改 title**（对齐既有产品约定,kernel 允许改但产品不改）
- *   - update 时 status 由 LLM 提议,proxy 直接透传给 kernel,不做枚举校验
- *   - creator_user_id / team_id 严格取 sessionInfo,防止越权
- *   - taskDraft 未配置 = 直接返 "config missing"（不做本地兜底）
+ * Key constraints (kernel-aligned):
+ *   - on create, pass agent_id so the kernel associates the current Agent (per the original TAPD requirement)
+ *   - do **not change title** when persisting (consistent with the existing product convention; the kernel allows it but the product doesn't)
+ *   - on update, status is proposed by the LLM; the proxy passes it straight through to the kernel without enum validation
+ *   - creator_user_id / team_id strictly come from sessionInfo to prevent privilege escalation
+ *   - taskDraft not configured = return "config missing" directly (no local fallback)
  */
 
 import type { Context } from "hono";
@@ -38,21 +38,21 @@ import {
   type PendingUpdatePayload,
 } from "../mem-command/pending-store.js";
 
-// ── 输入 / 输出类型 ────────────────────────────────────────────────────────
+// ── Input / output types ────────────────────────────────────────────────────────
 
 export interface CreateTaskFromSessionInput {
   sessionKey: string;
   agentSource: string;
   config: ProxyConfig;
   spaceId: string;
-  /** 用户提示（mem:create-task 后的自由文本），可空 */
+  /** User hint (free text after mem:create-task), optional */
   hint?: string;
-  /** 最近对话（用于生成草稿） */
+  /** Recent conversation (used to generate the draft) */
   recentMessages: MemCommandMessage[];
   /**
-   * 用户在 mem:create-task 后写明的 title（原文，40 字截断由调用方负责）。
-   *   - 有值：title 锁定，LLM 只负责生成 description；LLM 失败降级为 desc 留空、task 照样落库。
-   *   - 无值：title + description 都由 LLM 从对话推断；LLM 失败则直接返错。
+   * Title written verbatim by the user after mem:create-task (truncation to 40 chars is the caller's job).
+   *   - present: the title is locked, the LLM only generates the description; on LLM failure, degrade to an empty desc but still persist the task.
+   *   - absent: both title + description are inferred by the LLM from the conversation; on LLM failure, return an error directly.
    */
   lockedTitle?: string;
 }
@@ -65,14 +65,14 @@ export interface UpdateTaskFromSessionInput {
   hint?: string;
   recentMessages: MemCommandMessage[];
   /**
-   * 用户在 mem:update-task 后写明的 description（原文）。
-   *   - 有值：description 直接替换为该文本，不调 LLM。
-   *   - 无值：调 LLM diff 出新 description（changed=false 时不落库）。
+   * Description written verbatim by the user after mem:update-task.
+   *   - present: description is replaced directly with this text, no LLM call.
+   *   - absent: ask the LLM to diff out a new description (not persisted when changed=false).
    */
   directDescription?: string;
 }
 
-/** confirm/cancel 入参（不带 recentMessages，因为 draft 已在 pending 里） */
+/** confirm/cancel input (no recentMessages, since the draft already sits in pending) */
 export interface PendingActionInput {
   sessionKey: string;
   agentSource: string;
@@ -80,7 +80,7 @@ export interface PendingActionInput {
   spaceId: string;
 }
 
-/** create 命令首次调用时的 pending 摘要（给命令层拼预览文案用） */
+/** Pending summary for the first call of the create command (for the command layer to build preview copy) */
 export interface PendingCreateInfo {
   kind: "create";
   draftTitle: string;
@@ -89,7 +89,7 @@ export interface PendingCreateInfo {
   currentTaskTitle?: string;
 }
 
-/** update 命令首次调用时的 pending 摘要 */
+/** Pending summary for the first call of the update command */
 export interface PendingUpdateInfo {
   kind: "update";
   taskId: string;
@@ -104,37 +104,37 @@ export type PendingInfo = PendingCreateInfo | PendingUpdateInfo;
 
 export interface TaskFromSessionResult {
   success: boolean;
-  /** 成功时的 taskId */
+  /** taskId on success */
   taskId?: string;
-  /** 成功时的最终 title */
+  /** final title on success */
   title?: string;
-  /** 成功时的最终 description */
+  /** final description on success */
   description?: string;
-  /** 成功时的最终 status */
+  /** final status on success */
   status?: string;
-  /** update 模式：LLM 判定为 "无需更新" 时 true —— 未落库 */
+  /** update mode: true when the LLM decides "no update needed" — nothing was persisted */
   noUpdateNeeded?: boolean;
   /**
-   * create 模式：session 已绑定 task_id，此前的兼容位；新交互下会同时给 pending。
-   * 保留字段名以兼容 HTTP handler 的响应外壳（respond() 里读它决定 409）。
+   * create mode: the session already has a bound task_id — a legacy compat flag; under the new flow pending is returned alongside.
+   * Field name kept for compatibility with the HTTP handler response envelope (respond() reads it to decide on a 409).
    */
   alreadyBound?: boolean;
   /**
-   * 首次调用生成了 pending 草稿等待用户确认。未落库；命令层需拼预览文案，
-   * 引导下一轮回复 `mem:create-task confirm` / `mem:update-task confirm` 或 `... cancel`。
+   * The first call produced a pending draft awaiting user confirmation. Nothing persisted; the command layer should build the preview copy,
+   * guiding the next reply to `mem:create-task confirm` / `mem:update-task confirm` or `... cancel`.
    */
   pending?: PendingInfo;
-  /** confirm 分支：session 上没有对应 pending（可能超时/被取消/未生成过） */
+  /** confirm branch: no matching pending on the session (may have expired, been cancelled, or never been created) */
   noPending?: boolean;
-  /** cancel 分支：是否命中并清理了 pending */
+  /** cancel branch: whether a pending was found and cleared */
   cancelled?: boolean;
-  /** create 覆盖分支：原来绑定的旧 task_id（用于返回文案） */
+  /** create rebind branch: the previously bound old task_id (for the return copy) */
   previousTaskId?: string;
-  /** 失败原因，供调用方拼用户可见文案 */
+  /** failure reason, for callers to compose user-visible copy */
   error?: string;
 }
 
-// ── 内部：取 session state 的通用检查 ─────────────────────────────────────
+// ── Internal: common checks that resolve session state ─────────────────────────────────────
 
 interface ResolvedSession {
   state: SessionInitState;
@@ -166,8 +166,8 @@ function resolveSession(
     return { error: "session missing team_id/user_id (initialization incomplete)" };
   }
 
-  // "本次不关联任务" 走 config.sessionInit.defaultTaskId（虚拟值，kernel 不存在），
-  // 视为**未绑真实 task** —— 允许 create-task，禁止 update-task（后者会用 no-task 分支返错）。
+  // The "Don't bind a task this time" mode goes through config.sessionInit.defaultTaskId (a virtual value that doesn't exist in the kernel),
+  // and counts as **not bound to a real task** — create-task is allowed, update-task is not (the latter returns an error via the no-task branch).
   const rawTaskId = sessionInfo.task_id;
   const defaultTaskId = config.sessionInit?.defaultTaskId;
   const isVirtualDefault = !!rawTaskId && !!defaultTaskId && rawTaskId === defaultTaskId;
@@ -176,7 +176,7 @@ function resolveSession(
   return { state, sessionInfo, teamId, userId, ...(currentTaskId ? { currentTaskId } : {}) };
 }
 
-// ── 内部：检查并取 taskDraft 配置 ─────────────────────────────────────────
+// ── Internal: check and fetch the taskDraft config ─────────────────────────────────────────
 
 function resolveTaskDraftConfig(config: ProxyConfig) {
   const draft = config.memCommand?.taskDraft;
@@ -198,21 +198,21 @@ function normalizeDesc(d: string | null | undefined): string | undefined {
   return d == null ? undefined : d;
 }
 
-/** 由 resolved session 生成 pending key（含 team/agent/session 三元组）。 */
+/** Build the pending key from the resolved session (covering the team/agent/session triple). */
 function pendingKeyOf(resolved: ResolvedSession, agentSource: string, sessionKey: string): string {
   return makePendingKey({
     team_id: resolved.teamId,
-    // pending-store 的 agent 用 sessionInfo.agent_id (kernel 侧概念),缺失就用 agentSource 兜底
+    // pending-store's agent uses sessionInfo.agent_id (a kernel-side concept); when missing, fall back to agentSource
     agent_id: resolved.sessionInfo.agent_id ?? agentSource,
     session_id: sessionKey,
   });
 }
 
-// ── 内部：真正落库的两个原子操作（首次直落 / confirm 时也走这里） ────────
+// ── Internal: the two atomic persist operations (used on the first direct save and on confirm) ────────
 
 /**
- * 执行 create：调 kernel createTask，然后绑定 session。
- * agent_id 会尝试从 sessionInfo 取；缺就不传（由 kernel 决定）。
+ * Runs create: calls kernel createTask, then binds the session.
+ * agent_id is taken from sessionInfo when present; when missing it is omitted (left to the kernel).
  */
 async function doCreateAndBind(
   resolved: ResolvedSession,
@@ -245,11 +245,11 @@ async function doCreateAndBind(
   return { ok: true, task: created };
 }
 
-// ── 核心：create-task ─────────────────────────────────────────────────────
+// ── Core: create-task ─────────────────────────────────────────────────────
 //
-// 交互分层：
-//   未绑 + 任意参数 → LLM 生成 draft → 立即落库（不需要 confirm）
-//   已绑真实 task → LLM 生成 draft → 写 pending，等 confirm/cancel
+// Interaction tiers:
+//   Not bound + any args → LLM generates a draft → persist immediately (no confirm needed)
+//   Bound to a real task → LLM generates a draft → write pending, wait for confirm/cancel
 
 export async function createTaskFromSession(
   input: CreateTaskFromSessionInput,
@@ -260,7 +260,7 @@ export async function createTaskFromSession(
   const draftCfg = resolveTaskDraftConfig(input.config);
   if ("error" in draftCfg) return { success: false, error: draftCfg.error };
 
-  // Step 1: LLM 生成草稿（lockedTitle 情况下只出 description）
+  // Step 1: LLM generates the draft (lockedTitle yields only a description)
   const draft = await generateTaskDraft(draftCfg.cfg, {
     mode: "create",
     hint: input.hint,
@@ -268,16 +268,16 @@ export async function createTaskFromSession(
     ...(input.lockedTitle ? { lockedTitle: input.lockedTitle } : {}),
   });
 
-  // Step 1a: 结果归一化
+  // Step 1a: normalize the result
   //
-  // 三挡降级（2026-08-18 修复失败率过高问题）：
-  //   1) draft.ok=true          → 用 LLM 结果
+  // Three-tier fallback (2026-08-18 fix for an over-high failure rate):
+  //   1) draft.ok=true          → use the LLM result
   //   2) draft.ok=false + lockedTitle → title=lockedTitle, desc=""
-  //   3) draft.ok=false + 无参数 → "未命名任务_yyMMdd_HHmm" 兜底，desc=""，让用户后续 mem:update-task 补
+  //   3) draft.ok=false + no args → "Untitled task_yyMMdd_HHmm" fallback, desc="", so the user can fill it in later with mem:update-task
   //
-  // 之前第 3 挡是"严格返错"，导致 LLM 一波动就要用户重试 3 次——非常糟糕的 UX。
-  // 现在给个默认名并绑上，用户拿到 taskId 后可以随时补描述；
-  // 兜底错误信息通过 bindWarning 透传给上层，UI 层可以选择性提示"AI 命名失败，已使用默认名"。
+  // Previously tier 3 returned a hard error, so any LLM hiccup forced the user to retry 3 times — a very poor UX.
+  // Now a default name is assigned and bound, and once the user gets the taskId they can add a description anytime;
+  // the fallback error is surfaced via bindWarning, and the UI layer may optionally show "AI naming failed, used the default name".
   let finalTitle: string;
   let finalDescription: string;
   let draftFallbackWarning: string | undefined;
@@ -285,18 +285,18 @@ export async function createTaskFromSession(
     finalTitle = draft.title;
     finalDescription = draft.description;
   } else if (input.lockedTitle) {
-    // 有参数 + LLM 失败 → 降级：title 用参数、desc 留空
+    // args present + LLM failure → degrade: title uses the arg, desc is left empty
     finalTitle = input.lockedTitle;
     finalDescription = "";
     draftFallbackWarning = `AI description failed (${draft.error}); saved with empty description`;
   } else {
-    // 无参数 + LLM 失败 → 兜底："未命名任务_yyMMdd_HHmm"
+    // no args + LLM failure → fallback: "Untitled task_yyMMdd_HHmm"
     finalTitle = buildFallbackTaskTitle();
     finalDescription = "";
     draftFallbackWarning = `AI draft failed (${draft.error}); saved with default title, use mem:update-task to refine`;
   }
 
-  // Step 2a：已绑真实 task → 写 pending，等 confirm 覆盖绑定
+  // Step 2a: bound to a real task → write pending, wait for confirm to rebind
   if (resolved.currentTaskId) {
     let boundTitle: string | undefined;
     try {
@@ -304,7 +304,7 @@ export async function createTaskFromSession(
       const t = await client.getTask(resolved.currentTaskId);
       boundTitle = t.title;
     } catch {
-      // 拉不到旧 task title 也不阻塞（只影响预览显示）
+      // failing to fetch the old task title does not block (it only affects the preview display)
     }
     const key = pendingKeyOf(resolved, input.agentSource, input.sessionKey);
     const payload: PendingCreatePayload = {
@@ -334,12 +334,12 @@ export async function createTaskFromSession(
     };
   }
 
-  // Step 2b：未绑 → 直接落库
+  // Step 2b: not bound → persist directly
   const persisted = await doCreateAndBind(resolved, input, finalTitle, finalDescription);
   if (!persisted.ok) return { success: false, error: persisted.error };
   const created = persisted.task;
-  // 合并两类 warning：AI 兜底 + 绑定失败，都通过 error 字段透传给上层
-  // （字段名 error 是历史遗留；语义是"success=true 但有 warning"）
+  // Combine the two warning kinds — AI fallback + bind failure — and surface them upward through the error field
+  // (the error field name is legacy; its meaning is "success=true but with a warning")
   const combinedWarning = [draftFallbackWarning, persisted.bindWarning]
     .filter((w): w is string => !!w)
     .join("; ");
@@ -354,12 +354,12 @@ export async function createTaskFromSession(
 }
 
 /**
- * 生成"未命名任务_yyyyMMdd_HHmm"作为 LLM 兜底 title。
+ * Generate an "Untitled task_yyyyMMdd_HHmm" title as the LLM fallback.
  *
- * 时间戳精确到分钟，可读性 & 可搜性平衡：
- *   - 用户看到"未命名任务_260818_1710"能马上定位是啥时候创的
- *   - 不用秒，避免连续创建重名 —— 而且分钟内连开两个 task 是异常操作
- * 保证 ≤ MAX_TITLE_LEN(40) 字。
+ * The timestamp is accurate to the minute, balancing readability & searchability:
+ *   - seeing "Untitled task_260818_1710" lets the user immediately tell when it was created
+ *   - seconds are not used, to avoid duplicate names from rapid consecutive creates — and opening two tasks within a minute is abnormal anyway
+ * Guaranteed to be ≤ MAX_TITLE_LEN(40) characters.
  */
 function buildFallbackTaskTitle(): string {
   const now = new Date();
@@ -368,15 +368,15 @@ function buildFallbackTaskTitle(): string {
   const dd = String(now.getDate()).padStart(2, "0");
   const HH = String(now.getHours()).padStart(2, "0");
   const mm = String(now.getMinutes()).padStart(2, "0");
-  return `未命名任务_${yy}${MM}${dd}_${HH}${mm}`;
+  return `Untitled task_${yy}${MM}${dd}_${HH}${mm}`;
 }
 
-// ── 核心：update-task ─────────────────────────────────────────────────────
+// ── Core: update-task ─────────────────────────────────────────────────────
 //
-// 交互分层（每次都需要 confirm）：
-//   未绑 → 拦截返错，让用户先 create-task
-//   已绑 → 拉当前 task → 生成 draft（含 status 建议）→ 写 pending → 返 pending
-//          非 creator 直接拒（kernel 也不支持跨用户 update，proxy 侧提前给出建议 create-task 的指引）
+// Interaction tiers (confirm is needed every time):
+//   Not bound → intercept and return an error, have the user create-task first
+//   Bound → fetch the current task → generate a draft (incl. status suggestion) → write pending → return pending
+//           non-creator is rejected directly (the kernel also doesn't support cross-user update; the proxy pre-empts with guidance to create-task)
 
 export async function updateTaskFromSession(
   input: UpdateTaskFromSessionInput,
@@ -388,18 +388,18 @@ export async function updateTaskFromSession(
     return {
       success: false,
       error:
-        "no task bound to this session (session is in \"本次不关联任务\" mode or task_id missing); " +
+        "no task bound to this session (session is in \"Don't bind a task this time\" mode or task_id missing); " +
         "use mem:create-task to create and bind a new task first",
     };
   }
 
-  // 无参数分支才需要 LLM 配置
+  // Only the no-args branch needs the LLM config
   if (!input.directDescription) {
     const draftCfg = resolveTaskDraftConfig(input.config);
     if ("error" in draftCfg) return { success: false, error: draftCfg.error };
   }
 
-  // Step 1: 拉当前 task
+  // Step 1: fetch the current task
   const client = getClientFromResolved(resolved, input.config, input.spaceId);
   let current: TaskEntity;
   try {
@@ -411,7 +411,7 @@ export async function updateTaskFromSession(
     };
   }
 
-  // 非 creator 直接拒（kernel 侧仍以 owner-check 拒绝跨用户 update，proxy 侧提前阻断以给出清晰指引）
+  // Reject non-creators directly (the kernel still rejects cross-user update via its owner-check; the proxy pre-empts here to give clear guidance)
   if (current.creator_user_id && current.creator_user_id !== resolved.userId) {
     return {
       success: false,
@@ -419,11 +419,11 @@ export async function updateTaskFromSession(
     };
   }
 
-  // Step 2: 决定新 description + statusSuggestion
+  // Step 2: determine the new description + statusSuggestion
   let newDescription: string;
   let statusSuggestion: string | undefined;
   if (input.directDescription !== undefined) {
-    // 有参数：直接替换，不调 LLM，也不出 status 建议
+    // args present: replace directly, no LLM call, and no status suggestion
     newDescription = input.directDescription;
   } else {
     const draftCfg = resolveTaskDraftConfig(input.config);
@@ -441,7 +441,7 @@ export async function updateTaskFromSession(
     });
     if (!draft.ok) return { success: false, error: `draft failed: ${draft.error}` };
     if (!draft.changed) {
-      // LLM 判无改动 → 不写 pending，直接返 noUpdateNeeded
+      // LLM found no change → don't write pending, return noUpdateNeeded directly
       return {
         success: true,
         noUpdateNeeded: true,
@@ -455,7 +455,7 @@ export async function updateTaskFromSession(
     statusSuggestion = draft.suggestedStatus;
   }
 
-  // Step 3: 写 pending，等 confirm
+  // Step 3: write pending, wait for confirm
   const key = pendingKeyOf(resolved, input.agentSource, input.sessionKey);
   const payload: PendingUpdatePayload = {
     kind: "update",
@@ -488,14 +488,14 @@ export async function updateTaskFromSession(
   };
 }
 
-// ── 核心：confirm / cancel ────────────────────────────────────────────────
+// ── Core: confirm / cancel ────────────────────────────────────────────────
 
 /**
- * 用户回复 `mem:create-task confirm` 或 `mem:update-task confirm` 时调用。
- * 根据 pending 里的 kind 分派：
- *   - create → doCreateAndBind（覆盖原绑定）
- *   - update → kernel updateTask（description + status 透传）
- * 落库成功后清 pending；失败时保留 pending（用户可重试）。
+ * Called when the user replies `mem:create-task confirm` or `mem:update-task confirm`.
+ * Dispatches by the kind stored in pending:
+ *   - create → doCreateAndBind (rebinds over the original binding)
+ *   - update → kernel updateTask (description + status passed through)
+ * Clears pending after a successful persist; on failure the pending is kept (so the user can retry).
  */
 export async function confirmPendingTaskAction(
   input: PendingActionInput,
@@ -518,7 +518,7 @@ export async function confirmPendingTaskAction(
       payload.draft.description,
     );
     if (!persisted.ok) {
-      // 落库失败保留 pending 让用户重试
+      // persist failed: keep the pending so the user can retry
       return { success: false, error: persisted.error };
     }
     clearPending(key);
@@ -534,7 +534,7 @@ export async function confirmPendingTaskAction(
     };
   }
 
-  // update 分支
+  // update branch
   const client = getClientFromResolved(resolved, input.config, input.spaceId);
   let updated: TaskEntity;
   try {
@@ -559,8 +559,8 @@ export async function confirmPendingTaskAction(
 }
 
 /**
- * 用户回复 `mem:create-task cancel` 或 `mem:update-task cancel` 时调用：
- * 清 pending，不落库。返回 cancelled=true 让命令层拼提示文案。
+ * Called when the user replies `mem:create-task cancel` or `mem:update-task cancel`:
+ * clears pending without persisting. Returns cancelled=true so the command layer can compose the prompt copy.
  */
 export async function cancelPendingTaskAction(
   input: PendingActionInput,
@@ -573,7 +573,7 @@ export async function cancelPendingTaskAction(
   return { success: true, cancelled: existed };
 }
 
-// ── 内部：把 taskId 写回 sessionInfo ──────────────────────────────────────
+// ── Internal: write taskId back to sessionInfo ──────────────────────────────────────
 
 async function bindTaskIdToSession(
   sessionKey: string,
@@ -596,10 +596,10 @@ async function bindTaskIdToSession(
 /**
  * POST /v3/session/create-task
  *
- * 面板前端 / e2e 用。body 形如：
+ * Used by the panel frontend / e2e. The body looks like:
  *   { session_key, agent_source, space_id, hint?, locked_title?, recent_messages?: [...] }
- * 若不带 recent_messages，会返 "no recent messages" —— 面板要主动传（从
- * conversation/query 拉最近 N 条）。
+ * If recent_messages is omitted it returns "no recent messages" — the panel must pass it in (pull the
+ * latest N entries from conversation/query).
  */
 export function createSessionCreateTaskHandler(config: ProxyConfig) {
   return async (c: Context): Promise<Response> => {
@@ -621,7 +621,7 @@ export function createSessionCreateTaskHandler(config: ProxyConfig) {
 }
 
 /**
- * POST /v3/session/update-task —— 同上，但走 update 分支。
+ * POST /v3/session/update-task —— same as above, but runs the update branch.
  */
 export function createSessionUpdateTaskHandler(config: ProxyConfig) {
   return async (c: Context): Promise<Response> => {
@@ -642,7 +642,7 @@ export function createSessionUpdateTaskHandler(config: ProxyConfig) {
   };
 }
 
-// ── HTTP body 解析 ────────────────────────────────────────────────────────
+// ── HTTP body parsing ────────────────────────────────────────────────────────
 
 function parseCommonBody(
   body: Record<string, unknown>,

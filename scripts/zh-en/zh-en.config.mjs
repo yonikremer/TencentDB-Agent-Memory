@@ -39,6 +39,12 @@ export const protectedGlobs = [
   '**/pnpm-lock.yaml',
   // Asset graphics (SVG may embed text labels; keep as-is).
   '**/*.svg',
+  // Bilingual asset-confirm matchers (plan §4.1 fork decision): Chinese alternates
+  // kept so the flow still serves Chinese-speaking users - runtime regexes/.includes().
+  'MemoryProxy/src/session/store.ts',
+  'MemoryProxy/src/session/extractor.ts',
+  'MemoryProxy/src/session/claude-code/extractor.ts',
+  'MemoryProxy/src/session/codebuddy/extractor.ts',
 ];
 
 // Committed scratch from earlier passes. `git rm` each and it stops showing here.

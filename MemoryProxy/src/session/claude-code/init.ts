@@ -448,7 +448,7 @@ async function completeRegistration(
   // optional business dimension (isolation.ts), so a header-identity agent
   // with team+agent but no task (or a stale task) still registers and gets
   // memory — recall just broadens across the agent's memories instead of
-  // narrowing to a task. The interactive "本次不关联任务" / defaultTaskId path
+  // narrowing to a task. The interactive "Don't bind a task this time" / defaultTaskId path
   // also lands here with task_id = defaultTaskId (a virtual value). Do NOT
   // bypass when task_id is missing/undefined.
   const regData = buildRegistrationData(resolved, cachedTeams, sessionKey, regUserId);

@@ -1,11 +1,11 @@
 /**
  * POST /v3/session/force-archive-skill
  *
- * 手动强制归档当前 session 的 skill buffer（第三个触发条件）。
+ * Manually force-archive the current session's skill buffer (the third trigger condition).
  *
- * 两种使用方式：
- *   1. 函数调用（mem:create-skill 内部用）— import forceArchiveSkill()
- *   2. HTTP 接口（面板前端用）— createSessionForceArchiveHandler() 注册路由
+ * Two ways to use it:
+ *   1. Function call (used internally by mem:create-skill) — import forceArchiveSkill()
+ *   2. HTTP endpoint (used by the panel frontend) — createSessionForceArchiveHandler() registers the route
  */
 
 import type { Context } from "hono";
@@ -33,7 +33,7 @@ export interface ForceArchiveResult {
   error?: string;
 }
 
-/** Core 接口返回类型 */
+/** Return type from the Core API */
 interface CoreForceArchiveResponse {
   status: "archived" | "empty";
   task_id?: string;
@@ -45,19 +45,19 @@ interface CoreForceArchiveResponse {
 // ── Core Logic ─────────────────────────────────────────────────────────────
 
 /**
- * 手动强制归档当前 session 的 skill buffer。
+ * Manually force-archive the current session's skill buffer.
  *
- * 从 SessionStore 取 sessionInfo → 调 CoreSkillClient.forceArchive() → 返回结果
+ * Get sessionInfo from the SessionStore → call CoreSkillClient.forceArchive() → return the result
  */
 export async function forceArchiveSkill(input: ForceArchiveInput): Promise<ForceArchiveResult> {
   const { sessionKey, agentSource, config, spaceId, reason } = input;
 
-  // 参数校验
+  // Parameter validation
   if (!sessionKey) {
     return { success: false, error: "session_key is required" };
   }
 
-  // 从 SessionStore 取 session 状态
+  // Load the session state from SessionStore
   const compositeKey = `${agentSource}:${sessionKey}`;
   const store = getSessionStore();
   const state: SessionInitState | undefined = store.get(compositeKey);
@@ -68,7 +68,7 @@ export async function forceArchiveSkill(input: ForceArchiveInput): Promise<Force
 
   const sessionInfo = state.sessionInfo;
 
-  // 调用 Core 接口
+  // Call the Core API
   try {
     const client = getCoreSkillClient(config.coreSkill);
     const coreResult = await client.forceArchive(
@@ -108,7 +108,7 @@ export async function forceArchiveSkill(input: ForceArchiveInput): Promise<Force
 // ── HTTP Handler ───────────────────────────────────────────────────────────
 
 /**
- * 创建 HTTP handler，注册到 server.ts。
+ * Create the HTTP handler and register it in server.ts.
  */
 export function createSessionForceArchiveHandler(config: ProxyConfig) {
   return async (c: Context): Promise<Response> => {

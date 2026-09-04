@@ -98,7 +98,7 @@ export interface ForwardTarget {
   routedFrom: string;
 }
 
-/** resolveForwardTarget 的输入参数。 */
+/** Input parameters for resolveForwardTarget. */
 export interface ForwardTargetRequest {
   keyId: string;
   messages: unknown[];
@@ -108,7 +108,7 @@ export interface ForwardTargetRequest {
   modelId: string;
   defaultUpstreamUrl: string;
   requestPath: string;
-  /** 原始请求头（小写键），用于 agent profile 检测与 session key 解析。 */
+  /** Raw request headers (lowercased keys), used for agent profile detection and session key resolution. */
   headers?: Record<string, string>;
   /** Parent trace ID for observability reporting (Opik/Langfuse). */
   traceId?: string;
@@ -315,11 +315,13 @@ function getCostGuard(config: ProxyConfig): unknown {
 /**
  * Join a base URL with the standard endpoint extracted from the request path.
  *
- * 从 `WHITELIST_ENDPOINTS` 表匹配用户请求路径对应的 upstream endpoint。
- * 匹配时会自动剥离 `/proxy/{spaceId}` 前缀与 query string。
+ * Match the user request path against the `WHITELIST_ENDPOINTS` table to find
+ * its corresponding upstream endpoint. The `/proxy/{spaceId}` prefix and any
+ * query string are stripped before matching.
  *
- * 兜底行为：若请求路径不在白名单内，退回历史默认（`/chat/completions`），
- * 并打 `log.warn("joinUrl.fallback")`，便于后续观察是否有需要补入白名单的端点。
+ * Fallback: if the request path is not in the whitelist, revert to the historical
+ * default (`/chat/completions`) and emit `log.warn("joinUrl.fallback")`, so that
+ * later review can spot endpoints that should be added to the whitelist.
  *
  * @exported for unit testing; not part of the module's public API surface.
  */
@@ -327,7 +329,7 @@ export function joinUrl(base: string, requestPath: string): string {
   const normalizedBase = base.replace(/\/+$/, "");
   const baseWithoutQuery = normalizedBase.split("?")[0] ?? normalizedBase;
 
-  // agentUpstreams 或完整 endpoint base 已含路径时勿再拼接。
+  // Do not join again when agentUpstreams or the full endpoint base already contains a path.
   if (
     baseWithoutQuery.endsWith("/messages") ||
     baseWithoutQuery.endsWith("/chat/completions")
@@ -340,7 +342,7 @@ export function joinUrl(base: string, requestPath: string): string {
     return `${normalizedBase}${entry.upstreamEndpoint}`;
   }
 
-  // Fallback: 按请求路径后缀推断 Anthropic / OpenAI endpoint。
+  // Fallback: infer the Anthropic / OpenAI endpoint from the request path suffix.
   const endpoint = requestPath.endsWith("/messages")
     ? "/messages"
     : "/chat/completions";

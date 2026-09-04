@@ -1,28 +1,28 @@
 /**
- * key-utils —— ProxyStorage key 路径生成 & 校验工具。
+ * key-utils —— utility for ProxyStorage key path generation & validation.
  *
- * 见 docs/design/2026-07-12-cos-shark-sts-credential-plan.md §3.2
- * （原方案 2026-07-10-cos-ttl-nottl-split-plan.md §4.2 的目录布局在此扩展了 spaceId 层）。
+ * See docs/design/2026-07-12-cos-shark-sts-credential-plan.md §3.2
+ * (The directory layout of the earlier plan, 2026-07-10-cos-ttl-nottl-split-plan.md §4.2, is extended here with a spaceId layer).
  *
- * 目录方案：<ttl|nottl>/<spaceId>/<userId>/<agentSource>/<sessionId>/<data-type>[/subpath]
+ * Directory scheme: <ttl|nottl>/<spaceId>/<userId>/<agentSource>/<sessionId>/<data-type>[/subpath]
  *
- * spaceId 层在 P4 (kernel-sts) 引入 —— STS 权限按 spaceId 隔离，路径也随之带上
- * spaceId 段，key layout 与 STS resource `proxy_cache/{ttl|nottl}/{spaceId}/*` 对齐。
+ * The spaceId layer was introduced in P4 (kernel-sts) — STS permissions are isolated per spaceId, so the path also carries a
+ * spaceId segment, aligning the key layout with the STS resource `proxy_cache/{ttl|nottl}/{spaceId}/*`.
  *
- * 四段隔离键的合法性由本文件统一校验，各 Repo 拼 key 时透过 `sessionDirOf` 生成
- * 前缀（末尾一定带 `/`），再追加自己的数据类型段。写入前对易被注入的段
- * （spaceId / userId / agentSource / sessionId / hookId / skillId）做校验，防止
- * `../` 路径穿越、空段导致的 key 冲突以及 agentSource 混入非法字符打穿目录层。
+ * The four-segment isolation keys are validated uniformly in this file: each repo builds its prefix through `sessionDirOf`
+ * (which always ends in `/`) and then appends its own data-type segment. Before writing, the segments that are easy to
+ * inject (spaceId / userId / agentSource / sessionId / hookId / skillId) are checked to prevent
+ * `../` path traversal, key collisions from empty segments, and agentSource illegal characters breaking out of the directory layer.
  */
 
 const AGENT_SOURCE_RE = /^[a-z0-9-]+$/;
 
 /**
- * 通用段校验：非空 + 不含 `/` + 不含 `..` 子串。
+ * Generic segment validation: non-empty, no `/`, no `..` substring.
  *
- * `..` 校验直接拒绝所有含子串的场景（"..", "foo..bar", "..a" 全拒），比只拒
- * 完整 ".." 更保守 —— 生产 sessionId / userId / hookId 里理论上不会出现连续
- * 两个点，误伤成本极低而防注入价值高。
+ * The `..` check outright rejects every case containing the substring ("..", "foo..bar", "..a" all rejected), which is
+ * more conservative than only rejecting a full ".." — production sessionId / userId / hookId should never contain two
+ * consecutive dots, so the false-positive cost is negligible while the anti-injection value is high.
  */
 export function assertKeySegment(name: string, value: string): void {
   if (!value || value.includes("/") || value.includes("..")) {
@@ -31,11 +31,11 @@ export function assertKeySegment(name: string, value: string): void {
 }
 
 /**
- * agentSource 值域校验：`^[a-z0-9-]+$`。
+ * agentSource value validation: `^[a-z0-9-]+$`.
  *
- * 允许 lowercase + digit + hyphen，跟 URL path 第一段格式一致
- * （handler.ts / anthropicHandler.ts 从路径解析出来的就是这种格式）。
- * 大写、下划线、点、斜杠一律拒绝。
+ * Allows lowercase + digit + hyphen, matching the format of the first URL path segment
+ * (handler.ts / anthropicHandler.ts parse exactly this format from the path).
+ * Uppercase, underscore, dot, and slash are all rejected.
  */
 export function assertAgentSource(value: string): void {
   if (!AGENT_SOURCE_RE.test(value)) {
@@ -44,13 +44,13 @@ export function assertAgentSource(value: string): void {
 }
 
 /**
- * 生成 session 级目录前缀：`<bucket>/<spaceId>/<userId>/<agentSource>/<sessionId>/`。
+ * Generates the session-level directory prefix: `<bucket>/<spaceId>/<userId>/<agentSource>/<sessionId>/`.
  *
- * 末尾**保留斜杠**，让调用方直接 `${sessionDirOf(...)}<datatype>` 拼即可；
- * 目录级操作（`listNames` / `delPrefix`）也直接把返回值当 prefix 用。
+ * Keeps the trailing slash so the caller can just append `${sessionDirOf(...)}<datatype>`;
+ * directory-level operations (`listNames` / `delPrefix`) also use the return value directly as a prefix.
  *
- * spaceId 段的位置固定在 bucket 之后（ttl/nottl 之后），这是 lifecycle rule
- * 用一条前缀匹配所有 space 的关键约束 —— rule 不支持路径中间的通配符。
+ * The spaceId segment is positioned right after the bucket (after ttl/nottl); this is the key constraint
+ * for a lifecycle rule to match every space with a single prefix — rules do not support wildcards mid-path.
  */
 export function sessionDirOf(
   bucket: "ttl" | "nottl",
@@ -67,11 +67,11 @@ export function sessionDirOf(
 }
 
 /**
- * 2 段版:`<bucket>/<spaceId>/<sessionId>/`。
+ * 2-segment variant: `<bucket>/<spaceId>/<sessionId>/`.
  *
- * 给 BindingRepo 用 —— bridge 只凭 (spaceId, sessionId) 就要能读回身份,
- * userId/agentSource 挪到 JSON 内部字段。见 docs/design/2026-08-03-binding-flatten.md。
- * 老的 4 段 `sessionDirOf` 继续给 SessionRepo (ttl inj-sess.json) 用,不动。
+ * Used by BindingRepo — the bridge must be able to read back the identity using only (spaceId, sessionId),
+ * so userId/agentSource move into the JSON internal fields. See docs/design/2026-08-03-binding-flatten.md.
+ * The old 4-segment `sessionDirOf` continues to serve SessionRepo (ttl inj-sess.json); left unchanged.
  */
 export function sessionBindingDirOf(
   bucket: "ttl" | "nottl",

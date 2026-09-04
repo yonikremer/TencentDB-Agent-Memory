@@ -1,24 +1,29 @@
 /**
- * Turn 序号计数 —— 宿主侧无状态推导。
+ * Turn sequence numbering — stateless derivation on the host side.
  *
- * 一个 trace = 一个 turn（一次用户输入）。一个 turn 内的工具循环会产生多次 upstream
- * 请求，它们必须算出**相同**的 turn 序号，才能在 Langfuse 中归并到同一个 trace。
+ * One trace = one turn (one user input). The tool loop within a turn produces multiple
+ * upstream requests, and they must all compute the **same** turn sequence number so they
+ * can be merged into a single trace in Langfuse.
  *
- * 由于宿主侧没有逐请求的持久状态（turn 计数器在私有模块内部，不对外
- * 暴露逐 turn 序号），这里直接从 `messages` 历史推导：统计消息序列里"人类输入轮次"的
- * 数量。规则与私有模块的 turn 检测逻辑对齐：
- *   - Anthropic：user 消息含非 <system-reminder> 的 text block 即为人类输入；
- *     纯 tool_result / 纯 system-reminder 是工具循环延续。
- *   - OpenAI：role=user 且含非 <system-reminder> 文本为人类输入；role=tool 是工具循环。
+ * Since the host keeps no per-request persistent state (the turn counter lives inside a
+ * private module and does not expose per-turn sequence numbers), we derive it directly
+ * from the `messages` history: count the "human input rounds" in the message sequence.
+ * The rules align with the turn-detection logic of the private module:
+ *   - Anthropic: a user message whose text block is not <system-reminder> counts as a
+ *     human input; a pure tool_result / pure system-reminder is a tool-loop continuation.
+ *   - OpenAI: role=user containing non-<system-reminder> text is a human input; role=tool
+ *     is a tool loop.
  *
- * 因此：一个 turn 的首次请求与其后续工具循环请求，因为"人类轮次数"相同，turnSeq 一致。
- * 下一个 turn 的请求会多出一条人类输入 → turnSeq +1 → 新 trace。
+ * Hence the first request of a turn and its later tool-loop requests share the same
+ * "human round count", so turnSeq is identical. The next turn's request carries one more
+ * human input → turnSeq +1 → a new trace.
  *
- * 注意：依赖客户端发送完整历史（Claude Code / CodeBuddy 均如此）。若客户端截断历史，
- * turnSeq 可能偏移，但同一 turn 内仍保持一致（只是绝对值漂移），不影响"同 turn 归一 trace"。
+ * Note: this relies on the client sending the full history (Claude Code / CodeBuddy both
+ * do). If the client truncates the history, turnSeq may drift but stays consistent within
+ * the same turn (only the absolute value shifts), which does not affect "same turn, one trace".
  */
 
-/** 判断单条 user 消息内容是否为人类输入（非工具循环延续）。 */
+/** Whether a single user message's content is a human input (not a tool-loop continuation). */
 function isHumanUserContent(content: unknown): boolean {
   if (typeof content === "string") {
     return !content.startsWith("<system-reminder>");
@@ -37,16 +42,16 @@ function isHumanUserContent(content: unknown): boolean {
 }
 
 /**
- * 统计 messages 中"人类输入轮次"的数量，作为当前 turn 序号。
+ * Counts the "human input rounds" in messages, used as the current turn sequence number.
  *
- * 返回值 ≥ 1（至少当前这一轮）；空消息或无人类输入时返回 0。
+ * Returns ≥ 1 (at least the current round); returns 0 when messages is empty or no human input exists.
  */
 export function countHumanTurns(messages: unknown[], protocol: "openai" | "anthropic"): number {
   let count = 0;
   for (const msg of messages) {
     const m = msg as Record<string, unknown>;
     if (m?.role !== "user") continue;
-    // OpenAI 的工具响应是 role=tool（不会进入这里）；user 消息按内容判断。
+    // OpenAI tool responses have role=tool (they never reach here); user messages are judged by content.
     if (protocol === "openai" || protocol === "anthropic") {
       if (isHumanUserContent(m.content)) count += 1;
     }

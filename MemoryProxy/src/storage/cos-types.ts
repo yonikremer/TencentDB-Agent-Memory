@@ -1,27 +1,27 @@
 /**
- * CosLikeBackend / KernelStsCosOptions 主仓侧类型定义 —— **权威源**。
+ * CosLikeBackend / KernelStsCosOptions main-repo-side type definitions — the **authoritative source**.
  *
- * cost-guard 侧 `packages/cost-guard/src/storage/cos-types.ts` 有一份结构等价的
- * 独立定义（避免反向依赖主仓）。两份都是 5 个方法接口，结构类型下天然兼容 ——
- * 主仓通过 `await import("@context-proxy/cost-guard")` 拿到装配函数的返回值
- * （cost-guard 侧的 CosLikeBackend 实例），赋给主仓期望的 CosLikeBackend
- * 变量时 TypeScript 会自动接受。
+ * The cost-guard side has a structurally equivalent, independent copy in
+ * `packages/cost-guard/src/storage/cos-types.ts` (avoiding a reverse dependency on the main repo). Both are 5-method interfaces,
+ * so they're naturally compatible under structural typing — the main repo gets the assemble function's return value via `await import("@context-proxy/cost-guard")`
+ * (a cost-guard-side CosLikeBackend instance) and assigns it to the CosLikeBackend variable it expects;
+ * TypeScript accepts that automatically.
  *
- * 让 tsc 编译**不依赖 submodule 是否存在** —— 开源用户 clone 后即使
- * `packages/cost-guard/` 目录为空，主仓 `tsc` 依然能过（因为 CosLikeBackend
- * 类型定义在这里，不 import 自 cost-guard）。
+ * Make tsc compilation independent of whether the submodule exists — even if the
+ * `packages/cost-guard/` directory is empty after an open-source user clones, the main repo's `tsc` still passes (CosLikeBackend
+ * type is defined here, not imported from cost-guard).
  *
- * 详见 docs/design/2026-07-11-cos-submodule-extraction-plan.md §4.2 决策 1 + §4.4。
+ * See docs/design/2026-07-11-cos-submodule-extraction-plan.md §4.2 Decision 1 + §4.4.
  */
 
 /**
- * 最小 COS 后端契约 —— CosStorage 会向下调这 5 个方法。
+ * Minimal COS backend contract — CosStorage calls these 5 methods down to it.
  */
 export interface CosLikeBackend {
   /**
    * PUT object.
-   * @param headers 额外 header —— CAS 场景传 `{ "If-None-Match": "*" }`；
-   *                后端遇到 412 应该抛 `{ statusCode: 412 }`
+   * @param headers Extra headers — pass `{ "If-None-Match": "*" }` in CAS scenarios;
+   *                the backend should throw `{ statusCode: 412 }` on a 412
    */
   putObject(key: string, body: Buffer, headers?: Record<string, string>): Promise<void>;
   getObject(key: string): Promise<Buffer | null>;
@@ -30,32 +30,32 @@ export interface CosLikeBackend {
   /** List all keys under prefix (may paginate internally). Return full key path. */
   listKeys(prefix: string): Promise<string[]>;
   /**
-   * 可选：踢掉某个 spaceId 的 per-space backend + STS 凭证缓存。
+   * Optional: evict a spaceId's per-space backend + STS credential cache.
    *
-   * 仅 kernel-sts 装配（cost-guard `CosStorageBackendMultiSpace`）会实现；
-   * 单-space 或无 pool 的实现（例如未来主仓可能挂的 mock backend）应保持
-   * 不定义。`/v3/instance/proxy-destroy` handler 通过 optional-call 检测。
+   * Only the kernel-sts assembly (cost-guard `CosStorageBackendMultiSpace`) implements it;
+   * single-space or pool-less implementations (e.g. a mock backend the main repo may mount later) should leave it
+   * undefined. The `/v3/instance/proxy-destroy` handler detects it via an optional call.
    *
-   * 命中返回 `true`，未命中或不支持返回 `false`。
+   * Returns `true` when it hits, `false` when it misses or is unsupported.
    */
   evictSpace?(spaceId: string): Promise<boolean>;
 }
 
 /**
- * `openKernelStsCosBackend` 的入参 —— 跟 `StorageConfig.cos` 结构镜像
- * （去掉了跟 kernel-sts 无关的字段）。
+ * Input parameters for `openKernelStsCosBackend` — mirror the `StorageConfig.cos` structure
+ * (minus the fields irrelevant to kernel-sts).
  */
 export interface KernelStsCosOptions {
-  /** COS key 业务命名空间前缀，例如 `"proxy_cache/"`（跟 core 的 memory_v2/cos_data 隔离）。 */
+  /** Business namespace prefix for COS keys, e.g. `"proxy_cache/"` (isolated from core's memory_v2/cos_data). */
   rootPrefix: string;
   /**
-   * 可选：强制走 VPC 内网 / 自定义域名（例：`"cos.example.com"`）。
-   * 空则用 Shark 返回 CosUrl 里的 host。
+   * Optional: force VPC-intranet access / a custom domain (e.g. `"cos.example.com"`).
+   * If empty, use the host from the CosUrl returned by Shark.
    */
   endpointDomain?: string;
   /**
-   * Shark 拉临时凭证 —— 每个 spaceId 独立 STS，权限严格绑到
-   * `proxy_cache/{ttl|nottl}/{spaceId}/*` 两个前缀。
+   * Shark fetches temporary credentials — an independent STS per spaceId, with permissions strictly bound to the
+   * two prefixes `proxy_cache/{ttl|nottl}/{spaceId}/*`.
    */
   shark: {
     baseUrl: string;

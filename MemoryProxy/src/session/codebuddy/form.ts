@@ -133,7 +133,7 @@ function buildFollowupQuestionArgs(data: FormData): { title: string; questions: 
   if (stage === "asset_confirm") {
     questions.push({
       id: "asset_confirm",
-      question: "本次对话是否要关联团队资产？" + SKIP_HINT_ASSET_CONFIRM,
+      question: "Would you like to associate team assets for this conversation?" + SKIP_HINT_ASSET_CONFIRM,
       options: [ASSET_CONFIRM_YES, ASSET_CONFIRM_NO],
       multiSelect: false,
     });
@@ -143,7 +143,7 @@ function buildFollowupQuestionArgs(data: FormData): { title: string; questions: 
   if (stage === "team") {
     questions.push({
       id: "team",
-      question: "请选择本次会话所属的 Team：" + SKIP_HINT_LATER_STAGE,
+      question: "Please select the Team for this session:" + SKIP_HINT_LATER_STAGE,
       options: [
         ...teams.map((t) => `${t.team_name} (${t.team_id.slice(-8)})`),
       ],
@@ -168,7 +168,7 @@ function buildFollowupQuestionArgs(data: FormData): { title: string; questions: 
     ];
     questions.push({
       id: "agent",
-      question: `请选择「${team.team_name}」下要使用的 Agent：` + SKIP_HINT_LATER_STAGE,
+      question: `Please select the Agent to use under "${team.team_name}":` + SKIP_HINT_LATER_STAGE,
       options: agentLabelOptions,
       multiSelect: false,
     });
@@ -187,7 +187,7 @@ function buildFollowupQuestionArgs(data: FormData): { title: string; questions: 
     if (taskOptions.length > 0) {
       questions.push({
         id: "task",
-        question: `请选择「${team.team_name}」下关联的任务：` + SKIP_HINT_LATER_STAGE,
+        question: `Please select the Task to associate under "${team.team_name}":` + SKIP_HINT_LATER_STAGE,
         options: taskOptions,
         multiSelect: false,
       });

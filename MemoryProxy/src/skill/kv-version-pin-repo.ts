@@ -1,21 +1,21 @@
 /**
- * KvVersionPinRepo —— skill 版本锁 (ProxyStorage-backed).
+ * KvVersionPinRepo —— skill version pin (ProxyStorage-backed).
  *
- * 见 docs/design/2026-07-12-cos-shark-sts-credential-plan.md §3.2 §3.6。
+ * See docs/design/2026-07-12-cos-shark-sts-credential-plan.md §3.2 §3.6.
  *
- * Key 路径：
+ * Key path:
  *   nottl/<spaceId>/<userId>/<agentSource>/<sessionId>/skill-vpin/<skillId>.txt
  *
- * spaceId 是 P4 (kernel-sts) 新增的隔离段。老 caller 传空字符串时用 `_default` 兜底。
+ * spaceId is a new isolation segment added by P4 (kernel-sts). Old callers fall back to `_default` when passing an empty string.
  *
- * 关键设计 vs 原 Redis 版本：
- *   1. **拆 key**：从 map-in-one-object 改成 "一 skill 一对象"，消除 R-M-W 写放大
- *      与并发覆盖风险
- *   2. **CAS 语义**：`pinMany` 走 `putTextIfAbsent`（COS If-None-Match / SQLite
- *      INSERT OR IGNORE / Fs O_EXCL / Memory Map.has），首次写入权威，
- *      **无需依赖 sticky routing**
+ * Key design differences vs the original Redis version:
+ *   1. **Split keys**: from map-in-one-object to "one object per skill", eliminating R-M-W write amplification
+ *      and concurrent-overwrite risk
+ *   2. **CAS semantics**: `pinMany` uses `putTextIfAbsent` (COS If-None-Match / SQLite
+ *      INSERT OR IGNORE / Fs O_EXCL / Memory Map.has), first write is authoritative,
+ *      **no need to rely on sticky routing**
  *
- * `upsertVersion` 是覆盖写（对应 post-write 场景，plugin 返回 v+1）。
+ * `upsertVersion` is an overwrite (for the post-write scenario, when the plugin returns v+1).
  */
 import type { ProxyStorage } from "../storage/proxy-storage.js";
 import { sessionDirOf, assertKeySegment } from "../storage/key-utils.js";
@@ -65,8 +65,8 @@ export class KvVersionPinRepo {
   }
 
   /**
-   * 首次访问快照 —— 每对 (skillId, version) 走 putTextIfAbsent，天然是 HSETNX 语义。
-   * 静默降级：任一写失败不抛，与原 Redis 版本一致。
+   * First-access snapshot —— each (skillId, version) pair uses putTextIfAbsent, which is HSETNX semantics.
+   * Silent degradation: no write failure throws, consistent with the original Redis version.
    */
   async pinMany(
     spaceId: string,
@@ -88,7 +88,7 @@ export class KvVersionPinRepo {
     );
   }
 
-  /** 写操作后的强制覆盖 —— 覆写不需要 CAS。 */
+  /** Forced overwrite after a write operation —— no CAS required. */
   async upsertVersion(
     spaceId: string,
     userId: string,

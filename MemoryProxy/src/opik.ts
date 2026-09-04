@@ -253,8 +253,8 @@ export function opikCreateLlmSpan(
     type: "llm",
     start_time: span.startTime,
     end_time: span.endTime,
-    input: span.inputMessages,    // 直接传 messages 数组
-    output: outputMessages,       // 直接传 messages 数组
+    input: span.inputMessages,    // pass the messages array directly
+    output: outputMessages,       // pass the messages array directly
     model: span.model,
     usage: flatUsage,
   };

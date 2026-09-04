@@ -564,21 +564,21 @@ export async function handleCodexEndpoint(
         if (initResult.response) return initResult.response;
       }
 
-      // ── Default gate 首次命中：CB 状态机已经落 bypass state，本 handler
-      //    返一次 Plan 模式提示；下一轮请求 recovered.bypassed=true 会走
-      //    initialized 分支直接透传，Plan 提示不会再重复。
+      // ── Default gate first hit: CB state machine has already landed in bypass state; this
+      //    handler returns one Plan-mode prompt; on the next request recovered.bypassed=true
+      //    routes through the initialized branch and passes through directly — no repeat prompt.
       if ((initResult as any).bypassReason === "default-gate") {
         pipe.info("CODEX_GATE", "Default mode gate detected → notify user (first hit)");
         const { buildMemResponse } = await import("./mem-command/response-builder.js");
-        // reset 场景下的 gate: 用户明确发了 mem:session-reset 命令,
-        // 但 codex 客户端不在 Plan 模式无法弹 form → 措辞需要 明确告知
-        // "reset 命令需要 Plan 模式" 而非笼统的"资产功能不启用"。
+        // Reset-scenario gate: user explicitly sent mem:session-reset command, but the codex
+        // client is not in Plan mode so no form can be shown → wording must clearly state
+        // "reset command requires Plan mode" rather than a generic "assets feature disabled".
         const gateText = (initResult as any).resetFlow
-          ? "⚠️ mem:session-reset 需要 Plan 模式支持。\n\n"
-            + "codex 客户端当前不在 Plan 模式，无法弹出资产选择表单。\n"
-            + "请切到 Plan 模式后再执行 mem:session-reset。"
-          : "检测到未开启 Plan 模式，本次对话不开启团队资产相关功能（Skill / Task / Agent 不参与）。"
-            + "如需使用，请切到 Plan 模式后重新开启新会话。";
+          ? "⚠️ mem:session-reset requires Plan mode support.\n\n"
+            + "The codex client is not currently in Plan mode, so the asset selection form cannot be shown.\n"
+            + "Switch to Plan mode and run mem:session-reset again."
+          : "Plan mode is not enabled, so team asset features will not be activated for this conversation (Skill / Task / Agent are not involved)."
+            + "To use them, switch to Plan mode and start a new conversation.";
         return buildMemResponse(gateText, {
           protocol: "responses",
           stream: isStream,
@@ -690,7 +690,7 @@ export async function handleCodexEndpoint(
     }
   }
 
-  // ── mem:session-reset 完成确认 ─────────────────────────────────────────────
+  // ── mem:session-reset completion confirmation ─────────────────────────────
   if (_resetFlowResult) {
     const { agentName, agentIdShort, teamId, taskName, bypassed } = _resetFlowResult;
     const lines = bypassed

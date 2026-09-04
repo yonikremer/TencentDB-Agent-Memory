@@ -23,9 +23,9 @@ import { getSessionStore } from "../session/store.js";
 import type { BindingRepo } from "../db/binding-repo.js";
 import { KvBindingRepo } from "../db/kv-binding-repo.js";
 import { RedisBindingRepo } from "../db/binding-repo.js";
-// getSkillExtractTrigger / KvExtractStore 已随老链路一起删除。
-// 详见 handler-glue.ts 顶部注释 —— skill_extract 触发路径当前不可用,
-// core 侧后续会出手动归档接口, 到时 agent 工具再重新指向那个接口。
+// getSkillExtractTrigger / KvExtractStore were removed together with the legacy pipeline.
+// See the top comment in handler-glue.ts —— the skill_extract trigger path is currently
+// unavailable, and core will later ship a manual archive endpoint for the agent tool to use.
 import { getRedisClient } from "../db/redis-client.js";
 import { VersionPinRepo } from "./version-pin-repo.js";
 import { KvVersionPinRepo } from "./kv-version-pin-repo.js";
@@ -36,24 +36,28 @@ import { emitBridgeToolCallTelemetry, emitBridgeRejectTelemetry, agentSourceFrom
 import { getCoreSkillClient, type CoreSkillClient } from "./core-client.js";
 
 /**
- * 二选一的 pin repo（KvVersionPinRepo 或 VersionPinRepo）——
- * 接口对齐（getVersion/pinMany/upsertVersion），业务代码无需感知具体实现。
+ * One-of-two pin repo (KvVersionPinRepo or VersionPinRepo) ——
+ * aligned interfaces (getVersion/pinMany/upsertVersion), so business code does
+ * not need to know the concrete implementation.
  *
- * 见 docs/design/2026-07-10-cos-ttl-nottl-split-plan.md §4.1：所有方法加
- * `userId + agentSource` 两个必填参数。
+ * See docs/design/2026-07-10-cos-ttl-nottl-split-plan.md §4.1: all methods take
+ * `userId + agentSource` as two required params.
  *
- * P4 (kernel-sts, docs/design/2026-07-12-cos-shark-sts-credential-plan.md)
- * 之后又追加了 `spaceId` 首参 —— KvVersionPinRepo 的所有方法都要 5 个 seg
- * 才能拼出正确的 COS key。老 VersionPinRepo (Redis) 用 wrapper 适配到同
- * 一个 5 参签名，spaceId 段直接吞掉即可（Redis 版 key 里不带 spaceId）。
+ * After P4 (kernel-sts, docs/design/2026-07-12-cos-shark-sts-credential-plan.md)
+ * a leading `spaceId` param was added —— all KvVersionPinRepo methods need 5 segs
+ * to build the correct COS key. The legacy VersionPinRepo (Redis) is adapted via
+ * wrapper to the same 5-param signature; the spaceId segment is just swallowed
+ * (the Redis key carries no spaceId).
  *
- * 之前 4 参签名 + 直接把 KvVersionPinRepo 塞给 PinRepoLike 会导致：
+ * The old 4-param signature + stuffing KvVersionPinRepo straight into
+ * PinRepoLike would lead to:
  *   spaceId ← ids.user_id
  *   userId  ← ids.agent_source
  *   agentSource ← sessionKey
  *   sessionId ← skillId
- * → key 完全错乱且丢租户隔离；节点 B 读永远 miss，症状匹配
- *   "写到 COS 但另一节点看不到"。见 docs/design/2026-07-13-proxy-multinode-state-audit.md P0-1.
+ * → keys fully scrambled and tenant isolation lost; node B reads always miss,
+ *   matching "written to COS but the other node can't see it".
+ *   See docs/design/2026-07-13-proxy-multinode-state-audit.md P0-1.
  */
 interface PinRepoLike {
   getVersion(
@@ -81,10 +85,10 @@ interface PinRepoLike {
 }
 
 /**
- * 把 4 参 Redis-based VersionPinRepo 包成 5 参 PinRepoLike。
- * Redis key schema (skill:vpin:<userId>:<agentSource>:<sessionId>) 里本来
- * 就不带 spaceId —— 单实例 Redis 一般跟 kernel-sts space 是一对一或不重叠，
- * 沿用旧行为，spaceId 参数直接丢弃。
+ * Wrap the 4-param Redis-based VersionPinRepo into a 5-param PinRepoLike.
+ * The Redis key schema (skill:vpin:<userId>:<agentSource>:<sessionId>) does not
+ * carry spaceId —— a single-instance Redis is generally one-to-one or disjoint
+ * with kernel-sts space, so we keep the old behavior and drop the spaceId arg.
  */
 function adaptRedisPinRepo(inner: VersionPinRepo): PinRepoLike {
   return {
@@ -95,22 +99,25 @@ function adaptRedisPinRepo(inner: VersionPinRepo): PinRepoLike {
 }
 
 /**
- * 装配决策 —— 单一入口，让 skill-bridge 拿到"当前生效的"存储组合。
+ * Assembly decision —— single entry point so skill-bridge gets the storage
+ * combination "currently in effect".
  *
- *   storage.enabled + mode!=off → 走 ProxyStorage (KvVersionPinRepo)
- *   否则如果 redis.enabled       → 走 Redis (VersionPinRepo)
- *   否则                          → null (in-memory 兜底)
+ *   storage.enabled + mode!=off → ProxyStorage (KvVersionPinRepo)
+ *   else if redis.enabled       → Redis (VersionPinRepo)
+ *   else                        → null (in-memory fallback)
  *
- * 曾经这里还装配 KvExtractStore / RedisExtractStore 给老链路
- * SkillExtractTrigger 用, 已随老链路一起删除。
+ * This used to also assemble KvExtractStore / RedisExtractStore for the legacy
+ * SkillExtractTrigger path; both were removed along with the old pipeline.
  */
 export interface SkillBackingBundle {
   redis: Redis | null;
   pinRepo: PinRepoLike | null;
   /**
-   * BindingRepo 直接从 SessionStore 拿(injection pipeline 装配时已注入),
-   * 不重新构造,保证 bridge L2 反查用的实例和 handler 写 binding 的实例一致
-   * —— 单元测试注入 SessionStore.setBindingRepo 后,bridge 也读同一个 mock。
+   * BindingRepo is taken straight from SessionStore (already injected during
+   * assembly of the injection pipeline); it is not reconstructed, so the instance
+   * the bridge's L2 lookup uses is the same one handlers write bindings with.
+   * After a unit test injects SessionStore.setBindingRepo, the bridge reads the
+   * same mock too.
    */
   bindingRepo: BindingRepo | null;
 }
@@ -152,8 +159,8 @@ const ALLOWED_SUBPATHS = new Set<string>([
   "files/write",
   "files/remove",
   "listing",
-  // agent 侧 tool 名叫 skill_extract, bridge 转发到 core force-archive
-  // (不依赖 messages, core 从 conversation buffer 拿)。见下方 sub === "extract" 分支。
+  // The agent-side tool is named skill_extract; the bridge forwards to core force-archive
+  // (does not rely on messages; core reads from the conversation buffer). See the sub === "extract" branch below.
   "extract",
 ]);
 
@@ -167,9 +174,9 @@ const WRITE_SUBPATHS = new Set<string>([
   "files/remove",
 ]);
 
-// Note: 曾经有 RESET_EXTRACT_SUBPATHS 用来在 write 成功或 extract 完成后
-// 清零 proxy 侧 buffer 计数器 (老链路 KvExtractStore)。老链路删除后计数器
-// 也没了, 该常量随之删除。
+// Note: RESET_EXTRACT_SUBPATHS used to clear the proxy-side buffer counter after a
+// successful write or extract (legacy KvExtractStore). Once the legacy pipeline was
+// deleted the counter was gone too, so the constant was removed along with it.
 
 /**
  * Version pinning — see docs/design/2026-06-29-skill-version-pinning.md.
@@ -194,9 +201,9 @@ interface SessionIdFields {
   team_id: string;
   agent_id: string;
   /**
-   * URL 路径侧的 agentSource（`claude-code` / `codebuddy` ...）—— 用于
-   * Repo 三段隔离键。从 SessionStore 里存储 session 的 keyId 反解出来
-   * （keyId 形如 `${agentSource}:${sessionId}`）。
+   * agentSource from the URL path side (`claude-code` / `codebuddy` ...) —— used
+   * for the Repo's three-part isolation key. Reverse-derived from the keyId the
+   * session is stored under in SessionStore (keyId shaped like `${agentSource}:${sessionId}`).
    */
   agent_source: string;
   /**
@@ -217,19 +224,21 @@ interface SessionIdFields {
   user_key?: string;
   /**
    * Composite key actually used to load state from SessionStore
-   * (`${agentSource}:${sessionId}`). 用于埋点侧对齐 session_init_logs 的
-   * session_key —— 埋点不能猜前缀，必须用真实命中的 key。
+   * (`${agentSource}:${sessionId}`). Used on the telemetry side to align with
+   * the session_key of session_init_logs —— telemetry must not guess the prefix;
+   * it has to use the key that actually hit.
    */
   composite_key?: string;
 }
 
 /**
- * Bridge 只吃 2 个 header:
- *   - x-conversation-id (或 x-session-id / x-chat-id / x-thread-id) → sessionId
+ * The bridge only consumes 2 headers:
+ *   - x-conversation-id (or x-session-id / x-chat-id / x-thread-id) → sessionId
  *   - x-tdai-service-id → spaceId
  *
- * 不再依赖 Authorization 反查 userId —— 见 docs/design/2026-08-03-binding-flatten.md,
- * L2 fallthrough 走拍平的 (spaceId, sessionId) → binding.json 直接 stamp。
+ * No longer resolves userId from Authorization —— see
+ * docs/design/2026-08-03-binding-flatten.md; the L2 fallthrough stamps straight
+ * from the flattened (spaceId, sessionId) → binding.json.
  */
 function deriveSessionId(c: Context): string | null {
   return (
@@ -248,8 +257,8 @@ function stateToIdFields(
   if (!state || state.status !== "initialized" || !state.sessionInfo) return null;
   const s = state.sessionInfo;
   if (!s.user_id || !s.team_id || !s.agent_id) return null;
-  // agentSource 从 matchedKey 反解(命中的 L1 key 形如 `${agentSource}:${sessionId}`);
-  // L2b 分支直接从 binding.agentSource 拿(见 bindingToIdFields)。
+  // agentSource is reverse-derived from matchedKey (a hit L1 key looks like `${agentSource}:${sessionId}`);
+  // the L2b branch takes it straight from binding.agentSource (see bindingToIdFields).
   const colonIdx = matchedKey.indexOf(":");
   const agentSource = colonIdx > 0 ? matchedKey.slice(0, colonIdx) : "claude-code";
   return {
@@ -283,13 +292,15 @@ function bindingToIdFields(
 }
 
 /**
- * L1: 先按 bare sessionId 试(handler.ts 存的 keyId 是 `${agentSource}:${sessionId}`,
- * bridge curl 拿不到 agentSource,所以按候选前缀顺序探)。
+ * L1: try the bare sessionId first (the keyId handler.ts stores is `${agentSource}:${sessionId}`;
+ * the bridge curl can't get agentSource, so it probes by candidate-prefix order).
  *
- * ⚠️ 候选轮询是过渡期兼容:同 pod 内主对话链路建过 session, L1 Map 里的 key 带
- * agentSource 前缀,bare sessionId 命中不到。方案 B 拍平后 L2b binding 直接命中
- * 2 段 key,不再需要前缀轮询;这里 L1 保留是为了 L2b 出问题时,仍能从内存 L1
- * 恢复而不 401。
+ * ⚠️ Candidate polling is a transitional compat shim: when the main-dialog
+ * pipeline in the same pod created the session, keys in the L1 Map carry an
+ * agentSource prefix and a bare sessionId won't hit. After plan B flattens it,
+ * the L2b binding hits the 2-segment key directly and prefix polling is no longer
+ * needed; L1 is kept here so that if L2b breaks, it can still recover from the
+ * in-memory L1 instead of returning 401.
  */
 function loadSessionIdsL1(sessionId: string): SessionIdFields | null {
   const candidates = sessionId.includes(":")
@@ -306,13 +317,13 @@ function loadSessionIdsL1(sessionId: string): SessionIdFields | null {
 }
 
 /**
- * L2 fallthrough —— 拍平后只吃 (spaceId, sessionId)。见
- * docs/design/2026-08-03-binding-flatten.md。
+ * L2 fallthrough —— after flattening, only (spaceId, sessionId) are consumed.
+ * See docs/design/2026-08-03-binding-flatten.md.
  *
- * 不再走 verifyUserKey + getOrRecover 那条 4 段路径。原因:
- *   1) bridge curl 模板没塞 Authorization: Bearer,verify 拿不到 userId
- *   2) 拍平后 binding.json 里已经存了 user_id/team_id/agent_id/agent_source/user_key,
- *      一次 GET 就够,不需要再补 kernel getAgent/getTask
+ * No longer uses the old 4-segment verifyUserKey + getOrRecover path. Reasons:
+ *   1) the bridge curl template doesn't include Authorization: Bearer, so verify can't get userId
+ *   2) after flattening, binding.json already holds user_id/team_id/agent_id/agent_source/user_key,
+ *      a single GET suffices — no need to also call kernel getAgent/getTask
  */
 async function loadSessionIdsL2(
   bindingRepo: BindingRepo | null,
@@ -395,11 +406,12 @@ export interface SkillBridgeDeps {
  * fewer than N — vanishingly unlikely for the current corpus size. If it ever
  * matters, raise plugin's cap; this stays as-is.
  *
- * TODO(upgrade): 长期来看，如果观察到 team search 过滤后剩余条数常 < 用户
- * top_k（whitelist merged 显著大于 50，或 filter 命中率 P95 < 0.2），说明
- * 该 team 的 skill 池已把 top-50 撑爆，overfetch 兜不住 → 升级为请求侧
- * 过滤（proxy 传 `skill_ids: [...]` → core 在 pool 内精确检索）。
- * 见 `docs/design/2026-08-10-skill-search-scope-fix.md` §3 Plan A。
+ * TODO(upgrade): longer term, if team-search post-filter remaining counts are
+ * often < the user's top_k (whitelist merged significantly exceeds 50, or the
+ * filter hit-rate P95 < 0.2), the team's skill pool has overflowed top-50 and
+ * overfetch can't cover it → upgrade to request-side filtering (proxy sends
+ * `skill_ids: [...]` → core does an exact search within the pool).
+ * See `docs/design/2026-08-10-skill-search-scope-fix.md` §3 Plan A.
  */
 const PLUGIN_SEARCH_HARD_TOPK = 50;
 
@@ -452,8 +464,9 @@ export function createSkillBridgeHandler(
 
     const path = new URL(c.req.url).pathname;
     const sub = extractSubpath(path);
-    // 前置校验早退埋点: 每个 return 前都发一条 reject_reason 非空的 bridge_call。
-    // sessionKey 此刻可能还没派生, 允许传 "" (helper 兜底 agentSource='unknown')。
+    // Early-exit telemetry for pre-checks: emit a bridge_call with non-empty reject_reason
+    // before each return. sessionKey may not be derived yet here, so "" is allowed
+    // (the helper falls back to agentSource='unknown').
     if (!sub) {
       emitBridgeRejectTelemetry({
         sessionKey: "", bridgeSource: "skill-bridge",
@@ -489,8 +502,8 @@ export function createSkillBridgeHandler(
     }
 
     // Session must be initialized — IdFields come from there.
-    // curl 模板只带 (x-conversation-id, x-tdai-service-id) 两个 header;
-    // L1 miss 时用它俩去 nottl/<spaceId>/<sessionId>/binding.json 反查。
+    // The curl template only carries two headers (x-conversation-id, x-tdai-service-id);
+    // on an L1 miss those two are used to look up nottl/<spaceId>/<sessionId>/binding.json.
     const sessionKey = deriveSessionId(c);
     if (!sessionKey) {
       emitBridgeRejectTelemetry({
@@ -525,11 +538,11 @@ export function createSkillBridgeHandler(
       });
       return envelope(40101, `${TAG} session not initialized; cannot derive identity`, 401);
     }
-    // backing.redis 之前给老链路 SkillExtractTrigger 用, 老链路已删,
-    // 本函数体内不再直接使用 redis; backing 结构上保留是因为 pinRepo
-    // 走 redis 的分支还需要它。
+    // backing.redis used to serve the legacy SkillExtractTrigger path, which is gone;
+    // this function no longer touches redis directly. It is kept on the backing struct
+    // only because the pinRepo-via-redis branch still needs it.
 
-    // 消融实验：allowLlmWrite=false 时拒绝写操作
+    // Ablation experiment: reject write operations when allowLlmWrite=false
     const allowLlmWrite = config.skillRuntime?.allowLlmWrite ?? false;
     if (!allowLlmWrite && WRITE_SUBPATHS.has(sub)) {
       emitBridgeRejectTelemetry({
@@ -600,8 +613,9 @@ export function createSkillBridgeHandler(
         });
       } catch (err) {
         console.warn(`${TAG} files/download upstream fetch failed: ${(err as Error).message}`);
-        // 埋点补齐: 与主路径 :822 对称, upstream 未响应也算一次调用。
-        // 之前这个 catch 分支静默 return, 导致 curl 视角"打了 N 次" CH 少一条。
+        // Telemetry parity: like the main :822 path, an upstream non-response still
+        // counts as a call. This catch branch used to return silently, so CH was one
+        // row short from curl's "made N calls" perspective.
         const dlEmitKey = ids.composite_key ?? sessionKey;
         emitBridgeToolCallTelemetry({
           sessionKey: dlEmitKey,
@@ -681,18 +695,21 @@ export function createSkillBridgeHandler(
     let searchOriginalTopK = 0;
     let outbound: Record<string, unknown>;
     /**
-     * upstream 路径若与 `/v3/skill/${sub}` 不一致(如 extract → force-archive)
-     * 由分支写这个变量;默认沿用 sub。
+     * When the upstream path differs from `/v3/skill/${sub}` (e.g. extract →
+     * force-archive), the branch writes this variable; defaults to sub.
      */
     let upstreamSubpathOverride: string | null = null;
     if (sub === "extract") {
-      // agent 侧 tool 叫 skill_extract, 语义"立即归档当前对话触发一次 skill 抽取"。
-      // 转发到 core `/v3/skill/conversation/force-archive` —— 该接口不吃 messages,
-      // 从 conversation buffer(proxy 主对话链路每轮推的 /v3/skill/conversation/add)
-      // 拿累积的完整对话。见 core skill-schemas.ts forceArchiveRequestSchema。
+      // The agent-side tool is named skill_extract; its semantics are "archive the
+      // current conversation now to trigger one skill extraction".
+      // Forwards to core `/v3/skill/conversation/force-archive` —— that endpoint
+      // doesn't take messages; it reads the accumulated full conversation from the
+      // conversation buffer (pushed each turn by the proxy main-dialog pipeline via
+      // /v3/skill/conversation/add). See core skill-schemas.ts forceArchiveRequestSchema.
       //
-      // outbound 只需 (space_id, user_id, team_id, agent_id, session_id) + 可选 reason;
-      // agent 传的 messages / task_id 一律不透传(agent 视角无关,session 内隐含)。
+      // outbound only needs (space_id, user_id, team_id, agent_id, session_id) + optional reason;
+      // messages / task_id sent by the agent are never forwarded (irrelevant from the
+      // agent's perspective; implicit in the session).
       upstreamSubpathOverride = "conversation/force-archive";
       const reason = typeof inboundBody.reason === "string" && inboundBody.reason.trim()
         ? inboundBody.reason.trim().slice(0, 2000)
@@ -747,18 +764,19 @@ export function createSkillBridgeHandler(
           return envelope(50001, `${TAG} team search misconfigured: session has no user_key`, 500);
         }
 
-        // Whitelist = A ∪ B（见 docs/design/2026-08-10-skill-search-scope-fix.md §4）：
-        //   A = meta list-accessible(visibility='team') — team-shared skill
-        //   B = core /v3/skill/list(agent 自有全量)   — 含 private
+        // Whitelist = A ∪ B (see docs/design/2026-08-10-skill-search-scope-fix.md §4):
+        //   A = meta list-accessible(visibility='team') — team-shared skills
+        //   B = core /v3/skill/list(agent's own full set)   — includes private
         //
-        // 原来有 C = listing "本会话已注入" 做减法，但 C 是实时 listing 结果，
-        // 会话内新建的 skill 会出现在 C 中被减掉 → 搜不到 (Issue #1006)。
-        // 去掉 C 减法：代价是已注入 skill 可能重复出现在搜索结果中（无害），
-        // 但不会有"永远搜不到"的盲区。
+        // There used to be a C = listing "already injected in this session" subtract,
+        // but C is a live listing result — a skill created mid-session shows up in C
+        // and gets subtracted → can't be found (Issue #1006).
+        // Dropping the C subtract costs: an already-injected skill may now appear twice
+        // in search results (harmless), but there's no "never findable" blind spot.
         //
-        // 失败降级策略：
-        //   A 失败 → fail-closed 返回空（安全兜底：绝不让 LLM 看到未过滤结果）
-        //   B 失败 → 当空集，退化为纯 A（约等于修复前行为）
+        // Failure degradation strategy:
+        //   A fails → fail-closed, return empty (safe fallback: never let the LLM see unfiltered results)
+        //   B fails → treat as empty set, degrade to A alone (roughly pre-fix behavior)
         const coreClient = deps.coreClient ?? getCoreSkillClient(config.coreSkill);
         const resolver = deps.resolveVisibleSkillIds
           ?? defaultVisibleSkillIdsResolver(config);
@@ -771,8 +789,8 @@ export function createSkillBridgeHandler(
         }).then(r => ({ ok: true as const, ids: r.ids }))
           .catch(err => ({ ok: false as const, err: err as Error }));
 
-        // B limit=1000 是 core listRequestSchema 上限（paginationSchema.limit.max(1000)）。
-        // 单 agent 自有 skill 到不了 1000 量级，一次拿完不分页。
+        // B limit=1000 is the cap of core listRequestSchema (paginationSchema.limit.max(1000)).
+        // A single agent's own skills never approach 1000, so fetch them all in one page.
         const promiseB = coreClient.listSkills(
           {
             team_id: ids.team_id,
@@ -789,7 +807,7 @@ export function createSkillBridgeHandler(
         const [aResult, bIds] = await Promise.all([promiseA, promiseB]);
 
         if (!aResult.ok) {
-          // Fail-closed: A 挂掉不能降级到不过滤搜索。
+          // Fail-closed: if A is down, never degrade to an unfiltered search.
           console.warn(`${TAG} team search whitelist resolver (A) failed, fail-closed: ${aResult.err.message}`);
           return new Response(
             JSON.stringify({ code: 0, message: "ok", request_id: `bridge-${(deps.now ?? Date.now)()}`, data: { items: [] } }),
@@ -881,8 +899,8 @@ export function createSkillBridgeHandler(
       console.warn(
         `${TAG} upstream fetch failed sub=${sub} err=${(err as Error).message}`,
       );
-      // 埋点：upstream 未响应也算一次调用（方案 §5.1"每次都要记录"）
-      // 用 ids.composite_key 保证 session_key 与 session_init_logs 对齐。
+      // Telemetry: an upstream non-response still counts as one call (§5.1 "record every call").
+      // ids.composite_key is used so session_key aligns with session_init_logs.
       const emitKey = ids.composite_key ?? sessionKey;
       emitBridgeToolCallTelemetry({
         sessionKey: emitKey,
@@ -906,7 +924,7 @@ export function createSkillBridgeHandler(
       `${TAG} sub=${sub} status=${resp.status} elapsed=${elapsed}ms`,
     );
 
-    // 埋点：upstream 已响应（含 4xx/5xx），记录实际状态与耗时
+    // Telemetry: upstream responded (incl. 4xx/5xx); record the actual status and elapsed.
     const emitKey = ids.composite_key ?? sessionKey;
     emitBridgeToolCallTelemetry({
       sessionKey: emitKey,
@@ -922,9 +940,9 @@ export function createSkillBridgeHandler(
       elapsedMs: (deps.now ?? Date.now)() - callStart,
     });
 
-    // 曾经这里会在写操作 / extract 成功时清零 proxy 侧 buffer 计数器,
-    // 避免重复触发自动 extract。老链路 (SkillExtractTrigger + KvExtractStore)
-    // 已删除, 该逻辑不再需要。
+    // This used to reset the proxy-side buffer counter after a successful write or
+    // extract to avoid re-triggering automatic extraction. The legacy pipeline
+    // (SkillExtractTrigger + KvExtractStore) is gone, so this logic is no longer needed.
 
     // ── Team-wide search: response-side visibility filter ──
     // We composed with meta above and stashed the visible skill_id set

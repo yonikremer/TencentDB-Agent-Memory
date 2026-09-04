@@ -1,20 +1,22 @@
 /**
- * WorkBuddy endpoint handler —— 骨架层（helper 函数 + main handler stub）。
+ * WorkBuddy endpoint handler —— skeleton layer (helper functions + main handler stub).
  *
- * WorkBuddy 走 OpenAI Responses API（@openai/agents SDK），wire protocol 与
- * Codex一致，system prompt XML 结构与 CodeBuddy相似。但本文件**故意与
- * codexHandler / codebuddyHandler 完全解耦**，不import 任何 sibling handler，
- * 换WorkBuddy 只动本文件与 injection/agents/workbuddy/，其余客户端不受影响。
+ * WorkBuddy goes through the OpenAI Responses API (@openai/agents SDK); its wire protocol is
+ * identical to Codex and its system prompt XML structure is similar to CodeBuddy. However, this
+ * file is **intentionally fully decoupled from codexHandler / codebuddyHandler** — it imports no
+ * sibling handler. Swapping WorkBuddy only touches this file plus injection/agents/workbuddy/,
+ * leaving all other clients unaffected.
  *
- * 本轮（分层交付第一步）：**只暴露单测友好的 pure function**
- *   - classifyWorkbuddyRequest：识别 main vs auxiliary 请求
- *   - extractWorkbuddySessionId：从 header / body 中提取 session id
- *   - detectWorkbuddyDefaultModeGate：识别客户端 Default mode gate 信号
- *   - injectWorkbuddyAssets：向 body.input[0].content[] 追加 `<tdai_injections>` wrapper
+ * This round (step one of the layered delivery): **expose only unit-test-friendly pure functions**
+ *   - classifyWorkbuddyRequest: identify main vs auxiliary requests
+ *   - extractWorkbuddySessionId: extract the session id from the header / body
+ *   - detectWorkbuddyDefaultModeGate: detect the client's Default mode gate signal
+ *   - injectWorkbuddyAssets: append a `<tdai_injections>` wrapper to body.input[0].content[]
  *
- * 完整的 `handleWorkbuddyEndpoint(c, config)` 主 handler（含 auth / session-init /
- * mem-command / forward+langfuse tap）留到下一轮 server 路由接入时再补——
- * 那部分需要引入大量 config/session 依赖，先隔离出来降低回归面。
+ * The full `handleWorkbuddyEndpoint(c, config)` main handler (auth / session-init /
+ * mem-command / forward + langfuse tap) is deferred until the next round wires up the server
+ * routes — it needs many config/session deps, so it is isolated first to shrink the regression
+ * surface.
  */
 
 import type { Context } from "hono";
@@ -30,10 +32,10 @@ import {
   buildWorkbuddyInjectionBlock,
   type WorkbuddyInjectionInput,
 } from "./common/workbuddy-injection.js";
-// WorkBuddy 走 Responses API，与 codex wire 完全一致 —— 弹窗骨架直接复用
-// session/codex/form.ts 的 buildFormResponse + codexFormAnswersAsMessages，
-// 状态机复用 CB 的 handleSessionInit(agentSource="codex")。这样 WorkBuddy
-// 本身不需要单独做一套 form 骨架。
+// WorkBuddy uses the Responses API, identical to the codex wire — the modal skeleton directly
+// reuses buildFormResponse + codexFormAnswersAsMessages from session/codex/form.ts, and the
+// state machine reuses CB's handleSessionInit(agentSource="codex"). This way WorkBuddy does
+// not need its own separate form skeleton.
 import {
   buildFormResponse as buildCodexFormResponse,
   codexFormAnswersAsMessages,
@@ -74,14 +76,16 @@ const SKIP_RESPONSE_HEADERS = new Set([
 // ── Types (exported for unit tests) ──────────────────────────────────────────
 
 /**
- * WorkBuddy per-session state。
- * 与 CodexSessionState 语义一致但独立类型，避免跨 handler 类型共享。
+ * WorkBuddy per-session state.
+ * Semantically identical to CodexSessionState but a separate type, to avoid cross-handler
+ * type sharing.
  *
- * - status: "initialized" 表示已完成绑定/引导流程；"pending" 表示还在等
- *   session-init 表单回填
- * - bypassed: 用户明确选择"Default mode"绕过绑定流程后，永久跳过 form注入
- * - sessionInfo:绑定成功后附带的 { userId, teamId, agentId, ... } 元数据，
- *   透传给 injection pipeline 做上下文查询
+ * - status: "initialized" means binding/onboarding is complete; "pending" means still waiting
+ *   on the session-init form round-trip
+ * - bypassed: the user explicitly chose "Default mode" to bypass binding, so form injection is
+ *   permanently skipped
+ * - sessionInfo: the { userId, teamId, agentId, ... } metadata attached after a successful bind,
+ *   forwarded to the injection pipeline for context lookups
  */
 export interface WorkbuddySessionState {
   status: "initialized" | "pending";
@@ -92,15 +96,15 @@ export interface WorkbuddySessionState {
 // ── Constants ────────────────────────────────────────────────────────────────
 
 /**
- * WorkBuddy 客户端 Default mode gate 的特征字符串。
- * 客户端在用户选 Default mode 后，会在 function_call_output 里输出这个前缀
- * 提示 "request_user_input is unavailable in Default mode"——命中即视为
- * 用户明确选择绕过绑定流程，session 应永久 bypass。
+ * Signature string for the WorkBuddy client's Default mode gate.
+ * After the user picks Default mode, the client emits this prefix in its function_call_output
+ * ("request_user_input is unavailable in Default mode"); a match means the user explicitly
+ * chose to bypass the binding flow, so the session should be permanently bypassed.
  *
- * WorkBuddy 客户端的实际字符串**待抓包验证**，本轮先按 codex 的 gate 字符串
- * 打（"request_user_input is unavailable in Default mode"），等真实客户端
- * 联调时对齐。
- * TODO(workbuddy-integration): 抓包确认 WorkBuddy 客户端实际的 gate 字符串。
+ * The actual WorkBuddy client string is **still to be confirmed by capturing traffic**; for now
+ * we ship with codex's gate string ("request_user_input is unavailable in Default mode") and
+ * align it during integration testing with the real client.
+ * TODO(workbuddy-integration): capture traffic to confirm the actual WorkBuddy client gate string.
  */
 const DEFAULT_GATE_PREFIX = "request_user_input is unavailable in Default mode";
 
@@ -109,28 +113,30 @@ const DEFAULT_GATE_PREFIX = "request_user_input is unavailable in Default mode";
 /**
  * Classify a WorkBuddy request as main or auxiliary.
  *
- * Auxiliary 请求指客户端自发的辅助调用（memory 生成、trace 汇总、compact
- * 等），不应触发 session-init form 或 injection，直接转发上游。
+ * An auxiliary request is a client-initiated background call (memory generation, trace
+ * summarization, compact, etc.) that must not trigger the session-init form or injection;
+ * it is forwarded upstream as-is.
  *
- * 判定顺序（任一命中即返回 auxiliary）：
- *   1. path中出现 aux 路径片段（/compact, /trace_summarize, /realtime, /memories）
- *   2. header 出现 memgen 标记（x-openai-memgen-request=true，兼容 SDK 惯例）
+ * Decision order (any match returns auxiliary):
+ *   1. the path contains an aux path segment (/compact, /trace_summarize, /realtime, /memories)
+ *   2. the headers carry a memgen marker (x-openai-memgen-request=true, following SDK convention)
  *   3. body.client_metadata.thread_source ∈ {system, memory_consolidation}
  *
- * 未知的 thread_source 视为 main（偏严——宁可漏 aux 也不误把用户交互当 aux）。
+ * An unknown thread_source is treated as main (conservative — better to miss an aux call than
+ * to misclassify a real user interaction as aux).
  */
 export function classifyWorkbuddyRequest(
   body: Record<string, unknown>,
   path: string,
   headers: Record<string, string>,
 ): "main" | "auxiliary" {
-  // ① path-based aux 判定
+  // ① path-based aux detection
   const AUX_PATH_HINTS = ["/compact", "/trace_summarize", "/realtime", "/memories"];
   for (const hint of AUX_PATH_HINTS) {
     if (path.includes(hint)) return "auxiliary";
   }
 
-  // ② header memgen 标记
+  // ② header memgen marker
   const memgen =
     headers["x-openai-memgen-request"] ??
     headers["X-OpenAI-Memgen-Request"] ??
@@ -150,13 +156,13 @@ export function classifyWorkbuddyRequest(
 // ── Session ID extraction ────────────────────────────────────────────────────
 
 /**
- * 从请求头/请求体中提取 WorkBuddy session id。
+ * Extract the WorkBuddy session id from the request headers / body.
  *
- * 优先级（与 codex 相同）：
- *   1. header `session-id`（SDK 默认位置）
- *   2. body.client_metadata.session_id（fallback）
+ * Priority (same as codex):
+ *   1. header `session-id` (SDK default location)
+ *   2. body.client_metadata.session_id (fallback)
  *
- * 两者都缺 → null（上层负责决定是拒绝还是生成新 session）。
+ * Neither present → null (the caller decides whether to reject or create a new session).
  */
 export function extractWorkbuddySessionId(
   headers: Record<string, string>,
@@ -176,15 +182,15 @@ export function extractWorkbuddySessionId(
 // ── Default mode gate detection ──────────────────────────────────────────────
 
 /**
- * 识别 WorkBuddy 客户端的 Default mode gate 信号。
+ * Detect the WorkBuddy client's Default mode gate signal.
  *
- * 客户端在用户拒绝 request_user_input 表单（选择 Default mode）时，会在
- * 下一轮请求的 input[] 里带上 function_call_output.output ~= 
- * "request_user_input is unavailable in Default mode"。命中即表示用户
- * 明确要绕过绑定流程→ session 应标记 bypassed。
+ * When the user rejects the request_user_input form (choosing Default mode), the client
+ * includes a function_call_output.output ~= "request_user_input is unavailable in Default mode"
+ * in the next turn's input[]. A match means the user explicitly wants to bypass the binding
+ * flow → the session should be marked bypassed.
  *
- * 与 codex 版本同结构，字符串前缀独立定义（DEFAULT_GATE_PREFIX），未来客户端
- * 修改文案时只需改这一个常量。
+ * Same structure as the codex version; the prefix string is defined separately
+ * (DEFAULT_GATE_PREFIX) so future client copy changes only touch this one constant.
  */
 export function detectWorkbuddyDefaultModeGate(input: unknown): boolean {
   if (!Array.isArray(input)) return false;
@@ -203,20 +209,21 @@ export function detectWorkbuddyDefaultModeGate(input: unknown): boolean {
 // ── Asset injection ──────────────────────────────────────────────────────────
 
 /**
- * Inject `<tdai_injections>` wrapper into WorkBuddy body.input[0].content[].
+ * Inject the `<tdai_injections>` wrapper into WorkBuddy body.input[0].content[].
  *
- * 与 codex 逻辑同构：把 pipeline 产出的完整 XML 文本挂到 developer message
- * (input[0]) 的 content 数组末尾。
+ * Homomorphic to the codex logic: attach the full XML text produced by the pipeline to the
+ * end of the developer message (input[0]) content array.
  *
- * 防御性 short-circuit：
- *   - 无 input 或 input 不是数组 → 返回原 body
- *   - input[0] 不是 message → 返回原 body
- *   - input[0].content 不是数组 → 返回原 body
- *   （这些防御分支的意义：客户端非首帧时 input[0] 可能是 function_call 之类，
- *    只有第一轮 input[0] 才是 developer/user message；错注入 function_call 项
- *    的 content 会导致上游 400 或语义错乱。）
+ * Defensive short-circuits:
+ *   - no input, or input is not an array → return the original body
+ *   - input[0] is not a message → return the original body
+ *   - input[0].content is not an array → return the original body
+ *   (Why these guards matter: on non-first frames input[0] may be a function_call and the like;
+ *    only on the first turn is input[0] a developer/user message. Injecting into a function_call
+ *    item's content would cause an upstream 400 or corrupt the semantics.)
  *
- * 返回浅拷贝，不修改原 body（body → input → input[0] → content 全链路浅拷）。
+ * Returns a shallow copy and does not mutate the original body (body → input → input[0] →
+ * content are shallow-copied along the whole chain).
  */
 export function injectWorkbuddyAssets(
   body: Record<string, unknown>,
@@ -241,18 +248,18 @@ export function injectWorkbuddyAssets(
   return { ...body, input: newInput };
 }
 
-// ── Human turn counting (langfuse 埋点辅助) ──────────────────────────────────
+// ── Human turn counting (langfuse instrumentation helper) ──────────────────
 
 /**
- * 统计 WorkBuddy input[] 里的 "human turn" 数量。
+ * Count the number of "human turns" in the WorkBuddy input[].
  *
- * 用于 langfuse trace 的 turnSeq——只要客户端主动发出的用户消息（role=user
- * 且 type=message）参与计数；tool 调用产生的 function_call / function_call_output
- * / assistant 反馈不计入。这样同一轮内的多次 function_call 会merge 到同一个
- * trace，方便观测。
+ * Used as the turnSeq for the langfuse trace — only user-initiated messages (role=user and
+ * type=message) count; function_call / function_call_output items produced by tool calls and
+ * assistant feedback do not. This way multiple function_calls within one turn merge into a
+ * single trace, which is easier to observe.
  *
- * 与 codex 的 countHumanTurnsCodex 同逻辑，为了保持"handler 之间零依赖"独立
- * 复制一份。
+ * Same logic as codex's countHumanTurnsCodex, copied separately to keep "zero dependencies
+ * between handlers".
  */
 export function countHumanTurnsWorkbuddy(input: unknown): number {
   if (!Array.isArray(input)) return 0;
@@ -270,9 +277,9 @@ export function countHumanTurnsWorkbuddy(input: unknown): number {
 // ── Workbuddy Archive Context (L0 write + Skill extract) ────────────────────
 
 /**
- * WorkBuddy L0/Skill 归档上下文, 对齐 codexHandler 的 CodexArchiveCtx 设计:
- *   - archiveCtx=null 时 forward/session bypass 侧直接跳过 hook
- *   - 失败静默 (内部 warn), 绝不阻塞上游响应
+ * WorkBuddy L0/Skill archiving context, mirroring the CodexArchiveCtx design in codexHandler:
+ *   - when archiveCtx is null, the forward/session-bypass side skips the hooks entirely
+ *   - failures are silent (warned internally) and never block the upstream response
  */
 export interface WorkbuddyArchiveCtx {
   config: ProxyConfig;
@@ -280,20 +287,20 @@ export interface WorkbuddyArchiveCtx {
   agentSource: string;
   sessionInfo: Record<string, unknown>;
   userId: string;
-  /** 原始 body.input[] (responses API input items) */
+  /** The raw body.input[] (responses API input items) */
   input: unknown[];
   tdaiClient: TdaiClient | null;
   tdaiIdentity: TdaiIdentity | null;
   tdaiUserMessage: TdaiMessage | null;
   /**
-   * 资产能力开关（chat_memory / skill / ...）；用于 gate 归档 hook。
-   * 与 codexHandler.CodexArchiveCtx.assetCapabilities 对齐。
+   * Asset capability flags (chat_memory / skill / ...); used to gate the archive hooks.
+   * Aligned with codexHandler.CodexArchiveCtx.assetCapabilities.
    */
   assetCapabilities?: import("./injection/types.js").AssetCapabilityFlags;
 }
 
 /**
- * 从 responses API body.input[] 提取 latest user message 用于 L0 write。
+ * Extract the latest user message from the responses API body.input[] for the L0 write.
  */
 function extractLatestWorkbuddyUserMessage(input: unknown): TdaiMessage | null {
   if (!Array.isArray(input)) return null;
@@ -331,8 +338,9 @@ function buildWorkbuddyArchiveCtx(args: {
   const { sessionInfo, injectionSkipped } = args;
   if (injectionSkipped || !sessionInfo) return null;
 
-  // chat_memory=false 时用户显式关闭记忆 → 不创建 tdaiClient；skill 归档仍走。
-  // 对齐 codexHandler.buildArchiveCtx (line 855-857)。
+  // When chat_memory=false the user explicitly disabled memory → don't create the tdaiClient;
+  // skill archiving still runs.
+  // Aligned with codexHandler.buildArchiveCtx (lines 855-857).
   const tdaiClient = args.assetCapabilities?.chat_memory === false
     ? null
     : createWorkbuddyTdaiClient(args.config);
@@ -359,11 +367,12 @@ function buildWorkbuddyArchiveCtx(args: {
 }
 
 /**
- * 流结束后触发 TDAI L0 write + skill 提取, 对齐 codexHandler 的
- * triggerCodexArchiveHooks 逻辑。失败静默(内部已 warn), 不阻塞下游。
+ * Trigger the TDAI L0 write + skill extraction after the stream ends, mirroring
+ * codexHandler's triggerCodexArchiveHooks. Failures are silent (already warned internally)
+ * and never block downstream.
  *
- * @param ctx         归档上下文 (非 null 时有效)
- * @param assistantText stream accumulator 累积的 assistant 文本
+ * @param ctx          archive context (only effective when non-null)
+ * @param assistantText assistant text accumulated by the stream accumulator
  */
 async function triggerWorkbuddyArchiveHooks(
   ctx: WorkbuddyArchiveCtx,
@@ -371,13 +380,13 @@ async function triggerWorkbuddyArchiveHooks(
   toolCallCountOverride?: number,
 ): Promise<void> {
   // ── TDAI L0 write ──
-  // 与 codexHandler triggerCodexArchiveHooks 对称:
-  //   trackWrite 挂全局 in-flight set (index.ts flushPendingWrites 兜底)
-  //   withL0Retry 3 次退避挡 tdai kernel 瞬断
-  //   stream 场景不 await, 让归档 hook 提前返回
+  // Symmetric to codexHandler's triggerCodexArchiveHooks:
+  //   trackWrite registers onto the global in-flight set (index.ts flushPendingWrites covers it)
+  //   withL0Retry retries 3 times with backoff against transient tdai kernel outages
+  //   stream scenarios don't await, letting the archive hooks return early
   //
-  // 注意：buildWorkbuddyArchiveCtx 已在 chat_memory=false 时把 tdaiClient 置 null，
-  // 所以此处不需要再判 assetCapabilities.chat_memory；tdaiClient 为 null 时自然跳过。
+  // Note: buildWorkbuddyArchiveCtx already nulled tdaiClient when chat_memory=false, so there is
+  // no need to re-check assetCapabilities.chat_memory here; a null tdaiClient is skipped naturally.
   if (ctx.tdaiClient && ctx.tdaiIdentity && isExtractionAllowed(ctx.config, "tdai-memory")) {
     trackWrite(
       withL0Retry(() =>
@@ -391,15 +400,16 @@ async function triggerWorkbuddyArchiveHooks(
   }
 
   // ── Skill conversation/add trigger ──
-  // 与 codexHandler 对称: 归档写完再返, 保证跨节点下一轮读到最新 buffer。
-  // assistantMessage 使用 stream accumulator 的 outputText 组装一份
-  // Responses API 格式的消息 (type:"message", role:"assistant",
-  // content:[{type:"output_text", text}]) —— 与 codexHandler 一致。
+  // Symmetric to codexHandler: return only after the archive write finishes, so the next turn on
+  // another node reads the freshest buffer.
+  // assistantMessage is assembled from the stream accumulator's outputText into a Responses API
+  // message (type:"message", role:"assistant", content:[{type:"output_text", text}]) — consistent
+  // with codexHandler.
   //
-  // protocol 必须传 "responses"：server.ts 注释明确说明 WorkBuddy 与 Codex 同协议，
-  // langfuse tag 也用 "protocol:responses"。若错传 "openai"，skill 提取时
-  // normalizeConversation 会按 Chat Completions 格式解析 messages[]，
-  // 与实际 body.input[] (Responses API) 错位。
+  // protocol must be "responses": the server.ts comment clearly states WorkBuddy shares the Codex
+  // protocol, and the langfuse tag uses "protocol:responses" too. If "openai" is passed by
+  // mistake, skill extraction's normalizeConversation would parse messages[] as Chat Completions
+  // format, which mismatches the actual body.input[] (Responses API).
   if (isExtractionAllowed(ctx.config, "skill")) {
     const assistantMessage = assistantText
       ? {
@@ -427,16 +437,16 @@ async function triggerWorkbuddyArchiveHooks(
 // ── Upstream helpers ─────────────────────────────────────────────────────────
 
 /**
- * 把 workbuddy 请求 body 结构化成 langfuse observation 的 `input` 字段。
+ * Shape the workbuddy request body into the langfuse observation `input` field.
  *
- * workbuddy 走 Responses API，请求体形态：
- *   - body.input:        Array<InputItem>（必有，用户消息 / 工具输出等）
- *   - body.instructions: string           （可选，system-level 指令）
+ * workbuddy uses the Responses API; the request body shape is:
+ *   - body.input:        Array<InputItem> (always present: user messages / tool outputs, etc.)
+ *   - body.instructions: string           (optional, system-level instructions)
  *
- * 组合策略（尽量减少 langfuse UI 嵌套层级）：
- *   - 有 instructions → 返回 { input, instructions }
- *   - 仅 input       → 直接返回 body.input
- *   - 都缺失         → 返回 undefined（langfuse 侧不写 input 字段）
+ * Combination strategy (minimize nesting depth in the langfuse UI):
+ *   - instructions present → return { input, instructions }
+ *   - only input       → return body.input directly
+ *   - neither present  → return undefined (langfuse does not write the input field)
  */
 function buildWorkbuddyLangfuseInput(body: Record<string, unknown>): unknown {
   const hasInput = Array.isArray(body.input);
@@ -486,8 +496,8 @@ async function forwardToUpstream(
   archiveCtx: WorkbuddyArchiveCtx | null = null,
 ): Promise<Response> {
   // ── Per-agent upstream override ──
-  // 对齐 codexHandler: 支持 config.upstream.agents?.workbuddy 单独指 URL/apiKey，
-  // 未配置时回退到全局 config.upstream.{url,apiKey}。
+  // Aligned with codexHandler: supports config.upstream.agents?.workbuddy to point at its own
+  // URL/apiKey; falls back to the global config.upstream.{url,apiKey} when unset.
   const perAgent = (config.upstream as unknown as {
     agents?: { workbuddy?: { url?: string; apiKey?: string } };
   }).agents?.workbuddy;
@@ -496,17 +506,17 @@ async function forwardToUpstream(
   const upstreamUrl = joinUrl(upstreamBase, upstreamPath);
 
   const headers = buildUpstreamHeaders(c, config);
-  // 若 per-agent 指定了独立 apiKey，覆盖全局注入的 authorization
+  // If per-agent specifies its own apiKey, override the globally injected authorization
   if (perAgent?.apiKey) {
     headers["authorization"] = `Bearer ${perAgent.apiKey}`;
     delete headers["x-api-key"];
   }
   const bodyStr = JSON.stringify(body);
 
-  // 结构化埋点：与 codex 对齐（forwardStart / forwardDone / info 三段式）
+  // Structured instrumentation: aligned with codex (forwardStart / forwardDone / info, three stages)
   pipe.forwardStart(upstreamUrl);
 
-  // usage.log 记录请求（方便运营 / 计费统计），对齐 codex writeLog 用法
+  // usage.log records the request (for ops / billing stats), matching codex's writeLog usage
   try {
     writeLog(config, {
       timestamp: startTime,
@@ -531,7 +541,7 @@ async function forwardToUpstream(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     pipe.info("WORKBUDDY_FORWARD_ERR", msg);
-    // 网络层失败 → langfuse failure 上报，让线上可视化能看到
+    // Network-layer failure → report to langfuse failure so production dashboards can see it
     if (lf) {
       try {
         langfuseReportFailure({
@@ -562,7 +572,8 @@ async function forwardToUpstream(
 
   pipe.forwardDone(upstreamResp.status);
 
-  // 上游 4xx/5xx → langfuse failure 上报（body 已被上游消费，不重读，避免破坏流）
+  // Upstream 4xx/5xx → report to langfuse failure (body already consumed upstream; don't re-read
+  // it to avoid breaking the stream)
   if (lf && upstreamResp.status >= 400) {
     try {
       langfuseReportFailure({
@@ -617,7 +628,7 @@ async function forwardToUpstream(
 }
 
 /**
- * WorkBuddy tap context —— consumeWorkbuddyStream 的参数类型。
+ * WorkBuddy tap context —— the parameter type for consumeWorkbuddyStream.
  */
 interface WorkbuddyTapContext {
   startTime: string;
@@ -629,12 +640,12 @@ interface WorkbuddyTapContext {
   pipe: ReturnType<typeof createPipeline>;
   archiveCtx: WorkbuddyArchiveCtx | null;
   /**
-   * 转发到上游的最终 body（含注入后的 input[]）。用于两个地方：
-   *   1) langfuse observation.input（buildWorkbuddyLangfuseInput）
-   *   2) 兜底 —— 目前未用，但对齐 codex 便于后续扩展
+   * The final body forwarded upstream (including the injected input[]). Used in two places:
+   *   1) the langfuse observation.input (buildWorkbuddyLangfuseInput)
+   *   2) as a fallback — currently unused, but mirrors codex for future extension
    */
   inputBody: Record<string, unknown>;
-  /** 上游 URL，写进 observationMetadata 便于排障 */
+  /** Upstream URL, written into observationMetadata for troubleshooting */
   upstreamUrl: string;
 }
 
@@ -643,13 +654,14 @@ interface WorkbuddyTapContext {
  * langfuse, then trigger L0 write + skill extraction hooks.
  * Runs asynchronously without blocking the downstream response.
  *
- * 关键机制（对齐 codex 但保留 workbuddy 现有 try/finally 风格）：
- *   - 5 分钟兜底 setTimeout：客户端断开或上游卡住不释放时强制收尾一次
- *   - toolUseCount 累积：Responses API 里 `response.output_item.done` +
- *     `item.type==="function_call"` 计一次工具调用；透传给 skill 归档做
- *     round 边界判据
- *   - buildWorkbuddyLangfuseInput(inputBody)：把 body.input + instructions
- *     结构化写入 langfuse observation.input，便于排障
+ * Key mechanics (aligned with codex but keeping workbuddy's existing try/finally style):
+ *   - 5-minute fallback setTimeout: force a final cleanup when the client disconnects or the
+ *     upstream stalls without releasing the stream
+ *   - toolUseCount accumulation: in the Responses API, each `response.output_item.done` +
+ *     `item.type==="function_call"` counts one tool call; forwarded to skill archiving as the
+ *     round-boundary criterion
+ *   - buildWorkbuddyLangfuseInput(inputBody): writes body.input + instructions into the
+ *     langfuse observation.input for troubleshooting
  */
 async function consumeWorkbuddyStream(
   stream: ReadableStream<Uint8Array>,
@@ -663,12 +675,13 @@ async function consumeWorkbuddyStream(
   let assistantText = "";
   let usage: Record<string, unknown> | undefined;
   let responseId: string | undefined;
-  // Q: 累积当前 turn 内的 function_call 次数（round 边界判据）
+  // Q: accumulate the number of function_calls in the current turn (round-boundary criterion)
   let toolUseCount = 0;
 
-  // P: 5 分钟超时兜底。上游或客户端断链可能让 reader.read() 一直挂起，
-  // 用 setTimeout 强制 cancel，避免 tap coroutine 泄漏。用 flag 而不是
-  // 直接 throw，因为 fetch 的 ReadableStream cancel 会让主循环自然退出。
+  // P: 5-minute timeout fallback. An upstream or client disconnect can leave reader.read()
+  // hanging forever; force a cancel with setTimeout to avoid leaking the tap coroutine. Use a
+  // flag instead of throwing directly, because cancelling fetch's ReadableStream lets the main
+  // loop exit naturally.
   let streamCompleted = false;
   const timeoutHandle = setTimeout(() => {
     if (!streamCompleted) {
@@ -676,7 +689,7 @@ async function consumeWorkbuddyStream(
         "STREAM_TIMEOUT",
         new Error("Workbuddy stream reading exceeded 5 minutes"),
       );
-      // 主动 cancel reader，读循环会因此收到 done=true 或 error 退出
+      // Actively cancel the reader; the read loop then exits on done=true or an error
       void reader.cancel().catch(() => {
         /* best-effort */
       });
@@ -705,15 +718,15 @@ async function consumeWorkbuddyStream(
             const delta = evt.delta;
             if (typeof delta === "string") assistantText += delta;
           }
-          // Q: 工具调用计数（对齐 codex 的判据）—— 仅在 output_item.done
-          // 且 item.type==="function_call" 时 +1；不要放在 response.completed
-          // 里，避免多算或漏算。
+          // Q: tool call counting (matching codex's criteria) — increment only on
+          // output_item.done when item.type==="function_call"; don't put it in
+          // response.completed to avoid over- or under-counting.
           if (evtType === "response.output_item.done") {
             const item = evt.item as Record<string, unknown> | undefined;
             if (item?.type === "function_call") toolUseCount++;
-            // response.output_item.done 里的 resp 语义与 codex 保持一致：
-            // 有些上游会在这里把 usage/response.id 一起吐出（stream 内多次
-            // done），下面 completed 分支才是权威 usage 来源。
+            // The resp semantics inside response.output_item.done stay consistent with codex:
+            // some upstreams emit usage/response.id here (multiple times within a stream);
+            // the completed branch below is the authoritative usage source.
             const resp = (evt.response ?? evt) as Record<string, unknown>;
             if (typeof resp?.id === "string") responseId = resp.id as string;
             if (resp?.usage && typeof resp.usage === "object") {
@@ -746,7 +759,7 @@ async function consumeWorkbuddyStream(
 
   const endTime = new Date().toISOString();
   try {
-    // R: 用结构化 input 上报（body.input + instructions），便于 langfuse UI 排障
+    // R: report with the structured input (body.input + instructions) for langfuse UI troubleshooting
     langfuseReportGeneration({
       traceId: ctx.lf.traceId,
       name: `workbuddy:${ctx.modelId}`,
@@ -778,9 +791,9 @@ async function consumeWorkbuddyStream(
   }
 
   // ── TDAI L0 write + Skill extraction ──
-  // 对齐 codexHandler triggerCodexArchiveHooks: langfuse 上报后触发归档。
-  // archiveCtx=null (aux/未初始化 session/bypass) 直接跳过。
-  // Q: toolUseCount 透传给 skill 归档，作为 round 边界判据。
+  // Aligned with codexHandler's triggerCodexArchiveHooks: fire archiving after the langfuse
+  // report. archiveCtx=null (aux / uninitialized session / bypass) is skipped entirely.
+  // Q: toolUseCount is passed to skill archiving as the round-boundary criterion.
   if (ctx.archiveCtx && assistantText) {
     await triggerWorkbuddyArchiveHooks(ctx.archiveCtx, assistantText, toolUseCount).catch(
       (err: unknown) => {
@@ -798,18 +811,18 @@ async function consumeWorkbuddyStream(
 /**
  * WorkBuddy endpoint handler.
  *
- * 10-段流程（与 codex/anthropic/openai 三家 handler 对齐，便于对读）：
- *   1. Auth        - Bearer token / x-api-key 验签
- *   2. Body- 解析 JSON body
- *   3. Headers     - 提取小写化的请求头 map
+ * 10-step flow (aligned with the codex/anthropic/openai handlers for side-by-side reading):
+ *   1. Auth        - verify Bearer token / x-api-key signature
+ *   2. Body        - parse the JSON body
+ *   3. Headers     - build the lowercased request header map
  *   4. Classify    - main vs auxiliary
- *   5. Aux         - 短路透传（不注入、不上报 langfuse）
- *   6. Session ID  - header/body 提取 session id，构造 langfuse turn ctx
- *   7. Session init- 复用 CB 状态机 (handleSessionInit, agentSource="codex")
- *                   + codex form builder 渲染 Responses API SSE 弹窗
- *   8. Mem command - / 命令拦截（session 已注册时）
- *   9. Injection   - 通用 injection pipeline，注入到 body.input[0].content[]
- *   10. Forward    - 转发上游 + tap SSE 上报 langfuse
+ *   5. Aux         - short-circuit passthrough (no injection, no langfuse reporting)
+ *   6. Session ID  - extract session id from header/body, build the langfuse turn ctx
+ *   7. Session init- reuse the CB state machine (handleSessionInit, agentSource="codex")
+ *                   + codex form builder to render the Responses API SSE modal
+ *   8. Mem command - intercept "/" commands (once the session is registered)
+ *   9. Injection   - generic injection pipeline, inject into body.input[0].content[]
+ *   10. Forward    - forward upstream + tap the SSE stream and report to langfuse
  */
 export async function handleWorkbuddyEndpoint(
   c: Context,
@@ -851,9 +864,10 @@ export async function handleWorkbuddyEndpoint(
   }
 
   // ── 4. Classify request ──────────────────────────────────────────────────
-  // 关闭 workbuddyRequestRouting.enabled 时强制视为 main，走完全等价 aux 分流
-  // 未启用的老链路。运维回滚保险；默认启用。对齐 CC 的 ccRequestRouting.enabled
-  // 语义，但默认相反（CC 默认 false 是灰度上线；WB 默认 true 是保守回滚）。
+  // When workbuddyRequestRouting.enabled is off, requests are forced to main, taking the
+  // fully-equivalent legacy path that predates aux routing. Ops rollback insurance, on by default;
+  // follows CC's ccRequestRouting.enabled semantics but with the default inverted (CC: false for a
+  // gradual rollout; WB: true for a conservative rollback).
   const wbRoutingEnabled = config.workbuddyRequestRouting?.enabled !== false;
   const requestKind = wbRoutingEnabled
     ? classifyWorkbuddyRequest(body, path, headers)
@@ -897,14 +911,15 @@ export async function handleWorkbuddyEndpoint(
 
   // ── 7. Session-init state machine (reuses CB with agentSource="codex") ───
   //
-  // WorkBuddy 与 codex 走同一份 Responses API wire，弹窗骨架直接复用 codex/form.ts
-  // 的 buildFormResponse + CB 状态机（handleSessionInit + agentSource="codex"）。
-  // 这里的 agentSource 传 "codex" 而非 "workbuddy" —— 因为状态机内部靠 source 决定：
-  //   - 是否走两步式分页 (codex-only)
-  //   - Default gate 字符串识别
-  //   - formData.{teamPage,agentPage,taskPage} 是否填充
-  // 三者都是 codex 客户端专有行为，WorkBuddy 亦然。langfuse tag/日志侧的
-  // agent_source 保持 "workbuddy" 不受影响。
+  // WorkBuddy and codex share the same Responses API wire; the modal skeleton directly reuses
+  // codex/form.ts's buildFormResponse + the CB state machine (handleSessionInit +
+  // agentSource="codex"). agentSource here is "codex" rather than "workbuddy" — the state machine
+  // internally decides by source:
+  //   - whether to use two-step paging (codex-only)
+  //   - Default gate string recognition
+  //   - whether formData.{teamPage,agentPage,taskPage} get filled
+  // All three are codex-client-specific behaviors, and WorkBuddy behaves the same. The
+  // agent_source in langfuse tags / logs stays "workbuddy", unaffected.
   let sessionInfo: Record<string, unknown> | null | undefined;
   let assetCapabilities: import("./injection/types.js").AssetCapabilityFlags | undefined;
   let injectionSkipped = false;
@@ -928,7 +943,7 @@ export async function handleWorkbuddyEndpoint(
         const compositeKey = `codex:${sessionKey}`;
         store.bind(compositeKey, { userId: userId || "anonymous", agentSource, sessionId: sessionKey, spaceId });
 
-        // ── 强制归档旧 agent 的 skill buffer（best-effort）──
+        // ── Force-archive the old agent's skill buffer (best-effort) ──
         const oldState = store.get(compositeKey);
         if (oldState?.status === "initialized" && oldState.sessionInfo && config.coreSkill?.endpoint) {
           const si = oldState.sessionInfo as Record<string, string>;
@@ -971,9 +986,11 @@ export async function handleWorkbuddyEndpoint(
       );
       const { getMetadataClient } = await import("./meta/client.js");
       const store = getSessionStore();
-      // kernel 侧鉴权的 x-tdai-user-key 直接用客户端请求 bearer（与 codexHandler / anthropicHandler 对齐）。
-      // WorkBuddy / Codex / Claude Code 桌面客户端携带的 bearer 就是用户 key，kernel 能识别；
-      // 无需 config.tdai.apiKey 兜底（否则 config 里的 "local" 会覆盖真实用户 key，导致 401）。
+      // The kernel-side auth x-tdai-user-key is taken directly from the client request bearer
+      // (aligned with codexHandler / anthropicHandler). The bearer carried by the WorkBuddy /
+      // Codex / Claude Code desktop clients is the user key itself, which the kernel recognizes;
+      // no config.tdai.apiKey fallback is needed (otherwise "local" from the config would override
+      // the real user key and cause a 401).
       const metadataClient = getMetadataClient(config.coreSkill, spaceId, apiKey);
       const presetIdentity = parsePresetIdentity(config.sessionInit, headers);
 
@@ -986,13 +1003,15 @@ export async function handleWorkbuddyEndpoint(
       };
       const recovered = await store.getOrRecover(compositeKey, identity, {
         metadataClient,
-        // Responses API 客户端不用 messages[]，传空由 store 走 header/no-message 回收路径
+        // Responses API clients don't use messages[]; pass empty so the store recovers via the
+        // header/no-message path
         messages: [],
       });
 
       let initResult: Awaited<ReturnType<typeof handleSessionInit>>;
       const isTerminalState = recovered?.status === "initialized";
-      // Recovery hit source 决定是否需要 prewarm（详见 handler.ts 对称位置注释）。
+      // The recovery hit source decides whether prewarm is needed (see the mirrored comment spot
+      // in handler.ts).
       const needsPrewarm =
         recovered?.__recoverySource === "l2b" ||
         recovered?.__recoverySource === "history-scan";
@@ -1023,9 +1042,9 @@ export async function handleWorkbuddyEndpoint(
       } else {
         // Run the state machine — reuses CB's handleSessionInit with
         // agentSource="codex". CB parses picks from `messages[]`, but codex/workbuddy
-        // clients send them as `function_call_output.output` items in body.input[]。
-        // 我们用 codexFormAnswersAsMessages 把 output 合成成 minimal messages[]
-        // 供 CB 的 extractor 识别（extractor 只看 last user/tool message text）。
+        // clients send them as `function_call_output.output` items in body.input[].
+        // We use codexFormAnswersAsMessages to synthesize the outputs into minimal messages[]
+        // for CB's extractor (the extractor only looks at the last user/tool message text).
         const synthesizedMessages = codexFormAnswersAsMessages(input);
         const rawOutputs = input
           .filter((it: any) => it?.type === "function_call_output")
@@ -1048,10 +1067,10 @@ export async function handleWorkbuddyEndpoint(
             stream: isStream,
             modelId: modelId as string,
             protocol: "responses" as any,
-            // 把原始 input[] 交给 CB 状态机识别 Default gate 与 MORE 翻页
+            // Hand the raw input[] to the CB state machine to recognize the Default gate and MORE paging
             codexAnswerInput: input,
           },
-          "codex", // ← 状态机 source: 复用 codex 分支
+          "codex", // ← state machine source: reuse the codex branch
           metadataClient,
           apiKey,
           spaceId,
@@ -1060,7 +1079,7 @@ export async function handleWorkbuddyEndpoint(
       }
 
       if (initResult.intercepted) {
-        // CB 状态机中断 → 用 codex form builder 渲染成 Responses API SSE 弹窗
+        // CB state machine interrupted → render the Responses API SSE modal with the codex form builder
         if (initResult.formData) {
           return buildCodexFormResponse({
             teams: initResult.formData.teams,
@@ -1079,18 +1098,19 @@ export async function handleWorkbuddyEndpoint(
         if (initResult.response) return initResult.response;
       }
 
-      // Default gate 首次命中 → 返一次 Plan 模式提示，后续同 session recovered.bypassed=true
+      // Default gate first hit → return a Plan-mode notice once; later turns of the same session
+      // recover with bypassed=true
       if ((initResult as any).bypassReason === "default-gate") {
         pipe.info("WORKBUDDY_GATE", "Default mode gate detected → notify user (first hit)");
         const { buildMemResponse } = await import("./mem-command/response-builder.js");
-        // reset 场景下的 gate: 换成针对性文案,详见 codexHandler 同名段
+        // reset-scenario gate: use tailored copy; see the same-named section in codexHandler
         const gateText = (initResult as any).resetFlow
-          ? "⚠️ mem:session-reset 需要 Plan 模式支持。\n\n"
-            + "workbuddy 客户端当前不在 Plan 模式，无法弹出资产选择表单。\n"
-            + "请切到 Plan 模式后再执行 mem:session-reset。"
-          : "检测到未开启 Plan 模式，本次会话跳过资产注入。"
-            + "如需管理 Skill / Task / Agent，请切到 Plan 模式后重新开启新会话。"
-            + "本次消息将直接由 LLM 回答。";
+          ? "⚠️ mem:session-reset requires Plan mode support.\n\n"
+            + "The workbuddy client is not currently in Plan mode, so the asset selection form "
+            + "cannot be shown. Switch to Plan mode and run mem:session-reset again."
+          : "Plan mode was not enabled; asset injection is skipped for this session. "
+            + "To manage Skill / Task / Agent, switch to Plan mode and start a new session."
+            + "This message will be answered directly by the LLM.";
         return buildMemResponse(gateText, {
           protocol: "responses",
           stream: isStream,
@@ -1127,8 +1147,8 @@ export async function handleWorkbuddyEndpoint(
         }
       }
 
-      // Prewarm 前置短路：mem-command 命中的 turn 不走 forward、不消费 hook-cache，
-      // 若照常 prewarm 会白花 2-3s + 3 次网络请求。见 handler.ts 对称位置详注。
+      // Prewarm pre-short-circuit: turns that hit a mem-command never forward or consume the
+      // hook-cache, so prewarming anyway would waste 2-3s + 3 network requests (see handler.ts).
       let memCommandPending = false;
       if (config.memCommand?.enabled) {
         try {
@@ -1187,7 +1207,7 @@ export async function handleWorkbuddyEndpoint(
 
       if (initResult.resetFlow && initResult.justRegistered && !initResult.bypassed) {
         _resetFlowResult = {
-          agentName: initResult.agentDetail?.name ?? "未知",
+          agentName: initResult.agentDetail?.name ?? "Unknown",
           agentIdShort: (initResult.sessionInfo as Record<string, unknown>)?.agent_id
             ? String((initResult.sessionInfo as Record<string, unknown>).agent_id).slice(-8) : "",
           teamId: (initResult.sessionInfo as Record<string, unknown>)?.team_id
@@ -1205,7 +1225,7 @@ export async function handleWorkbuddyEndpoint(
     }
   }
 
-  // ── mem:session-reset 完成确认 ─────────────────────────────────────────────
+  // ── mem:session-reset completion confirmation ─────────────────────────────
   if (_resetFlowResult) {
     const { agentName, agentIdShort, teamId, taskName, bypassed } = _resetFlowResult;
     const lines = bypassed
@@ -1236,15 +1256,16 @@ export async function handleWorkbuddyEndpoint(
     if (userText) {
       const { parseCommandFromText, isMemCommandAllowed, executeMemCommand, buildMemResponse, extractSimpleMessages, truncateArgs } =
         await import("./mem-command/index.js");
-      // ⚠️ 不用 parseMemCommand(body, "workbuddy") —— 它只解 body.messages[] (CC/CB 形态),
-      // WorkBuddy 用的是 Responses API (body.input[])，传进去永远返 null → 命令静默透传给 LLM。
-      // 改用 parseCommandFromText(userText) 直接解析用户文本。对齐 codexHandler 的做法。
+      // ⚠️ Don't use parseMemCommand(body, "workbuddy") — it only parses body.messages[]
+      // (the CC/CB shape). WorkBuddy uses the Responses API (body.input[]), so it always returns
+      // null → the command silently passes through to the LLM. Instead, parse userText directly
+      // with parseCommandFromText, matching codexHandler.
       let memCmd = parseCommandFromText(userText);
-      // session-reset 已由 pre-hook 处理，跳过防止重复执行
+      // session-reset is already handled by the pre-hook; skip it here to avoid double execution
       if (memCmd?.command === "session-reset") memCmd = null;
       if (memCmd && isMemCommandAllowed(config.memCommand, memCmd.command)) {
         if (!sessionInfo || injectionSkipped) {
-          const errText = `⚠️ 会话未初始化，命令不可用。请先完成 session 初始化（选择 Team/Agent）后重试。`;
+          const errText = `⚠️ Session not initialized; the command is unavailable. Please finish session initialization (choose a Team/Agent) and retry.`;
           const errResponse = buildMemResponse(errText, {
             protocol: "responses",
             stream: isStream,
@@ -1264,24 +1285,24 @@ export async function handleWorkbuddyEndpoint(
           userId: userId || "",
           apiKey: apiKey || "",
           sessionInfo: sessionInfo as Record<string, unknown>,
-          // ⚠️ WorkBuddy 走 Responses API，与 codex 同协议。传 "responses"，
-          // executeMemCommand 内部会用对应的 responses SSE 骨架渲染命令响应。
+          // ⚠️ WorkBuddy uses the Responses API, same protocol as codex. Pass "responses" so
+          // executeMemCommand renders the command response with the matching responses SSE skeleton.
           protocol: "responses",
           stream: isStream,
           args: memCmd.args,
-          // task 命令族用最近对话生成草稿。Responses API body.input[] 结构：
-          //   { type:"message", role, content:[{type:"input_text"|"output_text", text}] }
-          // extractSimpleMessages 已内置对该形态的识别，转成 {role, content} 极简格式。
+          // The task command family drafts from the recent conversation. Responses API body.input[]
+          // shape: { type:"message", role, content:[{type:"input_text"|"output_text", text}] }
+          // extractSimpleMessages already recognizes this shape and flattens it to {role, content}.
           bodyMessages: extractSimpleMessages(input),
         });
 
         // ── TDAI L0 write + Skill extraction (fire-and-forget) ──
-        // 对齐 codexHandler 的 mem-command 后归档逻辑: 命令执行结果不阻塞响应,
-        // 异步触发 L0 write + skill 提取 + langfuse 上报。
+        // Aligned with codexHandler's post-mem-command archiving: the command result doesn't
+        // block the response; L0 write + skill extraction + langfuse reporting fire asynchronously.
         //
-        // assistantText 用 memResult.messageText (proxy 给用户的命令响应), 不是
-        // userText (用户输入的命令) —— L0 write 把"用户问了什么 / 系统答了什么"
-        // 配对写入, 用 userText 当 assistant 会颠倒语义。
+        // assistantText uses memResult.messageText (the proxy's command response to the user),
+        // not userText (the command the user typed). L0 write pairs "what the user asked / what
+        // the system answered"; using userText as the assistant would invert the semantics.
         const memArchiveCtx = buildWorkbuddyArchiveCtx({
           config,
           sessionInfo,
@@ -1339,7 +1360,7 @@ export async function handleWorkbuddyEndpoint(
     }
   }
 
-  // ── 9. Asset injection (每轮都跑) ────────────────────────────────────────
+  // ── 9. Asset injection (runs every turn) ─────────────────────────────────
   if (
     !injectionSkipped &&
     sessionInfo &&
@@ -1359,7 +1380,7 @@ export async function handleWorkbuddyEndpoint(
         sessionKey,
       );
 
-      // 构造 synthetic OpenAI body 供通用 pipeline 处理
+      // Build a synthetic OpenAI body for the generic pipeline to process
       const syntheticBody: Record<string, unknown> = {
         messages: [
           { role: "system", content: sessionContextBlock ?? "" },

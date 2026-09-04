@@ -1,18 +1,18 @@
 /**
  * WorkBuddy Session Init Form — `AskUserQuestion` tool_call.
  *
- * WorkBuddy 客户端复用 CC 的 `AskUserQuestion` tool（抓包 [wb-ask-user-schema]
- * 已实证），但底层协议是 **OpenAI /v1/chat/completions**（非 Anthropic）。
+ * WorkBuddy client reuses CC's `AskUserQuestion` tool (confirmed via packet capture [wb-ask-user-schema]),
+ * but the underlying protocol is **OpenAI /v1/chat/completions** (not Anthropic).
  *
- * 因此本 form：
- *   - questions[] shape 与 CC 完全一致（{question, header, options:[{label,description}], multiSelect}）
- *   - 传输侧走 OpenAI chat/completions SSE `tool_calls` chunk 流（CB 那套骨架）
- *   - Tool name: `AskUserQuestion`（同 CC）
- *   - ID prefix: `call_wb_session_init_`（区分 CB 的 `call_session_init_`）
- *   - 分页: 每页 3 option + 1 个"更多→"槽位（对齐 CC，避免超过硬上限）
+ * Therefore this form:
+ *   - questions[] shape is identical to CC ({question, header, options:[{label,description}], multiSelect})
+ *   - Transport uses the OpenAI chat/completions SSE `tool_calls` chunk stream (the CB skeleton)
+ *   - Tool name: `AskUserQuestion` (same as CC)
+ *   - ID prefix: `call_wb_session_init_` (distinct from CB's `call_session_init_`)
+ *   - Pagination: 3 options per page + 1 "More →" slot (aligned with CC, to stay under the hard limit)
  *
- * 不含任何 CodeBuddy XML 逻辑；也不共用 CB 的 form builder（CB 用
- * `ask_followup_question` XML 语义，WB 用 CC 的 AskUserQuestion 语义）。
+ * Contains no CodeBuddy XML logic, nor does it share CB's form builder (CB uses
+ * `ask_followup_question` XML semantics, WB uses CC's AskUserQuestion semantics).
  */
 
 import type { TeamOption } from "../types.js";
@@ -35,9 +35,9 @@ export const ASSET_CONFIRM_NO = "No, do not associate this time";
 export const ASSET_CONFIRM_FORM_TITLE = "Session Initialization — Associate Team Assets?";
 
 /**
- * 附在每步 question 文末的通用备注：告诉用户"选择跳过 = 本次 session init 跳过、不注入任何团队资产"。
- * AskUserQuestion 会给用户一个 "Other" 输入框，回复"跳过 / skip / 不关联" 就
- * 走 SKIP_RE bypass；文案与 claude-code/codex/codebuddy/dsh 五端统一。
+ * General note appended to the end of each question step: tells the user "selecting skip = bypass session init this time, inject no team assets".
+ * AskUserQuestion provides the user with an "Other" input box; replying "skip / do not associate" will
+ * take the SKIP_RE bypass. The copy is unified with the claude-code/codex/codebuddy/dsh endpoints.
  */
 const SKIP_HINT = ' (Selecting "skip" will bypass session init and inject no team assets)';
 
@@ -67,14 +67,14 @@ export interface FormData {
   stage: FormStage;
   selectedTeamId?: string;
   selectedAgentId?: string;
-  /** 分页：当前页码 (0-based)；对齐 CC 只使用一个 pageIndex（team/agent/task 单题） */
+  /** Pagination: current page index (0-based); aligned with CC, only a single pageIndex is used (team/agent/task are each one question) */
   pageIndex?: number;
   retry?: boolean;
   stream?: boolean;
   modelId?: string;
 }
 
-// ── AskUserQuestion input schema (与 CC 完全一致) ──────────────────────────────
+// ── AskUserQuestion input schema (identical to CC) ────────────────────────────
 
 interface WBAskQuestion {
   question: string;
@@ -90,11 +90,11 @@ function buildAskUserQuestionArgs(data: FormData): { questions: WBAskQuestion[] 
 
   if (stage === "asset_confirm") {
     questions.push({
-      question: titlePrefix + "本次对话是否要关联团队资产？" + SKIP_HINT,
-      header: "关联资产",
+      question: titlePrefix + "Would you like to associate team assets for this conversation?" + SKIP_HINT,
+      header: "Associate Assets",
       options: [
-        { label: ASSET_CONFIRM_YES, description: "选择 Team / Agent / Task，注入团队上下文" },
-        { label: ASSET_CONFIRM_NO, description: "本次不注入任何内容，直接放行" },
+        { label: ASSET_CONFIRM_YES, description: "Select Team / Agent / Task, inject team context" },
+        { label: ASSET_CONFIRM_NO, description: "Do not inject anything this time, proceed directly" },
       ],
       multiSelect: false,
     });
@@ -113,7 +113,7 @@ function buildAskUserQuestionArgs(data: FormData): { questions: WBAskQuestion[] 
       );
     }
     questions.push({
-      question: titlePrefix + "请选择本次会话所属的 Team：" + SKIP_HINT,
+      question: titlePrefix + "Please select the Team for this session:" + SKIP_HINT,
       header: "Team",
       options: teamOpts.slice(0, CC_MAX_OPTIONS),
       multiSelect: false,
@@ -136,7 +136,7 @@ function buildAskUserQuestionArgs(data: FormData): { questions: WBAskQuestion[] 
 
     if (!page.isLastPage) {
       const remaining = page.total - page.end;
-      combinedOptions.push({ label: MORE_LABEL, description: `查看下一批（还剩 ${remaining} 个 Agent）` });
+      combinedOptions.push({ label: MORE_LABEL, description: `View next batch (${remaining} Agent(s) remaining)` });
     }
 
     if (combinedOptions.length < 2) {
@@ -146,9 +146,9 @@ function buildAskUserQuestionArgs(data: FormData): { questions: WBAskQuestion[] 
       );
     }
 
-    const pageSuffix = page.totalPages > 1 ? `（第 ${pageIndex + 1}/${page.totalPages} 页）` : "";
+    const pageSuffix = page.totalPages > 1 ? ` (Page ${pageIndex + 1}/${page.totalPages})` : "";
     questions.push({
-      question: titlePrefix + `请选择「${team.team_name}」下要使用的 Agent${pageSuffix}：` + SKIP_HINT,
+      question: titlePrefix + `Please select the Agent to use under "${team.team_name}"${pageSuffix}:` + SKIP_HINT,
       header: page.totalPages > 1 ? `Agent ${pageIndex + 1}/${page.totalPages}`.slice(0, 12) : "Agent",
       options: combinedOptions.slice(0, CC_MAX_OPTIONS),
       multiSelect: false,
@@ -172,7 +172,7 @@ function buildAskUserQuestionArgs(data: FormData): { questions: WBAskQuestion[] 
       const remaining = page.total - page.end;
       taskOpts.push({
         label: MORE_LABEL,
-        description: `查看下一批（还剩 ${remaining} 个任务）`,
+        description: `View next batch (${remaining} task(s) remaining)`,
       });
     }
 
@@ -183,9 +183,9 @@ function buildAskUserQuestionArgs(data: FormData): { questions: WBAskQuestion[] 
       );
     }
 
-    const taskPageSuffix = page.totalPages > 1 ? `（第 ${taskPageIndex + 1}/${page.totalPages} 页）` : "";
+    const taskPageSuffix = page.totalPages > 1 ? ` (Page ${taskPageIndex + 1}/${page.totalPages})` : "";
     questions.push({
-      question: titlePrefix + `请选择「${team.team_name}」下要关联的任务${taskPageSuffix}：` + SKIP_HINT,
+      question: titlePrefix + `Please select the Task to associate under "${team.team_name}"${taskPageSuffix}:` + SKIP_HINT,
       header: page.totalPages > 1 ? `Task ${taskPageIndex + 1}/${page.totalPages}`.slice(0, 12) : "Task",
       options: taskOpts.slice(0, CC_MAX_OPTIONS),
       multiSelect: false,
@@ -201,8 +201,8 @@ function buildAskUserQuestionArgs(data: FormData): { questions: WBAskQuestion[] 
 /**
  * Build a WorkBuddy `AskUserQuestion` fake form response.
  *
- * 传输：**OpenAI chat/completions**（stream 或 non-stream）。
- * questions shape：同 CC AskUserQuestion —— `{questions: [{question, header, options, multiSelect}]}`。
+ * Transport: **OpenAI chat/completions** (stream or non-stream).
+ * questions shape: same as CC AskUserQuestion —— `{questions: [{question, header, options, multiSelect}]}`.
  */
 export function buildFormResponse(data: FormData): Response {
   const model = data.modelId ?? "unknown";

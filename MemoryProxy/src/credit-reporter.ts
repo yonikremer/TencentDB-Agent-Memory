@@ -32,19 +32,19 @@ const MAX_ERROR_HEADER_LEN = 256;
 /**
  * Detect usage schema protocol from upstream URL path.
  *
- * - `/v1/messages` (含子路径 `/v1/messages/count_tokens`、`/v1/messages?...`) → "anthropic"
- * - 其它路径（包括 `/v1/chat/completions` 与未识别路径） → "openai"
+ * - `/v1/messages` (including subpaths `/v1/messages/count_tokens`, `/v1/messages?...`) → "anthropic"
+ * - Other paths (including `/v1/chat/completions` and unrecognized paths) → "openai"
  *
- * 选 openai 作为兜底默认的理由：Anthropic 分支假设 input_tokens 已扣缓存，
- * 若被错误应用到 OpenAI usage 上会把 cache 部分按 input 高价重复计费；
- * 反之 OpenAI 分支「先减后算」，即使误用到 Anthropic usage 也仅退化为等价旧逻辑，
- * 风险不对称，故取 openai 兜底。
+ * Why openai is the fallback default: the Anthropic branch assumes input_tokens already exclude the cache,
+ * so if misapplied to OpenAI usage, the cache part would be double-billed at the high input price;
+ * conversely the OpenAI branch "subtract first, then compute" merely degrades to the equivalent
+ * legacy logic even if misapplied to Anthropic usage — the risk is asymmetric, hence openai as fallback.
  *
- * 大小写不敏感。
+ * Case-insensitive.
  */
 export function detectUsageProtocol(upstreamUrl: string): "anthropic" | "openai" {
   const path = upstreamUrl.toLowerCase();
-  // /v1/messages 后必须是 / 或 ? 或字符串结尾，避免误匹配 /v1/messages_admin
+  // After /v1/messages must come /, ?, or the end of the string, to avoid matching /v1/messages_admin
   if (/\/v1\/messages(\/|\?|$)/.test(path)) return "anthropic";
   return "openai";
 }
@@ -86,18 +86,18 @@ export function extractSpaceIdFromPath(path: string): string | null {
  * Only applies pricing-based calculation when upstreamUrl contains "tokenhub".
  * For non-TokenHub upstreams (e.g. copilot), returns 0.
  *
- * 通过 `detectUsageProtocol(upstreamUrl)` 判断走 Anthropic 或 OpenAI 分支：
+ * Uses `detectUsageProtocol(upstreamUrl)` to pick the Anthropic or OpenAI branch:
  *
- * Anthropic 分支（`/v1/messages`）：
- *   - nonCacheInput = usage.input_tokens（TokenHub 已扣除 cache 部分）
+ * Anthropic branch (`/v1/messages`):
+ *   - nonCacheInput = usage.input_tokens (TokenHub already deducted the cache part)
  *   - cacheRead = usage.cache_read_input_tokens
  *   - cacheWrite5m = usage.cache_creation.ephemeral_5m_input_tokens
  *   - cacheWrite1h = usage.cache_creation_input_tokens - ephemeral_5m_input_tokens
  *
- * OpenAI 分支（`/v1/chat/completions` 或其它路径）：
- *   - nonCacheInput = max(0, usage.prompt_tokens - cached_tokens)（prompt_tokens 含缓存）
+ * OpenAI branch (`/v1/chat/completions` or other paths):
+ *   - nonCacheInput = max(0, usage.prompt_tokens - cached_tokens) (prompt_tokens includes cache)
  *   - cacheRead = usage.cache_read_tokens ?? usage.prompt_tokens_details.cached_tokens
- *   - cacheWrite5m = 0（OpenAI 无 cache write 概念）
+ *   - cacheWrite5m = 0 (OpenAI has no cache write concept)
  *   - cacheWrite1h = 0
  *
  * Credit formula (per 1K tokens):
@@ -109,8 +109,8 @@ export function extractSpaceIdFromPath(path: string): string | null {
  *
  * If upstream is not TokenHub, returns 0.
  * If upstream is TokenHub but model pricing is not found, returns 0
- *   （原始 usage 会由 clickhouse 侧的 `getRawUsageReason → "unknown_model"`
- *   路径落到 raw 表用于追溯，避免把 token 计数当 credit 上报造成计费失真）.
+ *   (the raw usage is instead routed to the raw table via the clickhouse-side
+ *   `getRawUsageReason → "unknown_model"` path for tracing, avoiding token-count-as-credit billing distortion).
  */
 export function computeCreditDelta(
   usage: Record<string, unknown> | null | undefined,
@@ -126,17 +126,17 @@ export function computeCreditDelta(
 
   const protocol = detectUsageProtocol(upstreamUrl ?? "");
 
-  // 通用字段
+  // Common fields
   const output = numField(usage.completion_tokens) || numField(usage.output_tokens);
 
-  // 按协议分支抽取 5 类 token
+  // Extract the 5 token types per protocol branch
   let nonCacheInput = 0;
   let cacheRead = 0;
   let cacheWrite5m = 0;
   let cacheWrite1h = 0;
 
   if (protocol === "anthropic") {
-    // Anthropic (TokenHub): input_tokens 已扣缓存
+    // Anthropic (TokenHub): input_tokens already excludes the cache
     nonCacheInput = numField(usage.input_tokens);
     cacheRead = numField(usage.cache_read_input_tokens);
     const cacheCreation = usage.cache_creation as Record<string, unknown> | undefined;
@@ -145,27 +145,27 @@ export function computeCreditDelta(
     cacheWrite5m = ephemeral5m;
     cacheWrite1h = Math.max(0, totalCacheWrite - ephemeral5m);
   } else {
-    // OpenAI: prompt_tokens 含缓存，需减去 cached_tokens
+    // OpenAI: prompt_tokens includes cache, so subtract cached_tokens
     const promptDetails = usage.prompt_tokens_details as Record<string, unknown> | undefined;
     const promptTokens = numField(usage.prompt_tokens);
     cacheRead =
       numField(usage.cache_read_tokens) ||
       numField(promptDetails?.cached_tokens);
     nonCacheInput = Math.max(0, promptTokens - cacheRead);
-    // OpenAI 协议在 TokenHub 现有模型上无 cache write 概念，强制 0，
-    // 忽略 usage 中可能出现的 cache_creation_* 字段（避免误计费）。
+    // The OpenAI protocol has no cache write concept on TokenHub's current models, so force to 0,
+    // ignoring any cache_creation_* fields that may appear in usage (to avoid overbilling).
     cacheWrite5m = 0;
     cacheWrite1h = 0;
   }
 
-  // 查找定价
+  // Look up pricing
   const pricing = getModelPricing(pricingConfig, modelId ?? null);
 
   let credit: number;
   let fallback: string | undefined;
 
   if (pricing) {
-    // 计算 Credit 值
+    // Compute the Credit value
     credit =
       (nonCacheInput / 1000) * pricing.input +
       (output / 1000) * pricing.output +
@@ -173,8 +173,8 @@ export function computeCreditDelta(
       (cacheWrite5m / 1000) * pricing.cacheWrite5m +
       (cacheWrite1h / 1000) * pricing.cacheWrite1h;
   } else {
-    // 未定价模型：不上报 credit，避免把 token 计数当 credit 计费。
-    // 原始 usage 由 clickhouse 侧 `getRawUsageReason → "unknown_model"` 落 raw 表追溯。
+    // Unpriced model: do not report credit, to avoid billing token counts as credit.
+    // The raw usage is routed to the raw table via the clickhouse-side `getRawUsageReason → "unknown_model"` for tracing.
     credit = 0;
     fallback = "unknown_model";
   }

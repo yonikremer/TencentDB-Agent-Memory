@@ -1,23 +1,23 @@
 /**
  * memory-bridge — reverse proxy for `<proxy>/memory-bridge/v3/*` → tdai gateway.
  *
- * 设计思路与 src/skill/skill-bridge.ts 同形：
- *   - 不在 body.tools 里塞 native tool 定义（agent host 不识别）
- *   - 注入文本 `<tdai_memory_tools>` 引导 LLM 用 Bash curl 这个 bridge
- *   - bridge 强制注入 session IdFields + serviceToken 鉴权后转发到 tdai
+ * Design mirrors src/skill/skill-bridge.ts:
+ *   - does not stuff native tool definitions into body.tools (the agent host does not recognize them)
+ *   - injects the marker text `<tdai_memory_tools>` to steer the LLM into Bash curling this bridge
+ *   - the bridge forcibly injects session IdFields + serviceToken auth, then forwards to tdai
  *
- * 行为：
- *   1. 路径必须是 /memory-bridge/v3/{sub} ；sub 在 ALLOWED_SUBPATHS 内
- *   2. 强制 POST + Content-Type application/json
- *   3. 必须能识别 session（x-conversation-id / x-session-id ...），否则 401
- *   4. body 里 team_id/user_id/agent_id/session_id 一律被 session 值覆盖（防伪造）
- *   5. 转发到 ${coreSkill.endpoint}/v3/{sub}，添加 Bearer + service-id 头
- *   6. 透传 status 和 JSON body
+ * Behavior:
+ *   1. path must be /memory-bridge/v3/{sub}; sub must be inside ALLOWED_SUBPATHS
+ *   2. enforces POST + Content-Type application/json
+ *   3. must be able to identify a session (x-conversation-id / x-session-id ...), else 401
+ *   4. team_id/user_id/agent_id/session_id in the body are always overridden by session values (anti-spoofing)
+ *   5. forwards to ${coreSkill.endpoint}/v3/{sub}, adding the Bearer + service-id headers
+ *   6. passes through the status and the JSON body
  *
- * 安全：
- *   - allowlist 限定只有 search / read 类只读 subpath；mutation 走主链路
- *   - 不接受 atomic/update / scenario/write / core/write 等写操作
- *   - v3 strict isolation: 强制注入 session_id，满足 L0/L1 必填要求
+ * Security:
+ *   - allowlist limits to read-only subpaths such as search / read; mutations go through the main path
+ *   - write operations like atomic/update / scenario/write / core/write are not accepted
+ *   - v3 strict isolation: forcibly injects session_id to satisfy the L0/L1 required fields
  */
 
 import type { Context } from "hono";
@@ -33,23 +33,23 @@ import { emitBridgeToolCallTelemetry, emitBridgeRejectTelemetry, agentSourceFrom
 const TAG = "[memory-bridge]";
 
 /**
- * 允许通过 bridge 转发的 tdai 子路径（**只读**，LLM 通过 Bash 工具按需调用）。
+ * tdai subpaths allowed to be forwarded through the bridge (**read-only**; the LLM calls them on demand via the Bash tool).
  *
- * 设计取舍：
- *   - L0/L1 不再每轮自动召回，改为静态工具按需检索（cache 友好），因此放行
- *     atomic/* 与 conversation/* 的 search/query。
- *   - L2：system 给索引 `<l2_scene_index>`，正文按需读 → 放行 scenario/ls + scenario/read。
- *   - L3（persona）：直接注入 system，无需工具 → **不放行** core/read。
+ * Design trade-offs:
+ *   - L0/L1 are no longer auto-recalled each turn; instead static tools retrieve them on demand (cache-friendly), so
+ *     atomic/* and conversation/* search/query are allowed through.
+ *   - L2: system injects the index `<l2_scene_index>`, body read on demand → allow scenario/ls + scenario/read.
+ *   - L3 (persona): injected straight into system, no tool needed → **not allowed** core/read.
  *
- * 写操作（write / rm / add / update / delete）一律不在 allowlist 里；写入走主链路。
+ * Write operations (write / rm / add / update / delete) are never in the allowlist; writes go through the main path.
  */
 const ALLOWED_SUBPATHS = new Set<string>([
-  "atomic/search",        // L1 原子记忆 hybrid search
-  "atomic/query",         // L1 按 type/时间/分页
-  "conversation/search",  // L0 对话 hybrid search
-  "conversation/query",   // L0 按 session 取历史
-  "scenario/ls",          // L2 场景列表（path 索引）
-  "scenario/read",        // L2 按 path 读全文
+  "atomic/search",        // L1 atomic-memory hybrid search
+  "atomic/query",         // L1 by type / time / pagination
+  "conversation/search",  // L0 conversation hybrid search
+  "conversation/query",   // L0 history by session
+  "scenario/ls",          // L2 scene list (path index)
+  "scenario/read",        // L2 full text by path
 ]);
 
 interface SessionIdFields {
@@ -61,25 +61,26 @@ interface SessionIdFields {
   user_key?: string;
   /**
    * Kernel tenant/instance ID for `x-tdai-service-id`. Extracted from
-   * `SessionInfo.space_id`（原本来自请求路径 `/{agent}/{spaceId}/...`）。
-   * 用它做 tenant 路由是正确形态；`config.tdai.serviceId` /
-   * `config.coreSkill.serviceId` 只作为老 session（迁移前缓存）的兜底。
+   * `SessionInfo.space_id` (originally from the request path `/{agent}/{spaceId}/...`).
+   * Using it for tenant routing is the correct shape; `config.tdai.serviceId` /
+   * `config.coreSkill.serviceId` only serves as a fallback for old sessions (cached before the migration).
    */
   space_id?: string;
   /**
    * Composite key actually used to load state from SessionStore
-   * (`${agentSource}:${sessionId}`). 用于埋点侧对齐 session_init_logs 的
-   * session_key —— 埋点不能猜前缀，必须用真实命中的 key。
+   * (`${agentSource}:${sessionId}`). It is the session_key aligned with
+   * session_init_logs on the telemetry side —— telemetry cannot guess the prefix;
+   * it must use the real hit key.
    */
   composite_key?: string;
 }
 
 /**
- * curl 模板固定 2 header:
+ * The curl template fixes 2 headers:
  *   - x-conversation-id → sessionId
  *   - x-tdai-service-id → spaceId
  *
- * 不再吃 Authorization。见 docs/design/2026-08-03-binding-flatten.md。
+ * Authorization is no longer consumed. See docs/design/2026-08-03-binding-flatten.md.
  */
 function deriveSessionId(c: Context): string | null {
   return (
@@ -136,8 +137,8 @@ function bindingToIdFields(
  * Returns null on miss (caller decides whether to probe L2).
  */
 function loadSessionIdsL1(sessionId: string): SessionIdFields | null {
-  // handler 层存的 L1 key 形如 `${agentSource}:${sessionId}`; curl 拿到的
-  // 通常是 bare sessionId。按候选前缀顺序探,命中即返回。
+  // the L1 key stored by the handler layer looks like `${agentSource}:${sessionId}`; what curl
+  // usually gets is the bare sessionId. Probe candidate prefixes in order, return on hit.
   const candidates = sessionId.includes(":")
     ? [sessionId]
     : [sessionId, `codebuddy:${sessionId}`, `claude-code:${sessionId}`];
@@ -152,13 +153,13 @@ function loadSessionIdsL1(sessionId: string): SessionIdFields | null {
 }
 
 /**
- * L2 fallthrough —— 拍平后只吃 (spaceId, sessionId)。见
- * docs/design/2026-08-03-binding-flatten.md。
+ * L2 fallthrough —— after flattening it only consumes (spaceId, sessionId). See
+ * docs/design/2026-08-03-binding-flatten.md.
  *
- * 不再走 verifyUserKey + getOrRecover 4 段路径:
- *   1) bridge curl 模板没塞 bearer,verify 拿不到 userId
- *   2) 拍平后 binding.json 里已经存了 user_id/team_id/agent_id/agent_source/user_key,
- *      单次 GET 直接凑齐 IdFields
+ * No longer walks the 4-stage verifyUserKey + getOrRecover path:
+ *   1) the bridge curl template does not stuff in a bearer, so verify cannot obtain a userId
+ *   2) after flattening, binding.json already stores user_id/team_id/agent_id/agent_source/user_key,
+ *      so a single GET directly assembles the full IdFields
  */
 async function loadSessionIdsL2(
   bindingRepo: BindingRepo | null,
@@ -258,7 +259,7 @@ export function createMemoryBridgeHandler(
 
     const path = new URL(c.req.url).pathname;
     const sub = extractSubpath(path);
-    // 前置校验早退埋点: 每个 return 前落一条 reject_reason 非空的 bridge_call, 与 skill-bridge 对称。
+    // Early-exit telemetry for pre-checks: log a bridge_call with a non-empty reject_reason before every return, symmetric with skill-bridge.
     if (!sub) {
       emitBridgeRejectTelemetry({
         sessionKey: "", bridgeSource: "memory-bridge",
@@ -351,9 +352,9 @@ export function createMemoryBridgeHandler(
       return envelope(40001, `${TAG} invalid JSON body: ${(err as Error).message}`, 400);
     }
 
-    // 强制注入 session IdFields — LLM 不能伪造身份。
-    // search 类默认同时查 self + 借入 chat_memory；非 search 类默认 self，可通过 body.agent_id
-    // 选择 <tdai_profile_memory> 里暴露的 imported agent_id。
+    // Forcibly inject session IdFields — the LLM cannot spoof identity.
+    // search-type calls query self + borrowed chat_memory by default; non-search types default to self; use body.agent_id
+    // to pick an imported agent_id exposed in <tdai_profile_memory>.
     const modelSessionId =
       typeof inboundBody.session_id === "string" && inboundBody.session_id.trim()
         ? inboundBody.session_id.trim()
@@ -375,8 +376,8 @@ export function createMemoryBridgeHandler(
     };
 
     const ctxs = await resolveMemoryCtxs(config, ids, sessionKey);
-    // task_id 优先级：caller 显式传 > session 注入。session_id 保持"仅 caller 显式传"，
-    // 因为 search 类希望默认跨 session（agent 维度）；task_id 属于身份维度，仍应强制。
+    // task_id priority: caller-explicit > session-injected. session_id stays "caller-explicit only",
+    // because search-type calls want cross-session by default (agent dimension); task_id belongs to the identity dimension and should stay forced.
     const effectiveTaskId = modelTaskId ?? ids.task_id;
     const makeOutbound = (target: FixedAssetCtx): Record<string, unknown> => ({
       ...inboundBody,
@@ -405,9 +406,9 @@ export function createMemoryBridgeHandler(
         contentType = resp.headers.get("content-type") ?? "application/json";
         return { status, text, contentType };
       } finally {
-        // 埋点：每次实际调用 upstream 都记一条（成功/失败都算，方案 §5.1）
-        // 优先用 loadSessionIdsL1 里真实命中的 compositeKey，跟 session_init_logs 对齐；
-        // 拿不到才回落 raw sessionKey（L1/L2 miss 路径不该走到这里，但保底）。
+        // Telemetry: log one entry per real upstream call (success or failure both count, plan §5.1).
+        // Prefer the compositeKey actually hit in loadSessionIdsL1, aligning with session_init_logs;
+        // fall back to the raw sessionKey only when unavailable (L1/L2 miss paths should not reach here, but safe-guard).
         const emitKey = ids.composite_key ?? sessionKey;
         emitBridgeToolCallTelemetry({
           sessionKey: emitKey,
@@ -427,11 +428,11 @@ export function createMemoryBridgeHandler(
 
     if (MULTI_SEARCH_SUBPATHS.has(sub) && typeof inboundBody.agent_id !== "string") {
       const limit = limitFromBody(inboundBody);
-      // 两类 search 的响应 shape 不同：
-      //   - /v3/atomic/search       → data.items[]（L1 hit）
-      //   - /v3/conversation/search → data.messages[]（L0 hit）
-      // 早期代码固定读 data.items，导致 conversation/search 在 multi 分支
-      // 永远返回空（历史 bug）。这里按 sub 分派读写字段，保持透传语义。
+      // The two search types have different response shapes:
+      //   - /v3/atomic/search       → data.items[] (L1 hit)
+      //   - /v3/conversation/search → data.messages[] (L0 hit)
+      // Early code always read data.items, which made conversation/search always return empty
+      // in the multi branch (historical bug). Here the read field is dispatched per sub, keeping pass-through semantics.
       const isConversationSearch = sub === "conversation/search";
       const resultKey: "items" | "messages" = isConversationSearch ? "messages" : "items";
       const settled = await Promise.allSettled(ctxs.map(async (target) => ({ target, ...(await callUpstream(target)) })));
@@ -467,7 +468,7 @@ export function createMemoryBridgeHandler(
         name: x.agentName,
         role: x.isSelf ? "self" : "imported_from",
       }));
-      // 保持透传语义：返回字段名与上游一致（items vs messages）。
+      // Keep pass-through semantics: returned field names match upstream (items vs messages).
       const responseData: Record<string, unknown> = isConversationSearch
         ? { messages: truncated, searched_agents: searchedAgents }
         : { items: truncated, searched_agents: searchedAgents };
