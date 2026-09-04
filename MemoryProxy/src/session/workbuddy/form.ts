@@ -23,23 +23,23 @@ import { computePagination, CC_MAX_OPTIONS as CC_MAX_OPTIONS_SHARED } from "../c
 export const TOOL_NAME = "AskUserQuestion";
 export const TOOLCALL_PREFIX = "call_wb_session_init_";
 
-export const TEAM_FORM_TITLE = "会话初始化 — 选择 Team";
-export const AGENT_TASK_FORM_TITLE = "会话初始化 — 选择 Agent 与任务";
-export const RETRY_FORM_TITLE = "未能识别选择，请重新选择";
+export const TEAM_FORM_TITLE = "Session Initialization — Select Team";
+export const AGENT_TASK_FORM_TITLE = "Session Initialization — Select Agent and Task";
+export const RETRY_FORM_TITLE = "Selection unrecognized, please select again";
 
-export const SKIP_LABEL = "本次不关联（跳过注入，直接放行）";
-export const MORE_LABEL = "更多 →";
+export const SKIP_LABEL = "Do not associate this time (skip injection, proceed directly)";
+export const MORE_LABEL = "More →";
 
-export const ASSET_CONFIRM_YES = "是，关联团队资产";
-export const ASSET_CONFIRM_NO = "否，本次不关联";
-export const ASSET_CONFIRM_FORM_TITLE = "会话初始化 — 是否关联团队资产";
+export const ASSET_CONFIRM_YES = "Yes, associate team assets";
+export const ASSET_CONFIRM_NO = "No, do not associate this time";
+export const ASSET_CONFIRM_FORM_TITLE = "Session Initialization — Associate Team Assets?";
 
 /**
  * 附在每步 question 文末的通用备注：告诉用户"选择跳过 = 本次 session init 跳过、不注入任何团队资产"。
  * AskUserQuestion 会给用户一个 "Other" 输入框，回复"跳过 / skip / 不关联" 就
  * 走 SKIP_RE bypass；文案与 claude-code/codex/codebuddy/dsh 五端统一。
  */
-const SKIP_HINT = '（如选择"跳过"选项，本次 session init 将跳过，不注入任何团队资产）';
+const SKIP_HINT = ' (Selecting "skip" will bypass session init and inject no team assets)';
 
 const CC_MAX_OPTIONS = CC_MAX_OPTIONS_SHARED;
 

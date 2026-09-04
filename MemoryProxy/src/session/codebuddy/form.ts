@@ -17,18 +17,18 @@ import type { TeamOption } from "../types.js";
 export const TOOL_NAME = "ask_followup_question";
 export const TOOLCALL_PREFIXES = ["call_session_init_", "toolu_session_init_"] as const;
 
-export const TEAM_FORM_TITLE = "会话初始化 — 选择 Team";
-export const AGENT_TASK_FORM_TITLE = "会话初始化 — 选择 Agent 与任务";
-export const RETRY_FORM_TITLE = "未能识别选择，请重新选择";
+export const TEAM_FORM_TITLE = "Session Initialization — Select Team";
+export const AGENT_TASK_FORM_TITLE = "Session Initialization — Select Agent and Task";
+export const RETRY_FORM_TITLE = "Selection unrecognized, please select again";
 /** 兼容旧测试的总标题（cleaner.ts 检测用）。 */
-export const COMBINED_FORM_TITLE = "会话初始化 — 选择 Team / Agent / 任务";
+export const COMBINED_FORM_TITLE = "Session Initialization — Select Team / Agent / Task";
 
-export const SKIP_LABEL = "本次不关联（跳过注入，直接放行）";
+export const SKIP_LABEL = "Do not associate this time (skip injection, proceed directly)";
 export const PATH_SEP = " / ";
 
-export const ASSET_CONFIRM_YES = "是，关联团队资产";
-export const ASSET_CONFIRM_NO = "否，本次不关联";
-export const ASSET_CONFIRM_FORM_TITLE = "会话初始化 — 是否关联团队资产";
+export const ASSET_CONFIRM_YES = "Yes, associate team assets";
+export const ASSET_CONFIRM_NO = "No, do not associate this time";
+export const ASSET_CONFIRM_FORM_TITLE = "Session Initialization — Associate Team Assets?";
 
 /**
  * 附在每步 question 文末的通用备注：告诉用户"选择跳过 = 本次 session init 跳过、不注入任何团队资产"。
@@ -36,8 +36,8 @@ export const ASSET_CONFIRM_FORM_TITLE = "会话初始化 — 是否关联团队�
  * 进入 team / agent_task 后没有按钮内跳过，需要下一次会话重新选择。
  * 文案与 claude-code/workbuddy/codex/dsh 五端统一；后续步骤额外提示回退路径。
  */
-const SKIP_HINT_ASSET_CONFIRM = '（如选择"跳过"选项，本次 session init 将跳过，不注入任何团队资产）';
-const SKIP_HINT_LATER_STAGE = '（如选择"跳过"选项，本次 session init 将跳过，不注入任何团队资产；本步骤无跳过按钮，请在最初的「是否关联团队资产」步骤选择「否」）';
+const SKIP_HINT_ASSET_CONFIRM = ' (Selecting "skip" will bypass session init and inject no team assets)';
+const SKIP_HINT_LATER_STAGE = ' (Selecting "skip" will bypass session init and inject no team assets; if no skip button is present in this step, select "No" at the initial confirmation step)';
 
 /** Returns true if the given string contains any CodeBuddy form title marker. */
 export function containsFormTitle(s: string): boolean {

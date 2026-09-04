@@ -696,15 +696,15 @@ export async function handleCodexEndpoint(
   if (_resetFlowResult) {
     const { agentName, agentIdShort, teamId, taskName, bypassed } = _resetFlowResult;
     const lines = bypassed
-      ? ["✅ 已跳过团队资产关联", "", "后续对话不注入任何团队资产（Skill / 记忆 / Knowledge）。"]
+      ? ["✅ Skipped team asset association", "", "Subsequent conversations will not inject team assets (Skill / Memory / Knowledge)."]
       : [
-          "✅ 已重新绑定团队资产",
+          "✅ Team assets rebound",
           "",
           `- **Agent**: ${agentName}${agentIdShort ? ` (${agentIdShort})` : ""}`,
           teamId ? `- **Team**: ${teamId}` : null,
-          taskName ? `- **Task**: ${taskName}` : "- **Task**: 未关联",
+          taskName ? `- **Task**: ${taskName}` : "- **Task**: Unassociated",
           "",
-          "后续对话将使用新 Agent 的 Skill、记忆和知识资产。",
+          "Subsequent conversations will use the new Agent's Skill, Memory, and Knowledge assets.",
         ].filter(Boolean);
     const text = (lines as string[]).join("\n");
 

@@ -19,16 +19,16 @@ import { computePagination, CC_MAX_OPTIONS as CC_MAX_OPTIONS_SHARED } from "./pa
 export const TOOL_NAME = "AskUserQuestion";
 export const TOOLCALL_PREFIX = "toolu_cc_session_init_";
 
-export const TEAM_FORM_TITLE = "会话初始化 — 选择 Team";
-export const AGENT_TASK_FORM_TITLE = "会话初始化 — 选择 Agent 与任务";
-export const RETRY_FORM_TITLE = "未能识别选择，请重新选择";
+export const TEAM_FORM_TITLE = "Session Initialization — Select Team";
+export const AGENT_TASK_FORM_TITLE = "Session Initialization — Select Agent and Task";
+export const RETRY_FORM_TITLE = "Selection unrecognized, please select again";
 
-export const SKIP_LABEL = "本次不关联（跳过注入，直接放行）";
-export const MORE_LABEL = "更多 →";
+export const SKIP_LABEL = "Do not associate this time (skip injection, proceed directly)";
+export const MORE_LABEL = "More →";
 
-export const ASSET_CONFIRM_YES = "是，关联团队资产";
-export const ASSET_CONFIRM_NO = "否，本次不关联";
-export const ASSET_CONFIRM_FORM_TITLE = "会话初始化 — 是否关联团队资产";
+export const ASSET_CONFIRM_YES = "Yes, associate team assets";
+export const ASSET_CONFIRM_NO = "No, do not associate this time";
+export const ASSET_CONFIRM_FORM_TITLE = "Session Initialization — Associate Team Assets?";
 
 /**
  * 附在每步 question 文末的通用备注：告诉用户"选择跳过 = 本次 session init 跳过、不注入任何团队资产"。
@@ -36,7 +36,7 @@ export const ASSET_CONFIRM_FORM_TITLE = "会话初始化 — 是否关联团队�
  * 不关联" 就走 SKIP_RE bypass；没识别到的自由文本会 unrecognized → 同样 bypass。
  * 文案与 workbuddy/codex/codebuddy/dsh 五端统一，避免多客户端表述漂移。
  */
-const SKIP_HINT = '（如选择"跳过"选项，本次 session init 将跳过，不注入任何团队资产）';
+const SKIP_HINT = ' (Selecting "skip" will bypass session init and inject no team assets)';
 
 // 分页布局统一走 pagination.ts；此处仅用其常量。
 const CC_MAX_OPTIONS = CC_MAX_OPTIONS_SHARED;
@@ -87,11 +87,11 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
 
   if (stage === "asset_confirm") {
     questions.push({
-      question: titlePrefix + "本次对话是否要关联团队资产？" + SKIP_HINT,
-      header: "关联资产",
+      question: titlePrefix + "Would you like to associate team assets for this conversation?" + SKIP_HINT,
+      header: "Associate Assets",
       options: [
-        { label: ASSET_CONFIRM_YES, description: "选择 Team / Agent / Task，注入团队上下文" },
-        { label: ASSET_CONFIRM_NO, description: "本次不注入任何内容，直接放行" },
+        { label: ASSET_CONFIRM_YES, description: "Select Team / Agent / Task, inject team context" },
+        { label: ASSET_CONFIRM_NO, description: "Do not inject anything this time, proceed directly" },
       ],
       multiSelect: false,
     });

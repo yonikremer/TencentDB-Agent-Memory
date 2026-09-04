@@ -17,7 +17,7 @@ import { SKIP_LABEL, MORE_LABEL, ASSET_CONFIRM_YES, ASSET_CONFIRM_NO } from "./f
 
 // ── Markers ────────────────────────────────────────────────────────────────────
 
-const SKIP_RE = /跳过|不关联|skip/i;
+const SKIP_RE = /跳过|不关联|skip|do not associate/i;
 export const BYPASS_MARKER = "__bypass__" as const;
 export const MORE_MARKER = "__more__" as const;
 
@@ -26,7 +26,7 @@ export const MORE_MARKER = "__more__" as const;
  * 返回 true=是（关联资产），false=否（bypass），null=未识别。
  *
  * 格式兼容：
- *   1. 精准选项: "是，关联团队资产" / "否，本次不关联"
+ *   1. 精准选项: "Yes, associate team assets" / "No, do not associate this time" / "是，关联团队资产" / "否，本次不关联"
  *   2. Q&A 格式: "Your questions have been answered: \"Q?\"=\"A\"."
  *   3. "Chat about this" / 自由文本 → 降级返回 null（bypass）
  */
@@ -54,21 +54,21 @@ export function extractAssetConfirm(content: string): boolean | null {
   // （只有精准匹配 ASSET_CONFIRM_YES / ASSET_CONFIRM_NO 可以通过）
   const allowLoosePattern = answerOnly.length <= 80;
 
-  // 精准匹配：完整选项文本
-  if (answerOnly.includes(ASSET_CONFIRM_YES)) {
+  // 精准匹配：完整选项文本（英文或中文）
+  if (answerOnly.includes(ASSET_CONFIRM_YES) || answerOnly.includes("是，关联团队资产")) {
     return true;
   }
-  if (answerOnly.includes(ASSET_CONFIRM_NO)) {
+  if (answerOnly.includes(ASSET_CONFIRM_NO) || answerOnly.includes("否，本次不关联")) {
     return false;
   }
 
   if (allowLoosePattern) {
-    // 宽松"是"匹配：必须以"是"或"确认"开头，避免"是否"、"不是"等误匹配
-    if (/^(?:是|确认)[，,\s]/i.test(answerOnly.trim())) {
+    // 宽松"是"匹配：必须以"是"、"确认"、"yes"或"y"开头
+    if (/^(?:是|确认|yes|y)(?:[，,\s]|$)/i.test(answerOnly.trim())) {
       return true;
     }
     // 宽松"否"匹配
-    if (/^(?:否|不[，,\s]|跳过|skip)/i.test(answerOnly.trim())) {
+    if (/^(?:否|不[，,\s]|跳过|skip|no|n)(?:[，,\s]|$)/i.test(answerOnly.trim())) {
       return false;
     }
   }

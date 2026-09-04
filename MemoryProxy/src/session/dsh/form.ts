@@ -50,13 +50,13 @@ import type { TeamOption } from "../types.js";
 export const TOOL_NAME = "ask_user_question";
 export const TOOLCALL_PREFIX = "call_dsh_session_init_";
 
-export const TEAM_FORM_TITLE = "会话初始化 — 选择 Team";
-export const AGENT_TASK_FORM_TITLE = "会话初始化 — 选择 Agent 与任务";
-export const RETRY_FORM_TITLE = "未能识别选择,请重新选择";
+export const TEAM_FORM_TITLE = "Session Initialization — Select Team";
+export const AGENT_TASK_FORM_TITLE = "Session Initialization — Select Agent and Task";
+export const RETRY_FORM_TITLE = "Selection unrecognized, please select again";
 
-export const SKIP_LABEL = "本次不关联(跳过注入,直接放行)";
+export const SKIP_LABEL = "Do not associate this time (skip injection, proceed directly)";
 // dsh 不分页,MORE_LABEL 保留仅作向后兼容(测试或未来切分页时用);当前不产出。
-export const MORE_LABEL = "更多 →";
+export const MORE_LABEL = "More →";
 
 /**
  * fake tool_call assistant 消息的占位 reasoning_content。
@@ -78,9 +78,9 @@ export const MORE_LABEL = "更多 →";
  */
 const REASONING_PLACEHOLDER = "[proxy session-init form]";
 
-export const ASSET_CONFIRM_YES = "是,关联团队资产";
-export const ASSET_CONFIRM_NO = "否,本次不关联";
-export const ASSET_CONFIRM_FORM_TITLE = "会话初始化 — 是否关联团队资产";
+export const ASSET_CONFIRM_YES = "Yes, associate team assets";
+export const ASSET_CONFIRM_NO = "No, do not associate this time";
+export const ASSET_CONFIRM_FORM_TITLE = "Session Initialization — Associate Team Assets?";
 
 /**
  * 附在每步 question 文末的通用备注：告诉用户"选择跳过 = 本次 session init 跳过、不注入任何团队资产"。

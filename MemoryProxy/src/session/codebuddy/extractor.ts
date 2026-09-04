@@ -19,7 +19,7 @@ import { SKIP_LABEL, PATH_SEP, ASSET_CONFIRM_YES, ASSET_CONFIRM_NO } from "./for
 
 // ── Markers ────────────────────────────────────────────────────────────────────
 
-const SKIP_RE = /跳过|不关联|skip/i;
+const SKIP_RE = /跳过|不关联|skip|do not associate/i;
 export const BYPASS_MARKER = "__bypass__" as const;
 
 // ── opencode tool-result 剥壳 ───────────────────────────────────────────────
@@ -64,10 +64,20 @@ export function extractAssetConfirm(content: string): boolean | null {
   const xml = parseQuestionAnswerXml(content);
   const answer = xml?.teamAnswer ?? xml?.agentAnswer ?? xml?.taskAnswer ?? content;
 
-  if (answer.includes(ASSET_CONFIRM_YES) || /是.*关联|关联.*是|确认.*关联/i.test(answer)) {
+  if (
+    answer.includes(ASSET_CONFIRM_YES) ||
+    answer.includes("是，关联团队资产") ||
+    /^(?:yes|y|是|确认)/i.test(answer.trim()) ||
+    /是.*关联|关联.*是|确认.*关联/i.test(answer)
+  ) {
     return true;
   }
-  if (answer.includes(ASSET_CONFIRM_NO) || /否.*不关联|不关联.*否|本次不关联/i.test(answer)) {
+  if (
+    answer.includes(ASSET_CONFIRM_NO) ||
+    answer.includes("否，本次不关联") ||
+    /^(?:no|n|否|不|跳过|skip)/i.test(answer.trim()) ||
+    /否.*不关联|不关联.*否|本次不关联/i.test(answer)
+  ) {
     return false;
   }
   return null;

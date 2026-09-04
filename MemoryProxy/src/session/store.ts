@@ -750,11 +750,16 @@ export class SessionStore {
               const input = block.input as Record<string, unknown> | undefined;
               const question = (input?.question as string) ?? "";
               const options = input?.options as string[] | undefined;
-              if (question.includes("关联") || question.includes("资产")) {
+              if (question.includes("关联") || question.includes("资产") || /associat|asset|link/i.test(question)) {
                 // asset_confirm form — check if the next user message said "否"
                 continue; // defer to extractAssetConfirm logic via bypass detection
               }
-              if (options?.includes("否，本次不关联") || options?.includes("跳过") || question.includes("SKIP")) {
+              if (
+                options?.includes("否，本次不关联") ||
+                options?.includes("No, do not associate this time") ||
+                options?.includes("跳过") ||
+                question.includes("SKIP")
+              ) {
                 foundBypass = true;
               }
               if (question.includes("agent") || question.includes("Agent")) {
@@ -771,7 +776,11 @@ export class SessionStore {
       // CodeBuddy: <question_answer> XML in string content
       if (!content.includes("<question_answer")) continue;
       // Check for asset_confirm bypass markers in the assistant form message
-      if (content.includes("否，本次不关联") || content.includes("本次不关联")) {
+      if (
+        content.includes("否，本次不关联") ||
+        content.includes("No, do not associate this time") ||
+        content.includes("本次不关联")
+      ) {
         foundBypass = true;
       }
       // Extract agent_id from <question_item id="agent">

@@ -29,25 +29,25 @@ export const SESSION_INIT_TOOLCALL_PREFIXES = [
  * Form 标题：两轮分开。第一轮选 team，第二轮选 agent+task。
  * extractor 不依赖标题判别，只用作 retry 提示 + UI 文案。
  */
-export const SESSION_INIT_TEAM_FORM_TITLE = "会话初始化 — 选择 Team";
-export const SESSION_INIT_AGENT_TASK_FORM_TITLE = "会话初始化 — 选择 Agent 与任务";
+export const SESSION_INIT_TEAM_FORM_TITLE = "Session Initialization — Select Team";
+export const SESSION_INIT_AGENT_TASK_FORM_TITLE = "Session Initialization — Select Agent and Task";
 /** 跳过本次关联的选项文本，extractor 识别后直接 bypass 整个 session-init。 */
-export const SKIP_LABEL = "本次不关联（跳过注入，直接放行）";
+export const SKIP_LABEL = "Do not associate this time (skip injection, proceed directly)";
 
 /**
  * 资产关联前置对话框选项。
  * 用户选"是" → 继续 team/agent/task 流程
  * 用户选"否" → 直接 bypass
  */
-export const ASSET_CONFIRM_YES = "是，关联团队资产";
-export const ASSET_CONFIRM_NO = "否，本次不关联";
-export const ASSET_CONFIRM_FORM_TITLE = "会话初始化 — 是否关联团队资产";
+export const ASSET_CONFIRM_YES = "Yes, associate team assets";
+export const ASSET_CONFIRM_NO = "No, do not associate this time";
+export const ASSET_CONFIRM_FORM_TITLE = "Session Initialization — Associate Team Assets?";
 /**
  * Claude Code 分页模式专用：当 team 下 agent 数量超过 3 时，最后 1 个槽位
  * 用作"更多 →"按钮（非末页）。用户点击后 handler 把 agentPageIndex+1 重发 form。
  * extractor 识别此 label 后返回 MORE_MARKER 信号。
  */
-export const MORE_LABEL = "更多 →";
+export const MORE_LABEL = "More →";
 /**
  * Filler shown when the real option count on this page is 1 but Claude Code's
  * `AskUserQuestion` schema requires ≥2 options. Mirrors `claude-code/form.ts`
@@ -55,10 +55,10 @@ export const MORE_LABEL = "更多 →";
  * treats it as `unrecognized` and `init.ts` bypasses session-init. MUST NOT
  * contain "跳过 / 不关联 / skip" (would fire SKIP_RE on unrelated text).
  */
-export const NO_MORE_LABEL = "（无更多选项）";
-export const NO_MORE_DESC = "选此项将跳过本次注入，直接放行";
+export const NO_MORE_LABEL = "(No more options)";
+export const NO_MORE_DESC = "Selecting this skips injection and proceeds directly";
 /** 兼容旧测试的总标题（cleaner.ts 检测用）。 */
-export const SESSION_INIT_FORM_TITLE = "会话初始化 — 选择 Team / Agent / 任务";
+export const SESSION_INIT_FORM_TITLE = "Session Initialization — Select Team / Agent / Task";
 
 /**
  * 选项 label 的分隔符。第二轮的 agent / task 选项不再带团队前缀
@@ -67,7 +67,7 @@ export const SESSION_INIT_FORM_TITLE = "会话初始化 — 选择 Team / Agent 
 export const PATH_SEP = " / ";
 
 /** Title used when extraction failed and the form is re-issued. */
-export const SESSION_INIT_RETRY_FORM_TITLE = "未能识别选择，请重新选择";
+export const SESSION_INIT_RETRY_FORM_TITLE = "Selection unrecognized, please select again";
 
 /** Tool name used by the fake form (CodeBuddy / OpenAI protocol). */
 export const SESSION_INIT_TOOL_NAME = "ask_followup_question";
@@ -300,11 +300,11 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
 
   if (stage === "asset_confirm") {
     questions.push({
-      question: titlePrefix + "本次对话是否要关联团队资产？",
-      header: "关联资产",
+      question: titlePrefix + "Would you like to associate team assets for this conversation?",
+      header: "Associate Assets",
       options: [
-        { label: ASSET_CONFIRM_YES, description: "选择 Team / Agent / Task，注入团队上下文" },
-        { label: ASSET_CONFIRM_NO, description: "本次不注入任何内容，直接放行" },
+        { label: ASSET_CONFIRM_YES, description: "Select Team / Agent / Task, inject team context" },
+        { label: ASSET_CONFIRM_NO, description: "Do not inject anything this time, proceed directly" },
       ],
       multiSelect: false,
     });
@@ -324,7 +324,7 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
       ? teamOpts
       : [...teamOpts, { label: NO_MORE_LABEL, description: NO_MORE_DESC }];
     questions.push({
-      question: titlePrefix + "请选择本次会话所属的 Team：",
+      question: titlePrefix + "Please select the Team for this session:",
       header: "Team",
       options: allOptions.slice(0, CC_MAX_OPTIONS),
       multiSelect: false,
@@ -358,7 +358,7 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
     const remaining = totalAgents - (start + CC_MAX_BUSINESS_OPTIONS);
     combinedOptions.push({
       label: MORE_LABEL,
-      description: `查看下一批（还剩 ${remaining} 个 Agent）`,
+      description: `View next batch (${remaining} agents remaining)`,
     });
   }
 

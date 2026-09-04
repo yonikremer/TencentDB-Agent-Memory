@@ -34,13 +34,13 @@ export const TOOLCALL_PREFIX = "call_codex_session_init_";
  */
 export const TOOLCALL_ID_PREFIX = "fc_codex_session_init_";
 
-export const TEAM_FORM_TITLE = "会话初始化 — 选择 Team";
-export const AGENT_TASK_FORM_TITLE = "会话初始化 — 选择 Agent 与任务";
-export const RETRY_FORM_TITLE = "未能识别选择，请重新选择";
+export const TEAM_FORM_TITLE = "Session Initialization — Select Team";
+export const AGENT_TASK_FORM_TITLE = "Session Initialization — Select Agent and Task";
+export const RETRY_FORM_TITLE = "Selection unrecognized, please select again";
 
-export const ASSET_CONFIRM_YES = "是，关联团队资产";
-export const ASSET_CONFIRM_NO = "否，本次不关联";
-export const ASSET_CONFIRM_FORM_TITLE = "会话初始化 — 是否关联团队资产";
+export const ASSET_CONFIRM_YES = "Yes, associate team assets";
+export const ASSET_CONFIRM_NO = "No, do not associate this time";
+export const ASSET_CONFIRM_FORM_TITLE = "Session Initialization — Associate Team Assets?";
 
 /**
  * codex 分页 "更多..." 选项的稳定标记（写在 option.label 里，用户点了会
@@ -51,7 +51,7 @@ export const ASSET_CONFIRM_FORM_TITLE = "会话初始化 — 是否关联团队�
  * MARKER 本身不进 label（避免"__..."字符污染 UI 显示）。
  */
 export const CODEX_MORE_MARKER = "__codex_more_marker__" as const;
-export const CODEX_MORE_LABEL = "更多...";
+export const CODEX_MORE_LABEL = "More...";
 
 /**
  * 客户端 Default 模式下 gate 拦截的前缀字符串。
