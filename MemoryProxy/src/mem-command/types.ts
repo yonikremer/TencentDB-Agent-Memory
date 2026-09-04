@@ -1,12 +1,12 @@
 /**
- * mem-command 模块类型定义
+ * mem-command module type definitions
  */
 
 import type { ProxyConfig, MemCommandConfig } from "../types.js";
 
 /**
- * 最近对话消息片段。task-draft-generator 消费。
- * 目前只需 role + content，不带 tool_calls / attachment，保持极简。
+ * Recent conversation message snippet. Consumed by task-draft-generator.
+ * Currently only needs role + content, without tool_calls / attachment, kept minimal.
  */
 export interface MemCommandMessage {
   role: "user" | "assistant" | "system";
@@ -23,24 +23,24 @@ export interface MemCommandContext {
   sessionInfo: Record<string, unknown>;
   protocol: "anthropic" | "openai" | "responses";
   stream: boolean;
-  /** 命令参数（如 create-skill / create-task 的提示词） */
+  /** Command parameters (e.g., prompt words for create-skill / create-task) */
   args: string;
-  /** 请求是否开启了 extended thinking（Anthropic 专用） */
+  /** Whether the request enabled extended thinking (Anthropic only) */
   thinking?: boolean;
   /**
-   * 当前请求的最近对话消息（用于 task-draft-generator 生成草稿）。
+   * Recent conversation messages of the current request (used by task-draft-generator to generate drafts).
    *
-   * - CC/CB 走 chat/completions：直接是 body.messages[]
-   * - Codex/WorkBuddy 走 Responses API：目前传空数组（阶段 5 联调时再补 body.input 解析）
+   * - CC/CB goes through chat/completions: directly body.messages[]
+   * - Codex/WorkBuddy goes through Responses API: currently passes an empty array (will add body.input parsing during phase 5 joint debugging)
    *
-   * 未提供时视为空数组，task 命令族会返 "no recent messages" 错误。
+   * Treated as an empty array if not provided, task command family will return "no recent messages" error.
    */
   bodyMessages?: MemCommandMessage[];
 }
 
 /**
- * 已支持的 mem: 命令名 —— 强类型联合，供 index.ts 分派 / commands/* 收窄使用。
- * 未列入的字符串会被 executeMemCommand 走"未知命令"兜底。
+ * Supported mem: command names — strongly typed union, for dispatch in index.ts / narrowing in commands/*.
+ * Strings not listed will fall back to "unknown command" in executeMemCommand.
  */
 export type MemCommandName =
   | "help"
@@ -51,11 +51,11 @@ export type MemCommandName =
 
 export interface MemCommandResult {
   success: boolean;
-  /** 用户可读的结果文本（写入 L0 / 展示给用户） */
+  /** User readable result text (written to L0 / displayed to user) */
   messageText: string;
-  /** 结构化数据（可选） */
+  /** Structured data (optional) */
   data?: Record<string, unknown>;
-  /** 构造好的 HTTP Response（已按协议格式伪造） */
+  /** Constructed HTTP Response (faked according to protocol format) */
   response: Response;
 }
 

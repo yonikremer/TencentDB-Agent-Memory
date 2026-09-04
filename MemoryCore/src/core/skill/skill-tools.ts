@@ -1,19 +1,19 @@
 /**
- * SkillToolsV2 — 给 Review Agent 的工具集（绑定到 SkillCore）
+ * SkillToolsV2 — Toolset for Review Agent (bound to SkillCore)
  *
- * 暴露 4 个写动作 + 2 个读动作，覆盖 SkillExtractor 的需要：
- *   - skill_list      列出团队内可见 skill
- *   - skill_view      查看单个 skill 详情
- *   - skill_create    新建 skill
- *   - skill_update    全量替换 SKILL.md
- *   - skill_patch     单点串替
- *   - skill_files_write  增/改资源
+ * Exposes 4 write actions + 2 read actions, covering SkillExtractor requirements:
+ *   - skill_list      list skills visible in the team
+ *   - skill_view      view details of a single skill
+ *   - skill_create    create new skill
+ *   - skill_update    replace full SKILL.md
+ *   - skill_patch     patch unique substring
+ *   - skill_files_write  add/modify resources
  *
- * 不暴露 delete / files_remove —— 抽取流程不应能销毁团队 skill。
- * 工具错误以 JSON.stringify({error}) 返回，让 LLM 能 self-correct。
+ * Does not expose delete / files_remove — extraction workflows should not destroy team skills.
+ * Tool errors are returned as JSON.stringify({error}), enabling LLM self-correction.
  *
- * 每次成功的写操作都 push 一条 ExtractedSkillCandidate 到 auditSink，
- * SkillExtractor 把它作为 candidates 返回给调用方。
+ * Each successful write operation pushes an ExtractedSkillCandidate to auditSink,
+ * which SkillExtractor returns as candidates to the caller.
  */
 
 import { tool, jsonSchema } from "ai";
@@ -35,7 +35,7 @@ export interface ExtractedSkillCandidate {
 
 export interface CreateSkillToolsOptions {
   core: SkillCore;
-  /** 调用方身份（owner 校验依据）。 */
+  /** Caller identity (basis for owner checks). */
   user_id: string;
   team_id: string;
   agent_id: string;
@@ -53,10 +53,10 @@ function jsonError(e: unknown): string {
 
 export function createSkillTools(opts: CreateSkillToolsOptions) {
   const { core, user_id, team_id, agent_id, task_id, auditSink, logger } = opts;
-  // Read 路径：不带 task_id — audit 字段不参与检索。skill-core.ts:list/search
-  // 内部已经再兜底 undefine 掉 task_id, 但工具层依然显式区分以让意图清晰、
-  // 并防止未来 core 侧回退时又把 bug 引回来。
-  // Write 路径：带 task_id 落审计列 (记 skill 首次落库时的对话上下文)。
+  // Read path: without task_id — audit fields do not participate in retrieval. skill-core.ts:list/search
+  // internally already fallbacks to undefine task_id, but tool layer still explicitly distinguishes to clarify intent,
+  // and prevent bugs from recurring if core logic rolls back in the future.
+  // Write path: includes task_id for audit column logging (recording conversation context when skill is first created).
   const readIds = { user_id, team_id, agent_id };
   const writeIds = { user_id, team_id, agent_id, task_id };
 
@@ -216,3 +216,4 @@ export function createSkillTools(opts: CreateSkillToolsOptions) {
     }),
   };
 }
+

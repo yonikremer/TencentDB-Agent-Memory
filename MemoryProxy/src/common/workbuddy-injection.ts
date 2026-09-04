@@ -1,32 +1,32 @@
 /**
- * WorkBuddy 资产注入 —— `<tdai_injections>` wrapper 生成器。
+ * WorkBuddy asset injection — `<tdai_injections>` wrapper generator.
  *
- * 与 codex-injection.ts **同构但独立**：WorkBuddy 也用 OpenAI Responses API
- * (@openai/agents SDK)，body 结构与Codex 一致（`input[]` 数组、developer/user
- * message 混合、content 数组含 input_text）。逻辑本可以复用，但按项目
- * "clients 相互解耦"的方针，故意copy 一份独立文件；改动 WorkBuddy 不牵连
- * Codex，反之亦然。
+ * **Isomorphic but independent** from codex-injection.ts: WorkBuddy also uses OpenAI Responses API
+ * (@openai/agents SDK), body structure is consistent with Codex (`input[]` array, mixed developer/user
+ * messages, content array contains input_text). The logic could have been reused, but following the project's
+ * "clients decoupled from each other" policy, intentionally copied as an independent file; modifying WorkBuddy does not affect
+ * Codex, and vice versa.
  *
- * 两种模式（与 codex-injection 保持相同的双模式设计）：
- *   - **raw**（当前 handler 走的路径）：pipeline 已经产出的**完整成品文本**
- *     （含 `<available_skills>` / `<user_memory>` / `<tdai_profile_memory>` /
- *     `<memory-tools-guide>` 等多组内部 XML tag）原样嵌进 wrapper 内层，不再
- *     escape 或加子 tag —— 与 CC / CB / Codex 客户端在 system message 里看到
- *     的内容**字节一致**。
+ * Two modes (keeping the same dual-mode design as codex-injection):
+ *   - **raw** (path taken by current handler): the **complete finished text**
+ *     already produced by the pipeline (including multiple sets of internal XML tags like
+ *     `<available_skills>` / `<user_memory>` / `<tdai_profile_memory>` /
+ *     `<memory-tools-guide>`) is embedded as-is into the inner layer of the wrapper, without further
+ *     escaping or adding child tags —— completely **byte-identical** to what CC / CB / Codex clients see in the system message.
  *
- *   - **structured**（`{skills, memory, ...}` 5 段拆分）：预留给未来 WorkBuddy
- *     专属渲染器（如需要按段拆开时启用）。当前 pipeline 主链路**不能用**这种
- *     模式（pipeline 输出是单一 text，无法拆回 5 段；错用会把整段塞进
- *     `<available_skills>` 单个 tag 并被 XML escape，模型读不懂）。
+ *   - **structured** (5-segment split `{skills, memory, ...}`): reserved for future WorkBuddy-specific
+ *     renderer (enabled when needing to split by segment). The current pipeline main chain **cannot use** this
+ *     mode (pipeline output is a single text, cannot be split back into 5 segments; misuse will stuff the whole segment into
+ *     the single `<available_skills>` tag and get XML escaped, the model won't understand it).
  *
- * 详见docs/workbuddy-recon/ 与本目录 codex-injection.ts 的模块doc。
+ * See docs/workbuddy-recon/ and the module doc of codex-injection.ts in this directory for details.
  */
 
 // ── XML escape ───────────────────────────────────────────────────────────────
 
 /**
- * XML entity encode：转义 < > & " ' 五个 XML特殊字符。
- * 仅 structured 模式使用；raw 模式（当前主链路）不 escape。
+ * XML entity encode: escape < > & " ' five special XML characters.
+ * Only used in structured mode; raw mode (current main chain) does not escape.
  */
 function xmlEscape(s: string): string {
   return s
@@ -39,7 +39,7 @@ function xmlEscape(s: string): string {
 
 // ── Segments ─────────────────────────────────────────────────────────────────
 
-/** structured 模式子段定义：tag 名 + 对应输入字段名。顺序即渲染顺序。 */
+/** Sub-segment definition for structured mode: tag name + corresponding input field name. Order is rendering order. */
 const SEGMENTS: Array<{ tag: string; field: keyof WorkbuddyInjectionInputStructured }> = [
   { tag: "available_skills", field: "skills" },
   { tag: "user_memory", field: "memory" },
@@ -51,16 +51,16 @@ const SEGMENTS: Array<{ tag: string; field: keyof WorkbuddyInjectionInputStructu
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Raw 模式输入：pipeline 已经产出的完整 XML 文本串（不做二次 escape / 包裹）。
- * 当前 WorkBuddy handler 走这条路径。
+ * Raw mode input: complete XML text string already produced by the pipeline (no secondary escaping / wrapping).
+ * Current WorkBuddy handler takes this path.
  */
 export interface WorkbuddyInjectionInputRaw {
   raw: string;
 }
 
 /**
- * Structured 模式输入：5 段拆分（预留给未来 WorkBuddy 专属渲染器）。
- * ⚠️ 不要给当前 pipeline 主链路使用。
+ * Structured mode input: 5-segment split (reserved for future WorkBuddy-specific renderer).
+ * ⚠️ Do not use for current pipeline main chain.
  */
 export interface WorkbuddyInjectionInputStructured {
   skills?: string;
@@ -71,33 +71,33 @@ export interface WorkbuddyInjectionInputStructured {
 }
 
 /**
- * `buildWorkbuddyInjectionBlock` 入参：raw / structured 二选一。
- * 传 `{raw}` → raw 模式，原样嵌入；否则视为structured，按 5 段拆分渲染。
+ * `buildWorkbuddyInjectionBlock` input: raw / structured either one.
+ * Passing `{raw}` → raw mode, embedded as-is; otherwise treated as structured, rendered splitting into 5 segments.
  */
 export type WorkbuddyInjectionInput =
   | WorkbuddyInjectionInputRaw
   | WorkbuddyInjectionInputStructured;
 
 /**
- * 构建 `<tdai_injections>` wrapper，返回可直接 push 到 WorkBuddy
- * `body.input[0].content` 数组的 input_text 对象。
+ * Build `<tdai_injections>` wrapper, returns an input_text object that can be pushed directly
+ * to WorkBuddy `body.input[0].content` array.
  *
- * - raw 模式：`{raw: "..."}` → 原样嵌入 wrapper 内层，不 escape 不加子 tag
- * - structured 模式：`{skills, memory, ...}` → 每段用对应 tag 包裹 + XML escape，
- *   空段（空字符串 / undefined）省略
- * - 无内容时仍返回空 wrapper `<tdai_injections>\n</tdai_injections>`
+ * - raw mode: `{raw: "..."}` → embedded as-is into inner wrapper layer, no escape, no child tags added
+ * - structured mode: `{skills, memory, ...}` → each segment wrapped with corresponding tag + XML escaped content,
+ *   empty segments (empty string / undefined) omitted
+ * - still returns empty wrapper `<tdai_injections>\n</tdai_injections>` when no content
  */
 export function buildWorkbuddyInjectionBlock(
   input: WorkbuddyInjectionInput,
 ): { type: "input_text"; text: string } {
-  // Raw 模式：直接嵌入，不做任何处理
+  // Raw mode: directly embed, do no processing
   if (isRawInput(input)) {
     const raw = input.raw ?? "";
     const inner = raw.length > 0 ? "\n" + raw + "\n" : "\n";
     return { type: "input_text", text: `<tdai_injections>${inner}</tdai_injections>` };
   }
 
-  // Structured 模式：5 段拆分 + XML escape 内容
+  // Structured mode: 5-segment split + XML escape content
   const parts: string[] = [];
   for (const seg of SEGMENTS) {
     const raw = input[seg.field];

@@ -1,45 +1,45 @@
 /**
- * Langfuse debug helpers —— 由 `langfuse.debug=true` 门控，用来把 LLM 请求
- * 的原生结构 + 客户端指纹尽量塞进 Langfuse 上报，供**排障 / 客户端逆向**用。
+ * Langfuse debug helpers —— gated by `langfuse.debug=true`, used to stuff the native structure
+ * of LLM requests + client fingerprints into Langfuse reporting as much as possible, for **troubleshooting / client reverse-engineering**.
  *
- * 现状拆解（合并前的坑）：
- *   1. Anthropic 侧 `anthropicHandler.buildLangfuseInput` 已有 debug 分支，但
- *      只保留 messages+system 原生结构；output 仍取 text 拼接（tool_use /
- *      thinking / stop_reason 丢失）；metadata 只有 stream/retried/upstreamUrl。
- *   2. OpenAI 协议 handler.ts 的 5 处 langfuse 上报**完全不读 debug flag**，
- *      硬编码走 flattenMessagesForOpik 压平 —— CodeBuddy 请求走的正是这条路径，
- *      开 debug 也抓不到 CB 原生 body。
+ * Current situation breakdown (pitfalls before merge):
+ *   1. Anthropic side `anthropicHandler.buildLangfuseInput` already has a debug branch, but
+ *      only retains messages+system native structure; output still takes text concatenation
+ *      (tool_use / thinking / stop_reason lost); metadata only has stream/retried/upstreamUrl.
+ *   2. The 5 langfuse reporting spots in OpenAI protocol handler.ts **completely do not read debug flag**,
+ *      hardcoded to go through flattenMessagesForOpik flattening —— CodeBuddy requests take exactly this path,
+ *      so enabling debug cannot capture CB native body either.
  *
- * 本文件补的是**共用**部分 —— OpenAI 协议的 input builder + 通用 debug metadata。
- * Anthropic 侧的 input builder (`buildLangfuseInput`) 已在 anthropicHandler.ts 内联，
- * 不搬过来避免循环依赖。output 处理由各自 handler 自己按 debug flag 分岔。
+ * This file adds the **shared** parts —— input builder for OpenAI protocol + generic debug metadata.
+ * The input builder on Anthropic side (`buildLangfuseInput`) is already inlined in anthropicHandler.ts,
+ * not moved over to avoid circular dependency. Output processing branches off by each handler itself based on debug flag.
  *
- * 详见 docs/design/2026-07-30-cc-request-routing-plan.md 附录以及本次提交的
- * commit message。
+ * See appendix of docs/design/2026-07-30-cc-request-routing-plan.md and the commit message of this submission for details.
  */
 
 import type { CcRequestKind } from "./cc-request-classifier.js";
 import { findLastCacheControlIndex } from "./cc-request-classifier.js";
 
-// ─── 白名单与截断上限 ────────────────────────────────────────────────────────
-// 请求头前缀：跟 identity.ts:172 一致，避免各处对 CB header 认知漂移。
+// ─── Whitelist and Truncation Limits ────────────────────────────────────────────────────────
+// Request header prefixes: consistent with identity.ts:172, to avoid drifting understanding of CB headers across different places.
 const HEADER_PREFIX_WHITELIST = ["x-", "cb-", "codebuddy-"];
-// 单个 tool description / string 字段最多截断到多少字符（防 langfuse 单条上报膨胀）。
+// Maximum character limit to truncate for a single tool description / string field (to prevent langfuse single report bloat).
 const STRING_TRUNC = 200;
-// tools 最多抓多少条（前 N 个足够识别客户端指纹了）。
+// Maximum number of tools to capture (first N is enough to identify client fingerprint).
 const TOOLS_MAX = 8;
 
 /**
- * OpenAI 协议 messages 的 langfuse input builder。
+ * Langfuse input builder for OpenAI protocol messages.
  *
- * - `debug=true`: 原样返回 messages 数组（保留 CodeBuddy 可能塞的字符串/数组
- *   content、`<additional_data>` / `<question_answer>` 等内部 tag、cache_control
- *   marker、tool_use 原生形态、thinking block 等）。
- * - `debug=false`: 走调用方传入的 fallback（一般是 handler.ts:flattenMessagesForOpik），
- *   把 content 数组压平为 role+string 形态，节省 langfuse 存储成本 2-5x。
+ * - `debug=true`: returns original messages array as-is (retains string/array content CodeBuddy
+ *   might stuff, internal tags like `<additional_data>` / `<question_answer>`, cache_control
+ *   marker, tool_use native form, thinking block, etc.).
+ * - `debug=false`: goes through fallback passed by caller (usually handler.ts:flattenMessagesForOpik),
+ *   flattens content array into role+string form, saving langfuse storage cost 2-5x.
  *
- * 参数 `fallback` 显式传入而非 import，是为了让 handler 保留自己那份 flatten
- * 实现（有 opik/opik-fork 侧其它调用点复用），本文件不负责 flatten 语义。
+ * The reason parameter `fallback` is explicitly passed in instead of imported is to let handler retain
+ * its own flatten implementation (which has other callers on opik/opik-fork side reusing it), this file
+ * is not responsible for flatten semantics.
  */
 export function buildLangfuseInputChat(
   messages: unknown[],
@@ -47,7 +47,7 @@ export function buildLangfuseInputChat(
   fallback: (m: unknown[]) => unknown[],
 ): unknown {
   if (debug) {
-    // 直接返回原始 messages 数组 —— 保留 role/content 原生结构。
+    // Directly return original messages array —— retain role/content native structure.
     return messages;
   }
   return fallback(messages);
@@ -68,24 +68,24 @@ export interface RequestDebugMetadataInput {
 }
 
 /**
- * 从 body / headers / 路由上下文抽取"客户端指纹 + 请求分类关键字段"，塞进
- * Langfuse 的 observationMetadata / traceMetadata。
+ * Extract "client fingerprint + key fields for request classification" from body / headers / routing context,
+ * and stuff them into observationMetadata / traceMetadata of Langfuse.
  *
- * `debug=false` 时恒返回**空对象**（不污染线上 metadata）。
+ * When `debug=false` constantly returns **empty object** (does not pollute online metadata).
  *
- * 抽取的字段（都是 flat key，方便 Langfuse UI 展示）：
+ * Extracted fields (all flat keys, convenient for Langfuse UI display):
  *   - `model` / `stream` / `max_tokens` / `temperature` / `top_p` / `top_k`
  *   - `thinking_type` / `stop_sequences_len` / `system_len` / `messages_len`
- *   - `tools_len` / `tools_summary` — 前 N 个 tool 的 name + desc 截断到 200 char
- *   - `cache_control_marker_idx` — messages 里最后一个 cache_control marker 位置
- *     （识别 CC fork/main/sidequery 的核心信号；详见 cc-request-classifier.ts）
- *   - `body_metadata` — Anthropic body.metadata（含 user_id 等）
- *   - `body_extra_keys` — body 顶层"非标准字段"名字（CB / cursor 常私塞 extension 字段）
+ *   - `tools_len` / `tools_summary` — name + desc of first N tools truncated to 200 chars
+ *   - `cache_control_marker_idx` — position of last cache_control marker in messages
+ *     (core signal to identify CC fork/main/sidequery; see cc-request-classifier.ts)
+ *   - `body_metadata` — Anthropic body.metadata (contains user_id etc.)
+ *   - `body_extra_keys` — top-level "non-standard fields" names of body (CB / cursor often secretly stuff extension fields)
  *   - `agent_source` / `request_kind` / `space_id` / `turn_seq` / `request_path`
- *   - `header_<name>` — 白名单前缀的 client header（x-* / cb-* / codebuddy-*）
+ *   - `header_<name>` — client header with whitelisted prefix (x-* / cb-* / codebuddy-*)
  *
- * Tools/description 均截断以防单条上报膨胀。抽取失败静默返回已有字段
- * （debug 数据缺一两个字段不影响排障，不能因此抛异常影响业务）。
+ * Tools/description are both truncated to prevent single report bloat. If extraction fails, silently return existing fields
+ * (missing one or two fields in debug data does not affect troubleshooting, cannot throw exception to affect business).
  */
 export function buildRequestDebugMetadata(
   opts: RequestDebugMetadataInput,
@@ -96,7 +96,7 @@ export function buildRequestDebugMetadata(
   try {
     const b = opts.body ?? {};
 
-    // ── body 顶层常见字段 ──
+    // ── top-level common body fields ──
     if (typeof b.model === "string") out.model = b.model;
     if (typeof b.stream === "boolean") out.stream = b.stream;
     if (typeof b.max_tokens === "number") out.max_tokens = b.max_tokens;
@@ -110,7 +110,7 @@ export function buildRequestDebugMetadata(
       out.thinking_type = thinking.type;
     }
 
-    // stop_sequences（OpenAI: `stop`；Anthropic: `stop_sequences`）
+    // stop_sequences (OpenAI: `stop`; Anthropic: `stop_sequences`)
     const stopSeq = Array.isArray(b.stop_sequences)
       ? (b.stop_sequences as unknown[])
       : Array.isArray(b.stop)
@@ -118,7 +118,7 @@ export function buildRequestDebugMetadata(
       : null;
     if (stopSeq) out.stop_sequences_len = stopSeq.length;
 
-    // system prompt 长度（Anthropic 有 body.system；OpenAI 塞在 messages[0].role='system'）
+    // system prompt length (Anthropic has body.system; OpenAI stuffed in messages[0].role='system')
     if (typeof b.system === "string") {
       out.system_len = b.system.length;
     } else if (Array.isArray(b.system)) {
@@ -133,7 +133,7 @@ export function buildRequestDebugMetadata(
     const msgs = Array.isArray(b.messages) ? (b.messages as unknown[]) : [];
     out.messages_len = msgs.length;
 
-    // Tools 数组 —— 前 N 个的 name + desc（截断），足够指纹
+    // Tools array —— name + desc of first N (truncated), enough for fingerprinting
     if (Array.isArray(b.tools)) {
       const tools = b.tools as unknown[];
       out.tools_len = tools.length;
@@ -153,18 +153,18 @@ export function buildRequestDebugMetadata(
       if (summary.length) out.tools_summary = summary;
     }
 
-    // Cache control marker 位置 —— CC 请求分类的核心信号
+    // Cache control marker position —— core signal for CC request classification
     if (msgs.length > 0) {
       const idx = findLastCacheControlIndex(msgs);
       if (idx >= 0) out.cache_control_marker_idx = idx;
     }
 
-    // Anthropic body.metadata（可能含 user_id / session_id 之类客户端上下文）
+    // Anthropic body.metadata (might contain client context like user_id / session_id)
     if (b.metadata && typeof b.metadata === "object" && !Array.isArray(b.metadata)) {
       out.body_metadata = b.metadata as Record<string, unknown>;
     }
 
-    // body 顶层非标准字段（客户端私塞的 extension keys —— 识别客户端指纹）
+    // Top-level non-standard body fields (extension keys secretly stuffed by client —— to identify client fingerprint)
     const standardKeys = new Set([
       "model", "messages", "system", "tools", "tool_choice",
       "temperature", "top_p", "top_k", "max_tokens",
@@ -175,7 +175,7 @@ export function buildRequestDebugMetadata(
     const extra = Object.keys(b).filter((k) => !standardKeys.has(k));
     if (extra.length) out.body_extra_keys = extra;
 
-    // ── 路由上下文 ──
+    // ── routing context ──
     if (opts.agentSource) out.agent_source = opts.agentSource;
     if (opts.requestKind) out.request_kind = opts.requestKind;
     if (opts.spaceId) out.space_id = opts.spaceId;
@@ -183,18 +183,18 @@ export function buildRequestDebugMetadata(
     if (opts.requestPath) out.request_path = opts.requestPath;
     if (opts.protocol) out.protocol = opts.protocol;
 
-    // ── 请求头（白名单前缀）──
+    // ── request headers (whitelisted prefixes) ──
     if (opts.headers) {
       for (const [rawK, v] of Object.entries(opts.headers)) {
         const k = rawK.toLowerCase();
-        // 跳过含敏感信息的 header
+        // skip headers containing sensitive information
         if (k === "authorization" || k === "x-api-key" || k === "cookie") continue;
         if (!HEADER_PREFIX_WHITELIST.some((p) => k.startsWith(p))) continue;
         out[`header_${k}`] = truncate(String(v), STRING_TRUNC);
       }
     }
   } catch {
-    // debug metadata 只是辅助，绝不影响业务；抛异常就返回已经填的部分
+    // debug metadata is just auxiliary, absolutely must not affect business; catch exception and return what's already filled
   }
   return out;
 }

@@ -13,7 +13,7 @@
  * `getById(service_id, wiki_id)` so a foreign tenant's resource is never exposed (R1).
  * service_id / wiki_id are validated as safe path segments before use (R5).
  *
- * 细粒度 ingest progress 不在 KS 暴露：由 Panel 收 ingest_progress 回调并在 wiki/get 聚合。
+ * Fine-grained ingest progress is not exposed in KS: Panel collects ingest_progress callbacks and aggregates them in wiki/get.
  */
 
 import { Hono } from "hono";
@@ -78,7 +78,7 @@ export function createWikiRoutes(deps: WikiRouteDeps): Hono {
     const row = wikiService.getById(serviceId, wikiId);
     if (!row) return c.json(wrapError(404, "wiki not found"), 404);
 
-    // 空 wiki 禁止 ingest：无源文件时拒绝（避免静默成功 pageCount=0）
+    // Prohibit ingest on empty wiki: reject when there are no source files (avoids silent success with pageCount=0)
     const sources = wikiService.rawLs(serviceId, row.team_id, wikiId);
     if (!sources || sources.length === 0) {
       return c.json(wrapError(400, "wiki has no source files, upload before ingest"), 400);
@@ -87,7 +87,7 @@ export function createWikiRoutes(deps: WikiRouteDeps): Hono {
     const result = wikiService.ingest(serviceId, row.team_id, wikiId, requesterUserId);
     if (result.kind === "not_found") return c.json(wrapError(404, "wiki not found"), 404);
     if (result.kind === "busy") {
-      // 并发拒绝：干净最小的 409 响应体（调用方用 code 判断，不 parse message）。
+      // Concurrency rejection: clean, minimal 409 response body (caller uses code check, does not parse message).
       return c.json({ code: 409, message: "busy", data: { status: result.status, step: result.step } }, 409);
     }
     return c.json(wrapOk({ wiki_id: result.row.wiki_id, status: result.row.status }), 202);
@@ -118,8 +118,8 @@ export function createWikiRoutes(deps: WikiRouteDeps): Hono {
       }
       const ok = wikiService.delete(serviceId, row.team_id, id);
       if (ok) {
-        // wiki engine manager 注册清理仍由路由负责（wikiMgr 未注入 service）；
-        // 连接/元数据/磁盘四类清理已在 service.cleanupResources 内完成。
+        // Wiki engine manager registration cleanup is still handled by routes (wikiMgr is not injected into service);
+        // four types of cleanup (connection/metadata/disk/pool) are completed inside service.cleanupResources.
         try { wikiMgr.remove(id); } catch (err) { console.warn(`[wiki] wikiMgr.remove(${id}) failed:`, err); }
         result.deleted_ids.push(id);
       } else {
@@ -259,7 +259,7 @@ export function createWikiRoutes(deps: WikiRouteDeps): Hono {
       return c.json(wrapError(400, "files is required (non-empty array)"), 400);
     }
 
-    // 上传大小限制（防御纵深，Panel 侧已有同样校验）
+    // Upload size limit (defense in depth; Panel side already performs the same validation)
     const MAX_FILE_SIZE = 512 * 1024;
     const MAX_FILES = 10;
     const MAX_TOTAL = 5 * 1024 * 1024;

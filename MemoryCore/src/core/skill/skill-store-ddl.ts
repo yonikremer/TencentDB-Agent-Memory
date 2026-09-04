@@ -1,21 +1,21 @@
 /**
- * DDL 常量 — Skill 数据层 v2 重构
+ * DDL Constants — Skill Data Layer v2 Refactor
  *
- * 详见 `docs/design/2026-06-17-skill-redesign-v2.md` §2.1 / §2.2。
+ * See `docs/design/2026-06-17-skill-redesign-v2.md` §2.1 / §2.2 for details.
  *
- * 三张本模块所有的物理对象：
- *   - skills      — 主表，每行 = (skill_id, version) 一个不可变快照
- *   - skill_fts   — fts5 虚拟表（基于 head 行的 name/description/content）
- *   - skill_vec   — vec0 虚拟表（仅 dimensions>0 时创建）
+ * Physical objects belonging to this module:
+ *   - skills      — main table, each row = (skill_id, version) immutable snapshot
+ *   - skill_fts   — fts5 virtual table (based on head row's name/description/content)
+ *   - skill_vec   — vec0 virtual table (created only when dimensions > 0)
  *
- * 故意不在此 DDL 中创建：
- *   - skill_bindings / task_skill_drafts / task_floating_skills / task_fixed_skills（绑定/草稿/浮动概念已下沉到管控面）
- *   - skill_resources（manifest 收敛到 skills.manifest_json 列）
- *   - assets / task_asset_bindings（全局资产体系不在数据面落库）
+ * Intentionally NOT created in this DDL:
+ *   - skill_bindings / task_skill_drafts / task_floating_skills / task_fixed_skills (binding/draft/floating concepts moved down to control plane)
+ *   - skill_resources (manifest consolidated into skills.manifest_json column)
+ *   - assets / task_asset_bindings (global asset system not stored in data plane)
  */
 
 // ═════════════════════════════════════════════════════════════════════
-//  skills 主表 — 单表多行多版本
+//  skills main table — single table with multiple rows and versions
 // ═════════════════════════════════════════════════════════════════════
 
 export const SKILLS_DDL = `
@@ -65,7 +65,7 @@ export const SKILLS_DDL = `
 `;
 
 // ═════════════════════════════════════════════════════════════════════
-//  skill_fts — FTS5 虚拟表（仅索引 head 行）
+//  skill_fts — FTS5 virtual table (indexes head rows only)
 // ═════════════════════════════════════════════════════════════════════
 
 export const SKILL_FTS_DDL = `
@@ -83,11 +83,11 @@ export const SKILL_FTS_DDL = `
 `;
 
 // ═════════════════════════════════════════════════════════════════════
-//  skill_vec — vec0 虚拟表（dimensions>0 时调用方负责 exec）
+//  skill_vec — vec0 virtual table (caller executes when dimensions > 0)
 // ═════════════════════════════════════════════════════════════════════
 
 /**
- * `__DIM__` 在 init 时被替换为实际维度（如 1536）。
+ * `__DIM__` is replaced at init time with the actual dimension (e.g. 1536).
  */
 export const SKILL_VEC_DDL_TEMPLATE = `
   CREATE VIRTUAL TABLE IF NOT EXISTS skill_vec USING vec0(
@@ -97,8 +97,9 @@ export const SKILL_VEC_DDL_TEMPLATE = `
 `;
 
 // ═════════════════════════════════════════════════════════════════════
-//  常量
+//  Constants
 // ═════════════════════════════════════════════════════════════════════
 
-/** FTS 索引中 content 的最大字符数（避免巨大 SKILL.md 撑爆 fts5）。 */
+/** Maximum character count of content in FTS index (prevents giant SKILL.md from bloating fts5). */
 export const FTS_CONTENT_MAX = 4000;
+

@@ -1,8 +1,8 @@
 /**
  * Observability Module — Barrel Export
  *
- * 统一导出可观测性模块的所有公开类型、接口、工厂函数和默认实现。
- * 调用方通过此文件导入所需的可观测性能力。
+ * Unified exports for all public types, interfaces, factory functions, and default implementations of the observability module.
+ * Callers import required observability capabilities through this file.
  */
 
 // ============================

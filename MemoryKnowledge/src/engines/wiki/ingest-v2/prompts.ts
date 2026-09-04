@@ -1,58 +1,55 @@
 /**
- * prompts.ts — 摄取提示词（分析 / 系统 / 生成）。
+ * prompts.ts — Ingestion prompts (analysis / system / generation).
  *
- * 描述角色（wiki 维护者）、页面类型与目录约定（OKF type）、FILE 块输出协议、
- * wikilink 约定、去重更新策略、输出语言策略。依据本仓库 PRD/INTERFACE。
+ * Describes role (wiki maintainer), page types and directory conventions (OKF type), FILE block output protocol,
+ * wikilink conventions, deduplication/update strategies, and output language policies.
  *
- * 支持两种摄取流程（PRD §4.2）：
- *   - 单阶段：源全文 + 模板 + 已有页清单 → 直接产出 FILE 块（buildGeneratePrompt）。
- *   - 两阶段（OQ-4）：先「分析」(buildAnalysisPrompt) 产出结构化抽取计划，
- *     再「生成」(buildGenerateFromAnalysisPrompt) 依据分析产出 FILE 块。
- *     好处：把"抽什么"与"落盘格式"解耦，质量更稳、格式更规整。
+ * Supports two ingestion workflows:
+ *   - Single-stage: full source + template + existing page list → produce FILE blocks directly (buildGeneratePrompt).
+ *   - Two-stage: first "analysis" (buildAnalysisPrompt) produces structured extraction plan,
+ *     then "generation" (buildGenerateFromAnalysisPrompt) produces FILE blocks based on analysis.
  */
 
 import type { WikiTemplate } from "./template.js";
 
-/** 已存在页的精简信息，用于让 LLM 感知"已有知识"并决定新建/更新。 */
+/** Summary of an existing page to let LLM know existing knowledge when deciding create vs update. */
 export interface ExistingPageInfo {
-  /** wiki 相对路径，如 wiki/entities/redis.md */
+  /** Relative wiki path, e.g. wiki/entities/redis.md */
   relPath: string;
   title: string;
   type: string;
   description?: string;
 }
 
-/** 需要被更新的已存在页（命中 dedup 且未锁定），把原文给 LLM 做合并。 */
+/** Existing page to be updated (hit dedup and unlocked); full text provided to LLM for merging. */
 export interface PageForUpdate {
   relPath: string;
   content: string;
 }
 
-/** 把已有页清单格式化为列表文本（供分析/生成阶段复用）。 */
+/** Format existing page list as list text for reuse across analysis/generation. */
 function formatExistingPages(existingPages: ExistingPageInfo[]): string {
   return existingPages.length > 0
     ? existingPages
-        .map((p) => `- [${p.type}] ${p.relPath}${p.title ? ` — ${p.title}` : ""}${p.description ? `（${p.description}）` : ""}`)
+        .map((p) => `- [${p.type}] ${p.relPath}${p.title ? ` — ${p.title}` : ""}${p.description ? ` (${p.description})` : ""}`)
         .join("\n")
     : "(wiki is empty — this is the first source)";
 }
 
 /**
- * 检索增强上下文：非空时渲染为独立小节。
- * 块头已由 formatRetrievedPages 自带（"## Relevant Existing Knowledge ..."），
- * 这里只负责在既有清单与源文档之间插入一块空白分隔。
+ * Retrieval augmented context: rendered as independent section when non-empty.
  */
 function retrievalSection(retrievalContext?: string): string {
   return retrievalContext && retrievalContext.trim() ? `\n\n${retrievalContext}` : "";
 }
 
-/** 生成阶段对"检索增强上下文"的处理规则（单阶段 / 两阶段生成 prompt 共用）。 */
+/** Retrieval context rule for generation stage (shared by single-stage and two-stage). */
 const RETRIEVAL_CONTEXT_RULE =
   '${RETRIEVAL_CONTEXT_RULE}';
 
-// ─── 阶段 A：分析 ────────────────────────────────────────────
+// ─── Stage A: Analysis ────────────────────────────────────────────
 
-/** 分析阶段系统提示词：扮演"抽取规划者"，只产出结构化分析，不写页面。 */
+/** Analysis stage system prompt: acts as "extraction planner", producing only structured analysis, not writing final pages. */
 export function buildAnalysisSystemPrompt(template: WikiTemplate): string {
   return `You are a knowledge base analyst. Your job is to read a source document and plan how to integrate it into
 the existing wiki. You do NOT write final pages — you only produce a structured "extraction plan" for the
@@ -85,7 +82,7 @@ Decide whether a subject deserves its own page by asking:
 Output only the analysis itself — no FILE blocks, no final page content. Match the source document's primary language.`;
 }
 
-/** 构造分析阶段用户提示词。 */
+/** Builds user prompt for analysis stage. */
 export function buildAnalysisPrompt(args: {
   sourceName: string;
   sourceText: string;
@@ -106,9 +103,9 @@ ${sourceText}
 Produce the structured extraction plan following the rules above.`;
 }
 
-// ─── 系统提示词（生成阶段共用：格式契约 + 输出协议） ──────────
+// ─── System Prompt (shared across generation stage: format contract + output protocol) ──────────
 
-/** 构造系统提示词：角色、格式契约、输出协议。 */
+/** Builds system prompt: role, format contract, output protocol. */
 export function buildSystemPrompt(template: WikiTemplate): string {
   return `You are a meticulous knowledge base (wiki) maintainer. Your job is to read source documents
 provided by the user and integrate their knowledge into a persistent, cumulative markdown wiki —
@@ -167,7 +164,7 @@ Rules:
 - Do NOT output any explanatory text outside of FILE blocks.`;
 }
 
-/** 构造生成提示词（单阶段）：源全文 + 已有页清单 + 待更新页原文。 */
+/** Builds generation prompt (single-stage): full source + existing page list + full text of pages to update. */
 export function buildGeneratePrompt(args: {
   sourceName: string;
   sourceText: string;
@@ -212,11 +209,11 @@ ${RETRIEVAL_CONTEXT_RULE}
 Output ONLY FILE blocks — no extra commentary.`;
 }
 
-// ─── 阶段 B：基于分析的生成（OQ-4） ──────────────────────────
+// ─── Stage B: Generation from Analysis (OQ-4) ──────────────────────────
 
 /**
- * 构造"生成阶段"用户提示词（两阶段流程）：以分析结果为主输入，
- * 仍附源全文供查证细节。让 LLM 据此产出 FILE 块。
+ * Builds user prompt for "generation stage" (two-stage workflow): uses analysis results as primary input,
+ * still attaching full source text for verifying details. Prompts LLM to produce FILE blocks accordingly.
  */
 export function buildGenerateFromAnalysisPrompt(args: {
   sourceName: string;

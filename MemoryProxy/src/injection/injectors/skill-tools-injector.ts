@@ -45,9 +45,9 @@ export interface SkillToolsInjectorConfig {
    */
   proxyBaseUrl: string;
   /**
-   * 是否允许主模型创建/修改 skill。默认 false。
-   * false 时只注入只读工具（search/list/view/files_read）。
-   * 显式设为 true 后注入全部 10 个工具。
+   * Whether to allow the main model to create/modify skills. Default false.
+   * When false, only injects read-only tools (search/list/view/files_read).
+   * When explicitly true, injects all 10 tools.
    */
   allowLlmWrite?: boolean;
 }
@@ -65,8 +65,8 @@ export function renderSkillToolsBlock(
   const base = proxyBaseUrl.replace(/\/$/, "");
   const bridge = `${base}/skill-bridge/v3/skill`;
 
-  // gateway 需要 `x-tdai-service-id: <spaceId>` 才放行；`x-conversation-id`
-  // 让 proxy 复用 session 里的身份 (user_id / team_id / agent_id)。
+  // Gateway needs `x-tdai-service-id: <spaceId>` to pass; `x-conversation-id`
+  // lets proxy reuse identity from session (user_id / team_id / agent_id).
   const sessionHeader = sessionId ? ` -H 'x-conversation-id: ${sessionId}'` : "";
   const tenantHeader = spaceId ? ` -H 'x-tdai-service-id: ${spaceId}'` : "";
   const authHeader = `${tenantHeader}${sessionHeader}`;
@@ -74,102 +74,102 @@ export function renderSkillToolsBlock(
   const readTools = [
     `  <tool name="skill_search">`,
     `    path: ${bridge}/search`,
-    `    body: {"query": "描述你要找什么 skill 的关键词（必填，>=1字符）"}`,
-    `    use:  在**你在团队中有权限访问**的 skill 中按关键词 + 语义检索匹配项（跨 agent，但**不含**其他人设置为私密的 skill —— 与前端「团队资产」tab 展示一致）。query 必须是非空字符串，建议写 2-5 个相关关键词。当你觉得自己自带的 skill 不够用时，用它发现团队里其他可用的 skill。返回条数由服务端固定，若结果不理想请换一组关键词重试，不要在 body 里加 top_k/mode 等其它字段（会被忽略）。`,
+    `    body: {"query": "Keywords describing the skill you are looking for (required, >=1 character)"}`,
+    `    use:  Search for matching skills by keywords + semantics among skills **you have permission to access in the team** (cross-agent, but **excluding** skills others have set to private —— consistent with the 'Team Assets' tab in frontend). query must be a non-empty string, recommended 2-5 related keywords. When you feel your inherent skills are insufficient, use this to discover other available skills in the team. Return count is fixed by the server; if results are not ideal, try different keywords, do not add top_k/mode or other fields in the body (they will be ignored).`,
     `  </tool>`,
     "",
-    // 暂时下线：<available_skills> 块已经注入 agent 自带的 skill 列表，功能重叠。
-    // 后续如果需要分页刷新（skill 太多截断时）再恢复。
+    // Temporarily offline: the <available_skills> block already injects the agent's inherent skill list, overlapping functionality.
+    // Can be restored later if paginated refresh is needed (when too many skills cause truncation).
     // `  <tool name="skill_list">`,
     // `    path: ${bridge}/list`,
-    // `    body: {"filters": {"owner_agent_id": "?可选", "name_prefix": "?可选"}, "pagination": {"limit": 50}}`,
-    // `    use:  列出 head + active skill；按 owner / 前缀过滤`,
+    // `    body: {"filters": {"owner_agent_id": "?optional", "name_prefix": "?optional"}, "pagination": {"limit": 50}}`,
+    // `    use:  Lists head + active skills; filters by owner / prefix`,
     // `  </tool>`,
     // "",
     `  <tool name="skill_view">`,
     `    path: ${bridge}/get-by-name`,
-    `    body: {"skill_name": "<skill 名字>", "include_content": true, "include_manifest": true}`,
-    `    use:  **打开一个 skill 的入口**：拿到 SKILL.md 全文 + 资源目录树（manifest）。想读某个资源文件的字节，必须先调这个工具从 manifest 里挑出 path，再用 skill_files_read。skill_name 用 <available_skills> 里 \`- name: description\` 那个 name，或 skill_search 结果里的 name 字段。`,
+    `    body: {"skill_name": "<skill name>", "include_content": true, "include_manifest": true}`,
+    `    use:  **Open an entry to a skill**: gets the full SKILL.md text + resource directory tree (manifest). If you want to read the bytes of a specific resource file, you must first call this tool to pick a path from the manifest, then use skill_files_read. For skill_name, use the name from \`- name: description\` in <available_skills>, or the name field from skill_search results.`,
     `  </tool>`,
     "",
     `  <tool name="skill_files_read">`,
     `    path: ${bridge}/files/read`,
     `    body: {"skill_id": "skl-xxx", "path": "scripts/run.sh", "encoding": "utf-8|base64"}`,
-    `    use:  读取单个资源文件内容。**必须先调 skill_view 拿 manifest**，从里面挑出 skill_id + path，本工具才能定位。默认返回 JSON 信封（含 base64/utf-8 编码的字节）。\n    若需下载到本地：在 curl 末尾加 -o <本地路径>，proxy 会返回原始字节直接写入文件，不进上下文。下载的脚本需 chmod +x 后再执行。`,
+    `    use:  Read single resource file content. **Must call skill_view first to get the manifest**, pick skill_id + path from it for this tool to locate. Returns a JSON envelope by default (containing base64/utf-8 encoded bytes).\n    To download to local: append -o <local path> to curl, proxy will return raw bytes written directly to the file without entering context. Downloaded scripts require chmod +x before execution.`,
     `  </tool>`,
     "",
     `  <tool name="skill_extract">`,
     `    path: ${bridge}/extract`,
-    `    body: {"reason": "?可选，简要说明为什么觉得当前对话值得提取为 skill（写清楚有助于后台抽取器识别边界）"}`,
-    `    use:  立即归档当前对话触发一次 skill 抽取（异步任务，由后台 agent 分析对话内容生成 skill）。proxy 从 session 拿身份 + 用 core 侧累积的对话缓冲，你不用传 messages。适合在"用户已经跑通一段完整流程、值得复用"时主动触发。`,
+    `    body: {"reason": "?optional, brief reason why the current conversation is worth extracting as a skill (clarity helps the background extractor identify boundaries)"}`,
+    `    use:  Immediately archives the current conversation to trigger a skill extraction (async task, background agent analyzes conversation to generate a skill). Proxy uses session identity + conversation buffer accumulated at core side, you do not need to pass messages. Suitable for actively triggering when "user has completed a full workflow worth reusing".`,
     `  </tool>`,
   ];
 
   const writeTools = [
     `  <tool name="skill_create">`,
     `    path: ${bridge}/create`,
-    `    body: {"name": "string", "content": "SKILL.md 全文（含 frontmatter）", "resources": "?可选数组"}`,
-    `    use:  新建 skill；owner 自动 = 当前 agent`,
+    `    body: {"name": "string", "content": "Full SKILL.md (including frontmatter)", "resources": "?optional array"}`,
+    `    use:  Create a new skill; owner automatically = current agent`,
     `  </tool>`,
     "",
     `  <tool name="skill_update">`,
     `    path: ${bridge}/update`,
-    `    body: {"skill_id": "skl-xxx", "content": "新 SKILL.md"}`,
-    `    use:  替换 SKILL.md（version+1）`,
+    `    body: {"skill_id": "skl-xxx", "content": "New SKILL.md"}`,
+    `    use:  Replace SKILL.md (version+1)`,
     `  </tool>`,
     "",
     `  <tool name="skill_patch">`,
     `    path: ${bridge}/patch`,
     `    body: {"skill_id": "skl-xxx", "old_string": "...", "new_string": "...", "replace_all": false}`,
-    `    use:  SKILL.md 子串替换（避免大 diff）`,
+    `    use:  SKILL.md substring replacement (avoids large diffs)`,
     `  </tool>`,
     "",
     `  <tool name="skill_delete">`,
     `    path: ${bridge}/delete`,
     `    body: {"skill_id": "skl-xxx"}`,
-    `    use:  软删（archived；不递增版本）`,
+    `    use:  Soft delete (archived; does not increment version)`,
     `  </tool>`,
     "",
     `  <tool name="skill_files_write">`,
     `    path: ${bridge}/files/write`,
     `    body: {"skill_id": "skl-xxx", "files": [{"path": "scripts/x.sh", "content": "...", "encoding": "utf-8", "is_executable": true}]}`,
-    `    use:  增/改资源文件（version+1）`,
+    `    use:  Add/modify resource files (version+1)`,
     `  </tool>`,
     "",
     `  <tool name="skill_files_remove">`,
     `    path: ${bridge}/files/remove`,
     `    body: {"skill_id": "skl-xxx", "paths": ["scripts/old.sh"]}`,
-    `    use:  删资源文件（version+1）`,
+    `    use:  Delete resource files (version+1)`,
     `  </tool>`,
   ];
 
   const note = allowLlmWrite
-    ? "错误处理：响应是 `{code, message, request_id, data?}` 信封；`code != 0` 表示业务错。常见："
-    : "注意：当前仅开放只读操作。如需创建/修改 skill 请联系管理员。\n错误处理：响应是 `{code, message, request_id, data?}` 信封；`code != 0` 表示业务错。常见：";
+    ? "Error handling: Response is `{code, message, request_id, data?}` envelope; `code != 0` means business error. Common errors:"
+    : "Note: Currently only read-only operations are allowed. Please contact admin if you need to create/modify skills.\nError handling: Response is `{code, message, request_id, data?}` envelope; `code != 0` means business error. Common errors:";
 
   const readErrors = [
-    "- 40001 参数校验失败：body 字段缺失/格式错，看 message 里具体字段名。",
-    "- 40101 session not initialized：session 未识别（很可能你在错误的 conversation 环境用了这个工具）。",
-    "- 40401 SKILL_NOT_FOUND：skill 不存在或不属于你所在的 agent；先用 skill_search 找同类 skill。",
-    "- 50301 upstream unavailable：core 侧临时不可达，稍后重试。",
+    "- 40001 Parameter validation failed: missing/malformed body fields, check message for specific field name.",
+    "- 40101 session not initialized: Session unrecognized (likely using this tool in the wrong conversation environment).",
+    "- 40401 SKILL_NOT_FOUND: Skill does not exist or does not belong to your agent; use skill_search first to find similar skills.",
+    "- 50301 upstream unavailable: Core temporarily unreachable, try again later.",
   ];
   const writeErrors = [
-    "- 40301 SKILL_NOT_OWNER：你不是 owner，无法修改。",
-    "- 40901 SKILL_VERSION_STALE：版本过期，先 skill_view 拿最新版本再写。",
-    "- 42201 SKILL_NAME_DUPLICATE：同 team 重名。",
-    "- 42202 SKILL_PATCH_NOT_UNIQUE：old_string 不唯一，传 replace_all=true。",
+    "- 40301 SKILL_NOT_OWNER: You are not the owner, cannot modify.",
+    "- 40901 SKILL_VERSION_STALE: Version is stale, get latest version with skill_view before writing.",
+    "- 42201 SKILL_NAME_DUPLICATE: Name duplicated within team.",
+    "- 42202 SKILL_PATCH_NOT_UNIQUE: old_string is not unique, pass replace_all=true.",
   ];
 
   return [
     "<skill_tools>",
-    "以下是云端 skill 操作工具。**这些不是本地工具**，需要用 Bash 调用 curl 命中 proxy 的 skill-bridge 路径来执行。",
-    "proxy 会自动注入身份与鉴权（user_id / team_id / agent_id 由 session 决定），body 里你只需要传业务字段。",
+    "Below are the cloud skill operation tools. **These are not local tools**, you need to use Bash to call curl to hit the proxy's skill-bridge path to execute them.",
+    "Proxy will automatically inject identity and auth (user_id / team_id / agent_id determined by session), you only need to pass business fields in the body.",
     "",
-    "调用模板：",
-    `  curl -sSk -X POST <bridge>/<action> -H 'content-type: application/json'${authHeader} -d '{...业务字段...}'`,
-    `  其中 <bridge> = ${bridge}`,
+    "Call template:",
+    `  curl -sSk -X POST <bridge>/<action> -H 'content-type: application/json'${authHeader} -d '{...business fields...}'`,
+    `  where <bridge> = ${bridge}`,
     "",
-    "可用工具：",
+    "Available tools:",
     "",
     ...readTools,
     ...(allowLlmWrite ? [""] : []),

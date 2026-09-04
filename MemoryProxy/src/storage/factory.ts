@@ -1,17 +1,17 @@
 /**
- * ProxyStorage 工厂 —— 单例 + 降级链。
+ * ProxyStorage Factory — Singleton + Degradation Chain.
  *
- * 见 docs/design/2026-07-09-redis-to-cos-migration-plan.md §3.2.
+ * See docs/design/2026-07-09-redis-to-cos-migration-plan.md §3.2.
  *
- * ⚠ cos 是多节点部署下唯一正确的共享后端：**配了 cos 就绝不降级**，装配失败
- *   直接抛错让进程起不来。否则悄悄退到 process-local（sqlite/fs/memory）会造成
- *   多节点各写各的本地存储、跨节点状态互相读空（session-init 表单丢失等）。
- *   见 docs/design/2026-07-13-proxy-multinode-state-audit.md P0-2。
+ * ⚠ cos is the only valid shared backend in a multi-node deployment: **if cos is configured, it must never degrade**. Assembly failure
+ *   directly throws an error to prevent the process from starting. Otherwise, silently falling back to process-local (sqlite/fs/memory) will cause
+ *   multiple nodes to write to their own local storage, resulting in cross-node state reading as empty (loss of session-init form, etc.).
+ *   See docs/design/2026-07-13-proxy-multinode-state-audit.md P0-2.
  *
- * 非 cos 后端（本地 / 离线开发）保留降级链 sqlite → fs → memory：
- *   - 每次降级 console.error 一条 `!!! DEGRADED !!!`
- *   - `/health` 通过 `getEffectiveBackend()` 暴露 requested vs effective
- *   - memory 永不失败但明确不持久化，仅兜底以保证进程不 crash。
+ * Non-cos backends (local / offline development) retain the degradation chain sqlite → fs → memory:
+ *   - Each degradation console.error a `!!! DEGRADED !!!` message
+ *   - `/health` exposes requested vs effective via `getEffectiveBackend()`
+ *   - memory never fails but explicitly does not persist, serving only as a fallback to ensure the process does not crash.
  */
 import { createRequire } from "node:module";
 import type { ProxyStorage, ProxyStorageType } from "./proxy-storage.js";
@@ -25,30 +25,30 @@ const TAG = "[storage]";
 const _require = createRequire(import.meta.url);
 
 /**
- * 用户配置结构 —— kernel-sts 段见
- * docs/design/2026-07-12-cos-shark-sts-credential-plan.md §3.1。
+ * User configuration structure — for the kernel-sts section, see
+ * docs/design/2026-07-12-cos-shark-sts-credential-plan.md §3.1.
  *
- * COS 后端只支持 kernel-sts —— static AK/SK 已删除（正式环境禁止）。
- * 本地/离线开发用 `backend: sqlite`（或 fs / memory）。
+ * COS backend only supports kernel-sts — static AK/SK has been removed (forbidden in production).
+ * Local/offline development uses `backend: sqlite` (or fs / memory).
  */
 export interface StorageConfig {
   backend: ProxyStorageType;
-  /** `ttl/` 前缀下对象的生存期（天）。只对 ttl 前缀生效。 */
+  /** The lifetime (in days) of objects under the `ttl/` prefix. Only takes effect for the ttl prefix. */
   ttlDays: number;
 
   cos: {
     /**
-     * 业务命名空间前缀（跟 core 的 memory_v2/cos_data 隔离）。
-     * 注意：Shark 返回的 CosUrl 已经带 bucket/region/endpointDomain，
-     * 这里不用配 bucket/region。
+     * Business namespace prefix (isolated from core's memory_v2/cos_data).
+     * Note: The CosUrl returned by Shark already includes bucket/region/endpointDomain,
+     * no need to configure bucket/region here.
      */
     rootPrefix: string;
     /**
-     * 可选：强制走 VPC 内网 / 自定义域名（例：`cos.example.com`）。
-     * 空则用 Shark 返回 CosUrl 里的 host。
+     * Optional: Force use VPC intranet / custom domain (e.g., `cos.example.com`).
+     * If empty, uses the host from the CosUrl returned by Shark.
      */
     endpointDomain?: string;
-    /** Shark 拉临时凭证的配置。 */
+    /** Configuration for fetching temporary credentials from Shark. */
     shark: {
       baseUrl: string;
       timeoutMs?: number;
@@ -75,25 +75,25 @@ let _effective: ProxyStorageType = "memory";
 let _lastError: string | undefined;
 let _sweepTimer: NodeJS.Timeout | null = null;
 /**
- * 当前生效的 CosLikeBackend 引用（仅 cos 装配成功时非 null）。
- * 保留是为了让 `evictCosSpace()` 能通过 optional `evictSpace(spaceId)` 钩子
- * 踢掉 kernel-sts pool 里的 per-space backend；其它后端 / 未装配场景为 null。
+ * Currently active CosLikeBackend reference (non-null only when cos assembly is successful).
+ * Kept so that `evictCosSpace()` can kick out the per-space backend in the kernel-sts pool
+ * via the optional `evictSpace(spaceId)` hook; null for other backends / unassembled scenarios.
  */
 let _cosBackend: CosLikeBackend | null = null;
 /**
- * kernel-sts COS 装配入口 —— 从 cost-guard submodule dynamic import。
- * `initProxyStorage()` 时填一次，之后 tryCreate.case("cos") 用它装配。
- * null 表示 submodule 未加载或不可用 —— cos 分支会走降级链。
+ * kernel-sts COS assembly entry point — dynamically imported from the cost-guard submodule.
+ * Filled once during `initProxyStorage()`, then used by tryCreate.case("cos") for assembly.
+ * null indicates the submodule is not loaded or unavailable — cos branch will follow the degradation chain.
  */
 let _kernelStsFactory: ((opts: KernelStsCosOptions) => CosLikeBackend) | null = null;
 
 /**
- * 进程启动时调用一次 —— 做 cost-guard 的 dynamic import 后走同步 getProxyStorage。
+ * Called once at process startup — performs dynamic import of cost-guard then proceeds with synchronous getProxyStorage.
  *
- * cost-guard 不可用（开源用户无 submodule / 内部环境镜像构建漏做 submodule update）
- * 时静默跳过 —— getProxyStorage 里 cos 分支会抛错，走降级链 (sqlite → fs → memory)。
+ * If cost-guard is unavailable (open source users lack submodule / internal environment image build missed submodule update),
+ * skips silently — the cos branch in getProxyStorage will throw, triggering the degradation chain (sqlite → fs → memory).
  *
- * 见 docs/design/2026-07-11-cos-submodule-extraction-plan.md §4.2 决策 3。
+ * See docs/design/2026-07-11-cos-submodule-extraction-plan.md §4.2 Decision 3.
  */
 export async function initProxyStorage(config: StorageConfig): Promise<ProxyStorage> {
   if (_instance) return _instance;

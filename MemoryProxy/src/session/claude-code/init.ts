@@ -1,12 +1,12 @@
 /**
- * Claude Code Session Initialization — 状态机入口.
+ * Claude Code Session Initialization — State machine entry point.
  *
  * Flow:
- *   1. uninitialized → 内核拉 teams[], 发 `AskUserQuestion` form
- *   2. pending_team_select → 解析 JSON tool_result team 选择, 发 agent_select form
- *   3. pending_agent_select → 解析 agent (支持分页), 发 task_select form
- *   4. pending_task_select → 解析 task (支持分页), fetch 详情, register, inject
- *   5. initialized → 每次请求 strip + inject
+ *   1. uninitialized → fetch teams[] from kernel, send `AskUserQuestion` form
+ *   2. pending_team_select → parse JSON tool_result team selection, send agent_select form
+ *   3. pending_agent_select → parse agent (supports pagination), send task_select form
+ *   4. pending_task_select → parse task (supports pagination), fetch details, register, inject
+ *   5. initialized → strip + inject on every request
  */
 
 import type { SessionInitConfig } from "../../types.js";
@@ -70,7 +70,7 @@ export interface SessionInitResult {
   agentDetail?: AgentDetail | null;
   taskDetail?: TaskDetail | null;
   bypassed?: boolean;
-  /** 本次注册是 session-reset 触发的（pre-hook 设 resetFlow=true → 保留到 completeRegistration）。 */
+  /** This registration was triggered by session-reset (pre-hook sets resetFlow=true → preserved until completeRegistration). */
   resetFlow?: boolean;
   /**
    * Anthropic-only: the pre-built `<session_context>` string that MUST be
@@ -127,12 +127,12 @@ async function fetchTeamsAndAgents(
         task_id: tk.task_id,
         task_name: tk.title,
       }));
-      // 源头注入：defaultTaskId 配置了就作为"本次不关联任务"虚拟条目排在真
-      // task 之前。下游 form/extractor/init 一个字节都不用改 —— 分页 total
-      // 和 auto-select 级联唯一真相都是 tasks.length。用户选中虚拟条目 →
-      // completeRegistration 用 defaultTaskId 上报 → getTask 会 404 但
-      // Promise.allSettled 兜掉，taskDetail=null → 不注入 [Task]，正好是
-      // "跳过 task 但保留 agent 关联"的语义。
+      // Source injection: if defaultTaskId is configured, it is inserted as a "do not associate task this time" virtual entry
+      // before the real tasks. Downstream form/extractor/init don't need to change a single byte —— the only source of truth
+      // for pagination total and auto-select cascade is tasks.length. User selects virtual entry →
+      // completeRegistration reports with defaultTaskId → getTask returns 404 but
+      // Promise.allSettled catches it, taskDetail=null → does not inject [Task], which is exactly
+      // the semantics of "skip task but retain agent association".
       if (config.defaultTaskId) {
         tasks.unshift({
           task_id: config.defaultTaskId,
@@ -167,15 +167,16 @@ function findTeamIdForAgent(teams: TeamOption[], agentId: string): string | unde
  * agent AND is the last page — meaning the user would be forced to pick the
  * only real option. If so, we auto-select and skip rendering the form.
  *
- * 历史背景：旧分页策略（`3 每页 + MORE`）在 total mod 3 == 1（4、7、10…）时
- * 末页会剩 1 个，用户点 MORE 后被这个函数直接 auto-select，体验很怪。现在
- * pagination.ts 已经把 total ≤ 4 改为单页展示、total > 4 末页 solo 时把倒
- * 数第二页匀 1 个过来，正常路径下不会再触发本函数的 solo 分支。
+ * Historical context: The old pagination strategy (`3 per page + MORE`) would leave 1 item on the last page
+ * when total mod 3 == 1 (4, 7, 10...). After clicking MORE, the user would be auto-selected by this function,
+ * which was a strange experience. Now pagination.ts displays total ≤ 4 on a single page, and when total > 4
+ * and the last page is solo, it borrows 1 item from the second to last page. Under normal paths, this function's
+ * solo branch will no longer be triggered.
  *
- * 保留原因：防御性兜底 —— pagination.ts 若将来改回旧策略或有 bug，本函数
- * 仍能防止渲染 1-option form；另外 total === 1 的首末页依然会命中（那个场
- * 景 init.ts 上游其实已经 advanceFromAgentPicked auto-select 掉了，但双保
- * 险无害）。
+ * Reason for retention: Defensive fallback —— if pagination.ts ever reverts to the old strategy or has a bug,
+ * this function will still prevent rendering a 1-option form; also, it will still hit when total === 1 on the first
+ * and last page (in that scenario, init.ts upstream actually already auto-selects via advanceFromAgentPicked,
+ * but double insurance is harmless).
  */
 function autoSelectSoloAgent(team: TeamOption | undefined, pageIndex: number): string | null {
   if (!team) return null;
@@ -292,9 +293,9 @@ async function advanceFromAgentPicked(
 ): Promise<SessionInitResult> {
   const teamId = team.team_id;
 
-  // 0 tasks → bypass (统一契约：team+agent+task 缺一不注入)。
-  //   历史行为是"注册但 task_id=undefined，只注入 [Agent] 段"，现改为完全 bypass。
-  // 1 task → auto-select，直接推进到 completeRegistration。
+  // 0 tasks → bypass (unified contract: missing team, agent, or task means no injection).
+  //   Historical behavior was "register but task_id=undefined, only inject [Agent] section", now changed to complete bypass.
+  // 1 task → auto-select, proceed directly to completeRegistration.
   if (team.tasks.length === 0) {
     console.log(
       `[session-init:cc] session=${compositeKey} team=${teamId} agent=${agentId} has 0 tasks → bypass`,
@@ -390,8 +391,8 @@ function applyArtifactsAndContext(
   config: SessionInitConfig,
   protocol: "openai" | "anthropic" | undefined,
 ): ArtifactsAndContextResult {
-  // 曾经这里会按 config.keepInitArtifacts 决定要不要 stripInitArtifacts,
-  // 现在**永远保留** session_init form 交互, 不做任何删除。
+  // Previously, this would decide whether to stripInitArtifacts based on config.keepInitArtifacts.
+  // Now, session_init form interactions are **always retained**, with no deletions.
 
   // Anthropic keeps the system prompt on body.system, not in messages, so the
   // block is handed back through `systemAppend` and the handler applies it at
@@ -463,8 +464,8 @@ async function completeRegistration(
   let taskDetail: TaskDetail | null = null;
 
   if (metadataClient) {
-    // 当 task_id 是 defaultTaskId（虚拟值）时，跳过 getTask 调用——
-    // 内核不存在该 task，调用只会 404 产生无意义的 warn。
+    // When task_id is defaultTaskId (virtual value), skip the getTask call ——
+    // the kernel does not have this task, the call would just 404 and generate a meaningless warn.
     const shouldFetchTask = regData.task_id && regData.task_id !== config.defaultTaskId;
     const [agentRes, taskRes] = await Promise.allSettled([
       metadataClient.getAgent(resolved.agent_id).then((a) => ({
@@ -493,9 +494,9 @@ async function completeRegistration(
       `agent=${resolved.agent_id} task=${regData.task_id ?? "-"} team=${regData.team_id} user=${sessionInfo.user_id}`,
   );
 
-  // Fire-and-forget: 记录一条 (team, task, agent, user) 参与日志，供看板"实际参与"
-  // 分区展示。bypass 路径已在上方 return，走不到这里；debug forceIdentity 路径也
-  // 走 append —— 用于本地 / e2e 联调验证。失败仅 warn，不阻断 session 注入路径。
+  // Fire-and-forget: record a (team, task, agent, user) participation log for the dashboard's "actual participation"
+  // partition display. Bypass paths have already returned above and won't reach here; debug forceIdentity path also
+  // calls append —— used for local / e2e integration verification. Failure only warns and does not block the session injection path.
   if (
     metadataClient &&
     typeof metadataClient.appendParticipationLog === "function" &&
@@ -527,7 +528,7 @@ async function completeRegistration(
     selectedTeamId: state.selectedTeamId,
     agentDetail,
     taskDetail,
-    // 保留 resetFlow/resetEpoch 以供 handler 侧 prewarm 判断是否 clearBefore
+    // Retain resetFlow/resetEpoch for handler side prewarm to check if clearBefore is needed
     resetFlow: state.resetFlow,
     resetEpoch: state.resetEpoch,
   };
@@ -549,11 +550,11 @@ async function completeRegistration(
 // ── Main Handler ───────────────────────────────────────────────────────────────
 
 /**
- * 顶层入口 wrapper：装饰 handleSessionInitInner，在完成后发一条埋点
- * （仅当 prev !== initialized && after === initialized 时）。
+ * Top-level entry wrapper: decorates handleSessionInitInner, fires a telemetry event upon completion
+ * (only when prev !== initialized && after === initialized).
  *
- * 埋点装饰绝不改动状态机；失败/异常静默，业务链路零感知。
- * 详见 docs/design/2026-08-03-internal-usage-telemetry-plan.md §7.2。
+ * The telemetry decorator absolutely does not alter the state machine; failures/exceptions are silenced, zero impact on the business logic.
+ * See docs/design/2026-08-03-internal-usage-telemetry-plan.md §7.2 for details.
  */
 export async function handleSessionInit(
   sessionKey: string,
@@ -575,7 +576,7 @@ export async function handleSessionInit(
       metadataClient, userKey, spaceId, presetIdentity,
     );
   } finally {
-    // 无论正常/异常返回都尝试发一次埋点；装饰器内部自吞异常。
+    // Attempt to fire telemetry once whether returning normally or with an exception; the decorator swallows exceptions internally.
     emitSessionInitTelemetryIfCompleted({
       store,
       compositeKey,
@@ -601,9 +602,9 @@ async function handleSessionInitInner(
   if (sessionKey === "unknown" || !sessionKey) return { intercepted: false };
 
   const state = store.get(compositeKey);
-  // 曾经这里会按 config.keepInitArtifacts 决定要不要 stripInitArtifacts,
-  // 现在**永远保留** session_init form 交互, 不做任何删除。变量名 stripped
-  // 保留只为下游调用点不用大改, 语义上就是 messages 本身。
+  // Previously, this would decide whether to stripInitArtifacts based on config.keepInitArtifacts.
+  // Now, session_init form interactions are **always retained**, with no deletions. The variable name stripped
+  // is kept just so downstream call sites don't need major changes, semantically it's just messages itself.
   const stripped = messages;
 
   // ── DEBUG BYPASS ─────────────────────────────────────────────────────────
@@ -665,7 +666,7 @@ async function handleSessionInitInner(
 
   // [session-reset] gate removed: always init on missing state
 
-  // ── Case 1: Uninitialized → 先弹 asset_confirm 对话框 ───────────────────
+  // ── Case 1: Uninitialized → First pop up asset_confirm dialog ────────────
   if (!state || state.status === "uninitialized") {
     console.log(`[session-init:cc] session=${compositeKey} state=${state?.status ?? "none"} → uninitialized`);
     if (!userId) {
@@ -828,8 +829,8 @@ async function handleSessionInitInner(
       attemptCount: 0,
       userId,
       cachedTeams: teams,
-      // 保留 resetFlow/resetEpoch: pre-hook 写入的标记必须贯穿整个 form 流程,
-      // 让 completeRegistration 最终返回 resetFlow=true → handler 触发确认响应。
+      // Retain resetFlow/resetEpoch: markers written by pre-hook must persist through the entire form flow,
+      // so completeRegistration ultimately returns resetFlow=true → handler triggers confirmation response.
       resetFlow: state?.resetFlow,
       resetEpoch: state?.resetEpoch,
     });
@@ -852,7 +853,7 @@ async function handleSessionInitInner(
     console.log(`[session-init:cc:debug] session=${compositeKey} pending_asset_confirm lastUserText=${JSON.stringify(lastUserText.slice(0,500))} choice=${choice}`);
 
     if (choice === false) {
-      // bypass: 用户明确选择"不关联" —— 保留 form 对话原样，不删。
+      // bypass: user explicitly chose "do not associate" —— keep form conversation as is, do not delete.
       await store.set(compositeKey, {
         status: "initialized",
         keyId: sessionKey,
@@ -875,9 +876,9 @@ async function handleSessionInitInner(
     if (choice === true) {
       const teams = state.cachedTeams ?? [];
 
-      // Auto-select cascade: 只有 1 个 team 时不弹 team form，直接推进到
-      // agent 阶段（agent 内部再判断是否 auto-select）。这样"1 team + 1 agent
-      // + 1 task"的最小配置在 asset_confirm=是 之后不再弹任何额外表单。
+      // Auto-select cascade: when there is only 1 team, do not pop up the team form, advance directly to
+      // the agent stage (the agent internally decides whether to auto-select again). This way, the minimal configuration of "1 team + 1 agent
+      // + 1 task" will not pop up any additional forms after asset_confirm=Yes.
       if (teams.length === 1) {
         console.log(
           `[session-init:cc] session=${compositeKey} auto-select single team=${teams[0].team_id}`,
@@ -889,7 +890,7 @@ async function handleSessionInitInner(
         );
       }
 
-      // ≥2 teams → 弹 team_select 表单。
+      // ≥2 teams → pop up team_select form.
       await store.set(compositeKey, {
         status: "pending_team_select",
         keyId: sessionKey,
@@ -912,7 +913,7 @@ async function handleSessionInitInner(
       return { intercepted: true, response: buildFormResponse(fd) };
     }
 
-    // 未识别 → bypass (保留 form 对话原样)
+    // unrecognized → bypass (keep form conversation as is)
     console.warn(`[session-init:cc] session=${compositeKey} asset-confirm unrecognized, bypassing`);
     await store.set(compositeKey, { status: "initialized", bypassed: true } as SessionInitState);
     return { intercepted: false, messages: messages as Record<string, unknown>[], bypassed: true, resetFlow: state?.resetFlow ?? false };
@@ -939,7 +940,7 @@ async function handleSessionInitInner(
     }
 
     console.warn(`[session-init:cc] session=${compositeKey} team-select unrecognized, bypassing`);
-    // bypass: 保留 form 对话原样, 不删。
+    // bypass: keep form conversation as is, do not delete.
     await store.set(compositeKey, { status: "initialized", bypassed: true } as SessionInitState);
     return { intercepted: false, messages: messages as Record<string, unknown>[], bypassed: true, resetFlow: state?.resetFlow ?? false };
   }
@@ -960,13 +961,13 @@ async function handleSessionInitInner(
     if (extracted && extracted.agent_id === MORE_MARKER) {
       const currentPage = state.agentPageIndex ?? 0;
       const nextPage = currentPage + 1;
-      // 从 pagination.ts 拿 totalPages 判越界，与 form.ts 的切片同一算法。
+      // Get totalPages from pagination.ts to check bounds, using the same algorithm as the slice in form.ts.
       const totalPages = computePagination(team?.agents.length ?? 0, 0).totalPages;
       const safeNextPage = nextPage > totalPages - 1 ? 0 : nextPage;
 
-      // 防御性：pagination.ts 已保证正常路径不会出现 solo 末页，但双保险
-      // 兜住 —— 万一分页器改动出 bug，用户仍不会被 auto-select 惊到（会走
-      // 到这里 auto-select，从旧行为角度也是可接受的降级）。
+      // Defensive: pagination.ts guarantees the normal path won't have a solo last page, but double insurance
+      // catches it —— in case the paginator is modified and introduces a bug, the user still won't be startled by auto-select
+      // (falling through to auto-select here is also an acceptable degradation from the perspective of old behavior).
       const soloOnNext = autoSelectSoloAgent(team, safeNextPage);
       if (soloOnNext) {
         console.log(
@@ -1027,7 +1028,7 @@ async function handleSessionInitInner(
     }
 
     console.warn(`[session-init:cc] session=${compositeKey} agent-select unrecognized, bypassing`);
-    // bypass: 保留 form 对话原样, 不删。
+    // bypass: keep form conversation as is, do not delete.
     await store.set(compositeKey, { status: "initialized", bypassed: true } as SessionInitState);
     return { intercepted: false, messages: messages as Record<string, unknown>[], bypassed: true, resetFlow: state?.resetFlow ?? false };
   }
@@ -1039,9 +1040,9 @@ async function handleSessionInitInner(
     const selectedTeamId = state.selectedTeamId;
     const team = cachedTeams.find((t) => t.team_id === selectedTeamId);
 
-    // 新版 UI 没有 "跳过" 按钮：extractor 从 answers JSON 里取 label，
-    // 不再把 tool_result 全文当 answer（旧路径会因问题文案里的 "（可跳过）"
-    // 触发 answer.includes("跳过") 假阳性 → 用户明确选的 task 被吞掉）。
+    // The new UI does not have a "Skip" button: the extractor takes the label from the answers JSON,
+    // and no longer treats the full tool_result as the answer (the old path would trigger an answer.includes("skip")
+    // false positive because of "(skippable)" in the question text → causing the task explicitly selected by the user to be swallowed).
     const extracted = extractTaskFromOptionText(lastUserText, team);
 
     if (extracted === MORE_MARKER) {
@@ -1050,8 +1051,8 @@ async function handleSessionInitInner(
       const totalPages = computePagination(team?.tasks.length ?? 0, 0).totalPages;
       const safeNextPage = nextPage > totalPages - 1 ? 0 : nextPage;
 
-      // 防御性：见 agent MORE 分支的同名注释。正常路径 pagination.ts 已避免
-      // solo 末页；此处保留双保险。
+      // Defensive: see the comment with the same name in the agent MORE branch. The normal path pagination.ts has already avoided
+      // a solo last page; double insurance is retained here.
       const soloTaskId = autoSelectSoloTask(team, safeNextPage);
       if (soloTaskId && state.selectedAgentId) {
         console.log(
@@ -1079,11 +1080,11 @@ async function handleSessionInitInner(
       return { intercepted: true, response: buildFormResponse(fd) };
     }
 
-    // BYPASS_MARKER = declined / 兼容旧表单显式跳过；null = 有答复但匹配不到任何 task
-    // 两者都视作 "未识别"，与其它阶段的行为对齐 → bypass 整个 session-init。
+    // BYPASS_MARKER = declined / explicitly skip compatible with old forms; null = got an answer but failed to match any task
+    // Both are treated as "unrecognized", aligning with behavior in other stages → bypass entire session-init.
     if (extracted === BYPASS_MARKER || extracted === null) {
       console.warn(`[session-init:cc] session=${compositeKey} task-select unrecognized, bypassing`);
-      // bypass: 保留 form 对话原样, 不删。
+      // bypass: keep form conversation as is, do not delete.
       await store.set(compositeKey, { status: "initialized", bypassed: true } as SessionInitState);
       return {
         intercepted: false,
@@ -1092,7 +1093,7 @@ async function handleSessionInitInner(
       };
     }
 
-    // 命中 task_id
+    // Hit task_id
     const resolved: SessionInitData = {
       agent_id: state.selectedAgentId!,
       task_id: extracted,

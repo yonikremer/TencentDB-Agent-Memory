@@ -238,16 +238,17 @@ export class StorageAdapter {
   /**
    * Recursively copy all objects under `srcPrefix` to `dstPrefix`.
    *
-   * 路径映射：每个 src 下的 object key `${srcPrefix}/path/to/x` 都会被复制到
-   * `${dstPrefix}/path/to/x`。`prefix` 之间的相对路径保持不变。
+   * Path mapping: each object key under src (`${srcPrefix}/path/to/x`) is copied to
+   * `${dstPrefix}/path/to/x`. The relative path between prefixes is preserved.
    *
-   * 行为：
-   *   - srcPrefix 下没有任何对象 → throw `STORAGE_NOT_FOUND: <srcPrefix>`
-   *   - dstPrefix 已存在 ≥1 个对象 → 默认 throw `DESTINATION_EXISTS: <dstPrefix>`
-   *   - 传入 `{ overwrite: true }` 时允许覆盖（dst 端可能存在残留也照写）
+   * Behavior:
+   *   - No objects exist under srcPrefix → throw `STORAGE_NOT_FOUND: <srcPrefix>`
+   *   - dstPrefix already has ≥1 object → defaults to throw `DESTINATION_EXISTS: <dstPrefix>`
+   *   - Pass `{ overwrite: true }` to allow overwriting (any existing dst objects will be overwritten)
    *
-   * 在 Phase 5 之后被 skill-versioning 使用：每次 owner 改动触发新版本时，
-   * 把上一版本目录拷贝到新版本目录，再应用本次资源变更（write/remove）。
+   * Used by skill-versioning after Phase 5: whenever the owner makes a change triggering a new version,
+   * the previous version directory is copied to the new version directory, then this run's resource
+   * changes (write/remove) are applied.
    */
   async copyTree(
     srcPrefix: string,
@@ -259,7 +260,7 @@ export class StorageAdapter {
       recursive: true,
     });
 
-    // src 下没有任何对象 → 视为不存在
+    // No files under src — treat as non-existent
     const srcFiles = srcEntries.entries.filter((e) => !e.isDirectory);
     const srcExists = await this.backend.exists(srcPrefix);
     if (srcFiles.length === 0 && !srcExists) {
@@ -280,7 +281,7 @@ export class StorageAdapter {
     const dstNorm = dstPrefix.endsWith("/") ? dstPrefix : dstPrefix + "/";
 
     for (const entry of srcFiles) {
-      // 计算相对路径
+      // Compute relative path
       let rel = entry.key;
       if (rel.startsWith(srcNorm)) rel = rel.slice(srcNorm.length);
       else if (rel === srcPrefix) rel = "";

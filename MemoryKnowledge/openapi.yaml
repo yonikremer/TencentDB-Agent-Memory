@@ -786,7 +786,7 @@ components:
         status:
           type: string
           enum: [draft, pending, processing, ready, failed]
-          description: draft = 建壳未加工（仅 create 一次性出现）；pending/processing = in-flight；ready = 可查询；failed = 可重试。
+          description: draft = Shell built raw (only create appears once);pending/processing = in-flight;ready = Can be queried;failed = You can try again.
         sync_error:
           type: string
           nullable: true

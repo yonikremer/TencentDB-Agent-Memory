@@ -1,0 +1,1795 @@
+2 :     /* localStorage 不可用时静默忽略 */
+2 :     /** @deprecated 使用 teamAssets */
+2 :     /** 删除 */
+2 :   /** 是否显示每条的编辑入口（仅资产 Owner） */
+2 :   /** 点击编辑单条 */
+2 :     protocol: 'OpenAI Chat + Header 预选',
+2 :   /** 当前用户 ID（v3 API 必传） */
+2 :  * 从原 demoStore.ts 中抽出。
+2 :     // in-flight 去重
+1 :  * 日志端口（抽象）。业务/基础设施只依赖此接口，不绑定具体日志库。
+1 :  * 替换实现（console / pino / 上报到日志平台）只改 adapter + container，
+1 :  * 见 docs/architecture/06-logging.md。
+1 : /** 结构化字段，跟随一条日志一起输出。 */
+1 :    * 派生一个带固定字段的子 logger（如 reqId / userId），
+1 :    * 之后该 logger 打的每条日志都自动带上这些字段，便于串联一次请求。
+1 :  * 基于 fetch 的 skill 数据面适配器：POST /v3/skill/{action}。
+1 :  * skill body 使用嵌套 pagination（不是顶层 limit/offset），故不做 meta 的
+1 :  * sanitizeBody 裁剪，原样透传。凭证与 meta 共用同一套（instance + api_key +
+1 :  * user_key），user_key 始终透传（skill 无 auth/verify 这类免鉴权动作）。
+1 :  * Knowledge HTTP 客户端 — 调 core 的 /v3/wiki/* 和 /v3/code-graph/*.
+1 :  * 路径与请求体严格对齐 docs/knowledge/knowledge-api.yaml（07/08/11 定稿）。
+1 :  * 注：core router 实际监听 `/v3/wiki/*`、`/v3/code-graph/*`，
+1 :  * 故此处 baseUrl 不含 /v3，路径带 /v3 前缀。
+1 :  * 与 HttpSkillClient 同模式：Bearer + service-id + envelope 解析。
+1 :   // ═══════════════ Wiki · 资产层 ═══════════════
+1 :   // ═══════════════ Wiki · raw 文件层 ═══════════════
+1 :   // ═══════════════ Wiki · page 文件层 ═══════════════
+1 :   // ═══════════════ Wiki · 派生视图 ═══════════════
+1 : /** 内核 HTTP 响应信封（与 /v3/meta/* 一致）。 */
+1 : /** envelope.code → HTTP status（§4.8.2）：0→200；400–599→code；其余→502。 */
+1 :  * 记忆内核 v3 `/v3/meta/*` 全局 HTTP 头（与 tdai-memory-plugin 对齐）。
+1 :  * Control 面板入站校验与出站转发均使用同一套名称。
+1 :  * Knowledge RPC 端口 — Wiki（15 端点）+ Code-Graph（13 端点）。
+1 :  * 对齐 docs/knowledge/knowledge-api.yaml（07/08/11 定稿）。管控对
+1 :  * wiki/code-graph 不持久化；UI 触发的操作通过该端口直连 core。
+1 :  * 寻址规则（与 yaml 严格一致）：
+1 :  *  - create / list / *write / *rm 携带 IdFields（team_id 必传，user_id 可选）；
+1 :  *  - get / ingest / delete / *ls / *read / graph / search 及全部 code-graph
+1 :  *    查询端点仅以资产 id（wiki_id / code_graph_id）寻址，不再传
+1 :  *    team/agent/user/task ID（归属由内核侧通过复合键解析）。
+1 : /** raw 素材文件项（来自 `raw/sources/` 文件系统 stat）。 */
+1 : /** processed page 项（来自 `wiki/` 下 ingest 生成的页面）。 */
+1 :   // Wiki — 资产层（create/list 带 IdFields；get/ingest/delete 仅资产 id 寻址）
+1 :   // Wiki — raw 文件层（ls/read 仅资产 id；write/rm 带 IdFields）
+1 :   // Wiki — page 文件层（ls/read 仅资产 id；write/rm 带 IdFields）
+1 :   // Wiki — 派生视图（仅资产 id 寻址）
+1 :   // Code-Graph（create/list 带 IdFields；get/sync/delete/查询 仅资产 id 寻址）
+1 :  * 内核 /v3/skill/* 数据面透明代理端口。
+1 :  * 与 MetaKernelPort 同形，但转发到 /v3/skill/{action} 而非 /v3/meta/{action}。
+1 :  * 记忆内核 v3 元数据 HTTP fetch（Panel 专用）。
+1 : /** 内核 HTTP 调用失败（网络/超时/无效信封）。 */
+1 :   /** 透传为 x-request-id；缺省则生成 UUID。 */
+1 :  * POST 记忆内核元数据路径，返回完整信封。
+1 :  * - mode=envelope：业务 code≠0 不抛错（透明代理用）
+1 :  * - mode=data：code≠0 抛 KernelFetchError
+1 : /** 单次内核元数据调用的运行时凭证（middleware 从 Header + 注册表组装）。 */
+1 :  * 默认 Agent 模板的本地文件存储（存 Panel 本地）。
+1 :  * 路径：{dir}/{instanceId}/{team_id}/template.json
+1 :  * - 写入覆盖式 upsert（JSON 2 空格缩进）；
+1 :  * - 读取 ENOENT 返回 null（无模板）。
+1 :  * - team_id 做路径穿越防御。
+1 : /** 模板配置（= JSON 文件内容，对齐 agent/create 入参）。 */
+1 :  * Wiki ingest 细粒度进度（进程内存）。
+1 :  * KS → status-callback(event=ingest_progress) 写入；
+1 :  * wiki/get 聚合读出；终态 ready/failed 时 clear。
+1 :  * B-2：带 run_id 代际 + TTL，避免「终态 clear 后迟到的 indexing/98」写回，
+1 :  * 导致下一轮 extracting/0 被单调规则丢弃、进度条卡在 98%。
+1 :  * cleared 按 wiki 保留近期已清理的 runId 集合（非只记最后一个），
+1 :  * 防止：clear(run-1) → 写入 run-2 → 迟到的 run-1 被误判为「新代际」覆盖。
+1 : /** 默认 30min；卡住的 processing 残留不会永久占坑。 */
+1 :   /** 可注入时钟，便于 TTL 单测 */
+1 :   /** wikiId → (runId → clearedAt)；拒绝这些代际的迟到 progress */
+1 :    * 单调更新：更高 phase 胜出；
+1 :    * 同 phase 时 percent 更高胜出；
+1 :    * percent 相同（取整撞车）则 completed+failed 更大胜出，避免计数停滞。
+1 :    * - 落在已 clear 集合 → 丢弃（含跨代迟到包）；
+1 :    * - 与当前条目相同（或双方皆无）→ 套用单调规则；
+1 :    * - 与当前条目不同且非空 → 视为新一轮 ingest，直接覆盖。
+1 :       if (rid && clearedRuns.has(rid)) return; // 已终态清理的代际迟到包
+1 :         // 该 wiki 刚 clear 过：无 runId 的迟到包也丢弃，避免 clear 后再写回 98%
+1 :     // 新 runId → 允许从 extracting/0 重新开始（且该 rid 不在 cleared 集合）
+1 :     // 当前无 runId、来包有 runId：视为新代际覆盖（升级路径）
+1 :    * 终态清理。若提供 runId（或条目上已有），记入 cleared 集合，拒绝该代际迟到包。
+1 : #  Web 前端环境变量说明
+1 : #  复制本文件为 .env 并修改值即可：
+1 : #  重启 dev server 后生效（Vite 不会热加载环境变量）。
+1 : # ─── Control 后端地址（vite proxy）──────────────────────────
+1 : # 默认：http://127.0.0.1:8123（见 web/vite.config.ts）
+1 : # ─── 记忆 Gateway（可选，/v3 代理）──────────────────────────
+1 :  * ESLint 配置
+1 :  * 适用于 React + TypeScript + Vite 项目。
+1 :  * 集成 prettier（关闭与 prettier 冲突的规则）。
+1 :     // 允许 any 但给出 warning（渐进式迁移）
+1 :     // 允许未使用变量在开发阶段（tsc 已有 noUnusedLocals）
+1 :     // React Hooks 规则
+1 :     // 代码风格交给 prettier
+1 : Team Memory Control 的 Web 管理界面，对接同仓库的无状态 Control 服务。
+1 : ## 技术栈
+1 : ## 本地开发
+1 : 先从仓库根目录启动 Control：
+1 : 再启动前端：
+1 : 浏览器访问 `http://127.0.0.1:5173`。
+1 : ## 开发代理
+1 : `vite.config.ts` 默认配置：
+1 : | 请求前缀 | 默认目标 | 环境变量 |
+1 : 如需连接其他开发环境，请在未提交的 `web/.env` 中使用实际地址。不要把内部地址、账号或凭证写入 README、源码或已跟踪的环境文件。
+1 : ## 构建
+1 : 产物生成到 `web/dist/`。Control 可通过 `UI_DIST_DIR=./web/dist` 同源托管这些静态文件。
+1 : ## API 边界
+1 : 前端使用以下 Control API：
+1 : 登录凭证保存在浏览器 `localStorage`，业务请求通过 `X-Tdai-Service-Id` 和 `X-Tdai-User-Key` Header 发送。前端不得记录、展示或上传完整凭证。
+1 : API 对接以仓库 `docs/api/` 下的公开契约为准；未列入公开契约的外部服务接口不属于前端对接范围。
+1 : ## 常用命令
+1 : | 命令 | 说明 |
+1 : | `npm run dev` | 启动开发服务器 |
+1 : | `npm run build` | 类型检查并构建 |
+1 : | `npm run preview` | 预览构建产物 |
+1 : | `npm run lint:check` | 检查 ESLint |
+1 : | `npm run format:check` | 检查格式 |
+1 :  * i18n 迁移脚本 — 将 JSX/TSX 中的中文硬编码文案替换为 t() 调用
+1 :  * 此脚本做最小化的 pattern-based 替换，不追求完美。
+1 :  * 人工审查后仍需调整。
+1 : // 递归遍历目录，找出所有 .ts/.tsx 文件
+1 :   // 检查文件是否已有 useTranslation import
+1 :  * 中文残留扫描脚本 — 扫描 src 下（排除 locale 文件）是否还有 UI 中文残留
+1 :  * 使用方式：
+1 :  * 退出码：
+1 :  *   0 — 无残留
+1 :  *   1 — 发现中文残留
+1 :  * scan-chinese.mjs — 扫描 src 下（排除 i18n/ locale 文件）的硬编码中文残留
+1 :  * 用法：
+1 :  *   node scripts/scan-chinese.mjs              # 扫描并输出报告
+1 :  *   node scripts/scan-chinese.mjs --strict     # 发现残留时以非零退出码退出（用于 CI）
+1 :  * 规则：
+1 :  *   - 扫描 .ts / .tsx 文件
+1 :  *   - 排除 src/i18n/ 目录（locale 文件本身就是中文/英文映射表）
+1 :  *   - 排除代码注释（// 开头、* 开头、/* 开头的行）
+1 :  *   - 检测含 CJK 统一汉字（U+4E00–U+9FFF）的行
+1 : /** 递归收集 .ts/.tsx 文件，排除指定目录 */
+1 : /** 判断一行是否为纯注释行（// 开头、* 开头、/* 开头） */
+1 :  * 剥离行内注释（// 到行尾），但避免误删字符串字面量中的 //。
+1 :  * 粗略方法：从左到右扫描，跟踪引号状态，只在引号外遇到 // 时截断。
+1 :   let inSingle = false;  // 单引号
+1 :   let inDouble = false;  // 双引号
+1 :   let inTemplate = false; // 模板字符串反引号
+1 : console.log('  中文残留扫描（排除 src/i18n/，排除代码注释）');
+1 :   console.log('✅ 未发现硬编码中文残留。\n');
+1 : console.log(`发现 ${results.length} 个文件、共 ${totalHits} 行含中文残留：\n`);
+1 :   console.log(`📄 ${file} (${hits.length} 行)`);
+1 : console.log(`合计：${results.length} 个文件、${totalHits} 行中文残留`);
+1 :  * LoginGate — 进入应用前的登录页面（对接新面板 Control，见 09 设计文档 §3.3）。
+1 :  * 登录流程（无 Cookie、无 OAuth，Header 双凭证鉴权）：
+1 :  *   1. GET /api/v1/meta/instances              → 选记忆实例
+1 :  *   2. 用户输入自持的 user_key（sk-mem-…）
+1 :  *   3. POST /api/v1/meta/auth/verify（Header 仅 X-Tdai-Service-Id，body 带 user_key）
+1 :  *      → data.valid === true 登录成功；data.user 写入会话
+1 :  *   4. 前端把 { instance_id, user_key, user } 缓存到 localStorage（见 lib/panelSession.ts），
+1 :  *      之后每个 meta 请求都从这里读出注入双 Header
+1 :  * 设计：单列居中的明亮极简风格 —— 全屏点阵波纹动效背景（ParticleWaveBackground，
+1 :  * 纯 Canvas 零依赖，视觉参考 React Bits 的 Particles / DotGrid）+ 居中毛玻璃卡片，
+1 :  * 卡片内为「选实例 + 输入 user_key」表单。
+1 :   /** 展示用用户名（display_name || username），沿用旧字段名保持下游组件兼容 */
+1 :   /** 后端 ULID —— 一切归属判定（owner_user_id / creator_user_id / team_members.user_id）的真正 key */
+1 :    * 是否是全局 admin —— 来自 auth/verify 响应 data.user.user_type === 'system_admin'。
+1 :    * admin 是全局角色，与是否创建/加入任何 team 无关（管团队，不管资源）；
+1 :    * 非 admin 的普通用户（user_type !== 'system_admin'）才需要按 team.members 表查角色。
+1 : // 内存缓存 —— 真正的持久化交给 localStorage（lib/panelSession.ts，跨 tab 共享）。
+1 : // 这里只是给「无 prop、直接 readAuth() 取身份」的老组件（ChatMemoryPanel / WikiSourcesPanel /
+1 : // CodeSourcesPanel 等）提供一个同步读取的镜像缓存。
+1 : /** 登出 / 401 兜底：同时清内存镜像缓存与 localStorage 里的 instance_id+user_key。 */
+1 :  * 尝试用 localStorage 里缓存的 { instance_id, user_key, user } 直接恢复登录态；
+1 :  * 新面板无 Cookie，"恢复会话"就是读本地缓存，不需要再打后端。
+1 :  * App 启动时调用；成功则写入内存镜像缓存并返回，失败（未登录/缓存不全）返回 null。
+1 :       {/* 明亮点阵波纹动效背景（纯 Canvas，零外部依赖） */}
+1 :       {/* 居中内容区 */}
+1 :             {/* 记忆实例选择 — GET /api/v1/meta/instances */}
+1 :             {/* user_key（sk-mem-…），经 auth/verify 验活后写入前端会话 */}
+1 :  * MarkdownView — 统一的 Markdown 渲染组件。
+1 :  * Skill 详情 / Memory 详情等页面共用同一套渲染与展示风格：
+1 :  * ReactMarkdown + remark-gfm，外壳为 Tea token 边框盒
+1 :  * （见 markdown-view.css），不使用 tailwind 语义色与内联 style。
+1 :  * OwnerLabel —— 通用「资产 Owner 展示」组件。
+1 :  * 此前 Wiki（WikiOwnerLabel）与 Code（CodeOwnerLabel）各自实现了一模一样的
+1 :  * 「@displayName + 当前用户追加“你”标记」逻辑（都依赖 useUserDisplayName 全局
+1 :  * 缓存 + Rules of Hooks 约束下不能在 .map 里循环调 hook 的子组件结构）。
+1 :  * 这里统一收口；title / youText / youClassName 由调用方注入以兼容各页 i18n 与样式。
+1 :   /** hover 提示文本（调用方负责 i18n，通常含 userId 插值） */
+1 :   /** “你”标记文案（当前用户时展示） */
+1 :   /** “你”标记的 class（各页面可注入自己的样式类） */
+1 :  * ParticleWaveBackground — 明亮风格的点阵波纹动效背景（纯 Canvas，零外部依赖）。
+1 :  * 视觉参考 React Bits 的 Particles / DotGrid：网格点阵 + 多层正弦波驱动的起伏，
+1 :  * 点的半径与透明度随波峰变化，形成"呼吸感"的柔和波纹。
+1 :  * 为什么不直接装 React Bits 的包：
+1 :  *   其 Particles / DotGrid / Aurora 分别依赖 ogl / gsap / three，本项目均未安装。
+1 :  *   按 React Bits 官方推荐的 manual 方式（复制源码进项目）实现，避免新增运行时依赖
+1 :  *   与构建风险，同时保留完全可控的视觉调参能力。
+1 :  * 实现要点：
+1 :  *   - devicePixelRatio 适配，避免高清屏发虚；
+1 :  *   - ResizeObserver 跟随容器尺寸，不监听 window 以免多实例互相干扰；
+1 :  *   - 尊重 prefers-reduced-motion：偏好减少动效时渲染静态一帧，不启动 rAF；
+1 :  *   - 组件卸载时取消 rAF 与 observer，无内存泄漏。
+1 :   /** 点阵间距（px），越小越密。默认 26 */
+1 :   /** 点的基础半径（px）。默认 1.5 */
+1 :   /** 点颜色，需为 `r, g, b` 形式（透明度由内部按波峰计算）。默认深灰蓝 */
+1 :   /** 动画速度系数，默认 1 */
+1 :   /** 附加类名 */
+1 :       // 用 setTransform 而非 scale，避免多次 resize 后缩放系数累积
+1 :      * 渲染一帧。三层不同频率/相位的正弦波叠加，得到 [-1, 1] 的强度场；
+1 :      * 强度映射到点的半径与透明度，形成明暗起伏的点阵波纹。
+1 :      * 参数取值说明：时间系数决定"看起来动得多快"。太小（<0.5）时单个波周期会长达
+1 :      * 十几秒，肉眼几乎判断不出在动、像一张静态图；这里取 0.65~1.15 让主波约 5 秒
+1 :      * 一个周期，既能明确看出流动感又不至于晃眼。
+1 :           // 归一化坐标让波形不随画布尺寸变形
+1 :           // 主波自右向左流动，另两层不同角度叠加，避免出现规则条纹
+1 :           // wave ∈ 约 [-1, 1] → intensity ∈ [0, 1]
+1 :           // 幂次收缩暗部，让波峰更突出、波谷更干净，明暗对比更清晰
+1 :           // 顶部略淡、底部略实，增强"光从上方来"的明亮感
+1 :       // 偏好减少动效时不跑 rAF，resize 后需手动补画一帧
+1 :  * RouteGuards — 路由级权限守卫
+1 :  * - ResourceGuard：admin 角色访问资源页 → 重定向到工作台
+1 :  * - MemberManageGuard：member 角色访问成员管理页 → 重定向到工作台
+1 : /** 资源管理页面守卫：admin 不可见 */
+1 : /** 成员管理守卫：reviewer 不可见（admin / member 可见）。
+1 :  *  member 可查看成员列表、添加已有成员，但新建成员/删除成员/新建删除 Team
+1 :  *  的按钮在 TeamManagementPanel 内部按角色收敛。 */
+1 :  * SettingsDialog — 全局设置弹窗（从顶栏⚙图标触发）。
+1 :  * 当前只有一个 Tab：「权限管理」— 控制资源管理模块的开关
+1 :  * （Wiki / Code / Skill / Chat_Memory），防止未稳定使用的模块
+1 :  * 被注入内核运行。
+1 :  * 后续可在 TABS 数组里追加其他 Tab（如通知、偏好设置等）。
+1 : // ===== 资源模块 =====
+1 :  * StatusTag —— 通用「状态标签」组件。
+1 :  * 此前 Wiki（WikiStatusBadge）与 Code（statusLabel）各自实现 status → Tea Tag
+1 :  * 的渲染（theme + variant="soft" + 可选 hint），结构完全一致。这里统一收口，
+1 :  * 各资产页只负责提供「status → label/theme」的业务映射。
+1 :   /** 已翻译的状态文案（或原始 status 兜底） */
+1 :   /** Tea Tag 语义主题（soft 变体） */
+1 :   /** 可选的状态补充说明（如 processing 时的“处理中，可能需要几分钟”） */
+1 :   /** 外层容器 class（默认 _asset-status） */
+1 :  * AllocateAssetDialog — 通用「资产分配到 Agent」弹窗。
+1 :  * 与 AllocateSkillDialog 视觉对齐，但不限于 skill：用 assetType + assetLabel
+1 :  * 参数化标题，支持 wiki / code_graph / chat_memory 等任何挂载到 agent 固定
+1 :  * 资产的场景。
+1 :  * AssetListPanel — 资产管理页通用左侧列表面板。
+1 :  * 统一 Skills / Memory 等资产页的左侧导航列表容器，提供：
+1 :  *   - 面板标题 + 条数统计
+1 :  *   - 加载骨架屏
+1 :  *   - 空态提示
+1 :  *   - 选中态管理（浅品牌底色，无边框）
+1 :  *   - 统一的列表项 4 行结构（标题 / 描述 / 徽章 / 元信息）
+1 :  * 列表项内容通过 render prop 由各资产页自行填充，
+1 :  * 保持容器与业务解耦。
+1 : /* ── 面板 ── */
+1 :   /** 面板标题 */
+1 :   /** 条数统计文本 */
+1 :   /** 是否加载中 */
+1 :   /** 数据项 */
+1 :   /** 当前选中项 id */
+1 :   /** 从数据项提取唯一 id */
+1 :   /** 选中回调 */
+1 :   /** 渲染单个列表项内容（不含外层选中态容器） */
+1 :   /** 判断某项是否禁用（不可点击） */
+1 :   /** 空态文本 */
+1 : /* ── 列表项内容区 — 标准化 4 行结构 ── */
+1 : /** 标题行：主标识 + 可选操作按钮 */
+1 : /** 名称 / 标题文本 */
+1 : /** 资产真实 id —— 弱化展示，附在名称旁，便于识别 ID 化命名的资产（name + id 组合） */
+1 : /** 描述文本（2 行截断） */
+1 : /** 徽章行容器 */
+1 : /** 纯文本徽章 — 替代亮色 Tag */
+1 : /** "含你"/"你" 标识 — 品牌色纯文本 */
+1 : /** 元信息行容器 */
+1 : /** 元信息右侧时间 */
+1 :  * AssetMarkdown —— 资产页统一的 Markdown 渲染组件。
+1 :  * 从 WikiSourcesPanel / CodeSourcesPanel 收敛：两侧此前各有一份复制粘贴的
+1 :  * mdComponents，统一收口到此，避免再次分叉。
+1 :  * 两种密度（组件库版本差异）：
+1 :  *   - default：Wiki 详情正文用的较大字号（text-sm / text-lg）
+1 :  *   - compact：Code 详情搜索结果/探索结果用的紧凑字号（text-[11px]~[13px]）
+1 :  * 传入 compact 即切换为 Code 侧原有样式，保持两页视觉不回退。
+1 : /** Wiki 详情正文密度（默认） */
+1 : /** Code 详情搜索/探索结果密度（compact，原 CodeSourcesPanel 实现） */
+1 : /** 渲染一段 Markdown 正文（统一 gfm 插件 + 共享样式；compact 用于 Code 详情小字号场景） */
+1 :  * 资产页共用头部。
+1 :  * 仅负责统一标题、资产范围、Agent 筛选与操作栏的视觉编排；各资产页面仍自行维护
+1 :  * 数据请求、权限判断和按钮可用状态，避免把不同资产的业务语义耦合到通用组件中。
+1 :  * AssetSplitLayout — 资产管理页通用分栏布局。
+1 :  * 统一 Skills / Memory 等资产页的「左侧列表 + 右侧详情」分栏结构：
+1 :  * - 左右宽度可拖拽调节，比例记忆到 localStorage（同一浏览器下次保留）
+1 :  * - 右侧详情设最大高度，内容超出时在详情区内部滚动，不撑开外层页面高度
+1 :  *   （外层容器不出现滚动条）
+1 :   /** 拖拽宽度的持久化 key（不同页面互不干扰）；不传则不持久化 */
+1 :   // 拖拽过程：以容器左边界为基准计算左栏宽度，限制在 [MIN, MAX] 内
+1 :     // 拖拽时禁用文本选中，避免选到列表内容
+1 :   // 拖拽结束后持久化最终宽度
+1 :       /* localStorage 不可用时静默忽略，仅影响记忆能力 */
+1 :           // 键盘可达：左右箭头以 16px 步进调整左栏宽度
+1 :  * UserBadge —— 通用「用户徽章」组件。
+1 :  * 此前 Skills（SkillOwnerTag）与 Memory（UploaderBadge）各自实现了相同的
+1 :  * 「AssetBadge + UserIcon + displayName 展示 + 当前用户追加“你”标记」结构。
+1 :  * 这里统一收口；displayName 通过 useUserDisplayName 全局缓存获取，title /
+1 :  * youText / getTitle 由调用方注入以兼容各页 i18n。
+1 :   /** 是否为当前用户（决定是否追加“你”标记） */
+1 :   /** hover 提示文本；默认 userId。若需基于 displayName 拼装（如 skills），用 getTitle */
+1 :   /** “你”标记文案 */
+1 :   /** 基于 displayName 生成 hover 提示的回调（优先于 title） */
+1 :  * AgentEditDialog —— 编辑/查看 Agent 弹窗。
+1 :  * 编辑范围约定：
+1 :  *   - 名称、一句话描述、角色 prompt / 规则 prompt 可编辑保存。
+1 :  *   - 资源能力可直接在本弹窗勾选/解绑并保存：
+1 :  *     · Wiki 知识库 / CodeGraph → allocate / unbind（引用绑定，增量 diff）
+1 :  *     · Chat Memory → setAgentFixed（全量覆盖，天然处理增删；不含 agent 自身 memory）
+1 :  *     · Skill → 仍只读展示。skill 的「挂载」语义是 fork 出 owner=该 agent 的独立副本
+1 :  *       （见 skillApi.forkToAgent），在编辑弹窗里做增删副本涉及乐观锁与归档，
+1 :  *       风险高，本期不放开，保留在「创建 Agent」/技能管理页维护。
+1 :  * 资源已绑定态读真实绑定源（skill 表 owner_agent_id + agent-fixed-asset 表），与运行时一致。
+1 :   // 资源可编辑：用真实绑定源填充初始勾选态。
+1 :   // 初始绑定快照：保存时与当前勾选对比算增删 diff（skill 只读不参与 diff）。
+1 :   // agent 真实拥有但可能不在 team 资产池的绑定项（如 skill fork 副本、借入的 memory），
+1 :   // 注入资产池以保证「已绑定」项都能显示、数量与 list 卡片一致。
+1 :   // 加载态编排：
+1 :   //   assets.loading —— 团队资产池在加载（4 个折叠组都用资产池数据）
+1 :   //   realBindingsLoaded —— 真实绑定源已就绪（决定折叠组 count 是否可信）
+1 :   // 任一未就绪 → 折叠组走骨架占位，避免「已选 0/共 0 → 真实数字」跳变。
+1 :   // 可编辑：展示团队资产池全集（含已绑定与未绑定），供用户勾选/取消。
+1 :   // skill 仍只读，只展示已绑定项（fork 语义，见文件头说明）。
+1 :   // 资产是否相对初始绑定发生变化（用于启用保存按钮）
+1 :   /** 保存资产绑定 diff：wiki / code_graph 走 allocate/unbind，chat_memory 走全量 setAgentFixed。 */
+1 :     // Chat Memory：全量覆盖（内部会过滤自身 memory、校验借入上限）
+1 :       // 运行时使用 prompt 完整文本；metadata_json 保留两个字段的拆分，供前端再次编辑时恢复。
+1 :     // 读真实绑定源（权威、与运行时一致），仅用于只读展示。
+1 :         // 只读模式下后端可能拒绝访问非自己的 agent 资产（NOT_YOUR_AGENT），这是预期行为。
+1 :               // 整个资产区域加载中：骨架占位 4 个折叠组的轮廓
+1 :                   {/* Skill 仍只读：其绑定是 fork 独立副本，编辑弹窗不做增删（见文件头说明） */}
+1 :  * AgentGrid —— team 内 Agent 管理：卡片/列表视图、搜索与 Owner 筛选。
+1 :  * 权限与数据走真实后端链路。
+1 :  * Agent owner 标签：可见文本显示 display_name（缓存未命中先回退 id），
+1 :  * title 保留 user_id 供排查。抽子组件是 Rules of Hooks 要求（不能在 .map 里循环调 hook）。
+1 :   /** agent-overview/bootstrap 计数是否仍在加载：未返回时保持骨架屏，不提前跳出加载态 */
+1 :   /** 保留接口兼容；admin 不再有特殊权限。 */
+1 :   /** 是否有权限看到 team 内全部 agent（admin / team admin）。普通用户只能看到自己的，无需 Owner 筛选。 */
+1 :       /* localStorage 不可用则忽略 */
+1 :   // user_id → display_name 解析（筛选下拉 / tooltip 等批量场景；与 owner 标签同套缓存）
+1 :     // admin 与 member 一致：只能操作自己 owner 的 agent（不再有全局 admin 特权）。
+1 :       {/* 加载编排两段式：
+1 :           1) 首屏 agents 还没回来 → 4 个骨架卡占位（不知道实际数量，按视觉预设 4 张）
+1 :           2) agents 已就绪 → 立刻渲染真实卡片，counts 还在加载时只在「资产计数 chip」显示骨架占位
+1 :             —— 不再用整网格骨架覆盖，避免「4 骨架 → 1 真实卡」的过渡突兀 */}
+1 :           // 卡片视图骨架屏：4 个占位卡 + shimmer 动画，风格与 AssetListPanel 一致；
+1 :           // 卡片逐张错峰入场（60ms 步进，编排式加载），骨架卡不闪切
+1 :                 {/* 1. head：名称 + chevron，对齐真实 _memory-agents-card-head */}
+1 :                 {/* 2. id：等宽小字，对齐 _memory-agents-card-id */}
+1 :                 {/* 3. desc：两行，对齐 _memory-agents-card-desc（min-height 40px） */}
+1 :                 {/* 4. owner 行：label + pill，对齐 _memory-agents-owner-row */}
+1 :                 {/* 5. stats：2 列 4 个 mounted chip，对齐 _memory-agents-stats */}
+1 :                 {/* 6. actions：右对齐删除按钮，对齐 _memory-agents-card-actions */}
+1 :                 {/* 资产计数区：counts 还在加载时只把 4 个数字换成小骨架占位，主体立刻可见 */}
+1 :                 // 列表视图同样：counts 在加载时用「—」占位，而不是整行消失
+1 :  * CreateAgentDialog —— 创建 Agent 弹窗。
+1 :  * 支持套用/保存模板、勾选 skills/code_graph/llm_wiki/chat_memory 原子能力。
+1 :   /** Agent 严格归属一个 team，这里不让用户在 dialog 里改归属或转交 owner
+1 :    *  （owner 由后端在创建时固定为当前登录用户）。 */
+1 :   // 保存模板表单里可编辑的 agent 内容字段：默认取自当前主表单，
+1 :   // 展开保存表单时预填，用户可微调后再存入模板（不含 agent 名字）。
+1 :   // 从真实 API 拉取团队资产列表
+1 :     // 模板只承载文本描述，套用时不改动用户已勾选的原子能力。
+1 :   // 展开「保存为模板」表单时，用当前主表单值预填可编辑字段。
+1 :   // 关闭并清空保存模板表单的全部字段。
+1 :     // 模板只保存文本描述，不保存所选原子能力（skills / code_graph / llm_wiki / chat_memory）。
+1 :  * DefaultAgentTemplateDialog —— 默认 Agent 模板配置弹窗（仅全局 admin）。
+1 :  * 表单字段与「创建 Agent」对齐，但只允许选择**团队公共资产**
+1 :  * （useTeamAssets 内部已按 visibility=team 过滤 skill / code_graph / wiki；
+1 :  * 模板的 asset_ids 不支持 chat_memory，故不提供记忆勾选）。
+1 :  * 保存走 agent/set-default-template（覆盖式写入，一次回传完整 template）。
+1 :  * 已配置时打开弹窗会用 get-default-template 的返回值预填。
+1 : /** 从模板 metadata_json（JSON 字符串）读取 ui.role_prompt / ui.rules_prompt。 */
+1 :       /* metadata_json 不合法按空处理 */
+1 :   // 没有 ui 拆分时回退到整体 prompt（与 Agent 详情展示口径一致）
+1 :   /** 已配置的模板（用于预填表单）；null = 首次新建 */
+1 :   // 团队公共资产（skill / code_graph / wiki，后端 bootstrap 已按 visibility=team 过滤）
+1 :  * DefaultAgentTemplateSection —— 「默认 Agent 模板」管理区（仅全局 admin 可见）。
+1 :  * 放置于 Agents 页面的 AgentGrid 上方：
+1 :  *   - 未配置：展示「新建默认 Agent」入口；
+1 :  *   - 已配置：展示当前模板摘要 + 「修改配置」入口。
+1 :  * 数据源：agent/get-default-template（无权限校验）；写操作 agent/set-default-template
+1 :  * 仅 system_admin 可调用，因此本组件只在 isAdmin=true 时渲染。
+1 :       // 未配置时后端返回 {}；以 name 是否存在判断是否已配置
+1 :  * EditTeamDialog — 编辑当前 team 的名称 / 描述。
+1 :  * 与 CreateTeamDialog 同款表单样式，进入时以 team 当前值预填；
+1 :  * 提交调 teamsApi.update（team/update，仅 owner / admin 可改，
+1 :  * 后端会静默忽略 owner_user_id 等不可改字段）。
+1 :  * MemberSection —— team 成员列表 + 移除操作。
+1 :  * AddMemberDialog / CreatedUserKeyModal —— 添加已有用户 / 新建用户弹窗。
+1 :   // 只有全局 admin 或 team admin/owner 才能添加成员；普通成员无此入口。
+1 :  * 添加用户 — 两种模式：
+1 :  *   - 添加已有用户：按已知 user_id 加入 team
+1 :  *   - 新建用户并加入团队：调 meta/user/create 创建用户账号，再自动加入 team
+1 :   /** 新建用户成功后，回调父组件展示初始 API Key */
+1 :   // 新建用户表单
+1 :   // 自定义 user_key 开关（仅新建用户模式生效）：默认关 → 内核自动生成；开启 → 走 user/create-with-key
+1 :   // user/create 须 system_admin 权限（见 docs/api/metadata-api.md §1.4），
+1 :   // 非 全局 admin 调了必 403 —— 这里直接隐藏"新建用户"选项，避免用户操作后才报错。
+1 :     // 用户名只允许英文字母、数字、下划线（与后端 user_id 段校验规则一致）
+1 :     // 自定义 key 模式下额外校验 user_key 非空
+1 :       // Step 1: 创建用户
+1 :       //   - 默认走 meta/user/create（内核自动生成 default_user_key）
+1 :       //   - 开启「自定义 user_key」→ 走 meta/user/create-with-key，把 key 交给内核作为默认 key
+1 :       // Step 3: 自动加入当前 team
+1 :       // Step 4: 关闭添加弹窗，通过回调让父组件展示密钥弹窗
+1 :             自定义 user_key 开关：
+1 :             - 关（默认）：走 user/create，内核自动生成 default_user_key（现有行为）
+1 :             - 开：走 user/create-with-key，把用户指定的 key 作为默认 key
+1 :  * 创建用户成功后展示初始 API Key —— 仅此一次，关闭后无法再次获取。
+1 :  * TeamHeaderCard — 当前 team 概览卡片（头像 + 名称 + team_id + 成员数 + 描述）。
+1 :  * 抽自 TeamManagementPanel 头部，供 team 管理页与 Task 工作台等页面复用，
+1 :  * 统一「我现在操作的是哪个 team」的展示。样式类定义在 team-management-panel.css。
+1 :  * TeamManagementPanel — 团队管理。
+1 :  * 承担「Team + 成员 + Agent」管理：
+1 :  *   - 顶部是当前 team 概览 + team 级操作入口（仅新建 Team）；
+1 :  *     团队级「编辑 / 删除」已统一迁到左上角 TeamSwitcher 下拉框（active team 行右侧），
+1 :  *     不再在此面板重复入口。
+1 :  *   - 中部是当前 team 的成员管理：按 user_id 添加 / 删除成员
+1 :  *   - 下部是当前 team 的 Agent 卡片网格：新建 / 编辑 / 删除
+1 :  * 数据存储（后端持久化）：
+1 :  *   - team/members/agent 均走 @/lib/teamApi；
+1 :  *   - 写操作成功后统一调用 invalidateBackendCache()，驱动 useTeams/useAgents 重新拉取；
+1 :  *   - 后端 schema 还没有的展示字段，序列化进 agent.metadata_json 的 "ui" namespace。
+1 :  * 已知限制（如实反映后端当前能力，不做假 UI）：
+1 :  *   - Agent owner 由后端在创建时固定为当前登录用户，暂不支持转交；
+1 :  *   - Team 删除为级联操作（连带删除成员/agent/task/资产），仅 owner / admin 可删
+1 :  *     （入口在 TeamSwitcher 下拉框）。
+1 :  * 文件拆分（本文件仅保留组合/编排逻辑，具体实现见同目录下）：
+1 :  *   - EditTeamDialog 已迁到 TeamSwitcher 共用（@/layouts/GlobalHeader/TeamSwitcher）
+1 :    * 控制本面板渲染哪一块内容（拆 tab 用，功能完全不变）：
+1 :    *   - 'members'：仅成员管理
+1 :    *   - 'agents' ：仅 Agent 管理
+1 :    *   - 'all'    ：两者都渲染（向后兼容旧的单页用法）
+1 :   // 只取当前 team 的 agent — agent 严格归属 team，不会跨 team 显示
+1 :   // Agent 可见性：
+1 :   //   - 全局 admin / 当前 team 的 admin(owner)：可见 team 内全部 agent
+1 :   //   - 普通成员：只能看到自己 owner（创建）的 agent
+1 :   // 通知文案里展示 display_name 而非 user_id（复用全局缓存，幂等无额外请求）
+1 :       // 资产绑定统一走真实挂载接口（不写 metadata_json.ui）。串行执行，任一失败即抛错，
+1 :       // 由外层 catch 统一提示 —— 避免 allSettled 静默导致「显示绑了但实际没绑」。
+1 :       //   - skill → forkToAgent（复制 owner=新 agent 的独立副本）
+1 :       //   - code_graph / wiki → allocate（引用绑定）
+1 :       // SKILL_DELETE_FAILED：控制台层已删了一部分 skill 但被中断，agent 未 archive
+1 :       // —— 明确告诉用户去 skill 面板处理后重试，别只给一句技术错误码
+1 :       {/* === Header: 当前 team 概览 + ops ===
+1 :         切 team 的入口只在左上角全局 TeamSwitcher（App.tsx），这里不再提供
+1 :         平铺 chips 的切换入口，避免跟全局切换器形成两个语义重叠的控件。
+1 :         本卡片只承担三件事：
+1 :           1. 告诉用户「我现在操作的是哪个 team」（name + team_id + 成员数 + 描述）
+1 :           2. 提供 team 级的操作（+ 新建 Team / + 新建 Agent）
+1 :           3. 当尚未选 team 时，给出引导 */}
+1 :           {/* === 默认 Agent 模板（仅全局 admin 可见）=== */}
+1 :  * 空态引导。
+1 :  * 历史行为：任何已登录用户都能创建自己的第一个 team（team/create 无 admin 限制，
+1 :  * 创建者自动成为 owner），所以这里曾不区分 admin / 非 admin。
+1 :  * 现行行为：前端暂时屏蔽普通用户创建 team 的入口，
+1 :  * 仅 admin 可见创建 CTA；普通用户只看到"联系管理员"提示。
+1 :  * 后端 team/create 本身仍无角色限制，此屏蔽仅在前端实现。
+1 :  * 公共展示型小组件：
+1 :  *   - Mounted：Agent 卡片上的「已挂载资产」计数 chip
+1 :  *   - LightField：轻量表单字段（label + hint + children）
+1 :  *   - CollapseGroup：可折叠分组（skills / code_graph / llm_wiki / chat_memory 复选列表容器）
+1 :  *   - AssetCheckList：分组渲染的资产复选框列表
+1 :  * 均为纯展示组件，不含业务逻辑 / 数据请求。
+1 : /** 资产是否可被勾选/挂载：无状态（skill）或状态为 ready 才可选中，其他状态（pending/failed/...）视为不可用。 */
+1 : /** 过滤出全部可勾选的资产 key（供「一键全选」使用，保证与列表勾选禁用状态一致）。 */
+1 :   // counts 还在加载时，单独把数字区换成骨架占位，不动 label。
+1 :   // 让 agent 卡片主体立刻可见（避免「4 骨架 → 1 真实卡」的突兀跳变），
+1 :   // 只把不确定的计数数据占位起来，比整个网格保留骨架更平滑。
+1 :   /** 只展示已绑定数量、不展示团队池总数（用于只读详情场景）。 */
+1 :    * 加载态：count 数字区换成骨架占位（保留 label/title 等结构，避免布局抖动）。
+1 :    * 用于详情弹窗打开时资产绑定还没拉完的场景，避免「已选 0/共 0 → 真实数字」的突兀跳变。
+1 :           // 加载中：保留图标 + 标题，仅把 count 区换成骨架；按钮禁用防止「加载中点开」出现空面板
+1 :  * 公共类型 + 纯函数。
+1 :  * 无 React 依赖，方便被 hooks / 各 Dialog 子模块共用。
+1 : /** 排除 agent 自身默认拥有的 chat_memory（chat_memory-{team}-{agent}），得到「额外导入」的部分。 */
+1 : /** 移除成员权限：全局 admin / team owner / team admin 可以移除非 owner 成员；owner 不可被移除（含全局 admin）。 */
+1 :  * 数据 hooks：
+1 :  *   - loadAgentOverview / syncChatMemoryBindings：单次调用的资产总览接口
+1 :  *   - useTeamAssets：拉取团队级 skill/code_graph/wiki/chat_memory 列表
+1 :  *   - useAgentMountedCounts：批量拉取各 agent 已挂载资产数量，并在
+1 :  *     BACKEND_REFRESH_EVENT 后自动重新拉取
+1 : /** 团队资产 Hook：从真实 API 拉取 Skill / CodeGraph / Wiki / ChatMemory */
+1 :   // list 计数直接用后端 agent-overview/bootstrap 的 counts —— 它读的是真实源
+1 :   // （skill 表 owner_agent_id + agent-fixed-asset 表），与详情弹窗、运行时一致。
+1 :   // 不再用 metadata_json.ui 做 fallback：.ui 是已废弃的影子存储，会导致展示≠真实。
+1 :   // silent=true 的刷新（BACKEND_REFRESH_EVENT）不翻转 loading，避免操作后整屏骨架闪烁。
+1 :   // 初始 / agent 变更加载：翻转 countsLoading，驱动骨架屏覆盖整个 bootstrap 加载期
+1 :   // 保存后 invalidateBackendCache() 会广播 BACKEND_REFRESH_EVENT，静默重新拉 counts，
+1 :   // 保留旧值原地更新，不闪骨架屏
+1 :  * i18n 初始化模块
+1 :  * - 首次访问读取 navigator.language（zh 开头 → 中文，其他 → 英文）
+1 :  * - 用户手动切换后持久化到 localStorage
+1 :  * - react-i18next 的 useTranslation 会自动触发组件重渲染
+1 :  * ConsoleLayout — 主布局壳。
+1 :  * 基于 tea-component 的 `Layout` + `Menu` 组件，包含 TabBar、路由、菜单过滤等业务逻辑。
+1 : /** 路由 path → PageId */
+1 : /** PageId → 路由 path */
+1 :   // 使用说明页为独立页（自带返回按钮与页头），不占用多标签页栏
+1 :     // /guide 独立页不把 workbench_board 等页面追加进标签栏，避免返回时多出标签
+1 :   // 首次使用引导：登录后按「每用户仅首次」判定自动弹出
+1 :    * 回顾引导入口（由 GlobalHeader 的「我的资料 → 回顾引导」菜单项触发）：
+1 :    * 清掉 onboarded 标记 + 把 Guide 重新置为可见。
+1 :    * 必须先清标记再 setVisible，否则 Guide 内部的 close→markOnboarded 链路里
+1 :    * 立刻又会重新标记为已看过（虽然本次不冲突，但下次自动判定仍会按"已看过"处理）。
+1 :   // GuidePage 底部「引导回放」通过自定义事件触发与「我的资料 → 回顾引导」一致的链路
+1 :   // ===== 基于 team role 的菜单过滤 =====
+1 :   // admin 可访问所有页面（含资源管理）
+1 :   // 「成员管理」项：reviewer 不可见
+1 :             {/* 品牌已在全局 Header 展示，侧栏只承载导航（与 Memory项目公共壳层一致）。 */}
+1 :               {/* key 绑定 pathname：路由切换时重挂载页面帧，触发 _page-enter 过渡，保持跨页连续性 */}
+1 :  * LanguageSwitcher — 顶部语言切换器
+1 :           <span className="_memory-lang-switcher-label">{current === 'zh-CN' ? '中文' : 'English'}</span>
+1 :             中文
+1 :  * TeamSwitcher — 全局顶栏内嵌的 Team 切换器
+1 :  * 从侧边栏迁移到顶栏后的行内 pill 样式版本：使用 Tea `Dropdown` 承载弹出面板
+1 :  * （自带定位、遮罩点击关闭、滚动关闭等能力），面板内部用 `List`/`Input`/`Button` 组装。
+1 :  * 团队编辑入口：当前 active team 行右侧（owner / admin 可见）提供「编辑」「删除」
+1 :  * 图标按钮，复用 EditTeamDialog + tea.confirm 二级确认。这把 TeamManagementPanel
+1 :  * Header 上的「编辑 Team / 删除当前 Team」入口迁到了此处统一收纳。
+1 :   // 编辑弹窗可见状态
+1 :   // 当前用户 user_id（panelSession 同步可读）
+1 :   // 是否可编辑 / 删除当前 active team：全局 admin 或当前 team 的 owner / admin
+1 :     // 只切换 activeTeamId，不 invalidateTeamCache：
+1 :     //  - useAgents/useTasks 按 teamId 分桶缓存，切到目标 team 时若已有缓存（之前看过）
+1 :     //    会直接秒开，无需重新 loading；无缓存才走 fetch —— 这才是"自动刷新"而不是
+1 :     //    "整页重刷"。
+1 :     //  - invalidateTeamCache 会删目标 team 缓存 + 广播 BACKEND_REFRESH_EVENT，
+1 :     //    导致切 team 后所有页面（含 counts/participation 等无关数据）连带重新拉取，
+1 :     //    表现为"切换一次 = 全部重新刷新一次"。写操作后的 invalidateBackendCache
+1 :     //    已经保证数据新鲜度，切换本身不需要再强刷。
+1 :     // 取一次 agent 数（用于级联展示）—— 走 store 缓存避免额外请求
+1 :       /* 静默：仅用于展示级联范围，拿不到不影响删除 */
+1 :       // 删除当前 active team 时清空 activeTeamId，让 ensureValidActiveTeamId
+1 :       // 在 store 刷新后自动落到剩余的第一个 team（或空态）。
+1 :         // 静默刷新：仅让下拉框里的 team 列表保新鲜，不翻转 teamsLoading，
+1 :         // 否则 TeamManagementPanel 等消费方会整体进入 loading 占位（表现为
+1 :         // "点开选择 team 的选项框，成员/Agents 管理页面就刷新一下"）。
+1 :                 // 用原生 ul/li 而非 Tea List：Tea 的 List.Item selected 会自动渲染 ✓
+1 :                 // 并改变内边距，split="divide" 又会注入 padding/border-top，与自定义
+1 :                 // 卡片式行样式（圆角 + 描边 + 间距）反复冲突（表现为选中行左侧被裁切、
+1 :                 // 行分割线被上一行压住）。这里自己掌控全部样式，行为更可控。
+1 :                     // 仅当前 active team 行显示编辑/删除按钮，且仅 owner/admin 可操作
+1 :                           {/* 选中态由背景色 + 描边传达，不再额外显示 ✓ —— 避免与右侧
+1 :                               操作按钮挤在一起。操作按钮为绝对定位浮层，不占行内布局宽度。 */}
+1 :       {/* 编辑弹窗挂在 Dropdown 之外：避免 Dropdown clickClose 干扰 Modal 可见性 */}
+1 :  * GlobalHeader — 全局顶栏（跨越侧边栏 + 内容区，最外层通栏）
+1 :  *   左侧：品牌 Logo「Memory Hub」 + 分隔线 + 团队切换器（TeamSwitcher）
+1 :  *   右侧：同步状态指示 + 语言切换 + 用户头像菜单
+1 :   /** 当前登录所在的 memory 实例名（来自 auth.instance_name），用于「我的资料」展示 */
+1 :    * 「回顾引导」入口回调：ConsoleLayout 注入。
+1 :    * 未传则下拉菜单不展示该项，避免在「尚未拿到 auth」等中间态误出。
+1 :       {/* 左侧：品牌 + 团队切换器 */}
+1 :       {/* 右侧：同步状态 + 语言切换 + 用户菜单 */}
+1 :         {/* 使用说明：进入独立引导页；当前在该页时展示激活态 */}
+1 : /** TeamRole → 展示文案 + Tag 主题色 */
+1 :  * 「我的资料」弹窗：tea Avatar + Justify + Text/Tag 描述型展示。
+1 :  * 关键设计：
+1 :  *   - 头部 Avatar + 用户名 + 角色 Tag 一行展示（Justify 左右对齐）
+1 :  *   - User ID 用 InputAdornment + Copy 一行可复制，避免单独开块
+1 :  *   - 所属实例（如有）用 Card.Body 单独分组，与 User ID 区分语义
+1 :  *   - Footer 用 Justify 让「回顾引导」左对齐、「关闭」右对齐
+1 :         {/* 头部：Avatar + 用户名 + 角色 Tag */}
+1 :         {/* User ID：单独成块 + Copy，admin 给成员邀请用 */}
+1 :         {/* Username：明文提示，方便用户核对自己注册名 */}
+1 :         {/* 所属实例（可选）—— 多实例用户知道现在连的是哪个 */}
+1 :         {/* Justify：左回顾引导 / 右关闭；onReplayOnboarding 未传时只显示关闭 */}
+1 :  * OnboardingGuide — 首次使用引导（Tea Guide 组件版）
+1 :  * 使用 tea-component `Guide` 组件逐步高亮页面元素，替代旧的全屏双栏引导。
+1 :  * 双角色 SOP（步骤切换时自动跳转到对应页面，不只是展示）：
+1 :  *   - Admin：登录身份 → 新建/切换团队 → 新建成员发放 user_key → Agent → 点击 Agent 绑定资产 → 四个资产页
+1 :  *   - Member：登录身份 → 邀请成员 → Agent → 点击 Agent 绑定资产 → User_Key 管理 → 四个资产页
+1 :  * Admin 与 Member 的 Agent / 资产操作能力一致（均可编辑）；唯一差异在成员管理：
+1 :  * member 不能创建用户账号，只能按 user_id 邀请已有用户；admin 可新建用户并发放
+1 :  * user_key，也可新建团队。资产步骤逐一跳入 Wiki / Code / Skill / Chat Memory 页面介绍。
+1 :  * 健壮性：每步 element 选择器若在目标页缺失（如成员无「添加成员」权限），
+1 :  * 自动 fallback 到全局 Header 品牌区，避免 Guide 因元素缺失而整体消失。
+1 : /** 全局始终存在的锚点元素（Header 品牌区），用于目标元素缺失时的 fallback */
+1 : /** 每用户维度的「已看过引导」localStorage key */
+1 : /** 是否应当自动弹出引导（未标记过 = 首次） */
+1 :     // localStorage 不可用时不打扰用户
+1 :  * 重置「已看过引导」标记。
+1 :  * 用户在「我的资料 → 回顾引导」手动触发：清掉 onboarded 标记，下次进主面板
+1 :  * useEffect 检测 shouldShowOnboarding() === true 会再次自动弹出。
+1 :  * 注意：调用方还需把 OnboardingGuide 的 visible 设回 true，因为之前的 close()
+1 :  * 已经把内部 current 推进到 -1 并调了 onClose，仅清标记不足以重新打开。
+1 :   /** 目标路由：切换步骤时自动跳转（省略表示停留在当前页面） */
+1 :    * 要高亮的元素选择器。支持数组按序回退（例如 admin 优先高亮"添加成员"按钮，
+1 :    * 按钮不存在时回退到成员列表区），全部缺失时最终回退到 Header 品牌区。
+1 : /** 按顺序返回第一个匹配的元素，找不到返回 null */
+1 : /** 解析步骤高亮元素；目标元素缺失时按序回退，最终回退到全局 Header 品牌区，保证 Guide 始终可渲染 */
+1 :  * 按元素在视口中的实际位置动态计算气泡展开方向：
+1 :  *   - 水平：元素中心在左半屏 → 向右展开（*-start）；右半屏 → 向左展开（*-end）
+1 :  *   - 垂直：元素中心在上半屏 → 向下展开（bottom-*）；下半屏 → 向上展开（top-*）
+1 :  * 这样气泡永远朝视口中央方向展开，任何页面/任何位置的元素都不会被挤出屏幕。
+1 :   // 元素缺失（页面未跳转/未渲染）时无法用位置推断方向，直接使用步骤预设的安全方向。
+1 :   // 绝不能 fallback 到 body 计算：body rect 高度远超视口，cy 必大于 innerHeight/2，
+1 :   // 会算出 top-* 把气泡定位到屏幕外（"框超出屏幕点不到"的根因）。
+1 :  * 点击 Agent 进入编辑弹窗绑定资产的引导步骤（Admin / Member 共有，
+1 :  * 紧跟「新建 Agent」步骤，同页切换无跳转）。
+1 :  * 锚点三级回退：
+1 :  *   1. 卡片视图：框选第一个可编辑 Agent 的整张卡片；
+1 :  *   2. 列表视图（无卡片）：回退到可编辑 Agent 的名称按钮；
+1 :  *   3. 用户还没有任何 Agent：回退到「新建 Agent」按钮，
+1 :  *      文案同步提示「先新建一个 Agent 再回来点它」。
+1 : /** 每个资产页各自跳入介绍的引导步骤（Wiki / Code / Skill / Chat Memory） */
+1 :     // 优先框「新建 Wiki」按钮；按钮缺失（固定资产 tab / 无 team）时回退到顶部 Wiki tab，
+1 :     // 而不是回退到 logo，避免框错区域。
+1 :     // ActionPanel 左侧"新建 Wiki"按钮：向右展开
+1 :     // 优先框「注册仓库」按钮；按钮缺失时回退到顶部 Code tab。
+1 :     // ActionPanel 左侧"注册仓库"按钮：向右展开
+1 :     // 页头右侧 actions 中的"导入 Skill"按钮（与 Memory 一致）：向左展开
+1 :     // 右侧"导入记忆"按钮：向左展开
+1 :     // header 右上角用户按钮：用 bottom-end 让气泡右边缘对齐元素右边缘，向左展开，
+1 :     // 避免在窄视口下气泡被裁掉"下一步"按钮
+1 :   // Admin 与 Member 的 Agent / 资产操作能力一致（都可编辑），仅成员管理不同：
+1 :   //   - admin：可新建团队、新建用户并发放 user_key（member 无此权限）
+1 :   //   - member：只能按 user_id 邀请已有用户加入团队；但可管理自己的 User_Key（admin 无此入口）
+1 :   // placement 选择：右侧元素用 bottom-end（向左展开），左侧元素用 bottom-start（向右展开）
+1 :         // header 左上角：向左展开避免右移溢出
+1 :         // 优先高亮"添加成员"按钮；无 team 时按钮不存在，回退到成员列表区
+1 :         // ActionPanel 左侧"新建 Agent"按钮：向右展开
+1 :       // 普通 member 没有"添加成员"按钮（仅 admin/teamAdmin 可见），
+1 :       // 所以高亮始终存在的成员列表区，避免 fallback 到 header 导致"没跳转/定位错"
+1 :       // ActionPanel 左侧"新建 Agent"按钮：向右展开
+1 :       // Justify 右侧"新建 Key"按钮：向左展开
+1 :   /** 关闭引导（无论「跳过」还是「完成」都会标记为已看过） */
+1 :    * 动画对齐策略（替代旧的"隐藏→显示"门控，消除无遮罩空窗）：
+1 :    *   - 同页切换：气泡（popper transform）与高亮框（top/left/width/height）带
+1 :    *     CSS transition，随 scrollIntoView smooth 滚动平滑滑到新位置，全程可见；
+1 :    *   - 跨页切换：旧锚点会随页面卸载（popper 对 detached 元素会定位到 0,0），
+1 :    *     先 fadeOut 淡出 → 跳转 → 新锚点就绪后 no-anim 瞬间落位 → fadeIn 淡入。
+1 :   /** 新步骤首帧定位完成后淡入（双 rAF：等 React commit + popper 定位） */
+1 :   // 卸载时清理全局 class
+1 :   // 步骤切换：finish/cancel 直接关闭；next/back/start 先跳转目标页面，
+1 :   // 等目标路径匹配且元素出现后再推进 current（避免 Guide 因元素缺失闪退）。
+1 :         // 跨页跳转：先淡出（遮住"锚点卸载→新页加载"窗口），pending 完成后淡入
+1 :         // 同页切换：直接推进，位置 transition 与滚动动画对齐，平滑滑过去
+1 :   // 等待跳转完成：路径匹配后轮询目标元素出现，再推进 current（最多等 60 帧约 1s）
+1 :       // selector 可能是回退数组：任一元素出现即视为目标页面已就绪
+1 :         // 新锚点瞬间落位（no-anim 禁用过渡，避免从旧位置滑入），然后淡入
+1 :   // 初次显示：popper 首帧定位前禁用过渡（避免气泡从 (0,0) 滑入），定位完成后启用
+1 :       // 欢迎页高亮 header 品牌区：按实际位置动态计算方向
+1 :   // ===== 自定义精确高亮层 =====
+1 :   // tea Guide 内置 mask 基于 react-popper 定位：在内部滚动容器（tea-layout__content）
+1 :   // 下存在固定偏差（约 3~5px），且不随滚动更新（滚动后偏差进一步放大），导致高亮框
+1 :   // "漏边"。这里改用 getBoundingClientRect 实时计算（capture 监听内部容器滚动 +
+1 :   // resize），并用全局 CSS 隐藏 Guide 自带 mask（见 index.css `.tea-overlay[style*="z-index: 9999"]`）。
+1 :     // 步骤切换瞬间 Guide 的 scrollIntoView(smooth) 动画可能尚未结束，
+1 :     // 立即测到的是动画中间位置；用 rAF + 延迟兜底在布局稳定后修正。
+1 :     // capture 阶段监听，能捕获内部滚动容器（非 window）的滚动事件
+1 :     // 数据加载等导致的布局变化也会移动锚点（ResizeObserver 比 resize 事件覆盖更全）
+1 :           {/* 上下左右四块半透明遮罩拼出高亮洞 */}
+1 :           {/* 高亮描边 */}
+1 :  * TabBar — 多标签页栏。
+1 :  * 使用 Tea Design Token 统一样式。
+1 :  * api/agents.ts — Agent 管理（meta/agent/* + meta/agent-fixed-asset/*）。
+1 : // ========================= 默认 Agent 模板 =========================
+1 :   /** 团队 skill ID（skl-xxx） */
+1 :   /** 团队 code graph ID（code-xxx） */
+1 :   /** 团队 wiki ID（wiki-xxx） */
+1 :  * 默认 Agent 模板配置（agent/get-default-template / set-default-template 的 template 结构）。
+1 :  * 注意：
+1 :  *   - asset_ids 为团队资产 ID 快照，只允许选 visibility=team 的公共资产；
+1 :  *   - 覆盖式写入：set 时需一次回传完整 template；
+1 :  *   - metadata_json 为 JSON 字符串，ui.role_prompt / ui.rules_prompt 存拆分 prompt。
+1 :   /** 'private' | 'team'(默认) | 'restricted' */
+1 :    * 列出 team 下的 agents。
+1 :    * @param params.owner_user_id 可选：只返该 user owner 的 agent（"agent 私有可见性"场景，
+1 :    *   如 Skill 面板固定资产 tab）；不传则返 team 全量。`agent/list` 支持
+1 :    *   `team_id + owner_user_id` 组合过滤。
+1 :   /** agent 详情 */
+1 :   /** 创建 agent */
+1 :    * 更新 agent。
+1 :    * `metadata_json` 是给前端自定义关系的兜底通道：后端 schema 未落地的展示字段
+1 :    * （如 icon / accent / 关联 user 等 UI-only 字段）可以序列化进这里的自定义 namespace。
+1 :    * 删除 agent：走业务路由 /api/v1/agent/delete-cascade。
+1 :    * 该路由会先把 owner_agent_id = 当前 agent 的所有 active skill 走 skill/delete，
+1 :    * 全部成功后才调 meta/agent/archive；任一 skill 删失败即中断，agent 不会被 archive，
+1 :    * 抛出 SKILL_DELETE_FAILED 让调用方给用户展示（错误 data 里带上已删的 skill_ids
+1 :    * 和失败的 skill_id）。归档时后端会顺手清 chat_memory asset。
+1 :   /** 获取 agent 的资产聚合视图（binding + asset 详情）。
+1 :    *  用 metaListAll 翻页拉全量（list-with-detail 默认 limit 20，绑定资产一多会被截断）。
+1 :    *  applyVisibilityFilter：默认 true（屏蔽已私密的绑定，用于普通展示）。
+1 :    *  owner 视角管理自己的资产时应传 false —— 否则自己 owner 的 private skill
+1 :    *  会被接口过滤掉，导致 fixed tab 拿不到它的 visibility、共享/私密切换按钮消失。 */
+1 :   /** 获取 agent 固定资产 binding（仅 binding 字段） */
+1 :   /** 全量设置 agent 固定资产 */
+1 :    * 读取当前 team 的默认 Agent 模板（按 实例 × 团队 隔离，无权限校验）。
+1 :    * 未配置时后端返回 `{}`，调用方以 `data.name` 是否存在判断「未配置」。
+1 :    * 配置/覆盖当前 team 的默认 Agent 模板（仅 system_admin，否则 403 permission_denied）。
+1 :    * 覆盖式写入：必须一次回传完整 template。
+1 :  * api/assets.ts — 资产管理（meta/asset/*）。
+1 :   /** 列出 team 资产（支持按 type/status/owner 筛选） */
+1 :   /** 资产详情 */
+1 :   /** 创建/登记资产（两段式：主表 + 详情表） */
+1 :   /** 更新资产 */
+1 :   /** 删除资产（meta asset/delete → 物理删除行） */
+1 :    * 列出当前用户在指定 team 内**可访问**的资产（走后端 permission-checker，
+1 :    * 严格执行 visibility × ACL 过滤）。
+1 :    * 与 asset/list 的区别：
+1 :    *   - asset/list：SQL 直查 meta_assets，不做 visibility/ACL 过滤，adminOps 视角。
+1 :    *   - asset/list-accessible：先按 visibility × role × ACL 计算可见集合，
+1 :    *     私密 skill 别人自动看不到；owner 优先放行。
+1 :    * 可选 `visibility` 参数：在服务端做二次白名单过滤（例 `['team']` 只返回
+1 :    * 团队共享的），避免"响应体带全量、前端 JS 过滤"的信息泄露风险。
+1 :    * 用于"团队资产"tab —— 团队成员应该只看到"团队公开 + 自己私密 + 显式授权"三部分。
+1 :  * api/auth.ts — 登录验活 + 环境绑定。
+1 :  * 登录流程：
+1 :  *   ① GET /meta/instances 选实例
+1 :  *   ② 用户输入自持的 user_key（sk-mem-…）
+1 :  *   ③ POST /meta/auth/verify（Header 仅 X-Tdai-Service-Id，body 带 user_key）
+1 :  *   ④ data.valid === true → 登录成功，前端把 { instance_id, user_key, user } 写入 session
+1 :  * 无 OAuth、无 Cookie；见 lib/panelSession.ts。
+1 :   /** 登录验活：Header 仅带实例 ID，user_key 只放 body（meta-api.openapi.yaml §auth/verify） */
+1 : // ⚠️ 当前部署未注册 /api/v1/users/* 路由，以下接口可能 404。
+1 : // 保留代码用于兼容仍启用该路由的环境；若某个页面依赖这组接口，请先确认路由已注册。
+1 :  * 环境绑定（environment_bindings）：把用户在外部环境（IDE / 编程助手等）的
+1 :  * 外部 user_id 与本平台 user 关联，供 proxy 通过 (environment, environment_user_id)
+1 :  * 反查到团队 / agent / task。
+1 :  * 唯一约束：(environment, environment_user_id) 全局唯一；被他人占用 → 409。
+1 :   /** 列出当前登录用户的全部绑定 */
+1 :   /** 新增一条绑定（幂等：同 user 重复 POST 同样的 (env, env_user_id) 不报错） */
+1 :   /** 删除一条绑定（只能删自己的；删别人 → 403） */
+1 :  * api/base.ts — API 基础设施。
+1 :  * 规则（无 Cookie · 无状态）：
+1 :  *   - 元数据 CRUD 统一走 POST /api/v1/meta/{action}；
+1 :  *   - 鉴权由前端 sessionStorage 缓存 instance_id + user_key（见 lib/panelSession.ts），
+1 :  *     每次请求注入 Header X-Tdai-Service-Id + X-Tdai-User-Key（auth/verify 除外，
+1 :  *     该接口 user_key 只放 body，不放 Header）；
+1 :  *   - agent-fixed-asset/* 不适用通用「资产」UI（PANEL_CAPABILITIES.assets 为 false），
+1 :  *     skill 挂载走 v3 数据面 fork（skillApi.forkToAgent）；
+1 :  *   - 所有函数返回 Promise<T>，失败抛 ApiError。
+1 :  * 通用「资产」能力开关。
+1 :  * UI 消费 assetsApi / agentsApi.getAssets|getFixedAssets|setFixedAssets 前应先判断
+1 :  * `PANEL_CAPABILITIES.assets`，为 false 时展示"暂未开放"占位，不要发起注定 501 的请求。
+1 : /** 发出 401 事件，App 层监听后清 auth state 展示登录页 */
+1 : /** 监听 401 事件 */
+1 : // ========================= Meta API 基础 =========================
+1 :  * 登出 / 401 时清空前端会话（instance_id + user_key + user 缓存）。
+1 :  * 无 Cookie，"清会话"就是清 sessionStorage，不涉及后端调用。
+1 : /** 从当前会话取当前登录用户；未登录抛错（调用方应先保证已登录）。 */
+1 :  * meta 透明代理的公共调用：注入指定 Header，POST body，解析信封。
+1 :  * `auth/verify` 走此函数但只传 X-Tdai-Service-Id（不带 user-key），
+1 :  * 其余 action 走 `metaPost`（自动从 session 注入双 Header）。
+1 :  * 分页拉取 meta list 全部 items（内核 DEFAULT_PAGINATION = {limit: 20}，
+1 :  * 不传 limit 只会拿到前 20 条，列表类读取必须用本工具拿全量）。
+1 :  * offset 必须按 limit 步进，**不能**按 `items.length` 步进：带过滤语义的接口
+1 :  * （如 agent-fixed-asset/list-with-detail，total 是过滤前总数、items 是过滤后集合）
+1 :  * 的 `items.length < limit`，按 items.length 推进会让下一页从错误位置重新开始，
+1 :  * 造成条目重复；整页被过滤时更会提前 break 漏掉尾部数据。
+1 :       // 空页：通常代表已到末尾。但带过滤语义的接口中间页可能整页为空
+1 :       // （total 仍是过滤前总数），此时继续推进以免漏拉后续有效数据。
+1 :  * 「请求进行中去重」：同一 key 上一次发起尚未 settle 时，复用同一个 Promise，
+1 :  * 请求结束后立即从表中移除（不做结果缓存）。
+1 :  * 用途：消除 React 18 StrictMode 开发态对 effect 的双调用、以及组件并发挂载
+1 :  * 造成的同一接口重复网络请求。
+1 :  * 约束：只能用于**幂等只读**接口（list/get）。create/revoke 等写操作严禁复用，
+1 :  * 否则会把两次独立写合并成一次。
+1 :  * api/chat-memory.ts — Chat Memory 面板专用业务路由（/api/v1/chat-memory/*）。
+1 : /** 记忆块列表项（team-assets / agent-fixed / my-agents 共用） */
+1 :   /** 仅 team-assets */
+1 :   /** 仅 agent-fixed */
+1 :   /** 资产可见范围：agent-fixed / my-agents 由 visibility 映射返回；team-assets 不返回（恒为 team） */
+1 : /** 分层懒加载条目 */
+1 :   /** 条目创建/记录时间（ISO8601），backend 从 recorded_at_ms / created_time_ms / updated_at 转换 */
+1 : /** L1 语义搜索命中项：在分层条目基础上附带相关度 score（越大越相关） */
+1 :   /** 团队 Memory 池：当前团队所有已共享的 chat_memory */
+1 :   /** Agent 固定资产 */
+1 :   /** 我的资产分配（owner=me 的 agent 列表） */
+1 :   /** L0/L1/L2/L3 分层懒加载；L2 可传 path 懒读单个 Markdown 原文。
+1 :    *  L0 游标分页：第一页传 offset=0；后续页传 beforeTs（最后一条消息的 created_at），
+1 :    *  后端用 time_end 过滤，offset 归零，避免 VDB 大 offset 扫描。 */
+1 :       // 详情页时间筛选器（ISO8601），仅 L0 / L1 生效，后端对 L2 / L3 忽略
+1 :   /** 批量设置某个 agent 的固定 memory，后端会原子校验借入上限。 */
+1 :   /** 借入资产到我的 agent */
+1 :   /** 从 agent 解绑 */
+1 :   /** 手工建独立 UserAsset */
+1 :   /** 切换资产可见范围 */
+1 :   /** 导入历史对话到 agent 的 L0（走 /v3/conversation/add） */
+1 :   /** 编辑单层记忆内容（Owner-only）：
+1 :    *  L1 传 id=记录主键 + content；L2 传 id=文件路径 + content（可选 summary）；
+1 :    *  L3 只传 content（整份 core persona 覆盖写）。 */
+1 :   /** 分层语义 / 关键字搜索（agent 维度跨 session 召回，命中项带 score）：
+1 :    *  L0 = 对话消息检索；L1 = 原子记忆检索。 */
+1 :  * Knowledge Panel API 客户端（v1.0 冻结）
+1 :  * 对接文档：docs/api/knowledge-panel-api.md
+1 :  * 前缀：`/api/v1/knowledge`，全部 POST，统一信封 { code, message, request_id, data }
+1 :  * 鉴权：`X-Tdai-Service-Id` + `X-Tdai-User-Key`（与 meta API 一致）
+1 :  * 本期接入（§2.0 最小端点集）：
+1 :  *         search / raw/ls / raw/read / raw/write（12 个）
+1 :  *   Code-Graph: list / create / sync / delete / search / explore（6 个）
+1 : // ========================= Types（对接 Panel API） =========================
+1 : // ---- 兼容旧类型（平滑过渡） ----
+1 : /** @deprecated 用 WikiDetail 替代 */
+1 : /** @deprecated 用 CodeGraphDetail 替代 */
+1 :  * 导入知识库后触发异步 ingest。旧代码期望 SSE 进度流 => 新 Panel 无 SSE，
+1 :  * 前端转为：触发 ingest → 轮询 get 看 status。回调签名仅为兼容旧 UI 的进度条展示。
+1 : // 图谱类型（与旧版兼容）
+1 : /** meta + KS join 后的列表项（team-assets） */
+1 :   /** 读取某个 Agent 已绑定的全部 Knowledge 固定资产（wiki + code_graph）。 */
+1 :     /** 创建 wiki。返回 WikiDetail（含 wiki_id） */
+1 :     /** 团队 Wiki 池（meta list-accessible visibility=team + KS join） */
+1 :     /** 获取详情（含 status，用于 ingest 后轮询） */
+1 :     /** 触发异步 ingest（返回后轮询 get 看 status） */
+1 :     /** 触发 ingest 后轮询 wiki/get，用真实 status/internal_status 驱动进度展示。 */
+1 :           // 已经在 pending/processing 时，KS 会返回 409 busy；前端继续轮询现有任务。
+1 :         const maxAttempts = 300; // 最多约 10 分钟；每次都实际查询 wiki/get。
+1 :     /** 图谱 */
+1 :     /** 页面列表 */
+1 :     /** 读页面（含 raw/sources/...） */
+1 :     /** 删除 processed wiki 页面 */
+1 :     /** 全文搜索 */
+1 :     /** raw 文件列表 */
+1 :     /** raw 文件读取 */
+1 :     /** 删除 raw 原始文档 */
+1 :     /** raw 文件上传 */
+1 :     /** 创建（注册仓库） */
+1 :     /** 团队 Code 池 */
+1 :     /** code ready 后登记 meta（create 时不写 meta） */
+1 :     /** 触发 sync（异步，同 ingest 轮询 get） */
+1 :     /** 代码搜索（返回 { text, isError } 文本块） */
+1 :     /** 代码探索（返回 { text, isError } 文本块） */
+1 :     /** 详情（用于 sync 后轮询） */
+1 :   // ---- Connectors（导入 iwiki / TAPD 文档） ----
+1 : // ========================= 工具函数 =========================
+1 : /** 轮询 wiki ingest 状态直到 ready/failed */
+1 : /** 轮询 code-graph sync 状态 */
+1 :  * api/meta-instances.ts — 登录前选实例（GET /api/v1/meta/instances）。
+1 :  * 客户端可见的实例元信息。
+1 :  *   - `api_key`（真 secret）不下发。
+1 :  *   - `gateway_endpoint` 是后端 → 内核的转发地址，也是"客户端接入 baseUrl"。
+1 :  *     不属于 secret；每个实例独立，前端不能硬编码。
+1 :  *   - `proxy_endpoint` 可选。本地部署时 core 和 proxy 分开，客户端要接的是
+1 :  *     proxy，需要显式配置这个字段。仅前端 UI "客户端接入地址" 卡片使用；后端
+1 :  *     转发始终走 `gateway_endpoint`，不受它影响。
+1 :   /** 登录前选实例；GET /api/v1/meta/instances，公开、无需鉴权、无分页 */
+1 :  * skill-api.ts — Skill 数据面 API 客户端。
+1 :  * 对接文档：见团队内部知识库 Skill API 章节
+1 :  * 14 个 POST 接口，前端走 Panel 后端代理 `/api/v1/skill/`，由 Panel 再转发到记忆 Gateway `/v3/skill/`。
+1 :  * 鉴权 Header：`X-Tdai-Service-Id` + `X-Tdai-User-Key`（与 meta API 一致）。
+1 :  * 统一信封 `{ code, message, request_id, data }`，code === 0 为成功。
+1 : /** 列表/搜索结果的基础形态 */
+1 : /** get 接口返回，包含完整内容 */
+1 : /** 资源文件入参 */
+1 : /** 搜索命中结果 */
+1 : /** 去除 body 中值为空字符串或 undefined 的字段（v3 校验要求字符串字段要么不传，要么非空） */
+1 :  * `/v3/skill/extract` 入参（space_id 已转 optional）：
+1 :  *   - user_id / team_id / agent_id：必填
+1 :  *   - space_id：**前端不传**。跟其他 12 个 skill 接口一致, 从 `X-Tdai-Service-Id`
+1 :  *     header (= panelSession.instanceId) 走; 后端 handler 用 `auth.serviceId` 兜底。
+1 :  *   - session_id：可选，缺省时后端生成 `sx-<8hex>`
+1 :  *   - task_id：可选，透传为 SkillTaskEntry.task_ref_id（业务 ref，与归档 task_id 不同）
+1 :  *   - reason / options.max_iterations：透传给主 agent extractor prompt
+1 :  *   - role 新增 `system`（对齐 conversation/add 的 5 种 role）
+1 :  * `/v3/skill/extract` 返回体：
+1 :  *   - 后端恒走 archive → agent 队列 → worker 异步链路，永远返回 task_id；
+1 :  *     老版本的 `{mode:'sync', candidates}` 已被移除。
+1 :  *   - task_id 是**归档 task_id**（`task-<uuid8>`），跟入参 task_id (业务 task_ref_id) 是两个字段。
+1 :  *   - archive_key 是 COS 归档路径（含 `/skill_buffer/{user}/{team}/{agent}/{session}/`）。
+1 :   // 合并外部 signal 与内部超时
+1 : // `/v3/skill/extract/result` 已下线。SkillCoreSink 会在 worker
+1 : // drain 后直接把 skill 写入表，提取结果通过 `/v3/skill/list` 拿到（不再有独立
+1 : // 的 result 查询接口）。前端拿到 extract 的 task_id 即视为"任务已受理"。
+1 :  * api/skills.ts — Skill 数据面（/api/v1/skill/*）。
+1 :  * 与 meta 链路的关键区别：
+1 :  *   - skill 有独立存储与主键 skill_id（前缀 skl-），团队内可读、owner agent 可写；
+1 :  *   - 身份字段（user_id / team_id / agent_id）放在 body，不放 Header（鉴权 Header
+1 :  *     仍是 X-Tdai-Service-Id + X-Tdai-User-Key，与 meta 一致）；
+1 :  *   - 写操作（create/update/patch/delete/files.*）需带 agent_id（= owner），
+1 :  *     update/patch/delete/files.* 还需 expected_version 乐观锁；
+1 :  *   - 分页用嵌套 pagination.{limit,offset}。
+1 :  * 「挂载到 Agent」的语义：让 skill 真正归属某 agent 的唯一机制是 fork —— 复制一份
+1 :  * owner_agent_id=目标 agent 的独立副本（见 skillApi.forkToAgent）。acl/grant 只改
+1 :  * meta 授权层，对「固定资产」tab 与运行时注入（均按 owner_agent_id）无效。
+1 : /** skill 数据面调用：注入双 Header，POST body，解析信封（code!=0 抛 ApiError）。 */
+1 :   /** 列出 team 下的 head skill（分页拉全量；可选按 owner agent / 名称前缀 / 状态过滤） */
+1 :   /** 列出某个 agent 拥有（owner）的 skill */
+1 :   /** 获取 skill 详情（含 SKILL.md 正文 + 资源清单） */
+1 :   /** 读取单个资源文件内容 */
+1 :   /** 创建 skill（agentId 将成为 owner_agent_id） */
+1 :   /** 软删除（归档）；需 owner agent_id + expected_version 乐观锁 */
+1 :   /** 全量更新 SKILL.md 内容；需 owner agent_id + expected_version */
+1 :   /** 团队范围搜索 skill */
+1 :    * Fork skill 给 Agent —— 复制一份独立副本，`owner_agent_id` = 目标 agent。
+1 :    * 为什么用 fork 而不是 meta 授权（acl/grant）：
+1 :    *   - 「固定资产」tab（SkillsPanel）按 `owner_agent_id` 过滤展示；
+1 :    *   - agent 运行时注入 `<available_skills>`（/skill/listing）同样按
+1 :    *     `owner_agent_id` 过滤。
+1 :    *   两处读取都认 `owner_agent_id`，而 acl/grant 只改 meta 授权层，对它们均无效。
+1 :    *   因此让 skill 真正归属某 agent 的唯一机制就是复制一份 owner=该 agent 的副本。
+1 :    * 命名：副本沿用**源 skill 原名**，不加后缀。skill 唯一约束是
+1 :    * (team_id, owner_agent_id, name)：同一 team 允许多个同名副本（分属不同 agent），
+1 :    * 但同一 agent 下重名会被后端拒绝（42201）——此时向上抛错，由调用方提示。
+1 :    * 实现：getSkill（源正文 + 清单）→ filesRead（逐个资源，单个失败跳过）→
+1 :    *       create（name=原名，agent_id=目标 agent 即 owner）。
+1 :         /* 单个资源读取失败则跳过，不阻断 fork 主流程 */
+1 :       // 血缘：记录 fork 自哪个源 skill，供从副本反查源、避免重复 fork。
+1 :   /** 列出 team 下所有 task */
+1 :   /** 获取 task 详情（含 linked agents） */
+1 :    * 批量拉取 team 下 task 及其 linked agents（Panel 层聚合接口）。
+1 :    * 后端分页：传 limit + offset，Panel 透传给内核 task/list，
+1 :    * 内核只返回当前页的 task + 全量 total。Panel 再并行补齐 linked_agents。
+1 :    * 前端只拿到当前页的数据，内存和渲染都只处理一页。
+1 :   /** 创建 task */
+1 :   /** 更新 task（title / status / description / risk_level / source_url） */
+1 :   /** 删除 task（meta task/delete，字段为 task_ids 数组） */
+1 :   /** 关联 agent */
+1 :   /** 解除 agent 关联 */
+1 : // Session 启动时会 append 一条 (team, task, agent, user) 事件；看板据此
+1 : // 展示"实际参与 User / Agent"。语义与 `task-agent/link`（人工声明关系）互补：
+1 : //   - `linked_agents` = 意图（谁应该干这个 task）
+1 : //   - participation_log = 观测（谁实际起过 session）
+1 : // 后端 `dedupe:true` 只对 user_id 生效，agent 维度需前端自行 dedupe。
+1 :    * 拉取指定 task 的原始参与日志（不走内核 `dedupe`——它只按 user_id 去重，会丢
+1 :    * agent 维度信息）。调用侧按 user_id / agent_id 分别 dedupe 得到两份展示列表。
+1 :    * 拉取 team 下所有 task 的原始参与日志。列表页用一次请求覆盖 N 个 task 的
+1 :    * 统计数字，避免 fanout；前端按 task_id 分桶后再各自 dedupe。
+1 :    * 列出当前用户作为 active 成员的 team。
+1 :    * meta/team/list 要求 body 带 user_id 或 user_key；身份只在 header 不够。
+1 :    * admin 也传自己的 user_id（后端暂无 user/list 式「实例级列举全部 team」）。
+1 :   /** team 详情 */
+1 :   /** 创建 team */
+1 :   /** 更新 team */
+1 :    * 删除 team（meta team/delete）。
+1 :    * 注意：后端 schema 要求 `team_ids` 数组（一次可删多个），传单数 `team_id`
+1 :    * 会被 zod 静默 strip 后因缺 `team_ids` 校验失败 → 400。删除为级联操作，
+1 :    * 会一并删除该 team 的成员、agent、task 与全部资产。
+1 :   /** 列出 team 成员 */
+1 :    * 添加成员（按已知 user_id 加入 team）。
+1 :    * "开号"（拿到 user_key）与"加入 team"是两件独立的事：用户自行持有
+1 :    * user_key 登录后即可从 auth/verify 拿到自己的 user_id；team 管理员只需要
+1 :    * 已知这个 user_id 就能调 team-member/add（标准 meta action）。
+1 :    * 没有"按用户名建户"的等价能力——若要按用户名查找 user_id，可用 `usersApi.list`
+1 :    * 传入 `{ username }` 做精确匹配。
+1 :   /** 移除成员 */
+1 :  * api/types.ts — 跨模块共享的类型定义。
+1 :  * 只放被 2 个以上 API 模块引用的类型；单一模块专属类型就近放在对应模块文件里。
+1 : /** meta / control 信封格式 */
+1 : /** 内核分页响应（task/list、agent/list 等） */
+1 :  * auth/verify、user/get、user/list 均会返回的公共用户结构。
+1 :  * `user_type === 'system_admin'` 是判断"当前登录用户是不是 admin"的唯一权威字段。
+1 :    * 全局用户类型（auth/verify、user/get、user/list 均会返回），
+1 :    * 'system_admin' = 全局唯一的 admin 身份，与 team 无关；其余（如 'user'）都是普通用户。
+1 :    * 这是判断"当前登录用户是不是 admin"的唯一权威字段——不要再用 username === 'admin' 兜底猜。
+1 :   /** team-member/list · get 响应附带（读时 JOIN） */
+1 : /** 内核 user/create 响应（CreateUserResult） — 不含 username，含一次性密钥 */
+1 :   /** 默认 API 密钥明文，仅此次响应返回 */
+1 :   /** 分页列出用户；可传入 { username } 精确匹配或 { user_ids } 过滤 */
+1 :   /** 用户详情 */
+1 :    * 新建用户（透明代理至后端 user/create）。
+1 :    * 响应为 CreateUserResult：含 user_id / user_type / created_at / default_user_key。
+1 :    * default_user_key 为一次性明文密钥，仅此次响应返回。
+1 :    * ⚠️ 权限：须当前用户持有 system_admin 权限；普通用户 → 403。
+1 :    * 新建用户并显式指定 user_key（透明代理至后端 user/create-with-key）。
+1 :    * user/create 的姊妹接口：所有行为对齐 create，唯一区别是 default_user_key 直接采用调用方给的 user_key，
+1 :    * 而非由内核自动生成。适用于「面板 admin 建号时需要预先分配已知 key 给外部下发」的场景。
+1 :    * user_key 冲突会由内核返回 409 `duplicate_user_key`，Panel 后端原样透传。
+1 :    * ⚠️ 权限同 create：须当前用户持有 system_admin 权限；普通用户 → 403。
+1 :    * 删除用户（透明代理至后端 user/delete）。
+1 :    * ⚠️ 权限同上，须 system_admin 才能调用。
+1 : // 走标准 meta action（与 team/agent 同模型，双 Header 鉴权）。
+1 :   /** key 的可展示前缀（如 `sk-mem-ab12****`），内核 list/get 返回，用于免密识别具体是哪把 key */
+1 :   /** 明文 key —— 仅创建响应里出现这一次，之后（list/get）内核不会再回传，安全设计如此 */
+1 :   /** 列出当前登录用户的全部 API Key（按内核分页拉全量） */
+1 :   /** 创建一把新 Key；返回值里的 key_value 明文只展示这一次，调用方需立即展示给用户 */
+1 :   /** 吊销一把 Key */
+1 :  * asset-common —— 资产（Wiki / Code / Skill / Memory）页共享的类型与纯工具函数。
+1 :  * 此前这些类型与工具函数在 wiki-constants.ts / code-constants.ts /
+1 :  * memory types.ts 中各自重复定义，这里统一收口，页面文件通过 re-export 保持
+1 :  * 原有 import 路径不变。
+1 : /** 列表视图切换：卡片 / 表格 */
+1 : /** 列表状态筛选 */
+1 : /** 资产页子视图：列表 / 详情 */
+1 : /** 资产作用域：团队池 / 固定资产 */
+1 :  * ISO 时间字符串 → 面板展示格式（本地时区，'MM/DD HH:MM'）。
+1 :  * 输入为空或非法 → 返回 '—'。
+1 :  * 此前在 wiki-constants.ts 与 code-constants.ts 中实现完全相同，收敛到此。
+1 :  * 已知错误码集合 —— locale 文件中 error.* key 的来源。
+1 :  * 保留列表用于快速判断 code 是否有效（比 i18n.exists 更显式）。
+1 :  * 按错误码查找本地化文案。
+1 :  * 通过 i18n 实例动态翻译，跟随用户当前语言切换。
+1 :   // snake_case 归一：后端可能返回小写
+1 :     // 注：asset_not_bindable / visibility_restricted 在 PRIORITY_MESSAGE_PATTERNS 里前置匹配，
+1 :     // 因为它们会被 permission_denied 前缀吞掉。
+1 :  * 优先匹配的语义 pattern —— 在 extractCodeLike 兜底提取之前先跑。
+1 :  * 场景：内核抛的错误消息形如 `permission_denied: visibility_restricted` —— 前缀 `permission_denied`
+1 :  * 会被 extractCodeLike 提取成 `PERMISSION_DENIED` 直接命中通用文案，掩盖后面的 `visibility_restricted`
+1 :  * 语义关键词。因此凡是"通用错误码 + 细化子原因"的组合都必须在这里精准命中。
+1 :   // 先跑优先 pattern：避免 extractCodeLike 用 `permission_denied` 前缀吃掉子原因关键词。
+1 :  * Panel Session — 新面板前端会话缓存（localStorage）。
+1 :  * 对接 docs/architecture/09-new-panel-control-backend-design.md §3.3.2：
+1 :  * 新面板 Control 是无状态代理，不建 Cookie/Session；登录凭证
+1 :  * （instance_id + user_key）由前端自行持有，缓存在 localStorage
+1 :  * （跨 tab 共享，关 tab 不失效），每次 meta 请求从这里读出注入 Header：
+1 :  *   - X-Tdai-Service-Id（= 注册表 id = 内核 x-tdai-service-id；早期版本文档曾用
+1 :  *     `X-Metadata-Instance-Id` 这个名字，meta-api.openapi.yaml v1.1.0 起已改名，
+1 :  *     务必以最新契约为准，否则 Control 会报 400 MISSING_INSTANCE_ID）
+1 :  *   - X-Tdai-User-Key（auth/verify 除外）
+1 :  * 之前用 sessionStorage（tab 级），导致新开 tab 需要重新登录。
+1 :  * 改为 localStorage 后多 tab 共享登录态，登出时通过 storage 事件同步。
+1 :   /** = 注册表 id = 内核 x-tdai-service-id；登录页选择实例时确定 */
+1 :   /** 仅展示用（实例列表里的 name），非必需 */
+1 :   /** 用户自持的 API 密钥 sk-mem-…；经 auth/verify 验活后缓存 */
+1 :   /** auth/verify 响应 data.user（可选，用于展示 + 作为 owner_user_id/creator_user_id 来源） */
+1 : /** 读取当前会话；无会话或解析失败均返回 null（不抛错，调用方按未登录处理） */
+1 : /** 登录成功（auth/verify 返回 valid===true）后写入会话 */
+1 :     /* 隐私模式 / 存储配额异常：静默失败，不阻断登录后的本次会话内存态 */
+1 : /** 登出 / 401 兜底时清空会话 */
+1 :  * Tea 组件桥接工具
+1 :  * 提供便捷的方式在现有代码中使用 Tea 组件，
+1 :  * 逐步替换原生 HTML 元素和自定义实现。
+1 :  * 使用方式:
+1 :  *   tea.confirm({ message: '确认删除？' }).then(ok => { ... });
+1 :  *   tea.notify.success('操作成功');
+1 :  *   tea.notify.error('加载失败');  // 弹右上角通知卡片，需手动关闭，不会一闪而过
+1 :  *   tea.notify.error(err);  // 传入 Error / ApiError，自动提取 message + request_id
+1 :  * 结构化错误通知入参 — 适合需要展示 title + detail + requestId 的场景。
+1 :  * 从 unknown 错误对象中尽力提取 request_id。
+1 :  * 支持 ApiError（name === 'ApiError'）、SkillApiError、KnowledgeApiError 等。
+1 :    * 确认对话框 — 替代 confirm()
+1 :    * 消息提示
+1 :    * - success: 轻量 toast（一闪即过，不打断操作）
+1 :    * - error:   右上角通知卡片（需手动关闭，确保用户看到错误信息）
+1 :    * - warning:  右上角通知卡片（同 error，需手动关闭）
+1 :    * - info:     右上角通知卡片
+1 :    * 之前 error/warning 用 message.error（toast），3 秒自动消失，
+1 :    * 用户经常看不到错误提示就消失了。改用 notification 后错误提示
+1 :    * 会一直停留在右上角直到用户手动关闭，确保不会被遗漏。
+1 :    * error 入参支持三种形式：
+1 :    *   - string：直接作为 description
+1 :    *   - Error / ApiError / SkillApiError / KnowledgeApiError：自动提取 message + request_id
+1 :    *   - StructuredErrorInput { title?, detail?, requestId? }：结构化方式
+1 :       // 结构化入参 { title?, detail?, requestId? }
+1 :       // Error / string / 其他 — 走 getErrorMessage 提取友好提示
+1 :    * 复杂通知（带自定义标题）
+1 :    * 确认删除
+1 :  * 「确认后执行」帮助函数 —— 收敛各资产页大量重复的
+1 :  * `tea.confirm(...) → if (!ok) return → try/catch → tea.notify.error` 样板。
+1 :  * 用户确认后执行 action；action 抛错时默认走 tea.notify.error(err)
+1 :  * （可传 onError 自定义错误提示，如带 i18n 兜底文案）。
+1 :  * @returns 用户是否确认并成功执行（取消 / 执行失败均为 false）
+1 :  * 原始 1400+ 行文件已按业务域拆分到 lib/api/ 下：
+1 :  *   - api/base.ts          基础设施（ApiError / request / metaPost / metaListAll / …）
+1 :  *   - api/types.ts         跨模块共享类型
+1 :  *   - api/meta-instances   登录前选实例
+1 :  *   - api/auth.ts          登录验活 + 环境绑定
+1 :  *   - api/skills.ts        Skill 数据面
+1 :  * 外部消费方继续 `import { xxx } from '@/lib/teamApi'` 即可，无需改路径。
+1 :  * 新代码建议直接从 `@/lib/api/xxx` 导入，按需引用，减少打包体积。
+1 : // ── 基础设施 ──
+1 : // ── 共享类型（从 types.ts 透传） ──
+1 :  * 可拖拽分割线 hook
+1 :  * @param initial  初始宽度 (px)
+1 :  * @param min      最小宽度 (px)
+1 :  * @param max      最大宽度 (px)
+1 :  * @param side     拖拽边：'left' 表示左侧面板宽度可调，'right' 表示右侧面板宽度可调
+1 :  * ApiKeyPanel — User_Key 管理（组织与权限分组）。
+1 :  * 精简版：列表只展示 4 个核心字段——key_id / user_id / key_prefix / 创建时间，
+1 :  * 不再展示「名称」「过期时间」两列（对应地，新建弹窗也不再要求填写名称）。
+1 :  * Tea 组件：列表用 Table + autotip，头部用 Justify + H3，
+1 :  * 破坏性操作统一走 Modal.confirm 二次确认，新建弹窗复用全站统一的 Modal 外壳。
+1 :  * 后端链路：新面板（stateless）走 meta action `user-key/list|create|revoke`，
+1 :  * 由 Control 透明代理到内核 /v3/meta。前端不直接调内核，也不走旧 REST 路径。
+1 :  * owner 由登录 user_key 推断，前端不用也不能传别人的 user_id —— 天然满足
+1 :  * 「用户只能看到 / 管理自己的 key」。
+1 :  * 安全设计（内核既有行为，不是本组件的取舍）：
+1 :  *   - key 明文只在 `create` 响应里出现这一次，之后 list/get 都不会再回传；
+1 :  *   - `key_prefix` 是内核给的可展示前缀（如 `sk-mem-ab12****`），用于免密识别
+1 :  *     具体是哪把 key，不等同于明文；
+1 :  *   - 因此列表里已存在的 key 无法「展开显示完整 key」，只能吊销。
+1 :   // 客户端接入 base 地址（来自当前登录的 instance 元数据；每个实例不同）。
+1 :   // 优先取 proxy_endpoint —— 开源本地部署 core+proxy 分开时客户端要接的是 proxy；
+1 :   // 未配置时回落 gateway_endpoint，等同老行为（线上 gateway 前置 proxy，两者合一）。
+1 :       // 按创建时间倒序（内核未必保证顺序）
+1 :       // 已吊销的 key 不再展示
+1 :   // ---- 新建弹窗 ----
+1 :   // 不再收集「名称」——列表本身也不展示名称列，创建时无需再让用户填写。
+1 :   // 刚创建出来的 key（含完整明文，仅展示一次）
+1 :       {/* ===== 刚创建的 Key 提示（仅展示一次） ===== */}
+1 :                   // 复制成功后自动关闭完整 Key 显示，避免明文长时间停留在屏幕上
+1 :       {/* ===== 页面头部（Justify 左右布局） ===== */}
+1 :       {/* ===== Key 列表：key_id / key_prefix / 创建时间 + 操作 ===== */}
+1 :       {/* ===== 接入指引 ===== */}
+1 :         instance-id 从当前登录态注入（auth.instance_id）—— 用户不用再手工替换
+1 :         [instance-id] 占位符，也不用去别处找自己现在连的是哪个实例。
+1 :         未登录理论上不会走到这个页（LoginGate 挡在外面），仍保留占位 fallback 兜底。
+1 :               // base 未拉到就显示加载中；防止用户误抄硬编码 URL
+1 :               // 去掉结尾斜杠，避免 base + /path 拼成双斜杠（! 绕过闭包窄化）
+1 :                 // WorkBuddy 走 /workbuddy/<spaceId>（spaceId=instance_id，与 codebuddy 对称）。
+1 :                 // 网页版底层 OpenAI ChatCompletions、桌面版 Responses API，proxy 均已适配。
+1 :                 // codex 用 OpenAI Responses API（POST /v1/responses）；proxy 侧
+1 :                 // 同时注册了 v1/无v1 两种路径，惯例用不带 /v1 的 base，客户端
+1 :                 // config.toml 里 base_url 直接填这个地址即可，wire_api="responses"。
+1 :                 // dsh (deepseek-harness) — DeepSeek 官方 agent harness,Web UI 会话
+1 :                 // 走 OpenAI Chat Completions。**尾巴不带 /v1** —— dsh 客户端
+1 :                 // hardcoded 拼 ${baseURL}/chat/completions,与 CB 同族;proxy 侧
+1 :                 // 路由 /dsh/{spaceId}/chat/completions 已对齐。用户填的 baseURL
+1 :                 // 直接是这里的地址,不要在后面再加 /v1。
+1 :                 // OpenCode — sst/opencode 通用终端 AI 编程 Agent，协议 = 标准
+1 :                 // OpenAI Chat Completions（POST /v1/chat/completions），与 CB/dsh 同族。
+1 :                 // proxy 侧 agent-adapters/opencode.ts 已适配 form 回填 + mem: 命令族全套。
+1 :       {/* ===== 新建弹窗：只需设置「过期时间」（可留空＝永不过期），不再需要名称 ===== */}
+1 : /** L0 角色 → 展示分组：user 右侧、system 通栏、其余（assistant/tool/...）左侧。 */
+1 : /** 单条原子记忆的标题行：层级徽章 + 标题 + 时间 + 操作菜单（三点）+ 可选 chevron。
+1 :  *  L1 / L2 / L3 共用。L2 通过 expandable=true 额外渲染 chevron 并把整行做成可点击展开区。
+1 :  *  head 始终展示真实内容（不因加载态变骨架），加载正文时只有下方正文区显示骨架。 */
+1 :   /** L2 为 true：渲染 chevron 展开箭头、整行可点击展开/折叠 */
+1 :   /** 是否已展开（L2：hasBody） */
+1 :         {/* 操作菜单（三个点）置于时间右侧。三个点点击展开，支持编辑 / 复制。
+1 :             L2 的 head 是可点击展开区域，需阻止冒泡避免误触发折叠。 */}
+1 :               /* 展开加载中：chevron 位置显示 spinner，表示正在下载正文 */
+1 :                   // chevron 独立可点：阻止冒泡后自行触发展开/折叠，
+1 :                   // 避免落到相邻三点下拉的 stopPropagation 区域而“没反应”。
+1 :     // 用 div[role=button] 而非 <button>：head 内含 tea Button（真 button），
+1 :     // button 嵌 button 是非法 HTML。loading 时禁用点击。
+1 :     // 未展开（无正文且非加载中）不加 --with-body，故无底部横线；展开或加载中才加。
+1 : /** L1 / L3 原子记忆列表：正文直接展示（无折叠展开）。 */
+1 :   /** 当前层是否受时间筛选影响（仅 L1）：影响空态文案的语境 */
+1 : /** L2 场景记忆列表：正文按需加载、点击标题/chevron 折叠展开（带逐渐展开动画）。 */
+1 :         // 编辑入口（仅 Owner）。L2 需先展开加载正文后才可编辑，避免用空正文覆盖文件。
+1 :         // 复制入口：L2 有正文才可复制（未展开时无正文）。
+1 :           // L2 正文带 META 头，复制时去掉，只给纯正文，与编辑框展示保持一致。
+1 :             {/* L2 正文按需加载、可折叠：外层用 grid 0fr↔1fr 过渡实现逐渐展开/收起动画。
+1 :                 容器常驻 DOM，展开时高度从 0 平滑展开，避免条件渲染导致的瞬时跳变。
+1 :                 加载中同样展开（--open），显示多行骨架条，贴合正文展开后的真实形态。 */}
+1 :   /** 当前层「当前时间窗口内」的总条数（带时间筛选时后端返回的窗口内 total，用于分页） */
+1 :   /** L0 加载更多（追加更早的对话）；未传则不展示加载入口 */
+1 :   /** 详情页时间筛选器（仅 L0 / L1 生效）。start / end 为 ISO8601 字符串 */
+1 :   /** 后端探测到筛选范围过大（VDB 无法支撑）时为 true */
+1 :   /** 是否显示编辑入口（仅资产 Owner 可编辑） */
+1 :   /** 保存单层内容（L1/L2/L3）；未传则不显示编辑入口 */
+1 :   /** 分层语义搜索（L0 = 对话消息，L1 = 原子记忆）；未传则不显示搜索框 */
+1 :   // 分页只针对「当前时间窗口内」的条目：layerTotal 是窗口内总数（父级从 BFF 的
+1 :   // res.total 取），列表数据也是窗口内的，两者一致才不会有「全量总页数翻到空页」。
+1 :   // layerCounts 里的全量总数只用于层徽章计数，不参与分页。
+1 :   // L0 改为「下拉加载更多」交互；L1 / L2 / L3 使用翻页器
+1 :   // 时间筛选仅对按时间存储的 L0 / L1 生效
+1 :   // 上传者展示名（回退 user_id）
+1 :   // ── 编辑（L1/L2/L3）──
+1 :     // L2 正文带 META 头，编辑框只展示纯正文（写回时后端会用现有 META 重建）。
+1 :       // 搜索结果态：hook 的乐观更新只作用于分页列表，这里同步更新搜索结果条目，
+1 :       // 否则搜索视图里刚编辑的那条正文不会刷新。
+1 :   // ── 浏览 / 搜索 模式切换（仅 L0 / L1）──
+1 :   // 浏览：按时间范围翻看记忆（时间倒序，分页 / L0 聊天流）。
+1 :   // 搜索：按内容语义定位记忆（相关度排序）。二者意图不同，用显式模式切换互斥呈现，
+1 :   // 避免「时间筛选器和搜索框并列却互不联动」造成的心智割裂。
+1 :   // ── 分层搜索（L0 对话 / L1 原子记忆，跨 session 语义召回）──
+1 :   // 仅「搜索模式 + 已产生结果」才进入搜索结果视图；浏览模式始终走分页 / 聊天流。
+1 :   // 切块 / 切层时清空搜索态并回到浏览模式，避免把上一个上下文的结果 / 模式带过来
+1 :   // ── L0 滚动容器与锚点 ──
+1 :   // l0HasMore：已加载条数 < 后端总数。初次进入/切换块时滚到底部（最新消息）；
+1 :   // 加载更多（旧消息插入顶部）后保持视口位置不跳动。
+1 :   // 终止条件以「加载更早是否返回新增数据」为准（l0Ended），而非仅比较
+1 :   // 已加载条数 vs 全量总数 —— 时间筛选下全量总数永远大于窗口内条数，
+1 :   // 单靠长度比较会导致按钮一直显示且点击无反应。
+1 :     // 进入 L0 时设锚点滚到底部（最新消息）；离开 L0 也要更新 ref，
+1 :     // 这样从 L1 切回 L0 时 key 不同才会重新触发滚到底部。
+1 :   // 滚到顶部自动触发「加载更早」——避免用户每次都得点按钮。
+1 :   // 用 ref 记录上一次 scrollTop 位置，跨过 atTop 阈值才触发（atTop -> atTop 不重复），
+1 :   // 避免锚点修正引发的链式自动加载。
+1 :             {/* name + id 组合：id 弱化附在名字旁，便于用户识别 ID 化命名的资产 */}
+1 :         {/* 浏览 / 搜索 模式切换 + 模式对应控件（仅 L0 / L1）。
+1 :             浏览：时间范围筛选器；搜索：搜索框。二者互斥，消除「控件在但没用」的误导。 */}
+1 :             {/* 浏览模式：时间范围筛选器（仅 L0 / L1 生效） */}
+1 :       {/* 分层语义搜索：L0 对话 / L1 原子记忆（仅搜索模式显示） */}
+1 :           /* 进入某层时的加载态：按当前 layer 的真实形态给出对应骨架，
+1 :              避免一刀切的灰条切换让用户对接下来会出现什么感到突兀。
+1 :              L0 = IM 聊天气泡；L1/L2/L3 = 原子记忆条目（含展开行）。 */
+1 :               /* L0 聊天流：交替显示 user（右侧）/assistant（左侧）气泡骨架 */
+1 :               /* L3 核心记忆：单条占满，正文多行骨架，贴合 MarkdownView 富文本 */
+1 :               /* 进入 L2：L2 正文按需加载（点 chevron 才下载），未展开时没有正文。
+1 :                  加载态只画标题行 head（徽章 / 标题 / 时间 / 三点 / chevron），
+1 :                  下方不渲染正文骨架，避免误导用户以为马上就有内容。 */
+1 :               /* L1 原子记忆：多条卡片骨架，每条 = 标题头 + 正文 1-2 行 */
+1 :           /* 搜索模式但尚未执行搜索：给出引导，不落到浏览列表（否则模式切换后内容不变会误导）。
+1 :              置于 rangeTooLarge 之前——搜索不受时间范围限制，不应被「范围过大」遮挡。 */
+1 :               /* L0 搜索结果：对话消息样式（角色 + 气泡 + 相关度） */
+1 :               {/* 顶部：加载更早的对话（滚动到顶部自动触发，也可点击）。
+1 :                   加载中 / 还有更多 / 已到底（l0Ended）/ 超过一页 时都保留顶部提示区 */}
+1 :                 {/* 后端按最新对话从上到下返回，聊天视图需要反转为「旧在上、新在下」 */}
+1 :                   // system：居中通栏胶囊提示，不走头像+气泡布局
+1 :             /* L1 搜索结果：原子记忆样式（L0 搜索已在 L0 分支渲染聊天样式） */
+1 :           /* L2 场景记忆：独立组件，正文按需加载 + 折叠展开动画 */
+1 :       {/* 编辑 Modal（L1/L2/L3 通用）：正文用多行输入覆盖写 */}
+1 :  * ChatMemoryPanel — 原子能力 · 记忆。
+1 :  * 本文件只保留渲染与组装；状态/数据逻辑在 useChatMemory，常量与工具在 memory-utils。
+1 :                     {/* 第 1 行：标题（左） + 蓝色计数徽章（右） */}
+1 :                     {/* 第 2 行：资产真实 id，等宽灰色 */}
+1 :                     {/* 第 3 行：用户名（左） + 时间 / 解绑（右）
+1 :                         复用通用 AssetItemBadges + AssetItemTime，与 Skills 页结构一致 */}
+1 :                     {/* 第 4 行：共享/私密切换（仅 owner 可见） */}
+1 : /** 与 docs/api/chat-memory.md §4.10 import 接口对齐 */
+1 :  * CodeSourcesPanel —— Code 资产页主面板（列表视图 + 注册/分配组装）。
+1 :  * 列表视图渲染与组件组装；状态/数据逻辑在 useCodeSources，详情在 CodeDetailView，
+1 :  * Markdown 渲染统一走共享 AssetMarkdown。
+1 :               {/* 注册（新增团队池资产）与 memory/skill 对齐，放右上角 header */}
+1 :           // 已输入内容、非 SSH、但又不是合法 http(s) 地址 → 提示格式错误。
+1 :       {/* Allocate Code-Graph → Agent (固定资产) */}
+1 :  * CodeDetailView —— Code 资产详情视图（仓库信息 / 代码搜索 / 代码探索）。
+1 :  * 数据与回调来自 useCodeSources 返回对象；Markdown 用共享 AssetMarkdown（compact 密度）。
+1 :       {/* 返回面包屑 */}
+1 :       {/* 头部 */}
+1 :       {/* 统计 */}
+1 :       {/* 仓库信息 */}
+1 :       {/* 代码搜索 */}
+1 :       {/* 代码探索 */}
+1 :  * code-ui —— Code 资产页的小型展示组件。
+1 :  * 从 CodeSourcesPanel.tsx 拆出：Owner 标签 / 状态标签。
+1 :  * Owner 展示 —— 复用通用 OwnerLabel（走 user-profile-store 全局缓存，同一 owner 多行共享）。
+1 :  * 抽子组件是 Rules of Hooks 要求（不能在 .map 里循环调 hook）。
+1 : // 状态 → Tea Tag 语义主题映射（soft 变体），对齐 Memory 的 statusTheme。
+1 :  * GuidePage — 使用说明页（路由 /guide）
+1 :  * 两大块：
+1 :  *   1. 快速接入：Proxy 地址（读当前实例）→ Default/Analyse 模式 → API Key，
+1 :  *      Skill / 脚本两种接入方式，另提供「手动配置」逐 IDE 给配置文件与内容；
+1 :  *   2. 最佳实践：团队 Coding / 个人 OPC 两个场景的分步引导。
+1 :  * 底部提供「引导回放」入口：与「我的资料 → 回顾引导」一致，重看首次使用引导。
+1 :  * 手动配置的配置文件路径与内容与 agents/setup-proxy.sh 的 write_* 函数保持一致
+1 :  * （本页为只读展示，不执行写入）。API Key 一律使用占位符，不出现真实密钥。
+1 :   /** i18n key（guide.practice.team.stepN.title 等） */
+1 :   /** label 为 i18n key（复用 menu.* 键） */
+1 : /** 快速接入三步流程（标题/描述均为 i18n key） */
+1 :   '请阅读 ~/agents/skills/setup-proxy/SKILL.md，然后按照里面的步骤引导我完成 Agent 接入 Memory Proxy 的配置。';
+1 : /** 接入地址：{base}/{agent}/{instanceId}(/analyse)，与 Proxy 白名单形态一致。
+1 :  * 注意 Claude Code 的代理路由段是 `claude-code`（见 MemoryProxy whitelist.ts 的
+1 :  * AGENT_PREFIX_RE 与 setup-proxy.sh），而本页 IDE 标识为 `claude`，需归一化。 */
+1 :   /** 生成配置文件内容（占位符，不含真实密钥）。第二个参数为接入地址。 */
+1 :   /** 启动/注意事项（可空） */
+1 :       `# ~/.dsh/settings.yaml\nllm-deepseek:\n  apiKeyEnv: PROXY_USER_KEY\n  # 尾巴不要加 /v1 —— dsh 硬编码 baseURL/chat/completions\n  baseURL: ${proxyEndpoint(base, 'dsh', instanceId, mode)}\n  model: ${model}\n  reasoningEffort: high\n\n# ~/.dsh/.credentials.yaml\nPROXY_USER_KEY: ${KEY_PLACEHOLDER}`,
+1 :   // 快速接入三步曲：下载配置包 → 接入 IDE → 导入历史数据。
+1 :   // 默认定位第 1 步，步骤条引导用户一步步往下走。
+1 :   // 已走过的步骤（用于步骤条"已完成"态，让用户知道进度）
+1 :   /** 引导回放：与「我的资料 → 回顾引导」完全一致 —— 清标记 + 由 ConsoleLayout 重新弹出 */
+1 :       // ConsoleLayout 监听该事件后 setOnboardingVisible(true)
+1 :           {/* 三步流程步骤条：下载配置包 → 接入 IDE → 导入历史数据 */}
+1 :           {/* 第 1 步：下载配置包 */}
+1 :               {/* 使用根相对路径而非绝对路径：HashRouter 下绝对路径会被解析为路由
+1 :                   跳到 /downloads/... 而不是触发文件下载。
+1 :                   加 ?v= 版本参数强制浏览器绕过缓存下载最新 ZIP，避免下载到修复前的旧包 */}
+1 :           {/* 第 2 步：接入 IDE */}
+1 :                         // Analyse 需要手动配置接入地址（脚本/Skill 只会写 Default 地址），
+1 :                         // 选中时自动展开手动配置区，避免用户"选完不知道去哪配"。
+1 :           {/* 第 3 步：导入历史数据 */}
+1 :           {/* 步骤导航：上一步 / 下一步，明确引导用户按序走完三步 */}
+1 :       {/* 底部：前端引导回放 */}
+1 :  * AdminResourceLock — Admin 账号访问资源管理时的锁定提示。
+1 :  * 用 Tea `Card` + `Icon` 承载空态提示。
+1 :  * AssetScopeManager — 统一的「资产可配置范围」管理视图。
+1 : /** Owner 标签：显示 display_name（未命中回退 id），title 保留 user_id。抽子组件因 .map 内不能调 hook。 */
+1 :  * 资源管理页面通用壳 — Wiki / Code / Skills / Memory 共用
+1 :  * admin 与 member 均正常显示内容
+1 :  * 外层由 ConsoleLayout 的 Content.Body 包裹，这里作为直接子节点。
+1 :  * ForkSkillDialog — "复制一份 skill 给某个 agent，且该副本可被该 agent 编辑"。
+1 :  * 与「授权（asset visibility=team + acl/grant）」的区别：
+1 :  *   - 授权 → 通过\"我的资产分配\"tab 切共享或 acl/grant，不复制内容，其他人
+1 :  *     拿到的是对同一份 skill 的读/使用权限；
+1 :  *   - fork（本对话框）→ 拉源 skill 的 SKILL.md，**沿用原名 + 目标 agent 为 owner**
+1 :  *     调用 skill-api.createSkill 落一份独立副本，之后该 agent 可写。
+1 :  * 命名约定：副本**沿用源 skill 原名**，不加后缀。skill 唯一约束基于
+1 :  * (team_id, owner_agent_id, name)：同一 team 允许多个同名副本（分属不同 agent），
+1 :  * 但目标 agent 下若已存在同名 skill，后端会拒绝（42201），此处提前拦截并提示。
+1 :  * 实现：走「getSkill(源) → readSkillFile(附件们) → createSkill(新)」三步。
+1 :  * 改写 SKILL.md frontmatter 里的 name 字段，保证 DB 记录名与文件内容一致。
+1 :  * 仅替换第一个 `--- ... ---` frontmatter 块内的 `name:` 行；无 frontmatter 则原样返回。
+1 :   if (!/^\s*name\s*:/m.test(fmBody)) return content; // 无 name 字段，不强行插入
+1 :   /** 要 fork 的源 skill 名 */
+1 :   /** v3 API 需要的 skill_id */
+1 :   /** 当前 team ID（v3 API 必传） */
+1 :   // 副本名默认沿用源 skill 原名，用户可编辑。唯一约束靠 owner_agent_id 区分，
+1 :   // 同一 agent 下不允许重名（后端 42201），下方 submit 会提前拦截。
+1 :       // Step 1: 拉源 skill 详情（含 content + manifest）。
+1 :       // Step 2: 防御性检查 —— 目标 agent 下已存在同名 skill 则提前拦截，避免后端 42201。
+1 :       // Step 3: 复制附属资源文件（逐个 readSkillFile；单个失败跳过，不阻断主流程）。
+1 :           /* 单个资源读取失败则跳过，不阻断 fork 主流程 */
+1 :       // Step 4: 以（可编辑的）副本名 + 目标 agent 为 owner 创建 skill（v3 API）。
+1 :       // 若用户改了名，同步改写 SKILL.md frontmatter 的 name 字段，保持 DB 与文件一致。
+1 :  * ImportSkillDialog — 导入 Skill 弹窗。仅支持两种导入方式：
+1 :  *   1. 目录导入（directory）
+1 :  *      用户选一个本地目录，前端把里面的 File 拆成「主文件」（SKILL.md，
+1 :  *      必须在根目录或 <skill-name>/ 下）和「资源文件」（其他文件，保留
+1 :  *      相对路径）。走 v3 create 一次性落库（含资源，新建即 v1）。
+1 :  *      浏览器目录选择无 Tea 组件等价物，保留原生 <input type="file"
+1 :  *      webkitdirectory>，隐藏后由 Tea Button 触发。
+1 :  *   2. 对话导入（session）
+1 :  *      用户粘贴一段与该 agent 的对话（skill/extract 接口入参 JSON，
+1 :  *      含 messages 数组）。前端只做 JSON 校验 + 用当前上下文 ID 覆盖
+1 :  *      身份字段，然后调 extractSkills。服务端 LLM 从对话里自动归纳
+1 :  *      skill 的 name / description / content，通过工具调用直接落库
+1 :  *      （走 SkillCore.create/update 同一条链路），不经过审核。
+1 :  *      支持 sync（直接返回结果）和 async（返回 task_id 即视为已受理，
+1 :  *      提示用户预计出结果时间后关闭弹窗，不在前端阻塞轮询 —— 结果会异步
+1 :  *      沉淀到该 agent 的 skill 列表，用户后续手动刷新即可看到）。
+1 :  * 移除说明：原有的「粘贴 SKILL.md 文本」模式已下线 —— 目录导入已覆盖
+1 :  * 该场景，且用户手写 frontmatter 极易踩坑（name/description 缺失、
+1 :  * YAML 语法错），改由目录导入引导用户放好 SKILL.md 更稳。
+1 :   /** 当前激活 team（skill 归属，create 必填） */
+1 :   // session-import：用户粘贴 skill/extract 接口入参（含 messages 数组）。
+1 :   // 服务端 LLM 从 messages 自行归纳 skill 的 name / description / content。
+1 :       // ==== 对话导入：直接调 skill/extract ====
+1 :         // 后端 extract 接口限制 messages 最多 500 条（见 iWiki §3.13），
+1 :         // 组装 extract 入参。身份字段（user_id/team_id/agent_id）强制用当前 UI
+1 :         // 上下文覆盖，避免用户粘错 team / 伪造他人身份 —— 参见 <security_rules> §3。
+1 :         // space_id 不需要显式传：跟其他 skill 接口一致, 后端从 X-Tdai-Service-Id
+1 :         // header (= panelSession.instanceId) 取。session_id / task_id 也不传,
+1 :         // 让后端生成 —— 避免前端硬编码 "default" / "import-${Date.now()}" 污染归档路径。
+1 :         // extract 接口本身不接受 name/description 字段（skill 名和描述由 LLM
+1 :         // 从 messages 中自行归纳），JSON 中即便带了这两个字段也不会透传给服务端。
+1 :         // 后端 extract 恒走 archive → agent 队列 → worker 异步链路,
+1 :         // 永远返回 task_id (没有 sync candidates 分支了)。前端拿到 task_id 即
+1 :         // 视为"已受理"，提示预计出结果时间后关闭弹窗；结果由 SkillCoreSink 异步
+1 :         // 写入 skill 表，用户回列表刷新即可看到。
+1 :         // 前端软超时兜底（5s）：archive 链路涉及 COS 顺序读写（读 _tasks.json →
+1 :         // 写 data-xxx.jsonl → 写 _tasks.json），当 COS 慢时整体耗时容易超过
+1 :         // Panel 后端 15s 硬超时（KERNEL_TIMEOUT/504），从而在 UI 上误报失败。
+1 :         // 实际上请求已经在服务端排入队列，后端会继续跑完 archive。因此这里
+1 :         // 5s 内后端有响应就按真结果走；5s 到点还没回就直接展示"已受理"文案，
+1 :         // 不再阻塞用户 —— 后端调用在浏览器 fetch 层继续跑（不 abort），最坏
+1 :         // 情况是 15s 后 Panel 回 504，我们的 catch 静默吞掉（用户已经看到成功了）。
+1 :           // 如果已经软超时展示了成功文案，这里就静默吞掉后续错误（504 等）。
+1 :           // extractPromise 被软超时后 catch 成 null 的分支（正常不会走到这里，
+1 :           // 因为软超时已经先设过 result 了），兜底保持一致文案。
+1 :       // ==== 目录导入：走 v3 create + files/write ====
+1 :       // 确保 content 以 `---\n` 开头（v3 frontmatter 格式要求）。
+1 :       // 资源文件随 create 一次性落库（单版本 v1）。
+1 :       // 修复：原实现是 create(resources=[] → v1) + files/write(→ v2) 两步，
+1 :       // 导致任何带资源的导入 skill 一落库就是 v2（version 语义错乱）。
+1 :       // v3 create 本身支持 resources 数组，合并为一次调用即可保证新建 skill = v1。
+1 :         agent_id: agentId || props.userId, // v3 要求 agent_id，固定模式用选中的，否则用 userId 兜底
+1 :   // 是否需要在弹窗内显示「归属 Agent」选择器：
+1 :   //   - 仅 fixed-target 才有 agent 归属概念
+1 :   //   - 必须传了 agents 才能渲染下拉
+1 :       {/* 归属 Agent —— 必选项。始终展示在导入方式上方，
+1 :           与 ChatMemoryPanel.ImportBlockDialog 一致：即便外层已经传了 agentId
+1 :           也允许在弹窗里重选。 */}
+1 :       {/* Mode tabs：只保留 directory（目录导入）/ session（对话导入）两种 */}
+1 :             目录选择无 Tea 组件等价物，此处保留原生 input 作为唯一豁免，隐藏后由下方
+1 :             Tea Button 触发点击。webkitdirectory/directory 是非标准但广泛支持的浏览器
+1 :             属性，React 类型定义未收录，用 spread + any 透传而非逐属性 @ts-expect-error。
+1 :  * SkillDetailPane — SkillsPanel 右栏，展示单条 skill 的 frontmatter、正文
+1 :  * Markdown 与资源文件树；owner 还可在此就地编辑。
+1 :  * 编辑能力（仅 canEdit=owner 时开放，写操作均带 expected_version 乐观锁）：
+1 :  *   - 正文：编辑完整 SKILL.md（updateSkill）
+1 :  *   - 资源文件：新建 / 编辑 / 删除（writeSkillFiles / removeSkillFiles）
+1 :  *   - 版本历史：按需加载并只读查看任一历史版本（listSkillVersions + getSkill@version）
+1 :  * 任一写操作成功后 version 会 +1，因此统一 reload() 重新拉取详情并通知父组件刷新列表，
+1 :  * 保证下一次编辑携带的 expected_version 是最新值。
+1 :   // 缩进靠嵌套 ul 的固定 padding（见 css），不在 li 上写动态内联 style。
+1 :   /** 当前选中的 skill_id —— 权威选中标识，直接来自 selectedSkillId（独立 state），
+1 :    *  不经过列表派生，因此不受 agent/skill 列表加载或刷新时序影响。 */
+1 :   /** 列表里已知的 skill 名（作标题）；列表未加载完时可能暂为 null，详情返回后用 view.name 兜底 */
+1 :   /** 当前 team（写操作入参）；缺省时回退到详情里的 team_id */
+1 :   /** 当前登录用户 id（写操作入参 user_id） */
+1 :   /** 当前用户是否可编辑该 skill（owner）；false 时全部编辑入口隐藏 */
+1 :   /** 编辑成功后回调父组件刷新列表（版本/时间变化） */
+1 :   // 初始为 true：有 skillId 时首帧就处于「加载中」，避免首次进入先闪一帧空白再变加载态
+1 :   // 正文编辑态
+1 :   // 文件编辑态（在预览 Modal 内）
+1 :   // 新建文件 Modal
+1 :   // 版本历史
+1 :   // 历史版本查看 Modal 内的文件预览
+1 :     // 切换 skill 时重置所有编辑/版本态，避免残留上一条的草稿
+1 :   // view 的清空发生在切换时，渲染期先按 skill_id 校验归属：不属于当前 skillId 就
+1 :   // 视为「尚未加载」，避免切换时闪一帧上一个 skill 的正文 / 描述。
+1 :   // 写操作统一入参：team_id 优先用 props，回退详情；agent_id = owner_agent_id
+1 :   // 写成功后：重新拉详情拿最新 version，并通知父组件刷新列表
+1 :   // ── 正文编辑 ──
+1 :   // ── 文件编辑（预览 Modal 内）──
+1 :   // ── 新建文件 ──
+1 :   // ── 版本历史 ──
+1 :   // 历史版本查看 Modal 内的文件预览（只读，按 version 读取历史文件内容）
+1 :         {/* 固定悬浮头部：skill 名 + 描述 + 操作栏（不随内容滚动，避免用户滑很久才点到功能） */}
+1 :               {/* skill_id（= asset_id）：给出可复制的资产标识，便于对接 API /
+1 :                   排查问题时引用。用 skillId（权威选中值）而非 currentView，
+1 :                   详情还在加载时也能立即显示。 */}
+1 :         {/* 滚动内容区。刷新中（编辑/新建保存后 reload，此时 currentView 仍在）
+1 :             叠加半透明遮罩 + loading，给出明确的加载反馈；首次加载（无 currentView）则显示纯 loading 文字。 */}
+1 :               {/* Body（可编辑完整 SKILL.md，编辑入口在顶部固定操作栏） */}
+1 :         {/* 附属资源固定在底部：中间正文可滚动，附属资源始终可见，无需滑到底部查找。
+1 :             新建入口在顶部固定操作栏。 */}
+1 :       {/* Inline file-preview modal（支持编辑 / 删除） */}
+1 :       {/* 新建文件 Modal */}
+1 :       {/* 版本历史列表 Modal */}
+1 :       {/* 历史版本查看 Modal（只读：正文 + 附属资源） */}
+1 :                 {/* 该历史版本的附属资源（只读） */}
+1 :       {/* 历史版本文件预览 Modal（只读） */}
+1 : /** 从 SKILL.md 中提取正文（去掉 YAML frontmatter） */
+1 :  * Tab 语义：
+1 :  *   - team   ＝ 当前 team 内所有 agent 的固定资产并集（按 name 去重）；
+1 :  *              用户视角是"团队拥有的所有 skill"，数据上去掉了独立的「浮动池」概念。
+1 :  *   - fixed  ＝ 单个 agent 的固定资产（按 agent_id 隔离）。
+1 :  * 写操作：
+1 :  *   - 导入  → 仅在 fixed tab 下可用，落到当前选中的 agent。
+1 :  *   - 分配  → team tab 下选中一条 skill 后可用。后端走 team_to_agent 引用，
+1 :  *            被分配的 agent 拿到的是「只读」副本（共享 SKILL.md，编辑会动到团队版）。
+1 :  *   - Fork → team tab 下选中一条 skill 后可用。前端拼装 `fetchSkillFull → importSkill`，
+1 :  *            以 `<原名>-fork-<agentId>` 落新副本，agent 拿到的是独立可写副本。
+1 :  * 权限模型：
+1 :  *   - admin 用户：全部可见 + 全部可操作
+1 :  *   - skill owner：可编辑自己的 skill；可选择是否让其他人可见
+1 :  *   - 其他人：只能看到 owner 设为可见的 skill（可见 = 可复制 + 只读使用）
+1 :       {/* 固定资产的 Agent 选择器与 Code 页 "Agent 资产" 选项栏保持相同呈现。 */}
+1 :       {/* === 团队资产 / 固定资产 Tab === */}
+1 :                   {/* 第 2 行：资产真实 id，等宽灰色（与 ChatMemory 页同构） */}
+1 :                   {/* 共享/私密切换：原「个人资产」tab 的能力，迁到「Agent 资产」tab，
+1 :                       仅 owner 可切；owner 视角 getAssets 已关闭 visibility 过滤，
+1 :                       private skill 也能拿到 vis。即便 vis 偶发缺失也按 private 兜底渲染，
+1 :                       避免 skill 被切成 private 后切换按钮消失、无法再切回 team。 */}
+1 :             // 传原始 selectedSkillId（独立 state）而非 selectedSkill?.skill_id（列表派生）：
+1 :             // 选中即有值，不受 agent/skill 列表加载或刷新时序影响，避免详情面板先闪空态再变加载态。
+1 :             // 编辑权限与删除一致：仅 skill 的 owner（owner_user_id === 当前用户）可编辑
+1 :         // 导入弹窗在 team / fixed 两个 tab 都能打开。
+1 :         // target 始终是 fixed —— 所有 skill 都归属于某个具体 agent。
+1 :         // agentId 仅在 fixed tab 下作为默认归属带入；team tab 下传 undefined，
+1 :         // 由弹窗内的「归属 Agent（必选）」下拉自行兜底选第一个。
+1 :             // skill 建成功后，内核数据面 onSkillCreated 钩子会自动登记 asset
+1 :             // + 绑定为 owner agent 的 fixed-asset（visibility 默认 private）。
+1 :             // 前端不再需要额外调 localStorage 存"我的资产"—— 数据源已经是真后端。
+1 :           // Fork 弹窗的 skillId/skillName 来源：selectedSkill（列表来自 asset/list-accessible）
+1 :                 // fork 出的新副本以 `<原名>-fork-<agentId>` 落库，会作为新条目出现
+1 : // Sigma 的 Canvas 绘制不能直接解析 CSS var()，因此在组件渲染时读取 Tea Token 的计算值。
+1 : // 这避免模块加载早于 Tea 主题 CSS 时取得空值，并会在主题属性变更后刷新画布调色板。
+1 :           // 连接线颜色走 Tea 次级边框 Token，权重仅影响线宽。
+1 :   // 极细网格背景 + 白底，营造"高科技画布"感（CSS grid pattern）
+1 :  * WikiSourcesPanel —— Wiki 资产页主面板（列表视图 + 详情/创建/分配组装）。
+1 :  * 列表视图渲染与组件组装；状态/数据逻辑在 useWikiSources，详情在 WikiDetailView，
+1 :  * 展示小组件 / 常量工具 / 共享 Markdown 分别独立收口。
+1 :           // 创建（新增团队池资产）与 memory/skill 对齐，放右上角 header；
+1 :           // 仅「团队资产」tab 开放，固定资产 tab 只做绑定/查看。
+1 :       {/* Allocate Wiki → Agent (固定资产) */}
+1 :  * wiki-detail-components —— Wiki 详情页的展示子组件。
+1 :  * 从 WikiSourcesPanel.tsx 尾部拆出（WikiActions / ResizeHandle /
+1 :  * 均为纯展示组件，数据与回调由外层注入，不含业务状态。
+1 :   /** 当前这条 wiki 自身是否处于 ingest（pending / processing）状态 */
+1 : // Raw Files Section — 原始文档列表，默认展开
+1 :   // refreshKey 变化（如上传成功后）时强制重载原始文档列表，无需用户手动刷新。
+1 :   // 加载中显示占位提示，避免请求期间直接渲染空态（return null）导致用户无感知。
+1 :  * WikiDetailView —— Wiki 详情视图（概览 / 图谱 / 页面 / 搜索 四个 Tab + 添加文档 Modal）。
+1 :  * 全部数据与回调来自 useWikiSources 的返回对象，组件只做渲染。
+1 :   // 选中 Wiki 已不存在（被删除或刷新失败）时给出可返回的空态，避免死胡同
+1 :                 // accept 属性只是浏览器建议，用户可在选择器切换"所有文件"绕过，
+1 :                 // 这里做二次校验，与拖拽入口一致，避免二进制文件被读成乱码上传。
+1 :  * wiki-ui —— Wiki 资产页的小型展示组件。
+1 :  * 从 WikiSourcesPanel.tsx 拆出：状态徽章 / Owner 标签 / 懒加载知识图谱容器。
+1 :  * Owner 展示 —— 复用通用 OwnerLabel（显示用户名而非 user_id）。
+1 :  * useUserDisplayName 内部有全局缓存 + 只在首次 miss 时发 usersApi.get，
+1 :  * 同一 user_id 多行共享同一份缓存，扩展性 O(distinct user 数)，不是 O(行数)。
+1 :  * 抽子组件是因为 Rules of Hooks —— 不能在 .map 里循环调 hook。
+1 : // 导出类型供外层复用，避免 import 类型路径散落
+1 :  * BoardView —— 工作台任务卡片网格 + 详情抽屉。
+1 :   // 参与者 tooltip 展示 display_name 而非 user_id（与抽屉详情 UserChip 同一缓存）
+1 :   // 后端分页：useTasks 已只返回当前页数据，不需要前端切片
+1 :       {/* 头部：复用 members / agents 的 Section 通用头部（标题 + 计数 Tag + 副标题 + 右侧操作） */}
+1 :         // 首屏加载骨架屏：6 个占位卡片 + shimmer 动画
+1 :                 {/* 标题行：状态 pill + 标题 + 箭头 */}
+1 :                 {/* 描述 */}
+1 :                 {/* 元信息行：参与者 · Agent · 时间 */}
+1 :       {/* 分页：超过 1 页才展示 */}
+1 :       {/* 详情抽屉：设置（状态 / 编辑 / 删除）都在抽屉内完成 */}
+1 :  * TaskCreateDialog — 「新建 Task」弹窗。
+1 :  * 必填字段（前端校验）：
+1 :  *   - title         任务标题
+1 :  *   - description   任务描述
+1 :  * 关于 team 归属：
+1 :  *   不再让用户在 dialog 里选 team。team 由右上角全局 TeamSwitcher 决定，
+1 :  *   这里只 readonly 展示「将创建到 team：name (team_id)」，避免出现「右上角是 A
+1 :  *   但弹窗里默认选了 B、用户没注意一切就走偏」的两套上下文不一致问题。
+1 :  * 不再在创建时选 Agent — 关联 Agent 放到 task 创建之后再做。
+1 :  * TaskDetail —— 工作台任务详情（编辑标题/描述、切换状态、查看参与者、删除）。
+1 :  * 参与者 chip：可见文本显示 display_name（缓存未命中先回退 id），
+1 :  * title 保留语义 tooltip + user_id 供排查。
+1 :  * 抽子组件是 Rules of Hooks 要求（不能在 .map 里循环调 useUserDisplayName）。
+1 :   /** 删除当前 task（权限校验与二次确认由外层统一处理） */
+1 :   /** 当前 task 所属 team — 可能为 null（理论上不会，但 team 被删除场景需兜底） */
+1 :   /** 从 useTeamParticipation 分桶后传下来的当前 task 观测数据 */
+1 :   // 编辑权限：team 内任意 member 可改 task（含切换 status）。
+1 :   // —— 编辑态：只在用户点「编辑」后才进入；草稿独立维护，取消即丢弃 —— //
+1 :   // 切换 task / 退出编辑时同步草稿（避免编辑 A 后切换到 B 草稿还停在 A）
+1 :   // 参与者展示：creator 单列独立；其余进 "参与的 User"。
+1 :   // 数据源统一走 participation-log 观测 —— proxy session init 完成时 append 的
+1 :   // "实际起过 session 的 user"。creator 用自己的 agent 开工也算一次真实参与，
+1 :   // 所以不再过滤 creator（会同时出现在"创建者"和"参与的 User"两处，语义不同）。
+1 :   // 「实际参与 Agent」：session 观测到的 agent，映射到 team 的 agent name；
+1 :   // 未在 team agents 列表里的（比如已被删除）保留 agent_id 兜底展示。
+1 :       {/* === 工具行：编辑 + 状态切换（标题 / task_id / team 已在抽屉头部展示） === */}
+1 :       {/* === 参与者 === */}
+1 :       {/* === 描述 === */}
+1 :       {/* === 危险操作 === */}
+1 :  * TaskWorkbench — 用户工作台。
+1 :  * 收敛到两件事：
+1 :  *   1. 列出/创建/管理本团队下的 task；
+1 :  *   2. 通过 log tab 看 task 历史记录。
+1 :  * 布局：进入页面为全宽卡片网格；点击卡片拉出 Drawer，在抽屉内查看详情与设置
+1 :  * （改状态、编辑标题/描述、删除）。
+1 :  * 数据走后端链路 A（services/backendStore.ts，内部调用 @/lib/teamApi 的 meta 接口）。
+1 :   /** 当前激活的 team id（可空：未选时只显示 empty state） */
+1 :   /** 当前用户名（task 的 creator_user_id） */
+1 :   /** 当前 team 下可关联的 Agent 列表（来自 TeamManagementPanel 的同源数据） */
+1 :   /** 是否为全局 admin（保留接口兼容；admin 不再有 task 特权） */
+1 :   // 后端分页：useTasks 根据 page + pageSize 调 Panel 聚合接口，内核只返回当前页
+1 :   // 切换 team 时重置到第 1 页
+1 :    * 创建 task：team_id 完全由当前激活 team 决定，不再让 dialog 选 team
+1 :    * （切 team 的唯一入口在右上角全局 TeamSwitcher）。
+1 :     // 谁点击「创建 Task」，谁就是 creator_user_id。
+1 :           {/* 当前 team 概览（与 team 管理页同一组件） */}
+1 :             // 权限：删除 task 仅创建者 / team admin / 全局 admin
+1 :             // 权限：编辑 task（含切换 status）允许 team 内任意 member / admin
+1 :         // team 由右上角全局 TeamSwitcher 决定，dialog 里不再让用户选；
+1 :         // 这里 activeTeam 必为非空，因为上面 !activeTeamId 分支已经走 EmptyTeam 了
+1 :  * 路由表定义
+1 :  * 使用 react-router 的 createBrowserRouter / RouterProvider。
+1 :  * ConsoleLayout 作为父路由，各页面作为子路由。
+1 :  * 使用 HashRouter — 保持与旧版 hash 路由兼容，
+1 :  * 避免刷新 404（静态部署不需要服务端 fallback 配置）。
+1 :  * account-store.ts — 演示阶段的本地账号表（本地 localStorage）。
+1 :  * email → { username, password, isAdmin } 的本地账号体系，供旧版
+1 :  * 用户名密码登录使用。链路 A（新面板 Control）已切换到 user_key 鉴权，
+1 :  * 这套账号体系仅作历史兼容保留（`addTeamMember` 的 requireAccount 校验
+1 :  * 仍会用到 findAccountByUsername）。
+1 :  * 后端上线后替换成真正的用户中心 API 即可。
+1 :  * 生成 12 位随机密码，用作 mock 创建账号时的 fallback（用户未显式填时使用）。
+1 :  * 只是 demo 用途，不承载真实凭证 —— 但避免硬编码 `123123` 弱口令入 bundle。
+1 :   // 空种子：不再硬编码任何真实用户名/密码。
+1 :   // 历史上这里列过 6 个内部员工英文名 + 弱口令 `123123`（会 bundle 进前端 JS，
+1 :   // 客户拿到镜像开 devtools 就能看到 → 员工身份泄漏）。remote 上一版改成
+1 :   // alice/bob 等通用假名但仍保留 `123123`，本版继续彻底空 —— 用户按需自建。
+1 :   // 链路 A 已切 user_key 鉴权，本 mock 只服务 `addTeamMember` 的 findAccountByUsername。
+1 :       // 首次使用：把硬编码的种子账号写入 localStorage
+1 : /** 用邮箱查账号（不区分大小写） */
+1 : /** 用 username 查账号 */
+1 : /** 校验邮箱 + 密码登录 */
+1 : /** 创建单个账号（admin 专有权限，权限校验在 UI 层）。
+1 :  *  用户名允许重复，邮箱全局唯一。 */
+1 :     // fallback 随机密码 —— 避免硬编码弱口令；未来切真用户中心可去掉
+1 : /** 批量创建账号 */
+1 : /** 修改密码 */
+1 :  * Admin 直接设置任意用户的密码（不需要旧密码）。
+1 :  * 权限校验在 UI 层（仅 admin 可调用）。
+1 : /** 修改用户邮箱（admin 专有权限，权限校验在 UI 层） */
+1 :   // 检查邮箱是否已被其他人使用
+1 : /** 获取所有账号列表（admin 可见全部，普通用户只能看自己） */
+1 :  * agent-template-store.ts — Agent 新建模板（本地 localStorage）。
+1 :  * 从原 demoStore.ts 中抽出（独立职责：与 team/agent/task 本体无关，只服务
+1 :  * "新建 agent 时一键预填表单"这个辅助功能）。
+1 :  * 模板分两类：
+1 :  *   - 内置模板（builtin=true）：随产品发布，不可删除，覆盖几种常见角色。
+1 :  *   - 自定义模板（builtin=false）：用户在新建弹窗里「保存为模板」生成，
+1 :  *     存 localStorage，可删。
+1 :  * 后端上线后这层换成 GET/POST/DELETE /agent-templates 即可，UI 不用改。
+1 :   /** 模板名（展示用，必填） */
+1 :   /** 模板说明（选填，给使用者看的一句话） */
+1 :   /** 内置模板不可删除 */
+1 :   // ===== 预填到新建表单的字段（均为 agent 字段，不含 name —— name 由用户自己填）=====
+1 : /** 内置模板 —— 不落库，每次读取时与自定义模板合并返回。 */
+1 : /** 读取全部模板（内置在前，自定义在后，按创建时间倒序）。 */
+1 : /** 保存一个自定义模板（builtin 恒为 false）。 */
+1 : /** 删除一个自定义模板；内置模板不可删（静默忽略）。 */
+1 :  * asset-scope-store.ts — 资产「可配置范围」统一覆盖层（本地 localStorage）。
+1 :  * 从原 demoStore.ts 中抽出（独立职责：与 team/agent/task 本体的持久化方式
+1 :  * 无关，是叠加在 5 类资产之上的一层通用产品语义）。
+1 :  * 需求：每个 owner 可以管理「自己的资产」，选择该资产是
+1 :  *   - team    团队内可配置：team 成员都能配置 / 编辑这条资产
+1 :  *   - private 仅自己私有：只有 owner（+ team admin / 全局 admin）能配置 / 编辑
+1 :  * 这一层覆盖全部 5 类资产（agent / skill / code / wiki / memory）。不同资产的
+1 :  * 底层数据来源不同（backendStore / mock / 后端 knowledgeApi），但「可配置范围」
+1 :  * 这件事是统一的产品语义，所以单独抽一个轻量覆盖层：按 `${kind}:${asset_id}`
+1 :  * 存一条记录，与资产本体解耦。后端上线后换成一张 asset_acl 表即可，UI 不用改。
+1 :   /** 该资产的 owner —— 谁有权改它的可配置范围。无归属资产首次设置者成为 owner。 */
+1 :  * 读取某条资产的可配置范围。
+1 :  * 未显式设置过的资产，默认 `team`（团队内可配置）—— 与现状（团队池共享）一致，
+1 :  * owner 回退到资产本体自带的 owner（fallbackOwner）。
+1 :  * 设置某条资产的可配置范围。
+1 :  * owner 一旦确定就固定（取已有记录 → 资产自带 owner → 当前操作者）。
+1 :  * 调用方应先用 canManageAssetScope 做 UI 拦截；这里不重复鉴权（演示阶段）。
+1 :  * 谁能改一条资产的可配置范围：
+1 :  *   - 全局 admin / team admin → 可改（治理需要）
+1 :  *   - owner 本人 → 可改（"管理自己的资产"）
+1 :  *   - 无归属资产（ownerUserId 为空，如后端 Code/Wiki 没有 owner 概念）
+1 :  *     → 任意 team 成员可设置，首次设置者成为 owner
+1 :   // 全局 admin 不再自动获得资产管理特权，与普通 member 一致：
+1 :   // 只有 owner 本人或 team admin 能改资产的可配置范围。
+1 :   // 保留 isAdmin 参数仅为兼容已有调用方签名（未来清理时可去掉）。
+1 :  * 订阅资产可配置范围覆盖层的变化。
+1 :  * 组件用它在 setAssetConfigScope 后自动重渲染（返回值是递增 tick，仅用于触发刷新）。
+1 :  * backendStore.ts — Team / Agent / Task 的后端数据层（链路 A）。
+1 :  * 取代原来 demoStore.ts 里 team/agent/task 相关的 localStorage 实现：
+1 :  *   - Team    走 teamApi.teamsApi + teamApi.membersApi
+1 :  *   - Agent   走 teamApi.agentsApi
+1 :  *   - Task    走 teamApi.tasksApi
+1 :  * 后端 schema 里没有的 UI 专属字段（icon / accent / role_prompt / rules_prompt /
+1 :  * skills / code_graphs / llm_wikis / chat_memories / task.participants 等）
+1 :  * 统一序列化进 agent.metadata_json / task.metadata_json 的 "ui" namespace，
+1 :  * 保证刷新页面后这些字段不丢 —— 等对应的资产/字段在后端落地后，把
+1 :  * readXxxUiMeta / writeXxxUiMeta 里的读写目标换成真字段即可，组件层不用改。
+1 :  * 缓存策略：
+1 :  *   - 模块级缓存 + in-flight promise 去重：同一时刻多个 useTeams()/useAgents() 只发一次请求；
+1 :  *   - invalidateBackendCache()：所有写操作后调用，清缓存并广播 BACKEND_REFRESH_EVENT；
+1 :  *   - useTeams/useAgents/useTasks 监听该事件自动重新拉取。
+1 : // ========================= Types（前端展示形状，尽量贴近旧 demoStore，减少调用方改动） =========================
+1 :   /** 后端 metadata_json 透传（写回时需要在旧值基础上 merge，而不是整体覆盖） */
+1 : // ========================= metadata_json 兜底读写（"ui" namespace） =========================
+1 : /** 把 ui 专属字段 merge 写回 metadata_json（保留其它 namespace，如 chat_memory）。 */
+1 :       /* 旧值不合法直接丢 */
+1 : // ========================= Adapters（export 供 stores/backend.ts 使用） =========================
+1 :   // prompt 回退：当 metadata_json 不含 ui.role_prompt 时（agent 可能通过后端 API 直接创建，
+1 :   // 而非前端 UI），从后端 prompt 字段回退。prompt 是 role+rules 合在一起的完整文本，
+1 :   // 没有 ui 拆分时整体放到 role_prompt，rules_prompt 保持空。
+1 :     // 资产绑定不再从 metadata_json.ui 读（.ui 已废弃为资产存储）。
+1 :     // 真实绑定读 skill 表 owner_agent_id / agent-fixed-asset 表：
+1 :     // list 计数走 agent-overview/bootstrap.counts，详情弹窗走 skillApi.listByAgent
+1 :     // + knowledgeApi.agentFixed + chatMemoryApi.agentFixed。这些字段保留仅为类型兼容。
+1 : // ========================= Active team id（客户端 UI 状态，localStorage 持久化） =========================
+1 : /** teams 加载完成后确保 activeTeamId 指向一个有效 team（否则选第一个 / 清空）。 */
+1 : // ========================= Hooks & cache（已迁移到 stores/backend.ts） =========================
+1 : // 旧的模块级变量（_cachedTeams / _cachedAgentsMap / _inflightTeams …）已全部
+1 : // 迁移到 zustand store（stores/backend.ts），通过 useTeams / useAgents / useTasks
+1 : // 从 store 读数据 + 触发 fetch，多个组件共享同一份状态，不再重复请求。
+1 : // invalidateBackendCache / clearBackendCache 也由新 store 提供，这里 re-export
+1 : // 保持调用方无需改 import 路径。
+1 :   // team owner 如果不在 members 列表里（后端 owner 不一定出现在 members 数组中），
+1 :   // 默认按 'member' 处理——owner 在 team 内能管理资源，应能看到资源页。
+1 :   // 不返回 'admin' 是因为 useCurrentRole 返回的 'admin' 语义是"全局 admin"（看不到资源页），
+1 :   // team owner 不是全局 admin，不应被 AdminResourceLock 锁住。
+1 :   // admin 不再拥有全局特权，与 member 一致：只能操作自己 owner 的资产。
+1 : // ========================= Task mutations（async，包一层 diff/参与者逻辑） =========================
+1 :     // 参与者留痕：读一次当前 task 详情，把 actor 并入 participants 再写回 metadata_json
+1 :     } catch { /* 参与者留痕失败不阻断状态切换 */ }
+1 :  * services/index.ts — 领域服务门面
+1 :  * 组件统一从 @/services 导入。
+1 :  * Team / Agent / Task 已切换到后端链路 A（services/backendStore.ts，
+1 :  * 内部调用 @/lib/teamApi 的 meta 接口）；
+1 :  * 其余（accounts / user profile / api key / asset scope / user asset / agent template）
+1 :  * 后端暂无对应能力，仍走本地 localStorage 演示层（按职责拆分到独立文件），后续逐个替换。
+1 : // ===== Team / Agent / Task service（链路 A，后端持久化）=====
+1 : // ===== API Key service（链路 A 辅助 REST，见 @/lib/teamApi 的 userKeysApi，ApiKeyPanel 直接调用）=====
+1 : // ===== Permission helpers（全局 admin 判断，纯前端 auth state 实现，无后端概念）=====
+1 :  * permissions.ts — 全局权限判断的唯一权威实现。
+1 :  * 从原 demoStore.ts 中抽出。isGlobalAdmin 是全站唯一的"全局 admin"判定
+1 :  * 入口（与 team/agent/task 的后端实现无关，纯前端 auth state 判断）。
+1 :  * 全局 admin 判断：admin 拥有所有权限，可见所有内容。
+1 :  * 唯一权威来源：auth/verify 响应的 `user.user_type === 'system_admin'`，
+1 :  * 由 LoginGate 在登录时写入 `AuthState.isAdmin`。
+1 :  * 不再保留 `username === 'admin'` 字符串兜底——该兜底是早期演示阶段遗留，
+1 :  * 会导致 display_name / username 恰好为 "admin" 的普通用户被误判为全局 admin，
+1 :  * 尤其在"用户没有归属任何 team"或"team 里只有自己一个人"时，
+1 :  * roleInTeam 返回 null，UI 会按 admin 逻辑渲染（如 ResourcePage 显示 AdminResourceLock），
+1 :  * 出现 normal/member 用户看到 admin 锁定页的问题。
+1 :  * storage-utils.ts — 本地演示数据层的共享底座。
+1 :  * 供 agent-template-store / asset-scope-store / user-asset-store /
+1 :  * account-store / user-profile-store 共用：
+1 :  *   - safeParse：容错的 JSON.parse，解析失败时回退默认值；
+1 :  *   - emitChange / CHANGE_EVENT：写操作后广播一个全局事件，配合
+1 :  *     useChangeNotifier 让订阅方（各 useXxx hook）自动重渲染；
+1 :  *   - useChangeNotifier：简易 forceUpdate，监听 CHANGE_EVENT 与浏览器
+1 :  *     原生 'storage' 事件（跨 tab 同步）。
+1 :  * 这些 store 均为前端演示阶段的 localStorage 实现，后端上线后整批替换为
+1 :  * fetch 即可，UI 层不需要改。
+1 : /** 简易 forceUpdate：localStorage / 自定义事件触发后 +1。 */
+1 :     window.addEventListener('storage', onChange); // 跨 tab 同步
+1 :  * useSkillDetailCache — 按需加载 skill 数据面详情缓存。
+1 :  * 背景：asset/list-accessible 接口返回的资产列表只含 asset 层字段
+1 :  *（version 恒为 1，无 owner_agent_id），skill 数据面的真实 version 和
+1 :  * owner_agent_id 需要调 getSkill() 获取。旧实现在列表加载后对每条 skill
+1 :  * 并发 N 次 getSkill()（N+1），用户还没点开任何一条就把全部详情拉回来。
+1 :  * 本 hook 改为按需：列表先用 asset 层默认值渲染，当用户选中某条 skill
+1 :  * 后才补拉那一条的数据面详情并写入缓存，后续同一 skill 再次命中直接读缓存。
+1 :  * 使用方式（父组件）：
+1 :  *   列表渲染：const s = applyCachedDetail(skill);
+1 :   /** skill_id → 已拉取的数据面详情（version + owner_agent_id）。 */
+1 :   /** 正在请求中的 skill_id 集合，防止同一 skill 并发重复请求。 */
+1 :   /** 每次缓存写入后 +1，父组件依赖此值在 useMemo 中重算列表项。 */
+1 :   /** 同步读取缓存（不会触发请求）。 */
+1 :   /** 预加载一条 skill 的数据面详情（幂等，已缓存或正在请求的直接跳过）。 */
+1 :       // 静默失败：列表仍用 asset 默认值（v1 / 空 owner_agent_id）
+1 :    * 用缓存里的最新值覆盖 skill 对象的 version / owner_agent_id 字段。
+1 :    * 缓存 miss 则原样返回，不影响渲染。
+1 :  * useCurrentRole — 获取当前登录用户的角色
+1 :  * 返回 'admin' | 'member' | 'reviewer' | null（null = 未登录）。
+1 :  * 角色模型（唯一权威口径，勿再改回"按 team 成员表判断 admin"）：
+1 :  *   - admin  是**全局角色**，与是否创建/加入任何 team 无关（哪怕当前没有任何 team，也始终是 admin）。
+1 :  *     admin 的职责是管理 team（建团队、录入成员），不管理具体资源。
+1 :  *   - member 是**team 内角色**，即某个 team 的成员，负责在 team 内管理资源（agent/skill/wiki/code/memory）。
+1 :  *   - 因此判断顺序必须是：先判是不是全局 admin；不是，才去查其在 active team 里的成员角色。
+1 :  *     反过来"先查 team 成员表、查不到就当无角色"是错的——会导致"admin 账号下没有 team 时
+1 :  *     被误判为非 admin（甚至 null）"。
+1 :     // 全局 admin：独立于 team，始终是 admin（不依赖 activeTeam / team.members 查询结果）
+1 :     // isAdmin 来自 auth/verify 的 user_type === 'system_admin'，是唯一权威字段。
+1 :     // 非 admin：角色取决于其在当前 active team 里的成员记录（一般就是 'member'）
+1 :  * user-asset-store.ts — 用户自建资产（skill / memory）的本地 localStorage 层。
+1 :  * 用户可以创建自己的 skill 或 memory 资产：
+1 :  *   - scope = 'team'    → 团队内共享，所有成员可见并可分配给自己的 Agent
+1 :  *   - scope = 'private' → 仅自己可见，只有 owner 可分配给自己的 Agent
+1 :  * 团队资产 = 所有成员设为 'team' 的资产合集
+1 :  * 固定资产 = 从团队/个人资产中选择分配给具体 Agent 的资产
+1 :  * 注：全部资产已切换到真实后端 API，本文件仅保留 localStorage 读写能力
+1 :  * 供 ChatMemoryPanel 等组件使用。
+1 : /** 创建用户自建资产 */
+1 : /** 更新用户自建资产（只有 owner 可调用） */
+1 : /** 删除用户自建资产 */
+1 : /** 读取某用户拥有的资产（按 kind 过滤） */
+1 : /** 读取团队可见资产 = 该 team 内所有成员设为 scope='team' 的资产 + 当前用户自己的私密资产。
+1 :  *  team_id 为空时不按 team 过滤（返回所有 team 的可见资产）。 */
+1 :  * user-profile-store.ts — 用户显示名缓存。
+1 :  * 从后端 usersApi.get() 拉取 display_name，内存缓存避免重复请求。
+1 : // 内存缓存：user_id → display_name
+1 : /** 批量写入展示名缓存（如 team-member/list 已带 username 时）。 */
+1 :  * 订阅指定 user 的显示名。优先用内存缓存；未缓存时异步从后端拉取。
+1 :   // 未缓存 → 异步拉取
+1 :         .catch(() => { /* 静默失败 */ })
+1 :   return user_id; // 拉取完成前显示 user_id
+1 :  * 批量场景（如列表 tooltip 需要 join 多个用户名）的解析器。
+1 :  * 返回稳定函数引用；渲染期触发未缓存 id 的拉取，缓存就绪后经订阅触发重渲染。
+1 :  * 与 useUserDisplayName 同套缓存/订阅，二者解析结果一致。
+1 :           .catch(() => { /* 静默失败 */ })
+1 :  * 对接新面板 Control（无 Cookie、无状态代理，见 09 设计文档 §3.3）。
+1 :  * 登录凭证（instance_id + user_key）缓存在 localStorage（lib/panelSession.ts），
+1 :  * "退出登录"/"会话失效"都只是清本地缓存，Control 无登出 API、无服务端会话表。
+1 :  * 多 tab 同步：通过 storage 事件监听 localStorage 变化。
+1 :  *   - 其他 tab 登录 → 本 tab 自动恢复登录态（checkSession）
+1 :  *   - 其他 tab 登出 / 401 → 本 tab 自动退出到 LoginGate
+1 :  * auth 三态：
+1 :  *   - null      检测登录态中（App 启动时调 checkSession 读取 localStorage 缓存）
+1 :  *   - undefined 确认未登录 → 渲染 LoginGate
+1 :  *   - AuthState 已登录 → 渲染主界面
+1 :   /** 登录成功后写入（LoginGate 的 onLoggedIn 回调） */
+1 :   /** 退出登录：清本地 localStorage 会话，回到 LoginGate（无后端调用） */
+1 :   /** App 启动时读取 localStorage 缓存；不管结果如何都会把 auth 从 null 推进到确定态 */
+1 :     // 新面板无服务端会话，登出即清本地缓存，无需（也没有）后端登出接口。
+1 :     // 清模块级后端缓存（teams/agents/tasks），避免新用户登录后短暂看到上一个用户的列表。
+1 :     // 用 clearBackendCache 而非 invalidateBackendCache：后者会广播事件触发已挂载页面的
+1 :     // refetch listener，此时还在用旧 session Header 发请求，会把旧数据重新拉回来；
+1 :     // 这里只清缓存，让新用户登录挂载组件时自然走首次拉取。
+1 :     // activeTeamId 可能指向旧用户才有权限的 team，清掉避免新用户登录后选了一个没权限的 team。
+1 :  * 跨 tab 同步：监听 localStorage 的 storage 事件。
+1 :  * storage 事件只在"其他 tab"修改 localStorage 时触发（本 tab 的写入不会触发），
+1 :  * 非常适合做跨 tab 状态同步。
+1 :  *   - 其他 tab 登录（写入 tdai-panel.session）→ 本 tab 恢复登录态
+1 :  *   - 其他 tab 登出 / 401（删除 tdai-panel.session）→ 本 tab 退出到 LoginGate
+1 :       // 其他 tab 登出了 → 本 tab 同步退出
+1 :       // 其他 tab 登录了 → 本 tab 恢复登录态
+1 : // 任意 meta 请求返回 HTTP 401 时（如 Control 校验错误落在该码），全局清会话回到登录页。
+1 : // 新面板下这不是主要的登出触发路径（主动登出走 logout()），仅作兜底。
+1 : // 与 logout() 一样清缓存，否则 401 重登后仍会短暂看到上个用户的列表。
+1 : // 只需在 store 模块加载时注册一次。
+1 :  * stores/backend.ts — 全局后端数据 store（zustand）。
+1 :  * 取代 backendStore.ts 里的模块级变量（_cachedTeams / _cachedAgentsMap / _inflightTeams …）。
+1 :  * 核心设计：
+1 :  *   - teamsLoaded / agentsLoadedTeamIds：标记"已加载过"，
+1 :  *     避免每个组件挂载都重复 fetch。
+1 :  *   - invalidate()：写操作后调，清所有缓存 + 广播 BACKEND_REFRESH_EVENT。
+1 :  *   - invalidateTeam(teamId)：切 team 时只清当前 team 的 agents/tasks 缓存。
+1 :  *   - useTeams / useAgents / useTasks：从 store 读数据 + 触发 fetch，多组件共享同一份状态。
+1 : // 从 backendStore.ts re-import 纯函数（adapters / types），避免循环依赖
+1 : // ========================= 事件常量 =========================
+1 : // ========================= Store 类型 =========================
+1 :   // 数据
+1 :   // 全量总数（内核返回的 total），前端分页基于此计算总页数
+1 :   // 后端分页缓存：tasksPagesByTeam[teamId]["offset:limit"] = Task[]
+1 :   // loaded 标记（避免重复 fetch）
+1 :   // in-flight 去重
+1 :    * 强制重新拉取 team 列表（忽略 teamsLoaded 缓存，保留 in-flight 去重）。
+1 :    * `silent: true` 时不在 UI 层翻转 teamsLoading —— 用于下拉框展开等后台保新鲜
+1 :    * 场景，避免 TeamManagementPanel 等消费方因 teamsLoading=true 而整体进入
+1 :    * loading 占位（表现为"点一下下拉框页面就刷新"）。
+1 : // ========================= Store 实现 =========================
+1 :     // 已加载过 → 不重复 fetch（只有 invalidate / clearAll 后才会重新拉）
+1 :     // in-flight 去重：多个组件同时挂载时只发一次
+1 :       // 静默刷新不翻转 teamsLoading —— 消费方（TeamManagementPanel 等）依赖它
+1 :       // 显示 loading 占位；下拉框展开这类后台保新鲜场景翻转它会导致
+1 :       // "点一下下拉框整个页面闪成 loading 再恢复"。
+1 :         // 批量拉 members（N+1 → N，但这是后端 API 限制，无批量接口）
+1 :     // 已加载过 → 直接返回缓存
+1 :     // 缓存 key：按 (offset, limit) 粒度（teamId 已在 tasksPagesByTeam[teamId] 这层隔离）
+1 :     // 已缓存且非强制刷新 → 直接返回
+1 :   // 写操作后调：清所有缓存 + 广播刷新
+1 :   // 切 team 时调：只清当前 team 的 agents/tasks 缓存
+1 :   // 登出 / 401 时调：清所有缓存但不广播事件
+1 :  * useTeams — 从 store 读 team 列表 + activeTeamId。
+1 :  * 多个组件调 useTeams() 只会触发一次 fetchTeams（teamsLoaded 标记 + in-flight 去重）。
+1 :  * 写操作后调 invalidate() → teamsLoaded=false → 下次组件挂载/渲染时重新 fetch。
+1 :  * 切 team 通过 setActiveTeamId → 写 localStorage + 更新 state。
+1 :   // 监听 localStorage 变化（TeamSwitcher 写 activeTeamId 时触发）
+1 :  * useAgents — 从 store 读指定 team 的 agent 列表。
+1 :  * 同一 teamId 多个组件调用只触发一次 fetch。
+1 :  * invalidate() 或 invalidateTeam(teamId) 后才会重新拉。
+1 :   // 用 ref 缓存上次的 teamId，避免 selector 每次返回不同引用
+1 :  * useTasks — 从 store 读指定 team 的 task 列表。
+1 :  * readActiveTeamAgents — 同步读缓存的 agent 列表（不触发请求）。
+1 :  * 供 SkillsPanel 等仅需"引用列表"的场景使用。
+1 :   // 缓存未命中：触发后台拉取
+1 : // ========================= 导出 invalidate / clearAll（供 mutations 调用） =========================

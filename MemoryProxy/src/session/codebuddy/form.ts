@@ -1,13 +1,13 @@
 /**
  * CodeBuddy Session Init Form — `ask_followup_question` tool_call.
  *
- * CodeBuddy 渲染可点击按钮的 form：
+ * CodeBuddy renders a form with clickable buttons:
  *   - Tool name: `ask_followup_question`
- *   - Options: 平铺字符串列表，无数量限制
+ *   - Options: Flat list of strings, unlimited count
  *   - Protocols: OpenAI (`/v1/chat/completions`) + Anthropic (`/v1/messages`)
  *   - ID prefix: `call_session_init_` (OpenAI) / `toolu_session_init_` (Anthropic)
  *
- * 不含任何 Claude Code 逻辑。
+ * Contains no Claude Code logic.
  */
 
 import type { TeamOption } from "../types.js";
@@ -20,7 +20,7 @@ export const TOOLCALL_PREFIXES = ["call_session_init_", "toolu_session_init_"] a
 export const TEAM_FORM_TITLE = "Session Initialization — Select Team";
 export const AGENT_TASK_FORM_TITLE = "Session Initialization — Select Agent and Task";
 export const RETRY_FORM_TITLE = "Selection unrecognized, please select again";
-/** 兼容旧测试的总标题（cleaner.ts 检测用）。 */
+/** General title for legacy test compatibility (used by cleaner.ts detection). */
 export const COMBINED_FORM_TITLE = "Session Initialization — Select Team / Agent / Task";
 
 export const SKIP_LABEL = "Do not associate this time (skip injection, proceed directly)";
@@ -31,10 +31,10 @@ export const ASSET_CONFIRM_NO = "No, do not associate this time";
 export const ASSET_CONFIRM_FORM_TITLE = "Session Initialization — Associate Team Assets?";
 
 /**
- * 附在每步 question 文末的通用备注：告诉用户"选择跳过 = 本次 session init 跳过、不注入任何团队资产"。
- * CodeBuddy 是按钮式表单，唯一的跳过入口在最初的 asset_confirm 步骤选「否」；
- * 进入 team / agent_task 后没有按钮内跳过，需要下一次会话重新选择。
- * 文案与 claude-code/workbuddy/codex/dsh 五端统一；后续步骤额外提示回退路径。
+ * Universal note appended to the end of each question: tells the user "selecting skip = bypass session init this time, inject no team assets".
+ * CodeBuddy is a button-style form, the only skip entry point is selecting "No" at the initial asset_confirm step;
+ * after entering team / agent_task there is no in-button skip, requires re-selecting in the next session.
+ * Wording is unified across claude-code/workbuddy/codex/dsh five clients; later steps provide additional hints for fallback paths.
  */
 const SKIP_HINT_ASSET_CONFIRM = ' (Selecting "skip" will bypass session init and inject no team assets)';
 const SKIP_HINT_LATER_STAGE = ' (Selecting "skip" will bypass session init and inject no team assets; if no skip button is present in this step, select "No" at the initial confirmation step)';
@@ -58,16 +58,16 @@ export function isSessionInitToolCallId(id: string): boolean {
 // ── Form Data ──────────────────────────────────────────────────────────────────
 
 /**
- * CB form 支持的 stage。
+ * Stages supported by CB form.
  *
- * CB 客户端只用 "asset_confirm" | "team" | "agent_task"（agent+task 一发同时问）。
- * 2026-08-08 拆 stage 后 codex 客户端复用 CB 状态机时会额外走 "agent_select"
- * 和 "task_select" 两个子 stage —— CB 出口 formData 的 stage 字段值会跟到
- * codex handler，`buildCodexFormResponse` 拿 stage 判该 render 哪个 question。
+ * CB client only uses "asset_confirm" | "team" | "agent_task" (asks for agent+task simultaneously).
+ * After the 2026-08-08 stage split, when codex client reuses CB state machine, it will additionally go through "agent_select"
+ * and "task_select" sub-stages — the stage field value in CB's exported formData will follow into
+ * the codex handler, and `buildCodexFormResponse` uses the stage to determine which question to render.
  *
- * CB 自身的 `buildFollowupQuestionArgs` 遇到 agent_select/task_select 时按只问
- * 一个的语义 render；CB 客户端在 codex-only 路径下走不到这里（真正 render
- * 出口是 codex form.ts），保留分支只是防御性兜底 & 便于 CB 侧单测。
+ * CB's own `buildFollowupQuestionArgs` renders with the semantics of asking only one question when it encounters agent_select/task_select;
+ * the CB client will never reach here under the codex-only path (the real render exit is codex form.ts),
+ * this branch is kept as a defensive fallback & facilitates CB side unit testing.
  */
 export type FormStage =
   | "asset_confirm"
@@ -81,8 +81,8 @@ export interface FormData {
   stage: FormStage;
   selectedTeamId?: string;
   /**
-   * codex-only：agent_select 阶段选定的 agent_id，透传给 task_select stage
-   * form。CB 客户端自身不使用（CB 一发同时问 agent+task）。
+   * codex-only: The selected agent_id during the agent_select stage, passed through to the task_select stage
+   * form. Unused by the CB client itself (CB asks for agent+task simultaneously).
    */
   selectedAgentId?: string;
   retry?: boolean;
@@ -90,16 +90,16 @@ export interface FormData {
   modelId?: string;
   protocol?: "openai" | "anthropic";
   /**
-   * 仅 agentSource="codex" 场景使用：CB 状态机透传给下游 codex form 重渲染的
-   * 分页页码。CB 客户端自己不 render 分页（`ask_followup_question` 无 option
-   * 数量限制），字段填了也不影响 CB 出口。
+   * Used exclusively in agentSource="codex" scenarios: The pagination page index passed through by the CB state machine
+   * to the downstream codex form for re-rendering. The CB client does not render pagination itself
+   * (`ask_followup_question` has no option limit), filling this field does not affect CB output.
    */
   teamPage?: number;
   agentPage?: number;
   taskPage?: number;
   /**
-   * true = questions 传真 array（CB v1.106+）；false = 传 JSON string（老版本）。
-   * 未设置时默认 true。
+   * true = pass questions as a real array (CB v1.106+); false = pass as JSON string (older versions).
+   * Defaults to true if unset.
    */
   questionsAsArray?: boolean;
 }
@@ -107,9 +107,9 @@ export interface FormData {
 // ── Form Builder ───────────────────────────────────────────────────────────────
 
 /**
- * CB v1.106+ 的 ask_followup_question schema 要求 `questions` 是真 array（不再接受
- * JSON 字符串）。老版本（v1.105-）则期望 questions 为 JSON string。
- * 通过 FormData.questionsAsArray 判断走哪条路径，默认 true（新版）。
+ * CB v1.106+ ask_followup_question schema requires `questions` to be a true array (no longer accepts
+ * JSON strings). Older versions (v1.105-) expect questions as a JSON string.
+ * Determines which path to take via FormData.questionsAsArray, defaulting to true (new version).
  */
 function buildFollowupQuestionArgs(data: FormData): { title: string; questions: Array<Record<string, unknown>> | string } {
   const asArray = data.questionsAsArray !== false;
@@ -153,9 +153,9 @@ function buildFollowupQuestionArgs(data: FormData): { title: string; questions: 
   }
 
   // stage in { "agent_task" (CB one-shot), "agent_select" / "task_select"
-  // (codex-only split). CB 客户端不会走后两个 stage —— codex handler 会用
-  // codex form.ts 重渲染，不会调 CB `buildFollowupQuestionArgs`。分支保留
-  // 是防御性兜底，让 CB fallback render 也能出合法结构。
+  // (codex-only split). The CB client will not take the latter two stages — the codex handler will
+  // re-render using codex form.ts, and will not call CB's `buildFollowupQuestionArgs`. This branch is retained
+  // as a defensive fallback, allowing CB fallback render to produce valid structures as well.
   const team = teams.find((t) => t.team_id === selectedTeamId) ?? teams[0];
   if (!team) return { title, questions: asArray ? questions : JSON.stringify(questions) };
 
@@ -177,7 +177,7 @@ function buildFollowupQuestionArgs(data: FormData): { title: string; questions: 
   if (wantTask) {
     const taskOptions: string[] = [];
     for (const tk of team.tasks) {
-      // 虚拟兜底条目（isDefault）不拼 id 后缀，反正只有一个不会重名歧义。
+      // Virtual fallback entries (isDefault) do not append id suffixes, there's only one anyway so no naming ambiguity.
       if (tk.isDefault) {
         taskOptions.push(tk.task_name);
       } else {
@@ -199,9 +199,9 @@ function buildFollowupQuestionArgs(data: FormData): { title: string; questions: 
 
 /**
  * Build a fake form response (OpenAI or Anthropic protocol).
- * CodeBuddy 支持双协议：
- *   - protocol="openai": tool_calls chunk stream 或 JSON
- *   - protocol="anthropic": tool_use SSE stream 或 JSON
+ * CodeBuddy supports dual protocols:
+ *   - protocol="openai": tool_calls chunk stream or JSON
+ *   - protocol="anthropic": tool_use SSE stream or JSON
  */
 export function buildFormResponse(data: FormData): Response {
   const model = data.modelId ?? "unknown";

@@ -7,10 +7,6 @@ const PARAMS_MAX_LEN = 500;
 const RESULT_MAX_LEN = 2000;
 const COMPRESS_THRESHOLD = 200;
 
-export const L1_SYSTEM_PROMPT = `你是一个专为 AI 编码助手提供支持的"工具结果摘要器"。你的核心任务是深度理解当前的对话上下文，并将繁杂的工具调用与执行结果（一对toolcall和tool result整合成一条summary输出），提炼为高信息密度的 JSON 数组。
-
-在生成摘要前，请务必进行以下内部思考：
-1. 任务对齐：结合最近的对话记录，识别用户当前的核心目标和最新意图。若上下文存在冲突，始终以最新的用户意图为准。
 export const L1_SYSTEM_PROMPT = `You are a "Tool Result Summarizer" designed to support AI coding assistants. Your core mission is to deeply understand the current conversation context and aggregate raw tool call / result pairs (each pair of toolcall and tool result into one summary entry) into a high-information-density JSON array.
 
 In generating summaries, ensure you:
@@ -40,8 +36,8 @@ export function buildL1UserPrompt(
 ): string {
   const parts: string[] = [];
 
-  parts.push("## 最近的对话上下文（用于理解当前任务）：");
-  parts.push(recentContext || "(无可用上下文)");
+  parts.push("## Recent Conversation Context (for understanding current task):");
+  parts.push(recentContext || "(No available context)");
   parts.push("\n## Tool call/result pairs to summarize:");
 
   for (let i = 0; i < pairs.length; i++) {

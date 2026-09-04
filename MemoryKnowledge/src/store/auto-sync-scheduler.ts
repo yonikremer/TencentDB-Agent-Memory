@@ -1,26 +1,26 @@
 /**
- * AutoSyncScheduler — 定时拉取 git 仓库并更新 codegraph 索引。
+ * AutoSyncScheduler — Periodically fetches git repositories and updates codegraph index.
  *
- * 模型：FIFO 队列 + 定长 worker pool。
- *   - Scanner：每 scanIntervalMs 扫描一次所有 ready 状态的仓库；
- *     用 Set 去重（已入队或 worker 处理中的跳过）后 push 到内存 queue。
- *   - Workers：常驻 maxConcurrentSyncs 个协程，FIFO 从 queue 取任务调
- *     CodeGraphService.sync()；队列空时轮询等待，stop 后自然退出。
+ * Model: FIFO queue + fixed-size worker pool.
+ *   - Scanner: Scans all repositories in ready status once every scanIntervalMs;
+ *     deduplicates using Set (skips those already queued or in worker processing) then pushes to in-memory queue.
+ *   - Workers: maxConcurrentSyncs worker routines run continuously, popping tasks FIFO from queue to call
+ *     CodeGraphService.sync(); polls and waits when queue is empty, exits naturally after stop.
  *
- * 单仓库同步频率 = max(单次 sync 耗时, scanIntervalMs)。无额外冷却字段——
- * 想控制频率直接调 SCAN_INTERVAL_MIN。
+ * Single-repo sync frequency = max(single sync duration, scanIntervalMs). No extra cooldown field —
+ * adjust SCAN_INTERVAL_MIN directly to control frequency.
  *
- * 设计目标（源自需求）：
- *   1. 定时感知 git 仓库更新，自动拉取最新代码并重建 codegraph 索引
- *   2. 使用任务队列，避免突发性大量拉取打爆服务（并发受 worker 数硬限）
- *   3. 队列内 + 处理中的仓库不重复入队（Set 去重，队列大小上界 = 仓库数）
- *   4. 单个仓库同步失败不影响其他仓库（worker 吞异常继续消费）
- *   5. 复用 CodeGraphService.sync() 已有的 busy/not_found 拒绝语义
+ * Design goals:
+ *   1. Periodically detect git repository updates, automatically fetch latest code and rebuild codegraph index
+ *   2. Use task queue to avoid burst high-concurrency requests overloading the service (concurrency hard-limited by worker count)
+ *   3. Avoid duplicate enqueuing for repos in queue or processing (Set deduplication, queue max bound = repo count)
+ *   4. Single repo sync failure does not affect other repos (worker swallows exceptions and continues processing)
+ *   5. Reuse CodeGraphService.sync() existing busy/not_found rejection semantics
  *
- * 环境变量配置：
- *   - KNOWLEDGE_AUTO_SYNC_ENABLED: 启用开关 (default: false)
- *   - KNOWLEDGE_AUTO_SYNC_SCAN_INTERVAL_MIN: 扫描周期（分钟）(default: 10)
- *   - KNOWLEDGE_AUTO_SYNC_MAX_CONCURRENT: 全局最大并发同步数 (default: 3)
+ * Environment variable configuration:
+ *   - KNOWLEDGE_AUTO_SYNC_ENABLED: Enable switch (default: false)
+ *   - KNOWLEDGE_AUTO_SYNC_SCAN_INTERVAL_MIN: Scan interval (minutes) (default: 10)
+ *   - KNOWLEDGE_AUTO_SYNC_MAX_CONCURRENT: Global max concurrent sync count (default: 3)
  */
 
 import { createLogger } from "../logger.js";
@@ -32,21 +32,21 @@ const log = createLogger("auto-sync-scheduler");
 // ───────────────────────── Configuration ─────────────────────────
 
 export interface AutoSyncConfig {
-  /** 是否启用自动同步。默认 false（需显式开启）。 */
+  /** Whether auto-sync is enabled. Default false (must be explicitly enabled). */
   enabled: boolean;
-  /** 主循环扫描周期（毫秒）。默认 10 分钟。 */
+  /** Main loop scan interval (milliseconds). Default 10 minutes. */
   scanIntervalMs: number;
-  /** 全局最大并发同步数（= worker 数量）。默认 3。 */
+  /** Global max concurrent syncs (= worker count). Default 3. */
   maxConcurrentSyncs: number;
 }
 
 const MIN_MS = 60 * 1000;
-/** worker 空转时的轮询间隔（ms）。测试 fake timer 下也能被 advance。 */
+/** Polling interval when worker is idle (ms). Can be advanced under test fake timers. */
 const WORKER_IDLE_POLL_MS = 100;
 
 /**
- * 从环境变量解析配置，支持 fallback 默认值。
- * 所有数值字段做 clamp 防止不合理配置。
+ * Resolves configuration from environment variables, supporting fallback defaults.
+ * Clamps all numeric fields to prevent invalid configurations.
  */
 export function resolveAutoSyncConfig(env: Record<string, string | undefined> = process.env): AutoSyncConfig {
   const enabled = parseBoolean(env.KNOWLEDGE_AUTO_SYNC_ENABLED, false);
@@ -69,13 +69,13 @@ export interface AutoSyncSchedulerDeps {
 }
 
 export interface AutoSyncStatus {
-  /** 调度器是否已 start（未 stop）。 */
+  /** Whether scheduler is started (not stopped). */
   running: boolean;
-  /** 当前 worker 正在执行的 sync 任务数。 */
+  /** Number of sync tasks currently executing in workers. */
   activeSyncs: number;
-  /** 队列中等待处理的仓库数。 */
+  /** Number of repositories pending in queue. */
   queueLength: number;
-  /** 上一轮 scan 是否仍在进行中（避免重入）。 */
+  /** Whether previous scan round is still in progress (prevents re-entrancy). */
   scanning: boolean;
 }
 
@@ -84,23 +84,23 @@ export class AutoSyncScheduler {
   private readonly cgService: CodeGraphService;
   private readonly config: AutoSyncConfig;
 
-  /** 启动延迟 + 周期 scan 的 timer。 */
+  /** Timers for startup delay + periodic scan. */
   private startupTimer: ReturnType<typeof setTimeout> | null = null;
   private scanTimer: ReturnType<typeof setInterval> | null = null;
-  /** worker 空转 sleep 的 timer 集合（stop 时统一清理）。 */
+  /** Set of timer handles for worker idle sleep (cleared on stop). */
   private readonly workerSleepTimers = new Set<ReturnType<typeof setTimeout>>();
 
-  /** FIFO 待处理队列 + 去重 Set（队列内 + 处理中的 id）。 */
+  /** FIFO pending queue + deduplication Set (ids in queue or in-flight). */
   private readonly queue: CodeGraphRow[] = [];
   private readonly inFlight = new Set<string>();
 
-  /** 当前正在执行 sync 的 worker 数。 */
+  /** Count of workers currently executing sync. */
   private activeSyncs = 0;
-  /** worker 数（常驻）。 */
+  /** Persistent worker count. */
   private workerCount = 0;
-  /** 停止标记。stop 后 workers 循环退出。 */
+  /** Stop flag. Worker loops exit after stop. */
   private stopped = true;
-  /** 上一轮 scan 是否仍在进行。 */
+  /** Whether previous scan round is still in progress. */
   private scanning = false;
 
   constructor(deps: AutoSyncSchedulerDeps) {
@@ -110,10 +110,10 @@ export class AutoSyncScheduler {
   }
 
   /**
-   * 启动调度：
-   *   - 延迟 30s 首扫（让 restore 先完成，避免抢磁盘）
-   *   - 周期 scanIntervalMs 扫描
-   *   - 启动 maxConcurrentSyncs 个常驻 worker
+   * Starts scheduling:
+   *   - Delays first scan by 30s (allows restore to complete first, avoiding disk contention)
+   *   - Periodic scanning every scanIntervalMs
+   *   - Starts maxConcurrentSyncs persistent workers
    */
   start(): void {
     if (!this.config.enabled) {
@@ -130,13 +130,13 @@ export class AutoSyncScheduler {
       maxConcurrentSyncs: this.config.maxConcurrentSyncs,
     });
 
-    // 启动常驻 worker pool
+    // Start persistent worker pool
     for (let i = 0; i < this.config.maxConcurrentSyncs; i++) {
       this.workerCount++;
       void this.runWorker(i).finally(() => { this.workerCount--; });
     }
 
-    // 延迟首扫 30s
+    // Delay first scan by 30s
     const startupDelay = 30_000;
     this.startupTimer = setTimeout(() => {
       this.startupTimer = null;
@@ -150,7 +150,7 @@ export class AutoSyncScheduler {
     log.info(`[auto-sync] first scan in ${startupDelay / 1000}s`);
   }
 
-  /** 停止调度器：取消 timer、通知 worker 退出（已在跑的 sync 自然完成）。 */
+  /** Stops scheduler: cancels timers, signals workers to exit (in-flight syncs complete naturally). */
   stop(): void {
     this.stopped = true;
     if (this.startupTimer !== null) {
@@ -166,7 +166,7 @@ export class AutoSyncScheduler {
     log.info("[auto-sync] stopped");
   }
 
-  /** 状态快照（管理 API 使用）。 */
+  /** Status snapshot (used by admin API). */
   getStatus(): AutoSyncStatus {
     return {
       running: !this.stopped,
@@ -176,7 +176,7 @@ export class AutoSyncScheduler {
     };
   }
 
-  /** 手动触发一轮扫描（管理 API 使用）。不影响定时周期。disabled 时 no-op。 */
+  /** Manually triggers scan cycle (used by admin API). Does not affect periodic schedule. No-op when disabled. */
   triggerScan(): void {
     if (!this.config.enabled) {
       log.warn("[auto-sync] cannot trigger: scheduler is disabled");
@@ -189,10 +189,10 @@ export class AutoSyncScheduler {
   // ───────────────────────── Core scan loop ─────────────────────────
 
   /**
-   * 一轮扫描：
-   *   1. 列出所有 ready 状态的 code-graph
-   *   2. 用 inFlight Set 去重（队列内 / 处理中的不再入队）
-   *   3. FIFO push 到 queue，worker 会自动消费
+   * One scan round:
+   *   1. List all code-graphs in ready status
+   *   2. Deduplicate using inFlight Set (repos in queue or in-flight are not re-enqueued)
+   *   3. Push FIFO to queue for workers to consume automatically
    */
   private async scan(): Promise<void> {
     if (this.scanning) {
@@ -212,7 +212,7 @@ export class AutoSyncScheduler {
       let enqueued = 0;
       for (const row of candidates) {
         if (this.stopped) break;
-        if (this.inFlight.has(row.code_graph_id)) continue; // 已在队列或处理中
+        if (this.inFlight.has(row.code_graph_id)) continue; // Already in queue or processing
         this.inFlight.add(row.code_graph_id);
         this.queue.push(row);
         enqueued++;
@@ -226,9 +226,9 @@ export class AutoSyncScheduler {
   }
 
   /**
-   * 列出需要同步的 code-graph：只挑 status = ready 的。
-   * 已在队列或 worker 处理中的仓库由 scan() 里的 inFlight Set 去重，不重复入队；
-   * 单仓库的同步节奏天然由 max(sync 耗时, scanIntervalMs) 决定，无需额外冷却。
+   * Lists code-graphs needing sync: selects only status = ready.
+   * Repositories already in queue or worker processing are deduplicated by inFlight Set in scan();
+   * Single-repo sync cadence is naturally determined by max(sync duration, scanIntervalMs) with no extra cooldown.
    */
   private listSyncCandidates(): CodeGraphRow[] {
     const syncedRefs = this.store.listSyncedCodeGraphs();
@@ -251,8 +251,8 @@ export class AutoSyncScheduler {
   // ───────────────────────── Worker pool ─────────────────────────
 
   /**
-   * 一个常驻 worker：循环 shift 队列执行 sync；空则短睡后重试。
-   * stop() 后 loop 自然退出。异常一律吞掉（记录日志），保证 worker 不死。
+   * Persistent worker: continuously shifts queue to execute sync; sleeps briefly and retries when empty.
+   * Loop exits naturally after stop(). Exceptions swallowed with log records to keep worker alive.
    */
   private async runWorker(workerIdx: number): Promise<void> {
     log.debug(`[auto-sync] worker#${workerIdx} started`);
@@ -267,7 +267,7 @@ export class AutoSyncScheduler {
       try {
         await this.syncOne(row);
       } catch (err) {
-        // syncOne 内已捕获，这里是兜底
+        // Caught inside syncOne; this is a fallback
         log.error(`[auto-sync] worker#${workerIdx} unexpected error: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
         this.activeSyncs--;
@@ -277,12 +277,12 @@ export class AutoSyncScheduler {
     log.debug(`[auto-sync] worker#${workerIdx} exiting`);
   }
 
-  /** 对单个 code-graph 执行 sync（复用 CodeGraphService.sync 的判别联合）。 */
+  /** Executes sync on a single code-graph (reuses CodeGraphService.sync discriminated union). */
   private async syncOne(row: CodeGraphRow): Promise<void> {
     const startMs = Date.now();
     log.info(`[auto-sync] sync ${row.code_graph_id} (${row.repo_url}@${row.branch})`);
     try {
-      // CodeGraphService.sync 目前是同步返回 SyncResult；await 兼容未来改 async 或测试 mock。
+      // CodeGraphService.sync currently returns SyncResult synchronously; await keeps compatibility for future async or test mocks.
       const result: SyncResult = await Promise.resolve(
         this.cgService.sync(row.service_id, row.team_id, row.code_graph_id, undefined),
       );
@@ -303,7 +303,7 @@ export class AutoSyncScheduler {
     }
   }
 
-  /** setTimeout 版 sleep，stop 时统一清理避免测试环境 timer 泄漏。 */
+  /** setTimeout-based sleep, cleared on stop to avoid timer leaks in test environments. */
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => {
       const t = setTimeout(() => {

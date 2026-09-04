@@ -1,13 +1,13 @@
 /**
- * SkillConversationAddHandler — §7 Handler 主流程。
+ * SkillConversationAddHandler — §7 Handler Main Flow.
  *
- * 处理 `POST /v3/skill/conversation/add`：
- *   ① 校验必填字段 + role
- *   ② 计算 raw_bytes
- *   ③ 分路径：normal (< requestCompressThreshold) / compressed (≥) / oversize (拼接后 > chunkMax)
- *   ④ 拼接 data-current，累加计数
- *   ⑤ 判阈值 → 触发归档 (SkillTriggerService)
- *   ⑥ 写回 data-current + meta
+ * Handles `POST /v3/skill/conversation/add`:
+ *   ① Validates required fields + roles
+ *   ② Calculates raw_bytes
+ *   ③ Routes paths: normal (< requestCompressThreshold) / compressed (≥) / oversize (combined > chunkMax)
+ *   ④ Concatenates data-current, accumulates counters
+ *   ⑤ Checks thresholds → triggers archiving (SkillTriggerService)
+ *   ⑥ Writes back data-current + meta
  */
 
 import {
@@ -35,31 +35,31 @@ const VALID_ROLES: ReadonlySet<CompressibleRole> = new Set([
 ]);
 
 /**
- * 归档阈值 `tool_call_count` 的计数集合。
+ * Collection of roles counted towards the archive threshold `tool_call_count`.
  *
- * **只算 `tool_call`, 不算 `tool_result`。** 二者天然 1:1 配对 (每次
- * agent 调工具都会带回一次 result), 把两者都算等于把计数翻倍, 用户会
- * 观察到"agent 调 5 次工具就归档"——完全不是配置里的 10。
+ * **Only counts `tool_call`, not `tool_result`.** The two naturally pair 1:1 (every time
+ * the agent calls a tool, it brings back a result), counting both equals doubling the count, and the user would
+ * observe "archives after 5 tool calls" — absolutely not the configured 10.
  *
- * 具体来说, VALID_ROLES 里 "tool_call" 是 agent 主动发起的调用,
- * "tool_result" 是配对的返回。归档触发的语义是"agent 用工具的次数",
- * 所以只数 call 一侧。
+ * Specifically, in VALID_ROLES, "tool_call" is the call actively initiated by the agent,
+ * "tool_result" is the paired return. The semantics of the archive trigger are "the number of times the agent uses tools",
+ * so we only count the call side.
  *
- * 校验路径 (validate() 里) 依然对 tool_call 和 tool_result 都要求
- * tool_call_id —— 那是**结构合法性**校验, 跟计数无关, 两码事。
+ * The validation path (in validate()) still requires tool_call_id for both tool_call and tool_result
+ * — that is **structural validity** checking, completely unrelated to counting.
  */
 const TOOL_CALL_ROLES: ReadonlySet<CompressibleRole> = new Set(["tool_call"]);
 
-/** 校验时需要 tool_call_id 的 role 集合 (call 和 result 都要携带配对锚点)。 */
+/** Collection of roles requiring tool_call_id during validation (both call and result must carry the pairing anchor). */
 const TOOL_PAIR_ROLES: ReadonlySet<CompressibleRole> = new Set(["tool_call", "tool_result"]);
 
 const ID_FORBIDDEN_CHAR = "|";
 
 export interface AddConversationInput {
   /**
-   * 2026-07-30 新增：多租户实例 ID。透传到 AgentTuple 里让 worker pool
-   * 出队时能按 instance_id 动态解析对应 instance 的 CoS/VDB/LLM 资源。
-   * standalone 模式下由 gateway 兜底 "default"。缺失会在 validate 阶段拒绝。
+   * 2026-07-30 Added: multi-tenant instance ID. Passed through into the AgentTuple so the worker pool
+   * can dynamically resolve the corresponding instance's COS/VDB/LLM resources by instance_id upon dequeuing.
+   * In standalone mode, the gateway falls back to "default". Omission gets rejected during the validation phase.
    */
   instance_id: string;
   session_id: string;
@@ -67,34 +67,34 @@ export interface AddConversationInput {
   user_id: string;
   team_id: string;
   agent_id: string;
-  /** 业务侧 task 引用，透传到 archive 落地时的 task.task_ref_id。 */
+  /** Business-side task reference, passed through to task.task_ref_id when the archive lands. */
   task_id?: string;
   messages: CompressibleMessage[];
   /**
-   * 上游 HTTP handler 的 req_id，用于 obsLogger 分段事件关联链路。
-   * 缺省则事件字段少一个 req_id，业务逻辑不受影响。
+   * The upstream HTTP handler's req_id, used to link the full trace in obsLogger segmental events.
+   * If absent, the event fields will just lack a req_id, and business logic remains unaffected.
    */
   perfRequestId?: string;
 }
 
 export interface AddConversationResult {
-  /** 语义状态：ok=正常追加 / archived=触发了归档。 */
+  /** Semantic status: ok = appended normally / archived = archiving triggered. */
   status: "ok" | "archived";
   archived?: {
     task_id: string;
     archived_at_ms: number;
     archive_key: string;
-    /** normal 达阈值触发 / compressed 必触发 / oversize 兜底后触发 */
+    /** normal threshold met / compressed always triggers / oversize fallback triggers */
     reason: "tool_calls" | "bytes" | "compressed" | "oversize";
   };
 }
 
 export interface HandlerThresholds {
-  /** tool_call 累计阈值。默认 10。 */
+  /** tool_call cumulative threshold. Default 10. */
   toolCallThreshold: number;
-  /** 字节累计阈值。默认 40960 (40KB)。 */
+  /** Bytes cumulative threshold. Default 40960 (40KB). */
   bytesThreshold: number;
-  /** 本次 add 字节 ≥ 此值走压缩路径。默认 40960。 */
+  /** When add bytes ≥ this value, takes compression path. Default 40960. */
   requestCompressThresholdBytes: number;
 }
 
@@ -138,12 +138,12 @@ export class SkillConversationAddHandler {
   }
 
   async handle(input: AddConversationInput): Promise<AddConversationResult> {
-    // [obs] handler 内部分段：readBuffer / prepareArchive / trigger.archive / writeBack。
-    // 走 obsLogger 底座（结构化事件 + FileLogger + ClickHouse 后端），
-    // 通过 req_id 与上游 handleConversationAdd + trigger + worker 关联全链路。
+    // [obs] handler internal segments: readBuffer / prepareArchive / trigger.archive / writeBack.
+    // Uses obsLogger base (structured events + FileLogger + ClickHouse backend),
+    // tying the full trace together via req_id with the upstream handleConversationAdd + trigger + worker.
     const rid = input.perfRequestId;
 
-    // ① 校验
+    // ① Validation
     this.validate(input);
     const sess: SessionKey = {
       instance_id: input.instance_id,
@@ -154,10 +154,10 @@ export class SkillConversationAddHandler {
       session_id: input.session_id,
     };
 
-    // ② 计算 raw_bytes
+    // ② Calculate raw_bytes
     const rawBytes = totalMessagesBytes(input.messages);
 
-    // ③ 分路径：读现状 + 走共享 helper 做压缩 + 兜底
+    // ③ Branch path: read current state + use shared helper for compression + fallback
     const useCompress = rawBytes >= this.thresholds.requestCompressThresholdBytes;
     const t0Buf = Date.now();
     const [current, meta] = await Promise.all([
@@ -172,11 +172,11 @@ export class SkillConversationAddHandler {
       use_compress: useCompress,
     });
 
-    // conversation-add 特有语义：只有压缩路径才走 oversize 兜底 (原实现见下方注释);
-    // 用 helper 时，forceCompress=useCompress，当 useCompress=false 时 helper 内部
-    // 也不会走 applyOversizeStrategy——因为常规路径下 combinedBytes 不该 > chunkMax
-    // (那种情况下 rawBytes 早已 >= requestCompressThresholdBytes 走了压缩路径)。
-    // helper 里的 oversize 判定跟原实现语义等价：都是"combined > chunkMax"。
+    // conversation-add specific semantics: only compression paths do oversize fallback (original implementation logic below);
+    // When using the helper, forceCompress = useCompress. When useCompress = false, the helper internally
+    // does not do applyOversizeStrategy either — because on normal paths combinedBytes should not > chunkMax
+    // (in that case rawBytes would already be >= requestCompressThresholdBytes, routing to compression path).
+    // The oversize condition in the helper aligns with the original semantic: both are "combined > chunkMax".
     const t0Prep = Date.now();
     const prepared = prepareArchivePayload(
       current.messages as OversizeMessage[],
@@ -197,14 +197,14 @@ export class SkillConversationAddHandler {
     const combinedMessages: OversizeMessage[] = prepared.messages;
     const usedOversize = prepared.usedOversize;
 
-    // ④ 更新 meta 计数
-    // 只数 tool_call, 不数 tool_result —— 二者 1:1 配对, 数两遍会让阈值 10
-    // 变成实际"5 次工具调用即归档", 违背配置语义。详见 TOOL_CALL_ROLES 注释。
+    // ④ Update meta counters
+    // Only counts tool_call, not tool_result — the two pair 1:1, counting both makes the threshold of 10
+    // actually "archive after 5 tool calls", violating config semantics. See TOOL_CALL_ROLES comments.
     const addedToolCalls = countRoles(input.messages, TOOL_CALL_ROLES);
     const nextTool = meta.tool_call_count + addedToolCalls;
     const nextBytes = meta.byte_count + rawBytes;
 
-    // ⑤ 阈值判定
+    // ⑤ Threshold check
     const hitTool = nextTool >= this.thresholds.toolCallThreshold;
     const hitBytes = nextBytes >= this.thresholds.bytesThreshold;
     const shouldArchive = useCompress || hitTool || hitBytes;
@@ -212,7 +212,7 @@ export class SkillConversationAddHandler {
     let result: AddConversationResult = { status: "ok" };
 
     if (shouldArchive) {
-      // 归档段
+      // Archive block
       const reason: NonNullable<AddConversationResult["archived"]>["reason"] = usedOversize
         ? "oversize"
         : useCompress
@@ -226,18 +226,18 @@ export class SkillConversationAddHandler {
         session: sess,
         bufferAtTrigger: { messages: combinedMessages as Array<Record<string, unknown>> },
         taskRefId: input.task_id,
-        // 透传 req_id 给 trigger 内部分段事件（write_archive / mutex_* / enqueue_agent）
+        // Pass through req_id to trigger internal segmental events (write_archive / mutex_* / enqueue_agent)
         perfRequestId: input.perfRequestId,
       });
       obsLogger.info("skill.add_handler.trigger_archive", {
-        req_id: rid, session_id: input.session_id, instance_id: input.instance_id, instance_id: input.instance_id,
+        req_id: rid, session_id: input.session_id, instance_id: input.instance_id,
         dur_ms: Date.now() - t0Arch,
         task_id: archiveRes.taskId,
         archive_key: archiveRes.archiveKey,
         reason,
       });
 
-      // 归档后清空 data-current + 计数
+      // Clear data-current + counters after archiving
       const nowMs = this.now();
       const nextMeta: SessionMeta = {
         session_id: sess.session_id,
@@ -257,7 +257,7 @@ export class SkillConversationAddHandler {
         this.buffer.writeMeta(sess, nextMeta),
       ]);
       obsLogger.info("skill.add_handler.write_back", {
-        req_id: rid, session_id: input.session_id, instance_id: input.instance_id, instance_id: input.instance_id,
+        req_id: rid, session_id: input.session_id, instance_id: input.instance_id,
         dur_ms: Date.now() - t0Wb,
         archived: true,
       });
@@ -272,7 +272,7 @@ export class SkillConversationAddHandler {
         },
       };
     } else {
-      // 未触发归档：直接把拼接后的 data-current 写回
+      // No archiving triggered: write back the concatenated data-current directly
       const nowMs = this.now();
       const nextMeta: SessionMeta = {
         session_id: sess.session_id,
@@ -291,7 +291,7 @@ export class SkillConversationAddHandler {
         this.buffer.writeMeta(sess, nextMeta),
       ]);
       obsLogger.info("skill.add_handler.write_back", {
-        req_id: rid, session_id: input.session_id, instance_id: input.instance_id, instance_id: input.instance_id,
+        req_id: rid, session_id: input.session_id, instance_id: input.instance_id,
         dur_ms: Date.now() - t0Wb,
         archived: false,
         tool_count: nextTool,
@@ -335,11 +335,11 @@ export class SkillConversationAddHandler {
         throw new HandlerValidationError(`messages[${i}].content`, "content must be string");
       }
       if (TOOL_PAIR_ROLES.has(m.role as CompressibleRole)) {
-        // tool_call_id 是**必须**的（tool_call 和 tool_result 通过它配对）
-        // tool_name 是**可选**的：Anthropic 协议 tool_use block 里有 name, OpenAI 协议
-        //   role=tool 消息本身没有 tool_name 字段, 只有 tool_call_id。要求 tool_name
-        //   必填会让 proxy 侧被迫反查 assistant.tool_calls 才能填, 属于协议差异导致
-        //   的绕圈；干脆放宽为 optional (对 skill 抽取而言, content 才是关键)。
+        // tool_call_id is **mandatory** (tool_call and tool_result pair via this)
+        // tool_name is **optional**: Anthropic protocol has name in tool_use block, OpenAI protocol
+        //   role=tool message itself lacks tool_name, only tool_call_id. Making tool_name
+        //   mandatory forces the proxy side to reverse-lookup assistant.tool_calls to populate it, which is
+        //   circuitous due to protocol differences; let's relax it to optional (for skill extraction, content is what matters).
         if (typeof m.tool_call_id !== "string" || m.tool_call_id.length === 0) {
           throw new HandlerValidationError(
             `messages[${i}].tool_call_id`,

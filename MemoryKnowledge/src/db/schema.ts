@@ -66,7 +66,7 @@ export const knowledgeWiki = sqliteTable(
     agentId: text("agent_id"),
     taskId: text("task_id"),
     visibility: text("visibility").notNull().default("team"),
-    // draft = 建壳未加工（仅 create 一次性出现）；code-graph 仍用 pending（create 即建图）。
+    // draft = Shell built raw (only create appears once);code-graph Still used pending(create That is, building a map).
     status: text("status").notNull().default("draft"),
     internalStatus: text("internal_status"),
     syncError: text("sync_error"),

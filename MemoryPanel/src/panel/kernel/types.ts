@@ -9,7 +9,7 @@ export interface KernelCredentials {
   requestId?: string;
 }
 
-/** 单次内核元数据调用的运行时凭证（middleware 从 Header + 注册表组装）。 */
+/** Runtime credentials for a single kernel metadata call (middleware assembled from Header + registry). */
 export interface MetaCallContext {
   instanceId: string;
   gatewayEndpoint: string;

@@ -1,14 +1,14 @@
 /**
- * Skill 模块入口 — v2 redesign (2026-06-17)
+ * Skill Module Entry — v2 redesign (2026-06-17)
  *
- * 设计文档：docs/design/2026-06-17-skill-redesign-v2.md
+ * Design document: docs/design/2026-06-17-skill-redesign-v2.md
  *
- * 单表多版本（skill_id, version 联合唯一），DB 是 SKILL.md 与 manifest 的权威
- * 源；storage 只存资源字节。绑定语义全部上交管控面，数据面按
- * (user_id, owner_agent_id, team_id, task_id, skill_id) 五元组身份记录。
+ * Single table multiple versions (skill_id, version unique constraint), DB is the authoritative source for SKILL.md and manifest;
+ * storage only stores resource bytes. Binding semantics are fully handed over to the control plane, data plane records identity by
+ * (user_id, owner_agent_id, team_id, task_id, skill_id) five-tuple.
  */
 
-// 类型
+// Types
 export type {
   IdFields,
   SkillStatus,
@@ -20,7 +20,7 @@ export type {
   ExtractMessage,
 } from "./types.js";
 
-// 配置解析
+// Configuration parsing
 export type {
   SkillConfigInput,
   ResolvedSkillConfig,
@@ -39,7 +39,7 @@ export {
   formatSkillFile,
 } from "./skill-format.js";
 
-// DDL 常量
+// DDL Constants
 export {
   SKILLS_DDL,
   SKILL_FTS_DDL,
@@ -47,7 +47,7 @@ export {
   FTS_CONTENT_MAX,
 } from "./skill-store-ddl.js";
 
-// 存储接口抽象
+// Storage interface abstraction
 export type {
   ISkillStore,
   SkillStoreCapabilities,
@@ -55,7 +55,7 @@ export type {
   ExpiredVersionMeta,
 } from "./skill-store.interface.js";
 
-// 数据访问层
+// Data access layer
 export {
   SqliteSkillStore,
   SkillStoreError,
@@ -64,7 +64,7 @@ export {
   type SqliteSkillStoreOptions,
 } from "./skill-store.js";
 
-// 资源层
+// Resource layer
 export {
   SkillResourceStore,
   SkillResourceError,
@@ -73,7 +73,7 @@ export {
   type ResourceErrorCode,
 } from "./skill-resource-store.js";
 
-// 版本编排
+// Version orchestration
 export {
   SkillVersioning,
   type SkillVersioningOptions,
@@ -81,7 +81,7 @@ export {
   type AppendVersionMutation,
 } from "./skill-versioning.js";
 
-// 权限工具
+// Permission tools
 export {
   SkillPermissionError,
   assertOwner,
@@ -90,7 +90,7 @@ export {
   type SkillPermissionErrorCode,
 } from "./skill-permission.js";
 
-// 核心门面
+// Core facade
 export {
   SkillCore,
   SkillCoreError,
@@ -109,7 +109,7 @@ export {
   type ListVersionsInput,
 } from "./skill-core.js";
 
-// 抽取链路
+// Extraction pipeline
 export {
   SkillExtractor,
   createExtractorAdapter,
@@ -126,15 +126,15 @@ export {
   type CreateSkillToolsOptions,
 } from "./skill-tools.js";
 
-// Listing prompt 常量
+// Listing prompt constants
 export {
   SKILL_LISTING_HEADER,
   SKILL_LISTING_FOOTER,
   SKILLS_GUIDANCE,
 } from "./prompts/skill-listing-prompt.js";
 
-// 抽取 prompt
+// Extraction prompt
 export { SKILL_REVIEW_PROMPT } from "./prompts/skill-review-prompt.js";
 
-// 抽取链路里 worker / dedupe 共用的 ExtractorLLMRunner（与 v2 ExtractorRunner 形状兼容）。
+// ExtractorLLMRunner shared by worker / dedupe in the extraction pipeline (shape-compatible with v2 ExtractorRunner).
 export type { ExtractorLLMRunner } from "./types.js";

@@ -1,15 +1,15 @@
 /**
- * OpenTelemetry + Langfuse span processor 初始化。
+ * OpenTelemetry + Langfuse span processor initialization.
  *
- * 在 server.ts 最顶部调用 initTelemetry()，确保在所有模块加载前
- * 注册 OTel SDK。未配置 LANGFUSE_SECRET_KEY 时静默跳过，不影响服务运行。
+ * Invokes initTelemetry() at the very top of server.ts to ensure OTel SDK is registered
+ * before any modules are loaded. Silently skips when LANGFUSE_SECRET_KEY is not configured, without affecting service operation.
  *
- * AI SDK 的 generateText({ experimental_telemetry: { isEnabled: true } })
- * 会自动产生 GEN_AI 语义约定 span，LangfuseSpanProcessor 负责批量上报到 Langfuse。
+ * AI SDK's generateText({ experimental_telemetry: { isEnabled: true } })
+ * automatically produces GEN_AI semantic convention spans, which LangfuseSpanProcessor batch reports to Langfuse.
  */
 
-// 必须在读取 process.env 之前加载 .env，
-// 因为 initTelemetry() 在 config.ts (含 import 'dotenv/config') 之前执行
+// Must load .env before reading process.env,
+// because initTelemetry() executes before config.ts (which contains import 'dotenv/config')
 import 'dotenv/config';
 
 import { NodeSDK } from "@opentelemetry/sdk-node";
@@ -21,9 +21,9 @@ const log = createLogger("telemetry");
 
 let sdk: NodeSDK | null = null;
 
-/** 初始化 OpenTelemetry + Langfuse。未配置 key 时静默跳过。 */
+/** Initializes OpenTelemetry + Langfuse. Silently skips when key is not configured. */
 export function initTelemetry(): void {
-  if (sdk) return; // 防止重复初始化
+  if (sdk) return; // Prevents duplicate initialization
 
   const secretKey = process.env.LANGFUSE_SECRET_KEY;
   if (!secretKey) {
@@ -50,7 +50,7 @@ export function initTelemetry(): void {
     sdk = null;
   }
 
-  // 优雅退出时 flush 残留 span
+  // Flush residual spans on graceful shutdown
   process.on("SIGTERM", () => {
     sdk?.shutdown().catch(() => {});
   });
@@ -58,14 +58,14 @@ export function initTelemetry(): void {
 
 // ── Tracing helpers ──
 
-/** 共享 tracer，供 ingest 流程创建 parent span。 */
+/** Shared tracer for ingest workflow to create parent spans. */
 export const tracer = trace.getTracer("knowledge-wiki");
 
 /**
- * 在 span 上下文中执行异步函数。AI SDK 的 experimental_telemetry 会自动
- * 将 generateText 的 span 归并为当前 active span 的子 span。
+ * Executes an async function within a span context. AI SDK's experimental_telemetry automatically
+ * merges generateText spans as child spans of the current active span.
  *
- * 用法：
+ * Usage:
  *   const result = await withSpan("wiki-ingest", async (span) => {
  *     span.setAttribute("wiki.name", name);
  *     return runIngest(...);
@@ -76,7 +76,7 @@ export async function withSpan<T>(
   fn: (span: Span) => Promise<T>,
 ): Promise<T> {
   return tracer.startActiveSpan(name, async (span) => {
-    // langfuse.name 属性让 Langfuse UI 显示 trace 标题
+    // langfuse.name attribute makes Langfuse UI display trace title
     span.setAttribute("langfuse.name", name);
     try {
       return await fn(span);

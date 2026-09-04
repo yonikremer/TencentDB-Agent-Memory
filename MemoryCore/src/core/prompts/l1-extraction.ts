@@ -390,13 +390,13 @@ export function formatExtractionPrompt(params: {
   backgroundMessages?: ConversationMessage[];
   previousSceneName?: string;
 }): string {
-  const { newMessages, backgroundMessages = [], previousSceneName = "无" } = params;
+  const { newMessages, backgroundMessages = [], previousSceneName = "None" } = params;
 
   const bgText = backgroundMessages.length > 0
     ? backgroundMessages
         .map((m) => `[${m.id}] [${m.role}] [${new Date(m.timestamp).toISOString()}]: ${m.content}`)
         .join("\n\n")
-    : "无";
+    : "None";
 
   const newText = newMessages
     .map((m) => `[${m.id}] [${m.role}] [${new Date(m.timestamp).toISOString()}]: ${m.content}`)
@@ -404,13 +404,13 @@ export function formatExtractionPrompt(params: {
 
   return `**输出语言**：根据下方"待提取的新消息"中 user 发言的主导语言书写 \`scene_name\` 和 memory \`content\`。
 
-【上一个情境】：${previousSceneName}
+[Previous Scene]: ${previousSceneName}
 
-【背景对话】（仅供理解上下文推断关系/时间，严禁从中提取记忆）：
+[Background Messages] (Only for understanding context/relationships/time, strictly forbidden to extract memories from here):
 ${bgText}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-【待提取的新消息】（务必结合 timestamp 推算时间，只从这里提取记忆！）：
+[New Messages to Extract] (Must combine with timestamp to infer time, only extract memories from here!):
 ${newText}`;
 }

@@ -1,24 +1,24 @@
 /**
- * /v3/chat-memory/* HTTP handlers — Chat Memory 内容清空。
+ * /v3/chat-memory/* HTTP handlers — Chat Memory content clear.
  *
- * 设计要点：
- *   - `clear` 只删**内容**，不删资产。asset_id、Team/Agent 归属、Agent 绑定、
- *     ACL、Owner、名称、可见性全部保留，清空后 Agent 继续用原 memory_id 写入。
- *   - 任一 memory_id 不存在 / 非 chat_memory / 无法定位 agent 时整批拒绝
- *     （前置解析全部通过后才开始删除）。
- *   - 幂等：已清空过的 memory_id 再次调用仍返回成功，计数为 0。
- *   - 审计：每个 memory_id 按 L1/L2/L3 各记一条 delete 事件，只记
- *     memory_id + 时间 + 结果，**不保留任何原内容**。
+ * Design highlights:
+ *   - `clear` only deletes **content**, not the asset. asset_id, Team/Agent ownership, Agent binding,
+ *     ACL, Owner, name, and visibility are all preserved. After clearing, the Agent continues to write using the original memory_id.
+ *   - Any memory_id not existing / not chat_memory / unable to locate agent will reject the entire batch
+ *     (starts deleting only after front-end parsing all passes).
+ *   - Idempotent: calling again on an already cleared memory_id still returns success, count is 0.
+ *   - Audit: each memory_id records one delete event per L1/L2/L3, only recording
+ *     memory_id + time + result, **retaining zero original content**.
  *
- * 鉴权模型（与 L0–L3 数据面一致）：
- *   内核把 Bearer + x-tdai-service-id 视为可信的管理员级凭据，**不做用户级
- *   鉴权**、不解析 x-tdai-user-key —— 与 conversation/delete、atomic/delete
- *   等同类删除接口保持一致。"仅资产 Owner 可操作"由**面板后端**在转发前完成
- *   （见 MemoryPanel routes/chat-memory.ts 的 NOT_ASSET_OWNER 校验）。
+ * Authentication model (consistent with L0–L3 data plane):
+ *   The core treats Bearer + x-tdai-service-id as trusted admin-level credentials, **performing no user-level
+ *   auth**, not parsing x-tdai-user-key — consistent with similar delete interfaces like conversation/delete, atomic/delete.
+ *   "Only asset Owner can operate" is completed by the **panel backend** before forwarding
+ *   (see NOT_ASSET_OWNER validation in MemoryPanel routes/chat-memory.ts).
  *
- * 注册方式与 /v3/skill/*、/v3/knowledge/* 一致（extraRouteTable），
- * 因此绕过 L0–L3 的 strict-isolation 三元组校验 —— 本接口的作用域由
- * memory_ids 自身决定，不依赖请求头里的 agent/session。
+ * Registration method identical to /v3/skill/*, /v3/knowledge/* (extraRouteTable),
+ * thus bypassing L0–L3 strict-isolation triplet validation — this interface's scope is determined by
+ * memory_ids itself, not relying on agent/session in request headers.
  */
 
 import { randomUUID } from "node:crypto";
@@ -36,7 +36,7 @@ import type { Logger } from "../core/types.js";
 
 const TAG = "[chat-memory-handlers]";
 
-/** 单次clear 的 memory_ids 上限。 */
+/** Maximum memory_ids per clear. */
 export const CHAT_MEMORY_CLEAR_MAX = 100;
 
 // ═════════════════════════════════════════════════════════════
@@ -60,32 +60,32 @@ export const chatMemoryClearRequestSchema = z.object({
   { message: "memory_ids must contain at least one non-empty id" },
 );
 
-/** 单个 memory 的清空结果。 */
+/** Single memory clear result. */
 export interface ChatMemoryClearItem {
   memory_id: string;
-  /** 清空是否成功。失败时 memory_id 内容可能残留，调用方可重试（幂等）。 */
+  /** Whether clearing succeeded. If failed, memory_id content might remain, caller can retry (idempotent). */
   cleared: boolean;
   l0_deleted: number;
   l1_deleted: number;
-  /** L2/L3 profile 记录数（VDB 行 + 存储文件）。 */
+  /** L2/L3 profile record count (VDB rows + storage files). */
   profile_deleted: number;
-  /** 失败原因；成功时不返回。 */
+  /** Reason for failure; omitted if successful. */
   reason?: string;
   /**
-   * 失败是否值得重试。
+   * Whether the failure is worth retrying.
    *
-   * 清空是幂等的，所以内部已自动重试若干次；这里为 true 表示重试仍未成功
-   * （通常是 VDB/COS 持续不可用），调用方稍后再试即可补齐残留内容。
-   * 参数类错误等不可重试的失败为 false。
+   * Clearing is idempotent, so internal retries have already occurred; true here means retries still failed
+   * (usually persistent VDB/COS unavailability), caller can try again later to fill in remaining content.
+   * Parameter errors and other non-retryable failures are false.
    */
   retryable?: boolean;
-  /** 内部实际尝试次数，便于排查。 */
+  /** Internal actual attempt count, for troubleshooting. */
   attempts?: number;
 }
 
 export interface ChatMemoryClearData {
   items: ChatMemoryClearItem[];
-  /** 全部成功时为 true。 */
+  /** true when all are successful. */
   all_cleared: boolean;
 }
 
@@ -104,7 +104,7 @@ function formatZodErr(err: ZodError): string {
   return err.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
 }
 
-/** MetadataError.code → envelope code。与 v3-meta-router 的映射保持一致的语义。 */
+/** MetadataError.code → envelope code. Semantics consistent with v3-meta-router mapping. */
 function metadataErrorCode(code: string): number {
   if (code === "permission_denied") return 403;
   if (code.endsWith("_not_found")) return 404;
@@ -116,23 +116,23 @@ function metadataErrorCode(code: string): number {
 // ═════════════════════════════════════════════════════════════
 
 /**
- * 删除该 (team, agent) 作用域下的全部 L2/L3 存储对象。
+ * Delete all L2/L3 storage objects under this (team, agent) scope.
  *
- * 存储按 profile scope 前缀隔离（`profiles/<scope>/`），所以直接按前缀整体
- * 删除，覆盖 persona.md、scene_blocks/、.metadata/scene_index.json 及任何
- * 派生文件；不会越出该 (team, agent) 的作用域。
+ * Storage is isolated by profile scope prefix (`profiles/<scope>/`), so directly delete by prefix entirely,
+ * covering persona.md, scene_blocks/, .metadata/scene_index.json and any
+ * derived files; will not exceed this (team, agent) scope.
  *
- * 返回被删除的对象数（用于审计计数）。失败向上抛，由调用方标记该memory 失败。
+ * Returns deleted object count (for audit counting). Failure is thrown up, caller marks this memory failed.
  */
 async function clearProfileStorage(
   baseStorage: StorageAdapter,
   teamId: string,
   agentId: string,
 ): Promise<number> {
-  // ⚠️ 必须自己校验，不能依赖调用方。
-  // buildProfileIsolationScope 对空值会静默兜底成 "default"，拼出
-  // `team:default|agent:default` 这个**看起来合法**的作用域 —— 一旦
-  // teamId/agentId 为空，就会去删公共 default 作用域的数据，而不是报错。
+  // ⚠️ Must self-validate, cannot rely on caller.
+  // buildProfileIsolationScope silently fallbacks empty values to "default", spelling out
+  // `team:default|agent:default` this **seemingly valid** scope — once
+  // teamId/agentId is empty, it deletes shared default scope data instead of erroring.
   const team = (teamId ?? "").trim();
   const agent = (agentId ?? "").trim();
   if (!team || !agent) {
@@ -143,35 +143,35 @@ async function clearProfileStorage(
   }
 
   const scope = buildProfileIsolationScope({ teamId: team, agentId: agent });
-  // 作用域前缀与 v2-router scopedProfileStorage 保持完全一致，
-  // 否则会清到错误的目录（或清不到）。
+  // Scope prefix completely consistent with v2-router scopedProfileStorage,
+  // otherwise it clears the wrong directory (or none).
   const scopePrefix = `profiles/${encodeURIComponent(scope)}/`;
   const storage = createScopedStorageAdapter(baseStorage, scopePrefix);
 
-  // 先数再删：deleteByPrefix 的返回值各 backend 语义不完全统一，
-  // 这里用 list 的结果作为审计计数的权威来源。
+  // Count then delete: deleteByPrefix return value semantics aren't uniform across backends,
+  // use list result as authoritative source for audit counting here.
   let removed = 0;
   try {
     const entries = await storage.readdir("");
     removed = entries.filter((e) => !e.isDirectory).length;
-  } catch { /* 作用域尚不存在 → 视为已清空 */ }
+  } catch { /* Scope doesn't exist yet → treat as cleared */ }
 
-  // 空字符串前缀经scoped adapter 的 key() 拼接后是 `profiles/<scope>/`，
-  // 永远非空，不会越界到其他 agent，也不会命中 backend 的空 key 保护。
+  // Empty string prefix after scoped adapter key() concatenation is `profiles/<scope>/`,
+  // always non-empty, won't step out of bounds to other agents, nor hit backend empty key protection.
   await storage.rmdir("");
 
   return removed;
 }
 
 /**
- * 清空一个 (team, agent) 的 chat_memory **内容**：L0/L1/L2/L3 + 向量 + 文件。
- * 只删内容，**不动任何资产记录**（asset / 绑定 / ACL 由调用方各自决定）。
+ * Clear chat_memory **content** for a (team, agent): L0/L1/L2/L3 + vectors + files.
+ * Deletes content only, **doesn't touch any asset records** (asset / bindings / ACL decided by callers respectively).
  *
- * 两个调用方共用这一份实现，避免两套清理逻辑走偏：
- *   - `/v3/chat-memory/clear` —— 清完保留资产，Agent 继续用原 memory_id
- *   - `MetadataService.archiveAgent` —— 清完再删资产（删Agent 场景）
+ * Two callers share this implementation to avoid two distinct clean logics diverging:
+ *   - `/v3/chat-memory/clear` —— retains asset after clear, Agent continues using original memory_id
+ *   - `MetadataService.archiveAgent` —— deletes asset after clear (Agent deletion scenario)
  *
- * 失败向上抛，由调用方决定是标记单条失败还是中止整个流程。
+ * Failure is thrown up, caller decides to mark single failure or abort entire process.
  */
 export async function clearChatMemoryContent(args: {
   store: IMemoryStore;
@@ -179,7 +179,7 @@ export async function clearChatMemoryContent(args: {
   teamId: string;
   agentId: string;
 }): Promise<{ l0Deleted: number; l1Deleted: number; profileDeleted: number }> {
-  // 入口处自校验：这是破坏性操作，且有两个调用方，不能依赖上游都做过校验。
+  // Self-validation at entry: this is a destructive operation with two callers, cannot rely on upstream having validated.
   const teamId = (args.teamId ?? "").trim();
   const agentId = (args.agentId ?? "").trim();
   if (!teamId || !agentId) {
@@ -201,26 +201,26 @@ export async function clearChatMemoryContent(args: {
   };
 }
 
-/** 清空内容的整体重试次数上限（含首次尝试）。 */
+/** Total retry attempt limit for content clear (including first try). */
 export const CLEAR_MAX_ATTEMPTS = 3;
-/** 重试退避基数（毫秒），实际等待为 BASE * 2^(n-1)。 */
+/** Retry backoff base (ms), actual wait is BASE * 2^(n-1). */
 const CLEAR_RETRY_BASE_DELAY_MS = 300;
 
 /**
- * 判断错误是否值得重试。
+ * Check if error is worth retrying.
  *
- * 不可重试的是**入参/契约类错误** —— 重试一万次结果也一样，只会拖长请求。
- * 其余（VDB 超时、COS 5xx、连接重置等）都当作瞬时故障重试。
+ * Non-retryable are **input/contract class errors** — retrying 10000 times gives same result, only prolonging request.
+ * Others (VDB timeouts, COS 5xx, connection resets, etc) treated as transient failures to retry.
  */
 function isNonRetryableClearError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return (
-    // 入参为空 —— 调用方 bug，重试无意义
+    // Empty inputs — caller bug, retry is meaningless
     msg.includes("requires non-empty teamId and agentId")
     || msg.includes("requires a non-empty sessionId")
-    // store 能力缺失 —— 配置问题
+    // store capability missing — config issue
     || msg.includes("does not support clearMemoryContent")
-    // 护栏拦下的危险 filter —— 属于代码缺陷，必须暴露而不是重试掩盖
+    // Dangerous filter blocked by guardrails — code defect, must expose instead of covering by retrying
     || msg.includes("refusing clearMemoryContent")
     || msg.includes("would wipe the whole collection")
     || msg.includes("missing required scope field")
@@ -228,14 +228,14 @@ function isNonRetryableClearError(err: unknown): boolean {
 }
 
 /**
- * 带整体重试的内容清空。
+ * Content clear with overall retry.
  *
- * 为什么在**这一层**重试，而不是只依赖 TcvdbClient 的单请求重试：
- * 单请求重试只能覆盖"某一次 HTTP 调用抖动"，但清空是 L0→L1→profiles→存储
- * 四步，任何一步彻底失败都会留下"半清空"状态。清空天然幂等（按 filter 删，
- * 删过的再删返回 0），所以整体重跑是安全的，能把半清空收敛成全清空。
+ * Why retry at **this layer**, instead of relying only on TcvdbClient's single request retry:
+ * Single request retry only covers "one HTTP call jitter", but clear has L0→L1→profiles→storage
+ * four steps, any step failing completely leaves a "half-cleared" state. Clear is inherently idempotent (deleting by filter,
+ * deleting again returns 0), so overall re-run is safe and resolves half-cleared to fully cleared.
  *
- * 失败时抛出最后一次的错误，并在 message 前缀标注尝试次数，便于排查。
+ * On failure, throws the last error, and prefixes message with attempt count for troubleshooting.
  */
 async function clearChatMemoryContentWithRetry(args: {
   store: IMemoryStore;
@@ -290,10 +290,10 @@ async function clearChatMemoryContentWithRetry(args: {
 }
 
 /**
- * 带整体重试的清空，供 `archiveAgent`（删除 Agent 时连带清内容）复用。
+ * Clear with overall retry, for `archiveAgent` (clearing content when deleting Agent) to reuse.
  *
- * 与 clear 接口共用同一套重试策略，保证两条路径行为一致：都能自愈瞬时
- * VDB/COS 故障，且都不会用重试掩盖参数类错误。
+ * Shares same retry strategy with clear interface, ensuring two paths have identical behavior: both can self-heal transient
+ * VDB/COS failures, and neither will cover up parameter errors with retries.
  */
 export async function clearChatMemoryContentResilient(args: {
   store: IMemoryStore;
@@ -310,8 +310,8 @@ export async function clearChatMemoryContentResilient(args: {
 }
 
 /**
- * 写清空审计。L1/L2/L3 各一条 delete 事件，record_id 用 memory_id（asset_id），
- * 不写任何原内容。审计失败不阻塞主流程（与 v2-router recordAudit 语义一致）。
+ * Write clear audit. One delete event each for L1/L2/L3, record_id uses memory_id (asset_id),
+ * no original content written. Audit failure won't block main flow (semantics consistent with v2-router recordAudit).
  */
 export async function recordClearAudit(
   store: IMemoryStore,
@@ -377,15 +377,15 @@ async function handleChatMemoryClear(
     return errorEnvelope(503, "Metadata service not available", requestId);
   }
 
-  // ── 前置整批解析：asset 存在 + asset_type=chat_memory + 可定位 agent。
-  //    任一失败整批拒绝，一条都不清。
+  // ── Batch front-end parsing: asset exists + asset_type=chat_memory + agent locatable.
+  //    Any failure rejects whole batch, zero items cleared.
   //
-  //    这里**不做用户级 Owner 校验** —— 与 L0–L3 数据面保持一致的信任模型：
-  //    内核数据面把 Bearer + x-tdai-service-id 视为可信（管理员级）凭据，
-  //    不解析 x-tdai-user-key。"仅资产 Owner 可操作"由**面板后端**在转发前
-  //    完成（见 MemoryPanel routes/chat-memory.ts 的 NOT_ASSET_OWNER 校验）。
-  //    在内核再做一遍会造成：① 与同类删除接口(conversation/atomic delete)
-  //    行为不一致；② 服务端调用方（无用户上下文）无法使用本接口。
+  //    No user-level Owner validation here —— trust model is consistent with L0-L3 data plane:
+  //    The core data plane treats Bearer + x-tdai-service-id as trusted (admin-level) credentials,
+  //    and doesn't parse x-tdai-user-key. "Only asset Owner can operate" is done by the **panel backend**
+  //    before forwarding (see MemoryPanel routes/chat-memory.ts NOT_ASSET_OWNER validation).
+  //    Doing it again in core would cause: ① inconsistent behavior with similar delete interfaces (conversation/atomic delete);
+  //    ② server-side callers (without user context) couldn't use this interface.
   let targets: Array<{ asset_id: string; team_id: string; agent_id: string }>;
   try {
     targets = await metaSvc.resolveChatMemoryTargets(memory_ids);
@@ -396,8 +396,8 @@ async function handleChatMemoryClear(
     throw err;
   }
 
-  // ── 逐个清空内容。校验已全部通过，这里的失败只可能是存储/VDB 故障，
-  //    所以带整体重试（清空幂等，重跑安全）。 ──
+  // ── Clear content sequentially. Validation passed, failures here can only be storage/VDB faults,
+  //    so comes with overall retry (clearing is idempotent, rerun is safe). ──
   const items: ChatMemoryClearItem[] = [];
   for (const target of targets) {
     try {
@@ -427,8 +427,8 @@ async function handleChatMemoryClear(
         ...(attempts > 1 ? { attempts } : {}),
       });
     } catch (err) {
-      // 不回滚：清空本身是幂等的，调用方重试即可补齐残留。
-      // 只落安全信息，不把底层错误原文透给调用方。
+      // Don't rollback: clear itself is idempotent, caller retrying can fill the rest.
+      // Log only safe information, don't pass raw underlying error to caller.
       const retryable = !isNonRetryableClearError(err);
       deps.logger.error(
         `${TAG} clear failed memory=${target.asset_id} team=${target.team_id} ` +

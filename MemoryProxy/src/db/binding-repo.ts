@@ -1,18 +1,18 @@
 /**
- * BindingRepo — 长期 session binding 持久化。
+ * BindingRepo — long-term session binding persistence.
  *
- * 在 KV 里存一份"小纸条",只记 outcome + id 组,永不自动清理(`nottl/` 前缀)。
- * 用于沉睡对话唤醒 + bridge L2 反查身份。
+ * Stores a "little note" in KV, only recording outcome + id group, never automatically cleared (`nottl/` prefix).
+ * Used for waking up sleeping conversations + memory bridge L2 reverse lookup identity.
  *
  * ── Signature note ────────────────────────────────────────────────────────
- * 见 docs/design/2026-08-03-binding-flatten.md:
- *   - 原方案 (2026-07-10) 用 `(userId, agentSource, sessionId)` 三段作 key,
- *     加上 P4 (2026-07-12 kernel-sts) 的 `spaceId` 一共 4 段
- *   - 但 bridge 侧 curl 只能给 (spaceId, sessionId) —— 拿不到 userId/agentSource,
- *     跨 pod L1 miss 时永远拼不出老 key,401 到底
- *   - 拍平后:方法签名减到 `(spaceId, sessionId)`,userId/agentSource 挪到
- *     `SessionBinding` 结构体里,`userKey` 也一起存进去(memory-bridge L2b
- *     恢复后 chat_memory 检索不再降级)
+ * See docs/design/2026-08-03-binding-flatten.md:
+ *   - Original scheme (2026-07-10) used `(userId, agentSource, sessionId)` 3-segment as key,
+ *     plus P4 (2026-07-12 kernel-sts)'s `spaceId` making 4 segments total
+ *   - But curl on the bridge side can only give (spaceId, sessionId) —— cannot get userId/agentSource,
+ *     when cross-pod L1 misses, the old key can never be assembled, 401 all the way
+ *   - After flattening: method signature reduced to `(spaceId, sessionId)`, userId/agentSource moved to
+ *     `SessionBinding` struct, `userKey` is also stored together (after memory-bridge L2b
+ *     recovers, chat_memory retrieval no longer downgrades)
  */
 
 import type { Redis } from "ioredis";
@@ -27,15 +27,15 @@ export interface SessionBinding {
   agentId?: string;
   taskId?: string;
   /**
-   * URL path 侧的 agent 前缀(`claude-code` / `codebuddy` ...)。session init
-   * 落盘时从 identity 里带过来,bridge 反查时用它 stamp 到 outbound。
+   * agent prefix on the URL path side (`claude-code` / `codebuddy` ...). When session init
+   * falls to disk, brought over from identity, used by bridge reverse lookup to stamp to outbound.
    */
   agentSource?: string;
   /**
-   * 用户 apiKey。memory-bridge 恢复 chat_memory 检索时要用它去 kernel
-   * 查 imported agents(见 `memory-bridge.ts:resolveMemoryCtxs`),缺失
-   * 会静默降级成 self-only。老 4 段路径不带这个字段,恢复后必降级 ——
-   * 拍平后一起存进来,顺手修好。
+   * User apiKey. memory-bridge needs it when recovering chat_memory retrieval to query kernel
+   * for imported agents (see `memory-bridge.ts:resolveMemoryCtxs`), missing it
+   * will silently downgrade to self-only. The old 4-segment path does not carry this field, must downgrade after recovery ——
+   * stored together after flattening, fixed along the way.
    */
   userKey?: string;
 }

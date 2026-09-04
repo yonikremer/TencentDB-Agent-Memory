@@ -230,7 +230,7 @@ export async function extractL1Memories(params: {
   logger?.debug?.(`${TAG} Total extracted memories: ${allExtracted.length} across ${scenes.length} scene(s)`);
 
   if (allExtracted.length === 0) {
-    // ── 评测指标：L1 提取率（提取为空的情况） ──
+    // ── Evaluation metrics: L1 extraction rate (when extraction is empty) ──
     if (metricInstanceId) {
       try {
         const l0Count = messages.length;
@@ -240,7 +240,7 @@ export async function extractL1Memories(params: {
           metricProducer.send({ metric: "l1_extraction_rate", instanceId: metricInstanceId, value: 0, source: "core" });
         }
       } catch {
-        // 静默忽略，不影响业务逻辑
+        // Silently ignore, does not affect business logic
       }
     }
     return {
@@ -297,7 +297,7 @@ export async function extractL1Memories(params: {
       });
       dedupLatencyMs = Date.now() - dedupStartMs;
 
-      // ── 评测指标：去重决策分布 ──
+      // ── Evaluation metrics: Dedup decision distribution ──
       if (metricInstanceId) {
         try {
           const dedupCounts = { store: 0, update: 0, merge: 0, skip: 0 };
@@ -311,7 +311,7 @@ export async function extractL1Memories(params: {
           metricProducer.send({ metric: "l1_dedup_merge_count", instanceId: metricInstanceId, value: dedupCounts.merge, source: "core" });
           metricProducer.send({ metric: "l1_dedup_skip_count", instanceId: metricInstanceId, value: dedupCounts.skip, source: "core" });
         } catch {
-          // 静默忽略，不影响业务逻辑
+          // Silently ignore, does not affect business logic
         }
       }
 
@@ -404,7 +404,7 @@ export async function extractL1Memories(params: {
     });
   }
 
-  // ── 评测指标：L1 提取率 ──
+  // ── Evaluation metrics: L1 extraction rate ──
   if (metricInstanceId) {
     try {
       const l0Count = messages.length;
@@ -415,11 +415,11 @@ export async function extractL1Memories(params: {
         metricProducer.send({ metric: "l1_extraction_rate", instanceId: metricInstanceId, value: l1Count / l0Count, source: "core" });
       }
     } catch {
-      // 静默忽略，不影响业务逻辑
+      // Silently ignore, does not affect business logic
     }
   }
 
-  // ── 评测指标：L1 延迟 ──
+  // ── Evaluation metrics: L1 latency ──
   try {
     reportL1LatencyMetrics({
       instanceId: metricInstanceId ?? "",
@@ -428,7 +428,7 @@ export async function extractL1Memories(params: {
       hasError: false,
     });
   } catch {
-    // 静默忽略
+    // Silently ignore
   }
 
   return {
@@ -459,7 +459,7 @@ async function callLlmExtraction(params: {
   memoryPrompt?: ResolvedMemoryPrompt;
   /** Host-neutral LLM runner — when provided, used instead of CleanContextRunner. */
   llmRunner?: LLMRunner;
-  /** langfuse 上报身份四元组（team/user/agent/session）。 */
+  /** Langfuse reporting identity tuple (team/user/agent/session). */
   traceContext?: TraceContext;
 }): Promise<SceneSegment[]> {
   const { newMessages, backgroundMessages, previousSceneName, config, logger, model, promptMode = "chat", memoryPrompt, llmRunner, traceContext } = params;
@@ -478,8 +478,8 @@ async function callLlmExtraction(params: {
 
   let result: string;
 
-  // langfuse trace 语义：让此次 L1 抽取在 UI 有稳定 name / 顶级 user/session 列
-  // / 可筛选 tags。避免所有记忆抽取都显示为 Unnamed trace。
+  // Langfuse trace semantics: give this L1 extraction a stable name / top-level user/session columns
+  // / filterable tags in the UI. Avoids all memory extractions displaying as Unnamed trace.
   const traceParams = buildTraceParams("memory.l1-extract", traceContext);
 
   if (llmRunner) {

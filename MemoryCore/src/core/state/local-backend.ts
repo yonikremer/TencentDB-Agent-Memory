@@ -1,8 +1,8 @@
 /**
- * LocalStateBackend — 进程内 Pipeline 状态后端 (开源单机版)
+ * LocalStateBackend — In-process Pipeline state backend (open-source single-machine edition)
  *
- * 需求 #7.3: 基于进程内 Map/setTimeout/SerialQueue/文件 Checkpoint，零外部依赖。
- * 将现有 MemoryPipelineManager 中的状态管理逻辑封装为 IStateBackend 实现。
+ * Requirement #7.3: based on in-process Map/setTimeout/SerialQueue/file Checkpoint, zero external dependencies.
+ * Wraps the state management logic from the existing MemoryPipelineManager as an IStateBackend implementation.
  */
 
 import type {
@@ -36,9 +36,10 @@ export class LocalStateBackend implements IStateBackend {
   }
 
   /**
-   * Map key 拼成 `{instanceId}:{teamId}:{agentId}:{sessionId}` —— 与 RedisStateBackend 的
-   * hash tag 形态对齐：同一 (inst, tid, aid, sess) 必然 hash 到同一桶。
-   * tid/aid 缺失（旧调用）时用 "_" 占位，等价于退化到 instance 维度。
+   * Map key is composed as `{instanceId}:{teamId}:{agentId}:{sessionId}` — aligned with the
+   * hash tag format of RedisStateBackend: the same (inst, tid, aid, sess) always hashes to the same bucket.
+   * When tid/aid are absent (legacy callers), "_" is used as a placeholder, equivalent to
+   * falling back to instance-level granularity.
    */
   private k(instanceId: string, sessionId: string, teamId?: string, agentId?: string): string {
     return `${instanceId}:${teamId || "_"}:${agentId || "_"}:${sessionId}`;
@@ -89,7 +90,7 @@ export class LocalStateBackend implements IStateBackend {
     const sessions: string[] = [];
     for (const key of this.sessionStates.keys()) {
       if (key.startsWith(prefix)) {
-        // key format: {inst}:{tid}:{aid}:{sess}  → 取最后一段作为 sessionId
+        // key format: {inst}:{tid}:{aid}:{sess}  → take the last segment as sessionId
         const parts = key.split(":");
         if (parts.length >= 4) sessions.push(parts.slice(3).join(":"));
       }

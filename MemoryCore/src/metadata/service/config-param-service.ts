@@ -1,11 +1,11 @@
 /**
- * ConfigParamService — 配置参数业务逻辑层。
+ * ConfigParamService - Configuration parameter business logic layer.
  *
- * 职责：
- *  - initDefaults：幂等种子化 global 默认参数
- *  - 生效值解析（user 覆盖 global）
- *  - 1 分钟 TTL 进程内读缓存
- *  - 面向 Router 的 Caller 方法（getUserConfigForCaller / setUserConfigForCaller）
+ * Responsibilities:
+ *  - initDefaults: Idempotent seeding of global default parameters
+ *  - Effective value resolution (user overrides global)
+ *  - 1 minute TTL in-process read cache
+ *  - Caller methods for Router (getUserConfigForCaller / setUserConfigForCaller)
  */
 
 import type { IMetadataStore } from "../store/interface.js";
@@ -21,7 +21,7 @@ import {
 } from "../config/param-registry.js";
 import { MetadataError } from "./metadata-service.js";
 
-// ── 缓存 ──
+// ── Cache ──
 
 interface CacheEntry {
   value: string;
@@ -30,7 +30,7 @@ interface CacheEntry {
 
 const CACHE_TTL_MS = 60_000;
 
-// ── 响应类型 ──
+// ── Response types ──
 
 export interface UserConfigViewItem {
   module: string;
@@ -47,7 +47,7 @@ export interface UserConfigView {
   items: UserConfigViewItem[];
 }
 
-// ── Service 接口 ──
+// ── Service interfaces ──
 
 export interface IConfigParamService {
   initDefaults(registry: ConfigParamRegistry, quotaOverrides?: { maxUsersPerInstance?: number; maxTeamsPerInstance?: number }): Promise<void>;
@@ -61,7 +61,7 @@ export interface IConfigParamService {
   setUserConfigForCaller(data: { user_id: string; module: string; params: Record<string, string> }): Promise<{ ok: true }>;
 }
 
-// ── 实现 ──
+// ── Implementation ──
 
 export class ConfigParamService implements IConfigParamService {
   private readonly cache = new Map<string, CacheEntry>();
@@ -106,7 +106,7 @@ export class ConfigParamService implements IConfigParamService {
     }
   }
 
-  // ── 生效值解析 ──
+  // ── Effective value resolution ──
 
   async getEffectiveParam(module: string, paramName: string, userId?: string): Promise<string> {
     const paramDef = getParamDef(this.registry, module, paramName);
@@ -142,7 +142,7 @@ export class ConfigParamService implements IConfigParamService {
     return num;
   }
 
-  // ── 用户写入 ──
+  // ── User writes ──
 
   async setUserParam(userId: string, module: string, paramName: string, value: string): Promise<ConfigParamEntity> {
     const moduleDef = getModuleDef(this.registry, module);
@@ -174,7 +174,7 @@ export class ConfigParamService implements IConfigParamService {
     return result;
   }
 
-  // ── 配额 ──
+  // ── Quota ──
 
   async getInstanceQuotaLimits(): Promise<{ max_users_per_instance: number; max_teams_per_instance: number }> {
     const maxUsers = await this.getEffectiveInt("quota", "max_users_per_instance");
@@ -182,7 +182,7 @@ export class ConfigParamService implements IConfigParamService {
     return { max_users_per_instance: maxUsers, max_teams_per_instance: maxTeams };
   }
 
-  // ── 用户配置视图 ──
+  // ── User config views ──
 
   async getUserConfigView(userId: string, module: string, paramNames?: string[]): Promise<UserConfigView> {
     const moduleDef = getModuleDef(this.registry, module);
@@ -223,7 +223,7 @@ export class ConfigParamService implements IConfigParamService {
     };
   }
 
-  // ── AssetType 快捷方法 ──
+  // ── AssetType shortcuts ──
 
   async isAssetTypeEnabledForUser(userId: string, assetType: AssetType): Promise<boolean> {
     const paramName = `${assetType}.enabled`;
@@ -231,7 +231,7 @@ export class ConfigParamService implements IConfigParamService {
     return value === "1";
   }
 
-  // ── Caller 方法（面向 Router） ──
+  // ── Caller methods (for Router) ──
 
   async getUserConfigForCaller(
     data: { user_id: string; module: string; param_name?: string },
@@ -265,7 +265,7 @@ export class ConfigParamService implements IConfigParamService {
     return { ok: true };
   }
 
-  // ── 内部辅助 ──
+  // ── Internal helpers ──
 
   private async getGlobalValue(module: string, paramName: string, paramDef: ParamDef): Promise<string> {
     const cacheKey = `global:${module}:${paramName}`;

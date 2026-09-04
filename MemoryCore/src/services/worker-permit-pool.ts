@@ -1,16 +1,16 @@
 /**
- * WorkerPermitPool — memory PipelineWorker 并发信号量。
+ * WorkerPermitPool — memory PipelineWorker concurrency semaphore.
  *
- * 历史：曾经跨模块（memory PipelineWorker + skill 老 V2 worker）共用；
- * 2026-07-17 skill 改造后 skill 侧走 agent 级 extract-lock 做并发上限,
- * 不再依赖信号量。本 pool 目前只有 memory pipeline 一个 consumer,
- * 保留是因为 memory 侧 concurrency > 1 时仍需要它做队列。
+ * History: formerly shared across modules (memory PipelineWorker + skill old V2 worker);
+ * After skill refactor on 2026-07-17, the skill side uses agent-level extract-lock for concurrency limit,
+ * and no longer relies on semaphores. This pool currently has only one consumer: the memory pipeline,
+ * and is kept because memory side concurrency > 1 still needs it for queueing.
  *
- * 语义：
- *   - capacity 是硬上限
- *   - acquire 满时排队；release 依 FIFO 唤醒
- *   - release 多于 acquire 抛错（帮助定位漏配对的 bug）
- *   - destroy 唤醒所有 waiting 使其 reject（用于优雅停机）
+ * Semantics:
+ *   - capacity is a hard limit
+ *   - queue up when acquire is full; wake up via FIFO on release
+ *   - throw error if release is called more times than acquire (helps locate unmatched pair bugs)
+ *   - destroy wakes up all waiting and makes them reject (used for graceful shutdown)
  */
 
 const TAG = "[worker-permit-pool]";
@@ -32,8 +32,8 @@ export class WorkerPermitPool {
   }
 
   /**
-   * 获取一个许可。如果 in-flight 已达容量则挂起，直到有 release() 唤醒。
-   * destroy 后 acquire 立即 reject。
+   * Acquire a permit. If in-flight has reached capacity, suspend until woken up by release().
+   * After destroy, acquire rejects immediately.
    */
   acquire(): Promise<void> {
     if (this.destroyed) {
@@ -49,10 +49,10 @@ export class WorkerPermitPool {
   }
 
   /**
-   * 归还一个许可。若有 waiter 则出队并 resolve（in-flight 计数不变）；
-   * 否则 in-flight 递减。
+   * Return a permit. If there's a waiter, dequeue and resolve it (in-flight count unchanged);
+   * otherwise decrement in-flight.
    *
-   * release 多于 acquire 视为编程错误，抛出以帮助定位泄漏点。
+   * Calling release more times than acquire is considered a programming error and throws to help locate leaks.
    */
   release(): void {
     if (this._inFlight <= 0 && this.waiters.length === 0) {
@@ -60,31 +60,31 @@ export class WorkerPermitPool {
     }
     const next = this.waiters.shift();
     if (next) {
-      // 把 in-flight 顺延给 waiter，计数不变
+      // Pass in-flight directly to waiter, count remains unchanged
       next.resolve();
     } else {
       this._inFlight--;
     }
   }
 
-  /** 当前正在被持有的许可数。 */
+  /** Number of permits currently held. */
   inFlight(): number {
     return this._inFlight;
   }
 
-  /** 当前可立即拿到的许可数。 */
+  /** Number of permits immediately available. */
   available(): number {
     return Math.max(0, this.capacity - this._inFlight);
   }
 
-  /** 当前排队等待的 acquire 数。 */
+  /** Number of acquire requests currently queued. */
   waiting(): number {
     return this.waiters.length;
   }
 
   /**
-   * 摧毁 pool：拒绝所有 waiter，之后 acquire 立即 reject。
-   * 幂等。
+   * Destroy the pool: reject all waiters, and subsequent acquires reject immediately.
+   * Idempotent.
    */
   destroy(): void {
     if (this.destroyed) return;

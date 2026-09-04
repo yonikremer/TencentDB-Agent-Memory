@@ -1,4 +1,45 @@
-# Claude Code 资产导入
+# Claude Code Asset Import
+
+Import local Claude Code **skill / session** data into Memory Hub. This guide completes the process.
+
+## What to Scan
+
+| Type   | Path |
+|--------|------|
+| Skill   | `~/.claude/skills/*/SKILL.md`; project `./claude/skills/*/SKILL.md` |
+| Session | `~/.claude/projects/*/*.jsonl` |
+
+Use `--workspace` to point to the project-specific directory (global `~/.claude` is also possible).
+
+## Prerequisites
+
+Run from the repository root. Requires Node >= 22 and the following environment variables:
+
+```bash
+export PANEL_URL=http://127.0.0.1:8123
+export TDAI_SERVICE_ID=<spaceId>
+export TDAI_USER_KEY=<agent owner sk-mem-...>
+```
+
+`--agent-id` and `--team-id` are required; the owner must match `TDAI_USER_KEY`.
+
+## Usage
+
+The entry point is `agents/asset-import.ts` at the repo root. Use `--source claude-code` to target this IDE; omit for `auto` detection.
+
+```bash
+# Interactive import: list items (skill: number/name/description/source/associated scripts; session: id/time range/project path), then choose "full / none / partial" (partial accepts numbers or IDs, comma/space separated, multiple allowed)
+tsx agents/asset-import.ts --source claude-code --agent-id <id> --team-id <tid>
+
+# Non‑interactive (script/CI, full import without prompts)
+tsx agents/asset-import.ts --source claude-code --agent-id <id> --team-id <tid> -y
+
+# Specify project directory
+tsx agents/asset-import.ts --source claude-code --workspace /path/to/repo --agent-id <id> --team-id <tid>
+
+# Re‑import (ignore checkpoints, re‑import already imported items)
+tsx agents/asset-import.ts --source claude-code --agent-id <id> --team-id <tid> --force
+```
 
 把本机 Claude Code 的 **skill / session** 导入 Memory Hub。这一份手册即可完成。
 

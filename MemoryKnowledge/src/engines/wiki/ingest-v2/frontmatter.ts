@@ -1,15 +1,15 @@
 /**
- * frontmatter.ts — YAML frontmatter 的解析与构造。
+ * frontmatter.ts — Parsing and construction of YAML frontmatter.
  *
- * 产出页必须带合法 YAML frontmatter（被现有 manager scanWikiDir/BM25/graph 依赖）：
- *   type(必填) / title / sources(我方扩展) / description / tags / timestamp(OKF 推荐)
+ * Generated pages must carry valid YAML frontmatter (relied upon by existing manager scanWikiDir/BM25/graph):
+ *   type (required) / title / sources (our extension) / description / tags / timestamp (OKF recommended)
  *
- * 这里提供：
- *   - parseFrontmatter：从页内容拆出 frontmatter 对象 + 正文（用于合并/读 locked）。
- *   - buildPage：把 frontmatter 字段 + 正文拼成合规页内容（产出/重写时用）。
- *   - isLocked / readSources：合并逻辑用到的便捷读取。
+ * Provides:
+ *   - parseFrontmatter: splits frontmatter object + body text from page content (for merge / reading locked state).
+ *   - buildPage: constructs compliant page content from frontmatter fields + body text (for output / rewriting).
+ *   - isLocked / readSources: convenience getters used by merge logic.
  *
- * 用仓库已有的 `yaml` 依赖解析，宽容消费（坏 frontmatter 不抛错，按空处理）。
+ * Uses existing `yaml` dependency for parsing with tolerant consumption spirit (malformed frontmatter does not throw, handled as empty).
  */
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -22,22 +22,22 @@ export interface PageFrontmatter {
   tags?: string[];
   timestamp?: string;
   locked?: boolean;
-  /** 保留任何额外字段，round-trip 时不丢（OKF 宽容消费精神）。 */
+  /** Retains any extra fields during round-trip without loss (in line with OKF tolerant consumption). */
   [key: string]: unknown;
 }
 
 export interface ParsedPage {
   frontmatter: PageFrontmatter;
   body: string;
-  /** 是否成功解析到 frontmatter 块。 */
+  /** Whether frontmatter block was successfully parsed. */
   hasFrontmatter: boolean;
 }
 
 const FM_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 
 /**
- * 拆分页内容为 frontmatter + 正文。无 frontmatter 时返回 `{type:"other"}` 占位。
- * 解析失败（坏 YAML）时宽容降级，不抛错。
+ * Splits page content into frontmatter + body text. Returns `{type:"other"}` placeholder when frontmatter is missing.
+ * Graces gracefully on parsing failure (malformed YAML) without throwing.
  */
 export function parseFrontmatter(content: string): ParsedPage {
   const text = content ?? "";
@@ -61,13 +61,13 @@ export function parseFrontmatter(content: string): ParsedPage {
   return { frontmatter: { ...fm, type } as PageFrontmatter, body, hasFrontmatter: true };
 }
 
-/** 目标页是否被用户手工锁定（page/write 注入 locked:true）。锁定页 ingest 必须跳过。 */
+/** Whether target page is manually locked by user (injected with locked:true by page/write). Locked page ingest must be skipped. */
 export function isLocked(content: string): boolean {
   const { frontmatter } = parseFrontmatter(content);
   return frontmatter.locked === true;
 }
 
-/** 读取页声明的 sources 列表（raw/rm 级联依赖）。 */
+/** Reads sources list declared in page (depended on by raw/rm cascade). */
 export function readSources(content: string): string[] {
   const { frontmatter } = parseFrontmatter(content);
   const s = frontmatter.sources;
@@ -76,11 +76,11 @@ export function readSources(content: string): string[] {
 }
 
 /**
- * 把 frontmatter + 正文拼成合规页内容。
+ * Assembles frontmatter + body text into compliant page content.
  *
- * - `type` 必填；缺失时填 "other"（OKF：consumer 容忍未知 type）。
- * - 永不写 `locked` 字段（仅 page/write 注入；自研产出页不带 locked）。
- * - 字段顺序固定（type→title→description→sources→tags→timestamp→其它），可读性更稳。
+ * - `type` is required; fills "other" if missing (OKF: consumer tolerates unknown type).
+ * - Never writes `locked` field (only injected by page/write; output pages do not carry locked).
+ * - Fixed field order (type→title→description→sources→tags→timestamp→others) for stable readability.
  */
 export function buildPage(frontmatter: PageFrontmatter, body: string): string {
   const fm: Record<string, unknown> = {};
@@ -90,7 +90,7 @@ export function buildPage(frontmatter: PageFrontmatter, body: string): string {
   if (frontmatter.sources != null) fm.sources = frontmatter.sources;
   if (frontmatter.tags != null) fm.tags = frontmatter.tags;
   if (frontmatter.timestamp != null) fm.timestamp = frontmatter.timestamp;
-  // 透传其它自定义字段（排除 locked / 已处理字段）
+  // Pass through other custom fields (excluding locked / already processed fields)
   for (const [k, v] of Object.entries(frontmatter)) {
     if (["type", "title", "description", "sources", "tags", "timestamp", "locked"].includes(k)) continue;
     if (v != null) fm[k] = v;

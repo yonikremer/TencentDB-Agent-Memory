@@ -1,15 +1,14 @@
 /**
  * src/core/skill/queue/index.ts
  *
- * Skill 抽取模块的**接口类型 barrel**。老 job 队列（LocalSkillTaskQueue /
- * RedisSkillTaskQueue / SkillExtractWorkerV2 / SkillExtractJob 等）已经在
- * 2026-07-17 skill_extract → 直接归档改造中删除，抽取管线现在完全走
- * `src/core/skill/conversation-add/` 下的 SkillTriggerService +
- * SkillConversationExtractWorker + SkillAgentTaskQueue。
+ * Interface types barrel for the Skill extraction module. The old job queue (LocalSkillTaskQueue /
+ * RedisSkillTaskQueue / SkillExtractWorkerV2 / SkillExtractJob etc.) was deleted in the
+ * 2026-07-17 skill_extract → direct archive refactor, the extraction pipeline now entirely goes through
+ * SkillTriggerService + SkillConversationExtractWorker + SkillAgentTaskQueue under `src/core/skill/conversation-add/`.
  *
- * 本模块只保留 Worker/extractor 接口层类型（ConversationMessage /
- * ExtractedCandidate / ISkillExtractor / ExtractorLogger），给
- * conversation-add/extract-worker.ts 和 skill-extractor.ts 复用。
+ * This module only retains Worker/extractor interface layer types (ConversationMessage /
+ * ExtractedCandidate / ISkillExtractor / ExtractorLogger), for reuse by
+ * conversation-add/extract-worker.ts and skill-extractor.ts.
  */
 
 export type {

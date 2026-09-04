@@ -1,73 +1,68 @@
 /**
- * User query extractor —— 从 CC / CodeBuddy / 其他 coding agent 的 user
- * message content 里剥掉一切 harness 上下文，只保留"用户真正键入的文本"。
+ * User query extractor —— Strip away all harness context from the user message content of CC / CodeBuddy / other coding agents, retaining only the "text actually typed by the user".
  *
- * 使用场景（proxy 内三处共用）：
- *   1. tdai/recorder.ts::extractLatestUserMessage —— L0 写入
- *   2. agent-adapters/codebuddy.ts::extractUserText —— mem 命令 parser +
- *      normalize-conversation 抽 skill buffer 干净文本
- *   3. mem-command 通过 adapter.extractUserText 间接调用
+ * Usage scenarios (shared in three places within proxy):
+ *   1. tdai/recorder.ts::extractLatestUserMessage —— L0 write
+ *   2. agent-adapters/codebuddy.ts::extractUserText —— mem command parser + normalize-conversation extracting clean text for skill buffer
+ *   3. mem-command indirectly called via adapter.extractUserText
  *
- * 抽取语义（按优先级排列）：
+ * Extraction semantics (ordered by priority):
  *
- *   0) CC 客户端内部 prompt / tool_result 伪装 / session-init 回执，
- *      以及 DSH 纯文本 `Current runtime context.` 快照 → 整条丢弃，返回 ""，
- *      调用方据此决定本轮不写 L0 / 不进 skill buffer
+ *   0) CC client internal prompt / tool_result disguise / session-init receipt,
+ *      and DSH plain text `Current runtime context.` snapshot → discard entire message, return "",
+ *      caller uses this to decide not to write L0 / not to enter skill buffer for this round
  *
- *   1) 显式 `<user_query>...</user_query>` 块（CodeBuddy 标准 + CC 部分模板）
- *      → 只提取块内 join，即便同条消息同时含 session-init 表单也不受影响
+ *   1) Explicit `<user_query>...</user_query>` block (CodeBuddy standard + part of CC templates)
+ *      → only extract join inside block, even if the same message contains session-init form concurrently
  *
- *   2) 无 user_query 时按顺序剥离：
- *      - `<question_answer>...</question_answer>` （session-init 表单回填）
- *      - 常见 XML wrapper（system-reminder / additional_data / user_info /
- *        open_and_recently_viewed_files / session / persisted-output /
- *        tool_use_error / tool_result 等）
- *      - 单行 tool 回显（Bash 完成 / Read 的 cat -n 格式 / Write 成功回执）
- *      - MEMORY.md 风格 yaml frontmatter 块
- *      - 「会话初始化 — ...」标题残留行
- *      → 剥离完剩下什么就是用户键入
+ *   2) When no user_query, strip sequentially:
+ *      - `<question_answer>...</question_answer>` (session-init form backfill)
+ *      - Common XML wrappers (system-reminder / additional_data / user_info / open_and_recently_viewed_files / session / persisted-output / tool_use_error / tool_result, etc.)
+ *      - Single-line tool echo (Bash completion / cat -n format of Read / Write success receipt)
+ *      - MEMORY.md style yaml frontmatter block
+ *      - "Session Initialization — ..." remaining title lines
+ *      → what's left after stripping is user typing
  *
- * 迁移历史：本文件由 tdai/recorder.ts 抽离而来（原为 tdai 私有），语义未变。
- * 见 docs/design/2026-07-30-cc-request-routing-plan.md 附录 + codebuddy adapter
- * 抓包结论。
+ * Migration history: This file was extracted from tdai/recorder.ts (originally private to tdai), semantics unchanged.
+ * See docs/design/2026-07-30-cc-request-routing-plan.md appendix + codebuddy adapter packet capture conclusion.
  */
 
 /**
- * 会话初始化（选择 Team / Agent / 任务）表单问答的标题标记。
- * 用于剥离残留的标题行；真实用户输入不受影响。
+ * Title marker for session initialization (select Team / Agent / Task) form Q&A.
+ * Used to strip residual title lines; real user input is unaffected.
  */
-const SESSION_INIT_TITLE_MARKER = "会话初始化";
+const SESSION_INIT_TITLE_MARKER = "Session Initialization";
 
 /**
- * Claude Code CLI 用 role=user 塞进对话流的"内部辅助 prompt"识别器。
+ * Identifier for "internal auxiliary prompts" stuffed into conversation flow with role=user by Claude Code CLI.
  *
- * 场景：CC 客户端会用 role=user 承载多种**非用户真实输入**的内容，如果整条命中
- * 任一模式，直接判定为"非人类输入" → 该轮不写 L0，避免污染记忆库。
+ * Scenario: CC client uses role=user to carry various **non-user actual input** content, if the whole message matches any pattern,
+ * directly determine as "non-human input" → do not write L0 this round, avoid polluting memory store.
  *
- * 命中规则设计：
- *   - 全消息**开头**出现明显 CC 模式标记（[SUGGESTION MODE]、[TITLE MODE] 等）；
- *   - 或 CC 结构化元数据 JSON（{"parentUuid": ..., "promptId": ...}）；
- *   - 或系统级 recap/summary prompt（"The user stepped away and is coming back..."）；
- *   - 或 session-init AskUserQuestion 的回执（"Your questions have been answered:"）；
- *   - 或 tool 输出被伪装成 user 的典型格式（"(Bash completed with no output)"、
- *     `<persisted-output>` 大文件占位、CC 时间戳日志块）。
+ * Hit rule design:
+ *   - **Start** of full message shows clear CC mode markers ([SUGGESTION MODE], [TITLE MODE], etc.);
+ *   - Or CC structured metadata JSON ({"parentUuid": ..., "promptId": ...});
+ *   - Or system-level recap/summary prompt ("The user stepped away and is coming back...");
+ *   - Or receipt of session-init AskUserQuestion ("Your questions have been answered:");
+ *   - Or typical format of tool output disguised as user ("(Bash completed with no output)",
+ *     `<persisted-output>` large file placeholder, CC timestamp log block).
  *
- * 匹配用 startsWith / 全串锚定 —— 不误伤真实用户输入。
+ * Matching uses startsWith / full string anchor —— do not accidentally hurt real user input.
  */
 const CC_INTERNAL_PROMPT_PATTERNS: RegExp[] = [
-  // CC 模式标记：[XXX MODE: ...] / [XXX: ...]
+  // CC mode markers: [XXX MODE: ...] / [XXX: ...]
   /^\s*\[(?:SUGGESTION|TITLE|SUMMARY|COMPACT|COMPACTION|ANALYSIS|EVAL|RECAP|MEMORY|SIDECHAIN)\s+MODE[:\s]/i,
-  // CC 会话恢复 prompt（在 core prompts/session-resume 里定义）
+  // CC session resume prompt (defined in core prompts/session-resume)
   /^\s*The user stepped away and is coming back\.\s*Recap/i,
-  // AskUserQuestion 回执（session-init 或运行时问答）
+  // AskUserQuestion receipt (session-init or runtime Q&A)
   /^\s*Your questions have been answered:\s*"/i,
-  // CC 结构化 promptId 元数据 JSON（首字符是数字 + JSON 或直接 JSON 元信息）
+  // CC structured promptId metadata JSON (first char is number + JSON or direct JSON meta info)
   /^\s*\d+\s*\{"parentUuid"|^\s*\{"parentUuid":\s*"[^"]+","isSidechain"/,
-  // CC 用时间戳前缀重放对话日志（[2026-07-11T...][user] / [assistant]）
+  // CC replays conversation log with timestamp prefix ([2026-07-11T...][user] / [assistant])
   /^\s*\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[^\]]*\]\[(?:user|assistant|system)\]/,
-  // 注：<persisted-output> / (Bash completed with no output) 移到 2b/2c 的
-  //     wrapper 剥离层处理 —— 它们经常和用户下一句拼在同一条 user 消息里，
-  //     只应剥除自身、保留用户后续输入。
+  // Note: <persisted-output> / (Bash completed with no output) moved to
+  //       wrapper stripping layer of 2b/2c —— they are often concatenated with user's next sentence
+  //       in the same user message, should only strip itself, retaining user's subsequent input.
 ];
 
 function isClaudeCodeInternalPrompt(text: string): boolean {
@@ -77,9 +72,9 @@ function isClaudeCodeInternalPrompt(text: string): boolean {
 }
 
 /**
- * DSH 把运行环境快照作为独立 `role=user` 消息追加在真实提问之后。
- * 固定开头，与 session-init 跳过逻辑同一锚点，避免 L0 把 harness 元数据
- * 当成用户输入。真实用户提问不会以这段英文开头。
+ * DSH appends runtime environment snapshot as independent `role=user` message after real question.
+ * Fixed start, shares same anchor with session-init skip logic, to avoid L0 treating harness metadata as user input.
+ * Real user question won't start with this English segment.
  */
 export const DSH_RUNTIME_CONTEXT_PREFIX = "Current runtime context.";
 
@@ -88,25 +83,24 @@ export function isDshRuntimeContextSnapshot(text: string): boolean {
 }
 
 /**
- * 从原始 user content 文本抽取用户真实键入。
+ * Extract real user typing from original user content text.
  *
- * 返回空字符串意味着"这条 user message 全是 harness 噪声"，调用方应据此
- * 决定不写 L0 / 不进 skill buffer / 不匹配 mem 命令。
+ * Returning empty string means "this user message is all harness noise", caller should use this to decide
+ * not to write L0 / not to enter skill buffer / not to match mem command.
  *
- * 参数 `raw` 必须已是**字符串**（数组 content 由调用方自行 join —— 参见
- * agent-adapters 各自的 extractUserText 实现）。
+ * Parameter `raw` must already be a **string** (array content joined by caller themselves —— see extractUserText implementation of each agent-adapter).
  */
 export function extractUserQueryText(raw: string): string {
-  // 0) CC 内部 prompt / tool_result 伪装 / 表单回执 → 整条丢弃（不写 L0）
-  //    这是最高优先级：即便同时含 <user_query> 也整条判定为非人类输入。
-  //    真实用户输入不会命中这些锚定在开头/整串的模式。
+  // 0) CC internal prompt / tool_result disguise / form receipt → discard entirely (do not write L0)
+  //    This is highest priority: even if containing <user_query> at the same time, whole message is judged as non-human input.
+  //    Real user input won't hit these patterns anchored at start/whole string.
   if (isClaudeCodeInternalPrompt(raw)) return "";
-  // DSH runtime-context 快照：纯文本、无 XML wrapper，必须整条丢弃，
-  // 否则 extractLatestUserMessage 从后往前扫会把它当成真实提问写入 L0。
+  // DSH runtime-context snapshot: plain text, no XML wrapper, must be discarded entirely,
+  // otherwise extractLatestUserMessage scanning from back to front will treat it as real question writing L0.
   if (isDshRuntimeContextSnapshot(raw)) return "";
 
-  // 1) 优先：显式 <user_query> 块（即便同一条消息里还夹着 session-init 问答，
-  //    也只取真实 query，用户输入完整保留）。
+  // 1) Priority: explicit <user_query> block (even if session-init Q&A is interleaved in the same message,
+  //    only take real query, user input kept intact).
   const queries: string[] = [];
   const re = /<user_query>([\s\S]*?)<\/user_query>/gi;
   let m: RegExpExecArray | null;
@@ -116,22 +110,22 @@ export function extractUserQueryText(raw: string): string {
   }
   if (queries.length > 0) return queries.join("\n\n");
 
-  // 2) 没有显式 user_query：剥离所有"非用户键入"的内容片段，保留剩余的
-  //    用户真实输入。核心原则：只有用户手打的文本值得写 L0；一切 tool 回显
-  //    / 系统提醒 / 文件正文 / 表单工件 / CC 本地 memory 内容 —— 全部剥除。
+  // 2) No explicit user_query: strip all "non-user typed" content segments, retaining remaining real user input.
+  //    Core principle: only text hand-typed by user is worth writing to L0; all tool echoes
+  //    / system reminders / file bodies / form artifacts / CC local memory content —— strip all.
   let text = raw;
 
-  // 2a) session-init 表单回答 <question_answer>...</question_answer>
+  // 2a) session-init form answer <question_answer>...</question_answer>
   text = text.replace(/<question_answer[^>]*>[\s\S]*?<\/question_answer>/gi, "");
 
-  // 2b) XML 包裹类：CC / CodeBuddy 塞进 user role 的各种 harness 段
-  //     - system-reminder / system_reminder（两种拼写都覆盖）
-  //     - additional_data（CB 每条 user 首段都夹这个：current_time 等）
-  //     - user_info（CB 首条 user 塞的 OS/shell/workspace 元信息）
+  // 2b) XML wrapper class: various harness segments stuffed into user role by CC / CodeBuddy
+  //     - system-reminder / system_reminder (cover both spellings)
+  //     - additional_data (CB stuffs this in every first segment of user: current_time, etc.)
+  //     - user_info (OS/shell/workspace meta info stuffed in CB's first user message)
   //     - open_and_recently_viewed_files
-  //     - session（proxy 自己注入的 session context 包裹）
-  //     - persisted-output（CC "Output too large" 大文件占位）
-  //     - tool_use_error / tool-use-error / tool-result / tool_result（伪 wrapper）
+  //     - session (session context wrapper injected by proxy itself)
+  //     - persisted-output (CC "Output too large" large file placeholder)
+  //     - tool_use_error / tool-use-error / tool-result / tool_result (pseudo wrapper)
   for (const tag of [
     "system-reminder", "system_reminder",
     "additional_data",
@@ -145,19 +139,19 @@ export function extractUserQueryText(raw: string): string {
     text = text.replace(new RegExp(`<${tag}[^>]*>[\\s\\S]*?<\\/${tag}>`, "gi"), "");
   }
 
-  // 2c) 行级过滤：单行匹配的 tool 回显 / 文件片段 / memory frontmatter
-  //     每条规则单行判定，匹配则删除该行；不阻断其它行的用户输入。
+  // 2c) Line-level filtering: single-line matched tool echoes / file segments / memory frontmatter
+  //     Each rule judges single line, if matched delete that line; does not block user input on other lines.
   const LINE_DROP_PATTERNS: RegExp[] = [
-    // CC Write/Edit tool 成功回执
+    // CC Write/Edit tool success receipt
     /^\s*The file .+ has been (updated|created) successfully.*$/i,
     /^\s*File created successfully at:/i,
-    // CC Bash tool 静默完成
+    // CC Bash tool silent completion
     /^\s*\(Bash completed with no output\)\s*$/,
-    // CC read tool 返回的 cat -n 行号格式（"     1  内容" / "1  内容"）
-    // 至少 3 位数字更严格；1-2 位可能与用户输入冲突（如用户列表 "1 abc"）
-    // 因此这里只匹配"数字 + 2 空格 + 内容"且行首无其它字符 —— cat -n 特有格式
-    /^\s{0,6}\d+\t/,   // cat -n 用 tab 分隔（Read tool 的标准格式）
-    // MEMORY.md 相关：CC session_init/memory 命令产生的输出
+    // cat -n line number format returned by CC read tool ("     1  content" / "1  content")
+    // At least 3 digit number is stricter; 1-2 digits might conflict with user input (e.g., user list "1 abc")
+    // Thus here only matches "number + 2 spaces + content" and no other chars at line start —— format unique to cat -n
+    /^\s{0,6}\d+\t/,   // cat -n uses tab separator (Read tool's standard format)
+    // MEMORY.md related: outputs produced by CC session_init/memory command
     /^\s*File .+ has been (updated|created)/i,
   ];
   text = text
@@ -165,29 +159,29 @@ export function extractUserQueryText(raw: string): string {
     .filter((line) => !LINE_DROP_PATTERNS.some((re) => re.test(line)))
     .join("\n");
 
-  // 2d) 整块剥除：MEMORY.md yaml frontmatter（--- 到 ---，含 metadata）
-  //     格式：
+  // 2d) Block stripping: MEMORY.md yaml frontmatter (--- to ---, including metadata)
+  //     Format:
   //       ---
   //       name: ...
   //       description: ...
   //       metadata: ...
   //       ---
-  //     只匹配"至少含 name / description / metadata / node_type 关键字"的 frontmatter
-  //     以避免误伤 markdown 分割线。
+  //     Only matches frontmatter containing at least name / description / metadata / node_type keywords
+  //     to avoid accidentally hurting markdown dividers.
   text = text.replace(
     /(?:^|\n)---\s*\n(?:[a-z_][a-z0-9_]*:\s*.*\n)*?(?:name|description|metadata|node_type|originSessionId):[\s\S]*?\n---\s*(?:\n|$)/gi,
     "\n",
   );
 
-  // 2e) 残留的会话初始化表单标题行（如「会话初始化 — 选择 Agent 与任务」）
+  // 2e) Residual session initialization form title lines (e.g., "Session Initialization — Select Agent and Task")
   text = text
     .split("\n")
     .filter((line) => !line.includes(SESSION_INIT_TITLE_MARKER))
     .join("\n");
 
-  // 2f) 折叠多余空行（前面剥除后可能留下大段空行）
+  // 2f) Collapse redundant blank lines (large blocks of blank lines might be left after preceding stripping)
   text = text.replace(/\n{3,}/g, "\n\n");
 
-  // 剩余即用户真实输入；若整条本就全是 CC 工件，这里会自然变空 → 不写 L0。
+  // Remainder is real user input; if the whole message was all CC artifacts originally, it naturally becomes empty here → no L0 write.
   return text.trim();
 }

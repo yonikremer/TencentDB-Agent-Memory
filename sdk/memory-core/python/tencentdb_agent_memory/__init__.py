@@ -1,17 +1,17 @@
 """TencentDB Agent Memory Python SDK.
 
-版本布局（参考 tencentcloud-sdk-python 子模块拆版本风格）：
+Version Layout (referencing tencentcloud-sdk-python submodule split style):
 
-- 默认导出 `MemoryClient` / `AsyncMemoryClient` 指向 v2 — 老代码升级 SDK 后零修改即可继续工作。
-- 显式 import `from tencentdb_agent_memory.v3 import MemoryClient` 切到 v3
-  严格 isolation 版本（team/agent/user/session 构造时全部必填，路径走 /v3）。
+- Default exports `MemoryClient` / `AsyncMemoryClient` point to v2 — older code can upgrade the SDK without any modification to continue working.
+- Explicit import `from tencentdb_agent_memory.v3 import MemoryClient` switches to v3
+  strict isolation version (team/agent/user/session are all required during construction, path uses /v3).
 
->>> # 老代码
+>>> # Old code
 >>> from tencentdb_agent_memory import MemoryClient
 >>> client = MemoryClient(endpoint, api_key, service_id="...")
 >>> client.add_conversation(session_id="s1", messages=[...])
 
->>> # 新代码（严格 isolation）
+>>> # New code (strict isolation)
 >>> from tencentdb_agent_memory.v3 import MemoryClient
 >>> client = MemoryClient(endpoint, api_key, service_id="...",
 ...                       team_id="t1", agent_id="a1", user_id="u1")

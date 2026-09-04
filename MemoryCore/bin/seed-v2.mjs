@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
-// 薄启动器：seed-v2 通过 v2 API 把历史对话灌入 memory-tencentdb gateway。
+// Thin launcher: seed-v2 ingests historical conversations into memory-tencentdb gateway via v2 API.
 //
-// 优先用预编译产物（生产场景），找不到时 fallback 到 tsx 跑源码（开发场景）。
+// Prefers precompiled artifact (production scenario); falls back to tsx running source code when not found (development scenario).
 //
-// 构建：npm run build:seed-v2
-// 使用：
+// Build: npm run build:seed-v2
+// Usage:
 //   npm run seed-v2 -- --input ./scripts/seed-v2/fixtures/minimal.json
 //   node ./bin/seed-v2.mjs --input fixture.json --endpoint http://127.0.0.1:18420
 
@@ -19,10 +19,10 @@ const distEntry = path.resolve(thisDir, "../scripts/seed-v2/dist/seed-v2.js");
 const srcEntry  = path.resolve(thisDir, "../scripts/seed-v2/seed-v2.ts");
 
 if (fs.existsSync(distEntry)) {
-  // 预编译产物存在：直接 dynamic import
+  // Precompiled artifact exists: dynamic import directly
   await import(pathToFileURL(distEntry).href);
 } else if (fs.existsSync(srcEntry)) {
-  // 没编译过：fallback 到 tsx（开发期常见）
+  // Not compiled: fallback to tsx (common during development)
   const result = spawnSync(
     process.execPath,
     ["--import", "tsx", srcEntry, ...process.argv.slice(2)],

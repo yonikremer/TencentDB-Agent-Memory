@@ -1,8 +1,8 @@
 /**
- * extract-source-retrieval.test.ts — 逐块检索增强（per-chunk retrieval）回归测试。
+ * extract-source-retrieval.test.ts — Regression tests for per-chunk retrieval augmentation.
  *
- * 验证 extractSource 对每个源分块分别调用注入的 retrieveContext（而非整文件一次、
- * 所有块共用同一上下文）。用 mock LLM 返回固定 FILE 块，不发起真实 LLM 调用。
+ * Verifies that extractSource calls the injected retrieveContext separately for each source chunk (rather than once
+ * for the entire file with all chunks sharing identical context). Uses mock LLM returning fixed FILE block without making real LLM calls.
  */
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,7 +12,7 @@ import { extractSource, SOURCE_CHAR_BUDGET } from "./index.js";
 import { chunkText } from "./chunker.js";
 import type { LlmClient } from "./llm.js";
 
-/** 固定的合法 FILE 块，供 mock LLM 返回（type+title → 规范化路径）。 */
+/** Fixed valid FILE block returned by mock LLM (type+title → normalized path). */
 const FILE_BLOCK = `<<<FILE path="wiki/concepts/cache.md">>>
 ---
 type: concept
@@ -22,7 +22,7 @@ mock body
 <<<END>>>
 `;
 
-/** 记录 chat 调用（prompt 用于断言上下文是否注入）。 */
+/** Records chat invocations (prompt used to assert whether context is injected). */
 type ChatCall = { prompt: string };
 function makeMockLlm(calls: ChatCall[]): LlmClient {
   return {
@@ -49,7 +49,7 @@ afterEach(() => {
 });
 
 describe("extractSource per-chunk retrieval", () => {
-  it("短源（单块）：retrieveContext 只调用一次，参数为整份文本", async () => {
+  it("Short source (single chunk): retrieveContext is called only once, with the full text as argument", async () => {
     const text = "This is a short single-chunk source about cache eviction.";
     const { projectPath, sourcePath } = makeProjectAndSource(text);
 
@@ -68,13 +68,13 @@ describe("extractSource per-chunk retrieval", () => {
     });
 
     expect(retrieved).toEqual([text]);
-    // 上下文已注入每个（此处唯一的）chunk 的生成 prompt
+    // Context is injected into the generation prompt of each (here single) chunk
     expect(chatCalls.length).toBeGreaterThan(0);
     expect(chatCalls[0].prompt).toContain("MARKER_RELEVANT_CONTEXT");
   });
 
-  it("长源（多块）：retrieveContext 按块各调用一次，参数依次为各分块", async () => {
-    // ~42k 字符的无标题长文 → chunkText 按 SOURCE_CHAR_BUDGET 硬切成 2 块
+  it("Long source (multiple chunks): retrieveContext is called once per chunk, with chunk text sequentially as arguments", async () => {
+    // ~42k character headingless long text → chunkText hard-splits into 2 chunks by SOURCE_CHAR_BUDGET
     const text = `# Long doc\n\n${"cache block eviction policy ".repeat(2100)}`;
     expect(text.length).toBeGreaterThan(SOURCE_CHAR_BUDGET);
     const expectedChunks = chunkText(text, { targetChars: SOURCE_CHAR_BUDGET });
@@ -96,10 +96,10 @@ describe("extractSource per-chunk retrieval", () => {
       retrieveContext,
     });
 
-    // 关键回归断言：每个分块各检索一次，且参数与 extractSource 内部切分一致
+    // Critical regression assertion: retrieved once per chunk, arguments matching internal splitting of extractSource
     expect(retrieved.length).toBe(expectedChunks.length);
     expect(retrieved).toEqual(expectedChunks);
-    // 每个 chunk 的 prompt 都带上了它自己的检索上下文标记
+    // Each chunk prompt carries its own retrieval context marker
     expect(chatCalls.length).toBe(expectedChunks.length);
     chatCalls.forEach((c, i) => {
       expect(c.prompt).toContain(`MARKER_${i + 1}`);

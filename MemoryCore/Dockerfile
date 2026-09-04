@@ -6,7 +6,7 @@
 #   1. deps-builder: install all deps (incl. native compile toolchain)
 #   2. runtime:      slim image with only runtime deps + app
 #
-# 配置方式: 挂载 config.yaml 到 /data/config/tdai-gateway.yaml
+# Configuration: mount config.yaml to /data/config/tdai-gateway.yaml
 #   docker run -v ./config.yaml:/data/config/tdai-gateway.yaml ...
 #
 # Build:
@@ -26,7 +26,7 @@
 # Stage 1: build/install deps (with toolchain for native bindings)
 FROM node:22-slim AS deps-builder
 
-# apt 源默认走 Debian 官方，公网可直接构建。内网构建加速：
+# APT sources default to official Debian mirrors for direct public building. Internal network acceleration:
 #   docker build --build-arg APT_MIRROR=mirrors.tencent.com .
 ARG APT_MIRROR=deb.debian.org
 RUN if [ "$APT_MIRROR" != "deb.debian.org" ]; then \
@@ -35,7 +35,7 @@ RUN if [ "$APT_MIRROR" != "deb.debian.org" ]; then \
     fi
 
 # Native build toolchain (sqlite-vec, @node-rs/jieba etc.)
-# 使用 BuildKit cache mount 缓存 apt 包，避免重复下载
+# Use BuildKit cache mount to cache APT packages and avoid redundant downloads
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
@@ -46,9 +46,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 WORKDIR /build
 
-# node:22-slim 自带 npm@10.9.8 有 arborist "edgesOut" crash（干净
-# `npm install` 稳定报 `Cannot read properties of null (reading
-# 'edgesOut')`）。升到 11 规避，不影响其它构建行为。
+# node:22-slim ships with npm@10.9.8 which has an arborist "edgesOut" crash (clean
+# `npm install` consistently reports `Cannot read properties of null (reading
+# 'edgesOut')`). Upgrade to 11 to mitigate, without affecting other build behaviors.
 RUN npm install -g npm@11 --no-audit --no-fund
 
 # Copy package metadata first to maximize Docker layer cache
@@ -73,11 +73,11 @@ RUN node -e " \
     "
 
 # Generate lockfile + install production deps.
-# --omit=optional 精简镜像体积，减少 CI push 超时风险（可选依赖如 mongodb、
-# @clickhouse/client、kafkajs 等在网关镜像中不需要）。
+# --omit=optional trims image size to reduce CI push timeout risks (optional dependencies like mongodb,
+# @clickhouse/client, kafkajs etc. are not needed in the gateway image).
 # --ignore-scripts skips the openclaw postinstall patch (irrelevant in image).
 # --legacy-peer-deps relaxes strict peer resolution for older transitive deps.
-# 使用 BuildKit cache mount 缓存 npm 下载缓存，大幅加速重复构建
+# Use BuildKit cache mount for npm download cache to significantly speed up repeated builds
 RUN --mount=type=cache,id=npm-cache,target=/root/.npm \
     npm install \
         --omit=dev \
@@ -87,14 +87,14 @@ RUN --mount=type=cache,id=npm-cache,target=/root/.npm \
         --no-audit \
         --no-fund
 
-# tsx 需要 esbuild 二进制（是 tsx 的 optionalDependency），--omit=optional 后会丢失。
-# 单独安装 esbuild (--no-save 不修改 package.json)，esbuild ~10MB 远小于被省略的
-# 可选依赖总大小（mongodb ~100MB+ 等）。
+# tsx requires esbuild binary (which is an optionalDependency of tsx); it is lost after --omit=optional.
+# Install esbuild separately (--no-save without modifying package.json). esbuild (~10MB) is far smaller than
+# total omitted optional dependencies (mongodb ~100MB+, etc.).
 #
-# 注意：这里**不能**加 --omit=optional —— esbuild 的平台特定二进制
-# （@esbuild/linux-x64 / @esbuild/linux-arm64）本身就是 optionalDependency，
-# 加了会导致运行时报 "The package @esbuild/linux-x64 could not be found"。
-# 允许 dev 也不影响：esbuild 本身没有 devDep。
+# Note: Do NOT pass --omit=optional here — esbuild's platform-specific binaries
+# (@esbuild/linux-x64 / @esbuild/linux-arm64) are themselves optionalDependencies.
+# Adding it will cause runtime errors: "The package @esbuild/linux-x64 could not be found".
+# Allowing dev does not matter: esbuild itself has no devDeps.
 RUN --mount=type=cache,id=npm-cache,target=/root/.npm \
     npm install \
         --no-save \
@@ -104,11 +104,11 @@ RUN --mount=type=cache,id=npm-cache,target=/root/.npm \
         esbuild
 
 # Now copy the rest of the source
-# 注意: .dockerignore 已排除 node_modules/.git/__tests__/docs 等
+# Note: .dockerignore already excludes node_modules/.git/__tests__/docs etc.
 COPY . .
 
-# 保留原始 package.json（COPY . 会覆盖 patch 后的版本，所以无需 git checkout）
-# 注: .git 已被 .dockerignore 排除，原来的 git checkout 命令实际上总是失败的
+# Retain original package.json (COPY . overwrites the patched version, so no git checkout needed)
+# Note: .git is excluded by .dockerignore, so the original git checkout command actually always failed
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -139,8 +139,8 @@ COPY --from=deps-builder /build /app
 RUN mkdir -p /data/tdai-memory /data/config
 
 # ── Runtime configuration ──
-# 配置文件路径: 挂载 yaml 到 /data/config/tdai-gateway.yaml
-# 敏感凭证通过环境变量注入 (env 优先级高于配置文件)
+# Configuration file path: mount yaml to /data/config/tdai-gateway.yaml
+# Sensitive credentials injected via environment variables (env overrides configuration file)
 ENV NODE_ENV=production \
     TDAI_GATEWAY_CONFIG=/data/config/tdai-gateway.yaml \
     TDAI_GATEWAY_HOST=0.0.0.0 \
@@ -151,8 +151,8 @@ EXPOSE 8420
 
 # K8s-friendly health check (liveness/readiness probes still defined separately
 # in the Deployment manifest — this is the local-runtime fallback).
-# 默认值只写在这里，不放进 ENV：TDAI_GATEWAY_PORT 一旦成为镜像环境变量就会盖掉
-# 挂载配置里的 server.port（env 优先级高于 yaml），而 8420 与 gateway 的代码默认值一致。
+# Default value is written here only and not put in ENV: once TDAI_GATEWAY_PORT becomes an image env var,
+# it overrides server.port in mounted config (env takes precedence over yaml), while 8420 matches gateway's code default.
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=15s \
     CMD curl -fsS http://127.0.0.1:${TDAI_GATEWAY_PORT:-8420}/health || exit 1
 

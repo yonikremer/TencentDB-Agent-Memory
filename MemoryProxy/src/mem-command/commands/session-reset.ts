@@ -1,21 +1,21 @@
 /**
- * mem:session-reset — 重置当前 session 的绑定, 在会话中间重新走 session-init 表单.
+ * mem:session-reset — Resets the binding of the current session, forcing the session-init form to pop up again mid-conversation.
  *
- * 语义:不管当前 state 是 uninitialized / pending_* / initialized / bypassed,
- * 命令执行后一律进入 `pending_asset_confirm`,并携带 `resetEpoch = Date.now()` +
- * `resetFlow = true`。下一次请求进来时,`handleSessionInit` 会因 state !==
- * initialized 而弹 asset_confirm 表单,用户重新选择 Team/Agent/Task。
+ * Semantics: Regardless of whether the current state is uninitialized / pending_* / initialized / bypassed,
+ * after execution, it unconditionally enters `pending_asset_confirm`, with `resetEpoch = Date.now()` +
+ * `resetFlow = true`. On the next incoming request, `handleSessionInit` will pop up the asset_confirm form
+ * because state !== initialized, letting the user re-select Team/Agent/Task.
  *
- * 跨节点一致性:
- *   - 写入 store 走 `store.set` write-through,L1 + L2a(SessionRepo) 同步落盘
- *   - 别的 pod 的 L1 里可能还有旧 initialized —— `store.getOrRecover` step 1
- *     用 resetEpoch 对齐 L2a,发现 L2a.resetEpoch 更大就打破 L1 短路,拿新
- *     pending 状态弹表单
- *   - L2b binding (initialized 时的"小纸条") 显式删除,避免下一轮 `rebuildFromBinding`
- *     把旧 initialized 直接灌回来
+ * Cross-node consistency:
+ *   - Writes to store use `store.set` write-through, persisting to L1 + L2a (SessionRepo) synchronously
+ *   - L1 on other pods might still hold the old initialized state — `store.getOrRecover` step 1
+ *     aligns with L2a using resetEpoch; if it finds L2a.resetEpoch is larger, it breaks L1 short-circuit,
+ *     taking the new pending state to pop up the form.
+ *   - L2b binding (the "little sticky note" when initialized) is explicitly deleted, preventing the next round's `rebuildFromBinding`
+ *     from restoring the old initialized state directly.
  *
- * 文案:参照 create-skill 的口味,只暴露"重置/关联/团队资产"等用户能理解的
- * 词,不出现 status / resetEpoch / binding / pending_asset_confirm 等内部术语。
+ * Text convention: Following the flavor of create-skill, only exposing user-understandable terms like
+ * "reset/associate/team assets", without internal jargon like status / resetEpoch / binding / pending_asset_confirm.
  */
 
 import type { MemCommandContext, MemCommandResult } from "../types.js";
@@ -28,23 +28,23 @@ export async function executeSessionReset(ctx: MemCommandContext): Promise<MemCo
   const store = getSessionStore();
   const compositeKey = `${ctx.agentSource}:${ctx.sessionKey}`;
 
-  // 记录 old 状态用于观测(埋点在 Commit 4 追加,现在只在返回值 data 里带上)
+  // Record old state for observation (tracking appended in Commit 4, currently just included in return data)
   const before = store.get(compositeKey);
   const oldStatus = before?.status ?? "uninitialized";
   const oldBypassed = !!before?.bypassed;
 
   const resetEpoch = Date.now();
-  // 写 uninitialized 而非 pending_asset_confirm:
+  // Write uninitialized instead of pending_asset_confirm:
   //
-  // pending_asset_confirm 意味着"proxy 已经弹了 form,等用户答复"—— 但 reset
-  // 后的下一轮 body 里不会有 form tool_use/tool_result(因为 form 还没弹过)。
-  // 如果写 pending_asset_confirm,下一轮 handleSessionInit 进入 "pending_asset_confirm
-  // 分支" 试图从 user 消息解析 form 答案 → 解不出 → unrecognized → bypass →
-  // 命令白跑了。
+  // pending_asset_confirm means "proxy has already popped the form, waiting for user reply" — but the next round's
+  // body after reset will not have the form tool_use/tool_result (because the form hasn't popped yet).
+  // If we write pending_asset_confirm, the next round of handleSessionInit enters the "pending_asset_confirm
+  // branch" attempting to parse the form answer from the user message → fails to extract → unrecognized → bypass →
+  // command ran for nothing.
   //
-  // 写 uninitialized 让下一轮走 Case 1 "第一次进来" 分支:重拉 teams → 弹
-  // asset_confirm form。因为 Commit 2 已经删掉 isFreshCCConversation gate,
-  // 即使 messages 很多也不会被 safety-net 拦截。
+  // Writing uninitialized makes the next round go to Case 1 "first time in" branch: refetches teams → pops
+  // asset_confirm form. Since Commit 2 already removed the isFreshCCConversation gate,
+  // it won't be intercepted by the safety-net even with many messages.
   const nextState: SessionInitState = {
     status: "uninitialized",
     keyId: ctx.sessionKey,
@@ -55,9 +55,9 @@ export async function executeSessionReset(ctx: MemCommandContext): Promise<MemCo
     resetFlow: true,
   };
 
-  // 兜底 bind identity:handler 路径正常会先调 store.getOrRecover(compositeKey, identity, ...)
-  // 完成 bind,但 pre-hook 前置拦截时 store 里未必已经 bind 过 —— 显式补一次
-  // 保证 store.set 的 L2a write-through 能命中正确 namespace。
+  // Fallback bind identity: handler path normally calls store.getOrRecover(compositeKey, identity, ...)
+  // to complete bind first, but when intercepted by pre-hook upfront, store might not have bound yet — explicitly bind
+  // to guarantee store.set's L2a write-through hits the correct namespace.
   store.bind(compositeKey, {
     userId: ctx.userId,
     agentSource: ctx.agentSource,
@@ -67,10 +67,10 @@ export async function executeSessionReset(ctx: MemCommandContext): Promise<MemCo
 
   await store.set(compositeKey, nextState);
 
-  // 显式删除 L2b binding —— 否则下一次请求走 getOrRecover 时 step 3 rebuildFromBinding
-  // 会用旧 initialized binding 直接灌回来,resetFlow 空跑。
-  // store.set 内部已经 `deleteBinding` 了 pending 状态(只在 initialized 才 put),
-  // 但为了防御性:这里显式 delete,不依赖 store.set 内部行为的实现细节。
+  // Explicitly delete L2b binding — otherwise the next request going through getOrRecover step 3 rebuildFromBinding
+  // will directly restore using the old initialized binding, making resetFlow a no-op.
+  // store.set internally already `deleteBinding`s pending states (only puts on initialized),
+  // but defensively: explicitly delete here, without relying on store.set's internal implementation details.
   const bindingRepo = store.getBindingRepo();
   if (bindingRepo) {
     try {
@@ -84,11 +84,11 @@ export async function executeSessionReset(ctx: MemCommandContext): Promise<MemCo
   }
 
   // ── observability ────────────────────────────────────────────────────────
-  // 结构化 audit log — 让运维在 dashboard / grep 时能精确抓到 session-reset
-  // 事件。字段与后续 session_init_logs 的 completion 埋点对齐(same session_key /
-  // agent_source),PM/运维可以 join 看"reset 触发 → 完成 init 的转化率"。
-  // reset_epoch 用于跨节点一致性调试 —— pod A 写、pod B 读,若两侧看到不同的
-  // reset_epoch 就能立刻定位 L2a probeL2a stale 的问题。
+  // Structured audit log — lets ops precisely catch session-reset events in dashboard/grep.
+  // Fields aligned with subsequent session_init_logs completion tracking (same session_key /
+  // agent_source), so PM/ops can join and see "reset triggered → init completion conversion rate".
+  // reset_epoch is for cross-node consistency debugging — pod A writes, pod B reads; if they see different
+  // reset_epochs, we can immediately isolate L2a probeL2a stale issues.
   console.log(
     `[session-reset] session=${compositeKey} space=${ctx.spaceId} user=${ctx.userId} ` +
       `agent_source=${ctx.agentSource} old_status=${oldStatus} old_bypassed=${oldBypassed} ` +
@@ -107,7 +107,7 @@ export async function executeSessionReset(ctx: MemCommandContext): Promise<MemCo
   return {
     success: true,
     messageText,
-    // 结构化数据只在日志/面板可见,不进用户可读文案
+    // Structured data only visible in logs/panel, not included in user-readable text
     data: {
       old_status: oldStatus,
       old_bypassed: oldBypassed,
@@ -119,24 +119,24 @@ export async function executeSessionReset(ctx: MemCommandContext): Promise<MemCo
 }
 
 /**
- * 根据老状态构造用户可读文案。
+ * Constructs user-readable message based on the old state.
  *
- * 老状态       文案强调
- * uninitialized 「继续对话时会弹出选择」
- * initialized   「已解除绑定,请重新选择」
- * bypassed      「已恢复选择入口」
- * pending_*     「已重新开始选择」
+ * Old state       Message emphasis
+ * uninitialized   "Will pop up selection when continuing conversation"
+ * initialized     "Binding removed, please re-select"
+ * bypassed        "Selection entrance restored"
+ * pending_*       "Restarted selection"
  */
 function buildSuccessMessage(oldStatus: string, oldBypassed: boolean): string {
   if (oldStatus === "uninitialized") {
-    return "✅ 已重置,继续对话时会弹出团队资产选择";
+    return "✅ Reset complete, team asset selection will pop up when continuing conversation";
   }
   if (oldBypassed) {
-    return "✅ 已恢复团队资产选择入口,继续对话时会弹出重新选择";
+    return "✅ Team asset selection entrance restored, will pop up to re-select when continuing conversation";
   }
   if (oldStatus === "initialized") {
-    return "✅ 已解除本次会话的团队资产绑定,继续对话时会弹出重新选择";
+    return "✅ Team asset binding removed for this session, will pop up to re-select when continuing conversation";
   }
   // pending_*
-  return "✅ 已重新开始团队资产选择,继续对话时会弹出选择";
+  return "✅ Restarted team asset selection, will pop up when continuing conversation";
 }

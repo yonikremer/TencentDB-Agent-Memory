@@ -1,11 +1,11 @@
 /**
- * Knowledge HTTP 客户端 — 调 core 的 /v3/wiki/* 和 /v3/code-graph/*.
+ * Knowledge HTTP client — tunes core's /v3/wiki/* and /v3/code-graph/*.
  *
- * 路径与请求体严格对齐 docs/knowledge/knowledge-api.yaml（07/08/11 定稿）。
- * 注：core router 实际监听 `/v3/wiki/*`、`/v3/code-graph/*`，
- * 故此处 baseUrl 不含 /v3，路径带 /v3 前缀。
+ * The path is strictly aligned with the request body docs/knowledge/knowledge-api.yaml (finalized on 07/08/11).
+ * Note: core router actually monitors `/v3/wiki/*`, `/v3/code-graph/*`,
+ * Therefore, the baseUrl here does not contain /v3, and the path is prefixed with /v3.
  *
- * 与 HttpSkillClient 同模式：Bearer + service-id + envelope 解析。
+ * Same mode as HttpSkillClient: Bearer + service-id + envelope resolution.
  */
 import { CoreUpstreamError } from '../../domain/errors.js';
 import type {
@@ -80,7 +80,7 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
     }
   }
 
-  // ═══════════════ Wiki · 资产层 ═══════════════
+  //═══════════════ Wiki · Asset Layer ═══════════════
 
   async wikiCreate(teamId: string, name: string, userId?: string): Promise<WikiDetail> {
     return this.post('/v3/wiki/create', { team_id: teamId, name, user_id: userId });
@@ -102,7 +102,7 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
     return this.post('/v3/wiki/list', { team_id: teamId, ...opts });
   }
 
-  // ═══════════════ Wiki · raw 文件层 ═══════════════
+  //═══════════════ Wiki · raw file layer ═══════════════
 
   async wikiRawLs(wikiId: string): Promise<{ items: RawFileEntry[] }> {
     return this.post('/v3/wiki/raw/ls', { wiki_id: wikiId });
@@ -120,7 +120,7 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
     return this.post('/v3/wiki/raw/rm', { team_id: teamId, user_id: userId, wiki_id: wikiId, filenames });
   }
 
-  // ═══════════════ Wiki · page 文件层 ═══════════════
+  //═══════════════ Wiki · page file layer ═══════════════
 
   async wikiPageLs(wikiId: string): Promise<{ items: PageEntry[] }> {
     return this.post('/v3/wiki/page/ls', { wiki_id: wikiId });
@@ -138,7 +138,7 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
     return this.post('/v3/wiki/page/rm', { team_id: teamId, user_id: userId, wiki_id: wikiId, refs });
   }
 
-  // ═══════════════ Wiki · 派生视图 ═══════════════
+  //═══════════════ Wiki · Derived view ═══════════════
 
   async wikiGraph(wikiId: string): Promise<WikiGraphData> {
     return this.post('/v3/wiki/graph', { wiki_id: wikiId });

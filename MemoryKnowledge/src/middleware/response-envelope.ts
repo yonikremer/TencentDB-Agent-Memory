@@ -17,7 +17,7 @@ function truncate(s: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max) + `…[+${s.length - max}]`;
 }
 
-/** 提取 request body 的关键字段（避免打全量，只打 ID 类字段便于关联）。 */
+/** Extracts key fields from request body (avoids logging full body, logs ID fields for correlation). */
 function pickReqFields(body: unknown): Record<string, unknown> {
   if (!body || typeof body !== 'object') return {};
   const b = body as Record<string, unknown>;
@@ -37,8 +37,8 @@ export function accessLog(): MiddlewareHandler {
     const requestId = c.req.header("x-request-id") || crypto.randomUUID();
     c.set("requestId", requestId);
 
-    // 缓存 request body（body 只能读一次，失败时用于日志）
-    // Hono 的 bodyCache 期望 Promise（c.req.json()/text() 会对缓存值调 .then()）
+    // Cache request body (body can only be read once, used for logging on failure)
+    // Hono's bodyCache expects Promise (c.req.json()/text() calls .then() on cached value)
     let reqBody: unknown = undefined;
     if (c.req.method === 'POST' || c.req.method === 'PUT') {
       try {
@@ -47,7 +47,7 @@ export function accessLog(): MiddlewareHandler {
         c.req.bodyCache.text = Promise.resolve(raw);
         if (reqBody) c.req.bodyCache.json = Promise.resolve(reqBody);
       } catch {
-        // 非 JSON body，忽略
+        // Non-JSON body, ignore
       }
     }
 
@@ -58,20 +58,20 @@ export function accessLog(): MiddlewareHandler {
     log.info(`${route} → ${status} (${ms}ms)`);
 
     if (status >= 400) {
-      // 失败时打 request 关键字段 + response body（截断）
+      // On failure, log key request fields + response body (truncated)
       const fields = pickReqFields(reqBody);
       const logExtra: Record<string, unknown> = { status, ...fields };
 
       try {
         const respText = await c.res.text();
         logExtra.responseBody = truncate(respText, MAX_BODY_LOG);
-        // 重建 response（text() 消费了 body）
+        // Rebuild response (text() consumed body)
         c.res = new Response(respText, {
           status: c.res.status,
           headers: c.res.headers,
         });
       } catch {
-        // response body 读不了就算了
+        // Ignore if response body cannot be read
       }
 
       log.warn(`${route} error`, logExtra);

@@ -1,4 +1,4 @@
-# panel-knowledge-combined 镜像上下文忽略清单
+# panel-knowledge-combined image context ignore list
 #
 # build.sh 会把 panel/（team-memory-control）+ knowledge/（services/knowledge）
 # rsync 到临时 context 目录，本文件在此 context 里生效。

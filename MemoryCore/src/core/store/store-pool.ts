@@ -1,18 +1,18 @@
 /**
- * StorePool — per-instanceId 的 Store 实例池
+ * StorePool — Store instance pool per-instanceId
  *
- * 双模式支持:
- *   - standalone: 使用 SQLite 本地存储 (每个 instanceId 一个 SQLite 文件)
- *   - service: 使用 TCVDB 向量数据库 (每个 instanceId 一个远程 VDB 连接)
+ * Dual mode support:
+ *   - standalone: Uses SQLite local storage (one SQLite file per instanceId)
+ *   - service: Uses TCVDB vector database (one remote VDB connection per instanceId)
  *
- * 与 InstanceConfigProvider 配合:
- *   1. 请求到达时, 从 InstanceConfigProvider 获取该 instanceId 的 VDB 配置
- *   2. 用 VDB 配置创建/复用 Store 实例
- *   3. 池化管理, 避免重复创建连接
+ * Works with InstanceConfigProvider:
+ *   1. When a request arrives, fetches the VDB config for the instanceId from InstanceConfigProvider
+ *   2. Creates/reuses a Store instance using the VDB config
+ *   3. Pooled management to avoid creating duplicate connections
  *
- * standalone 模式下:
- *   - VdbConfig 为空或来自环境变量 → 创建 SQLite Store
- *   - 固定一个 "default" instanceId, 行为与原 createStoreBundle 一致
+ * In standalone mode:
+ *   - If VdbConfig is empty or from environment variables → creates SQLite Store
+ *   - Fixes a "default" instanceId, behavior is consistent with the original createStoreBundle
  */
 
 import path from "node:path";
@@ -44,7 +44,7 @@ export interface PooledStore {
 
 interface PoolEntry {
   pooledStore: PooledStore;
-  /** VDB 配置指纹, 用于检测配置变更 */
+  /** VDB config fingerprint, used to detect config changes */
   configFingerprint: string;
   lastAccessedAt: number;
 }
@@ -59,26 +59,26 @@ interface Logger {
 export type StoreMode = "sqlite" | "tcvdb";
 
 export interface KafkaMetricOptions {
-  /** Kafka Broker 列表 (逗号分隔或数组) */
+  /** Kafka Broker list (comma separated or array) */
   brokers?: string[] | string;
-  /** Topic 名称 (默认: "memory_monitor") */
+  /** Topic name (default: "memory_monitor") */
   topic?: string;
-  /** 是否启用 (默认: 根据 brokers 是否非空自动判断) */
+  /** Whether enabled (default: automatically determined based on whether brokers is non-empty) */
   enabled?: boolean;
 }
 
 export interface StorePoolOptions {
-  /** 存储模式: "sqlite" (standalone 本地) 或 "tcvdb" (service 远程) */
+  /** Storage mode: "sqlite" (standalone local) or "tcvdb" (service remote) */
   mode: StoreMode;
-  /** 记忆插件配置 (用于 BM25/embedding 设置) */
+  /** Memory plugin config (used for BM25/embedding settings) */
   memoryCfg: MemoryTdaiConfig;
-  /** 数据目录 (SQLite 模式下使用) */
+  /** Data directory (used in SQLite mode) */
   dataDir?: string;
-  /** 最大池化实例数 (Memory store), 默认 100 */
+  /** Max pooled instance count (Memory store), default 100 */
   maxStores?: number;
-  /** 最大 Skill store 缓存数, 默认 100 */
+  /** Max Skill store cache count, default 100 */
   maxSkillStores?: number;
-  /** Kafka 指标上报配置 (可选, 不配置则不上报) */
+  /** Kafka metric reporting config (optional, will not report if not configured) */
   kafka?: KafkaMetricOptions;
   logger: Logger;
 }
@@ -94,25 +94,25 @@ export class StorePool {
   private memoryCfg: MemoryTdaiConfig;
   private dataDir: string;
   private logger: Logger;
-  /** 全局共享的 BM25 编码器 (避免重复加载 jieba 词典导致 OOM) */
+  /** Globally shared BM25 encoder (avoids OOM caused by reloading jieba dictionary) */
   private sharedBm25Encoder: BM25LocalEncoder | undefined;
 
-  /** Skill store 缓存上限 */
+  /** Skill store cache limit */
   private maxSkillStores: number;
-  /** Skill store 最后访问时间 (LRU 淘汰用) */
+  /** Skill store last access time (for LRU eviction) */
   private skillStoreAccessTimes = new Map<string, number>();
 
 
 
   /**
-   * Grace-close 跟踪：已从 pool 移除但底层 close 推迟执行的 entries。
-   * CR-5 mitigation (2026-05-19): evict / config-change 不立刻 close 底层 store,
-   * 而是延迟 graceCloseDelayMs 后再 close, 让 in-flight 请求(同步路径 recall/capture
-   * <100ms; 异步 worker 路径 L1/L2/L3 受 maxRetries=3 + 指数退避兜底)有时间完成.
+   * Grace-close tracking: entries removed from pool but whose underlying close is delayed.
+   * CR-5 mitigation (2026-05-19): evict / config-change do not immediately close the underlying store,
+   * but delay close by graceCloseDelayMs, allowing in-flight requests (sync paths recall/capture
+   * <100ms; async worker paths L1/L2/L3 backed by maxRetries=3 + exponential backoff) time to complete.
    */
   private pendingCloses = new Set<Promise<void>>();
-  /** Grace period 默认 30s, 远大于同步路径墙钟 (recall ~49ms / capture ~54ms),
-   *  且 worker 路径即使撞上也有 reEnqueue 重试机制 (5s/15s/45s). */
+  /** Grace period default 30s, much larger than sync path wall clock (recall ~49ms / capture ~54ms),
+   *  and even if worker paths hit it, they have reEnqueue retry mechanism (5s/15s/45s). */
   private graceCloseDelayMs = 30_000;
 
   constructor(opts: StorePoolOptions) {
@@ -123,22 +123,22 @@ export class StorePool {
     this.dataDir = opts.dataDir ?? ".";
     this.logger = opts.logger;
 
-    // 初始化时创建一次 BM25 编码器, 所有 Store 共享
+    // Create BM25 encoder once upon initialization, shared across all Stores
     this.sharedBm25Encoder = createBM25Encoder(this.memoryCfg.bm25, this.logger as StoreLogger);
 
-    // 初始化 Kafka Metric Producer（异步，不阻塞构造）
+    // Initialize Kafka Metric Producer (async, does not block construction)
     this.initKafkaMetricProducer(opts.kafka);
 
     this.logger.info(`${TAG} Initialized: mode=${this.mode}, maxStores=${this.maxStores}, maxSkillStores=${this.maxSkillStores}, bm25=${this.sharedBm25Encoder ? "shared" : "disabled"}`);
   }
 
   /**
-   * 初始化 Kafka Metric Producer。
-   * 异步执行，不阻塞 StorePool 构造。初始化失败静默忽略。
-   * 配置优先级：StorePoolOptions.kafka > 环境变量（兜底）
+   * Initializes Kafka Metric Producer.
+   * Executes asynchronously, does not block StorePool construction. Initialization failures are silently ignored.
+   * Config priority: StorePoolOptions.kafka > environment variables (fallback)
    */
   private initKafkaMetricProducer(kafka?: KafkaMetricOptions): void {
-    // 配置优先，环境变量仅作兜底
+    // Config takes priority, environment variables are only for fallback
     const rawBrokers = kafka?.brokers ?? "";
     const brokers = Array.isArray(rawBrokers)
       ? rawBrokers
@@ -150,23 +150,23 @@ export class StorePool {
       return;
     }
 
-    // 异步初始化，不阻塞业务
+    // Async initialization, does not block business logic
     metricProducer.initialize({
       brokers,
       topic: kafka?.topic ?? "memory_monitor",
       enabled: true,
     }).catch((err) => {
-      // 初始化失败静默处理，不影响业务
+      // Initialization failures are silently handled, does not affect business logic
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.warn(`${TAG} Kafka metric producer init failed: ${msg}. Metrics disabled.`);
     });
   }
 
   /**
-   * 获取指定 instanceId 对应的 Store 实例
+   * Get the Store instance corresponding to the specified instanceId
    *
-   * - standalone (sqlite): vdbConfig 可以为 null, 创建 SQLite Store
-   * - service (tcvdb): 根据 vdbConfig 创建 TCVDB Store
+   * - standalone (sqlite): vdbConfig can be null, creates SQLite Store
+   * - service (tcvdb): creates TCVDB Store based on vdbConfig
    */
   async getStore(instanceId: string, vdbConfig: VdbConfig | null): Promise<PooledStore> {
     const now = Date.now();
@@ -175,24 +175,24 @@ export class StorePool {
       : `sqlite:${instanceId}`;
     const cached = this.pool.get(instanceId);
 
-    // 命中且配置未变
+    // Cache hit and config unchanged
     if (cached && cached.configFingerprint === fingerprint) {
       cached.lastAccessedAt = now;
       return cached.pooledStore;
     }
 
-    // 配置变了 → 关闭旧的
+    // Config changed → close the old one
     if (cached) {
       this.logger.info(`${TAG} Config changed for ${instanceId}, recreating store`);
       await this.closeEntry(instanceId, cached);
     }
 
-    // LRU 淘汰
+    // LRU eviction
     if (this.pool.size >= this.maxStores) {
       await this.evictLru();
     }
 
-    // 创建新 Store
+    // Create new Store
     const pooledStore = this.mode === "tcvdb" && vdbConfig
       ? this.createTcvdbStore(vdbConfig)
       : this.createSqliteStore(instanceId);
@@ -210,7 +210,7 @@ export class StorePool {
       `${TAG} Created ${this.mode} store for ${instanceId}: ${storeDesc} (pool size: ${this.pool.size})`,
     );
 
-    // 初始化 Store (建表/检查连接)
+    // Initialize Store (create tables/check connection)
     try {
       await pooledStore.store.init();
     } catch (e) {
@@ -221,7 +221,7 @@ export class StorePool {
   }
 
   /**
-   * 移除指定实例的 Store (实例下线时调用)
+   * Remove the Store for the specified instance (called when instance goes offline)
    */
   async evict(instanceId: string): Promise<void> {
     const entry = this.pool.get(instanceId);
@@ -231,24 +231,24 @@ export class StorePool {
   }
 
   /**
-   * 关闭所有 Store
+   * Close all Stores
    *
-   * CR-5: 原 closeAll 直接同步关闭所有 pool 内 store, 会导致 in-flight 请求崩溃.
-   * 现在分两步:
-   *   1. 把所有 entries 触发 closeEntry (延迟关闭, 加入 pendingCloses)
-   *   2. 等待所有 pendingCloses 完成 (含本次新加 + 之前 evict 留下的)
-   * 进程关停场景下, 调用方可以选择缩短 grace 时间避免阻塞: setGraceCloseDelay(0)
+   * CR-5: The original closeAll directly and synchronously closed all stores in the pool, which would crash in-flight requests.
+   * Now it is split into two steps:
+   *   1. Trigger closeEntry for all entries (delayed close, added to pendingCloses)
+   *   2. Wait for all pendingCloses to complete (including new additions this time + remnants from previous evicts)
+   * During process shutdown, callers can choose to shorten the grace period to avoid blocking: setGraceCloseDelay(0)
    */
   async closeAll(): Promise<void> {
-    // 关闭 Memory store pool
+    // Close Memory store pool
     const entries = [...this.pool.entries()];
     this.pool.clear();
-    // 触发延迟关闭 (这些 promise 会自动加入 pendingCloses)
+    // Trigger delayed close (these promises will be automatically added to pendingCloses)
     for (const [id, entry] of entries) {
-      await this.closeEntry(id, entry);  // closeEntry 内部不阻塞, 立即返回
+      await this.closeEntry(id, entry);  // closeEntry returns immediately without blocking internally
     }
 
-    // 关闭 Skill store 缓存
+    // Close Skill store cache
     for (const [key, store] of this.skillStoreCache) {
       try {
         store.close();
@@ -260,14 +260,14 @@ export class StorePool {
     this.skillStoreCache.clear();
     this.skillStoreAccessTimes.clear();
 
-    // 等所有 pending close 完成 (含本次 + 之前 evict 留下的)
+    // Wait for all pending closes to complete (including this time + remnants from previous evicts)
     await Promise.allSettled([...this.pendingCloses]);
     this.logger.info(`${TAG} All stores closed (${entries.length} memory + skill caches cleared)`);
   }
 
   /**
-   * 移除指定 instance 的 Skill store (实例销毁时调用).
-   * 调用 store.close() 设 degraded=true, 然后从缓存中移除.
+   * Remove the Skill store for the specified instance (called when instance is destroyed).
+   * Calls store.close() setting degraded=true, then removes it from cache.
    */
   evictSkillStore(instanceId: string): void {
     const key = `skill:${instanceId}`;
@@ -285,8 +285,8 @@ export class StorePool {
   }
 
   /**
-   * 设置 grace-close 延迟 (毫秒). 设为 0 时立即关闭, 失去 in-flight 保护.
-   * 主要用于测试或进程紧急退出场景.
+   * Set grace-close delay (in milliseconds). When set to 0, closes immediately, losing in-flight protection.
+   * Mainly used for testing or emergency process exit scenarios.
    */
   setGraceCloseDelay(ms: number): void {
     this.graceCloseDelayMs = Math.max(0, ms);
@@ -296,10 +296,10 @@ export class StorePool {
   has(instanceId: string): boolean { return this.pool.has(instanceId); }
 
   /**
-   * 获取指定 instanceId 的 Skill Store (TCVDB).
+   * Get the Skill Store (TCVDB) for the specified instanceId.
    *
-   * 与 getStore() 使用相同的 VDB 实例，只是不同的 Collection ({db}_skills)。
-   * Skill store 有独立缓存 (skillStoreCache)，不受 Memory store 池化管理影响。
+   * Uses the same VDB instance as getStore(), just a different Collection ({db}_skills).
+   * Skill store has an independent cache (skillStoreCache), unaffected by Memory store pooled management.
    */
   async getSkillStore(instanceId: string, vdbConfig: VdbConfig): Promise<ISkillStore> {
     const key = `skill:${instanceId}`;
@@ -309,7 +309,7 @@ export class StorePool {
       return cached;
     }
 
-    // LRU 淘汰
+    // LRU eviction
     if (this.skillStoreCache.size >= this.maxSkillStores) {
       this.evictSkillStoreLru();
     }
@@ -338,9 +338,9 @@ export class StorePool {
   // ════════════════════════════════════════════════════════
 
   private createTcvdbStore(vdbConfig: VdbConfig): PooledStore {
-    // [DEBUG] 本地调试用: 公网 HTTPS 连接 VDB 时需要 CA 证书。
-    // 内网部署走 HTTP 80 端口无需此逻辑。
-    // 通过环境变量 VDB_CA_PEM_PATH 指定 PEM 文件路径。
+    // [DEBUG] For local debugging: CA certificate is required when connecting to VDB via public HTTPS.
+    // Intranet deployments via HTTP port 80 do not need this logic.
+    // Specify the PEM file path via the VDB_CA_PEM_PATH environment variable.
     const caPemPath = vdbConfig.url.startsWith("https://")
       ? (process.env.VDB_CA_PEM_PATH || undefined)
       : undefined;
@@ -370,7 +370,7 @@ export class StorePool {
   // ════════════════════════════════════════════════════════
 
   private createSqliteStore(instanceId: string): PooledStore {
-    // Embedding service (远端 API, 如 OpenAI text-embedding)
+    // Embedding service (Remote API, e.g. OpenAI text-embedding)
     let embeddingService: EmbeddingService | undefined;
     const embCfg = this.memoryCfg.embedding;
     if (embCfg.enabled && embCfg.provider !== "local" && embCfg.provider !== "none" && embCfg.apiKey) {
@@ -386,7 +386,7 @@ export class StorePool {
 
     const dims = embCfg.dimensions ?? 0;
     const dbPath = this.getSqlitePath(instanceId);
-    // 确保数据库目录存在（对于非 default instance）
+    // Ensure database directory exists (for non-default instances)
     const dbDir = path.dirname(dbPath);
     if (!existsSync(dbDir)) {
       mkdirSync(dbDir, { recursive: true });
@@ -401,9 +401,9 @@ export class StorePool {
   }
 
   /**
-   * SQLite 文件路径:
-   *   - "default" → dataDir/vectors.db (兼容原逻辑)
-   *   - 其他 instanceId → dataDir/instances/{instanceId}/vectors.db
+   * SQLite file path:
+   *   - "default" → dataDir/vectors.db (compatible with original logic)
+   *   - Other instanceId → dataDir/instances/{instanceId}/vectors.db
    */
   private getSqlitePath(instanceId: string): string {
     if (instanceId === "default") {
@@ -421,18 +421,18 @@ export class StorePool {
   }
 
   private async closeEntry(instanceId: string, entry: PoolEntry): Promise<void> {
-    // CR-5 mitigation: 立刻从 pool 移除 (新请求拿不到这个 entry, 会创建一个新 store),
-    // 但底层 store.close() 推迟 graceCloseDelayMs 才执行, 让任何持有此 entry 引用
-    // 的 in-flight 请求有时间完成. 不加引用计数避免修改所有调用方;
-    // worker 路径有 maxRetries=3 重试兜底, 同步路径墙钟远小于 grace period, 双保险.
+    // CR-5 mitigation: Immediately remove from pool (new requests won't get this entry, will create a new store),
+    // but delay underlying store.close() by graceCloseDelayMs, allowing any in-flight requests holding a reference
+    // to this entry time to complete. No reference counting added to avoid modifying all callers;
+    // worker paths have maxRetries=3 backoff, sync path wall clock is much smaller than grace period, double insurance.
     this.pool.delete(instanceId);
 
     const closePromise = (async () => {
-      // 等 grace period
+      // Wait for grace period
       if (this.graceCloseDelayMs > 0) {
         await new Promise<void>((resolve) => {
           const t = setTimeout(resolve, this.graceCloseDelayMs);
-          // unref 避免阻塞进程退出 (closeAll 会主动 await 这些 promise)
+          // unref avoids blocking process exit (closeAll will actively await these promises)
           if (typeof (t as { unref?: () => void }).unref === "function") {
             (t as { unref: () => void }).unref();
           }
@@ -448,7 +448,7 @@ export class StorePool {
 
     this.pendingCloses.add(closePromise);
     closePromise.finally(() => this.pendingCloses.delete(closePromise));
-    // 不 await — 调用方立即返回, 真 close 在后台进行
+    // Do not await — caller returns immediately, actual close happens in the background
   }
 
   private async evictLru(): Promise<void> {
@@ -469,7 +469,7 @@ export class StorePool {
     }
   }
 
-  /** Skill store LRU 淘汰：踢掉最久未访问的 entry. */
+  /** Skill store LRU eviction: kicks out the least recently accessed entry. */
   private evictSkillStoreLru(): void {
     let oldestKey: string | null = null;
     let oldestTime = Infinity;

@@ -1,5 +1,5 @@
 /**
- * API trace 统一写日志：stdout 单行 JSON（interface: tdai-metadata-api）。
+ * API trace unified logging: stdout single-line JSON (interface: tdai-metadata-api).
  */
 import { getApiRequestContext } from "./api-request-context.js";
 import { getApiTraceConfig, isApiTraceActive } from "./api-log-config.js";
@@ -45,6 +45,6 @@ export function logApiTrace(
     const payload = buildStdoutPayload(levelUpper, event, cfg.policy.profile, merged);
     writeApiTraceStdout(payload);
   } catch {
-    // 静默失败
+    // Fail silently
   }
 }

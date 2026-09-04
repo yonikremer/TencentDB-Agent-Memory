@@ -1,44 +1,44 @@
 /**
- * opencode 客户端适配器。
+ * opencode client adapter.
  *
- * 背景（2026-08-19 官方文档 https://opencode.ai/docs/providers/）：
+ * Background (2026-08-19 official docs https://opencode.ai/docs/providers/):
  *
- *   - 开源终端 AI 编程 Agent（sst/opencode），支持 75+ provider
- *   - 用户在 `opencode.json` 里自选 provider，绝大多数场景通过 AI SDK
- *     `@ai-sdk/openai-compatible` 打到自定义 baseURL，即 **标准 OpenAI
- *     Chat Completions**（`POST /v1/chat/completions`）
- *   - 少数模型走 `@ai-sdk/openai` 的 Responses API；覆盖 anthropic baseURL
- *     的场景走 `/v1/messages`。本 adapter **只覆盖主流 chat/completions 场景**
- *   - 与 codebuddy / dsh 同族协议
+ *   - Open source terminal AI programming Agent (sst/opencode), supports 75+ providers
+ *   - Users select provider in `opencode.json`, most scenarios hit custom baseURL via AI SDK
+ *     `@ai-sdk/openai-compatible`, i.e., **standard OpenAI
+ *     Chat Completions** (`POST /v1/chat/completions`)
+ *   - A few models use Responses API of `@ai-sdk/openai`; scenarios covering anthropic baseURL
+ *     use `/v1/messages`. This adapter **only covers the mainstream chat/completions scenarios**
+ *   - Same family protocol as codebuddy / dsh
  *
- * # 与已有 openai-chat 客户端的差异
+ * # Differences from existing openai-chat clients
  *
- *   - CodeBuddy: content 恒字符串，塞 `<user_query>` / `<additional_data>`
- *     / `<user_info>` wrapper —— 需走 `extractUserQueryText` 剥离
- *   - dsh: content 恒字符串，**裸文本**无 wrapper —— 直接返回
- *   - opencode: 抓包尚未实证。**从项目定位（通用 CLI）推断更接近 dsh**：
- *     不会塞私有 wrapper，用户输入应为裸文本
+ *   - CodeBuddy: content always string, embeds `<user_query>` / `<additional_data>`
+ *     / `<user_info>` wrapper — needs stripping via `extractUserQueryText`
+ *   - dsh: content always string, **bare text** no wrapper — returns directly
+ *   - opencode: No packet capture evidence yet. **Inferred from project positioning (universal CLI) to be closer to dsh**:
+ *     Won't embed private wrappers, user input should be bare text
  *
- *   保守策略：走 `extractUserQueryText`。
- *   —— 该函数对"无 wrapper 的纯字符串"会原样返回，对未来 opencode 若真
- *      塞了 wrapper 也能吃下（forward-compatible）；两种形态零回归。
+ *   Conservative strategy: Use `extractUserQueryText`.
+ *   — This function returns "pure string without wrapper" as is, and can handle if future opencode
+ *     actually embeds a wrapper (forward-compatible); zero regression for both shapes.
  *
- * # 两个适配点
- *   - `classifyRequest`: 恒 `"main"`（opencode 是通用 CLI，没有 fork/aux 语义）
- *   - `extractUserText`: 字符串 → extractUserQueryText 剥离；数组 → default 兜底
+ * # Two adaptation points
+ *   - `classifyRequest`: Constant `"main"` (opencode is a universal CLI, no fork/aux semantics)
+ *   - `extractUserText`: String → extractUserQueryText strip; Array → default fallback
  *
- * # 与 codebuddy adapter 的关系
+ * # Relationship with codebuddy adapter
  *
- *   实现几乎一致（同协议 + 同兜底策略）。故意保留独立文件而非 alias/复用
- *   codebuddyAdapter，理由：
- *   1. 未来 opencode 若发现私有信号（aux endpoint、专属 header）需要独立演进
- *   2. 语义所属清晰：agentKind === "opencode" 便于 telemetry 归因
+ *   Implementation is almost identical (same protocol + same fallback strategy). Intentionally kept as a separate file rather than alias/reusing
+ *   codebuddyAdapter, reasons:
+ *   1. If future opencode reveals private signals (aux endpoint, exclusive header), it needs independent evolution
+ *   2. Semantic clarity: agentKind === "opencode" facilitates telemetry attribution
  *
- * TODO(抓包实证)：待用户在生产环境跑起 opencode 后，抓一条真实请求，
- *   核对：
- *     (a) content 是否裸文本（无 wrapper）→ 若是，可切换到 dsh 风格
- *         `content.length > 0 ? content : null`，避免走 wrapper 剥离开销
- *     (b) 有无 aux 语义端点或独占 header（如有 → 补入 classifyRequest）
+ * TODO(Packet capture evidence): Wait for users to run opencode in production, capture a real request,
+ *   verify:
+ *     (a) Is content bare text (no wrapper) → If yes, can switch to dsh style
+ *         `content.length > 0 ? content : null`, avoiding wrapper stripping overhead
+ *     (b) Any aux semantic endpoint or exclusive header (if yes → add to classifyRequest)
  */
 
 import { extractUserQueryText } from "../common/user-query-extractor.js";
@@ -49,19 +49,19 @@ export const opencodeAdapter: AgentAdapter = {
   agentKind: "opencode",
 
   classifyRequest(_body?, _path?, _headers?) {
-    // opencode 是通用 CLI，未观察到 fork/sidequery 语义信号；主对话 + 可能的
-    // 系统摘要都当 main 处理，通用能力（injection + L0 + mem 拦截 + skill buffer）
-    // 全开放。未来若发现 aux endpoint（如 title-gen / summary），在此扩展。
+    // opencode is a universal CLI, no fork/sidequery semantic signals observed; main conversations + possible
+    // system summaries are all treated as main, universal capabilities (injection + L0 + mem interception + skill buffer)
+    // fully open. Expand here if aux endpoints (like title-gen / summary) are discovered in the future.
     return "main";
   },
 
   extractUserText(content) {
-    // 主流场景：openai-compatible provider → content 是字符串
+    // Mainstream scenario: openai-compatible provider -> content is string
     if (typeof content !== "string") {
-      // 未来若 opencode 改成 content-blocks 数组，走 default 兜底（拼接所有 text）
+      // If opencode changes to content-blocks array in the future, fallback to default (concatenate all text)
       return defaultAdapter.extractUserText(content);
     }
-    // 保守剥离：无 wrapper 时原样返回，有 wrapper 时按 <user_query> 抽取
+    // Conservative strip: returns as is when no wrapper, extracts based on <user_query> if wrapper exists
     const extracted = extractUserQueryText(content);
     return extracted.length > 0 ? extracted : null;
   },

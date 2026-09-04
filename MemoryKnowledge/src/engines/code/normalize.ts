@@ -1,14 +1,14 @@
 /**
- * Git URL 归一化 — 将 SSH/HTTPS/裸路径统一为 host/namespace/project 形式。
+ * Git URL normalization — Will SSH/HTTPS/The naked path is unified as host/namespace/project form.
  *
- * 示例：
+ * Example:
  *   git@gitlab.example.com:namespace/project/repo.git      → gitlab.example.com/namespace/project/repo
  *   https://gitlab.example.com/namespace/project/repo.git  → gitlab.example.com/namespace/project/repo
  *   gitlab.example.com/namespace/project/repo              → gitlab.example.com/namespace/project/repo (pass-through)
  */
 
 /**
- * 归一化 Git URL 为 `host/path` 形式（不含 .git 后缀）。
+ * normalization Git URL for `host/path` form (excluding .git suffix).
  */
 export function normalizeRepoUrl(input: string): string {
   let host: string;
@@ -30,19 +30,19 @@ export function normalizeRepoUrl(input: string): string {
     return `${host}/${path.replace(/\.git$/, "")}`;
   }
 
-  // 已经是归一化形式（host/namespace/project）
+  // is already in normalized form (host/namespace/project)
   return input.replace(/\.git$/, "");
 }
 
 /**
- * 生成数据源唯一键：normalized_url + ":" + branch
+ * Generate data source unique key:normalized_url + ":" + branch
  */
 export function sourceKey(repo: string, branch: string): string {
   return `${normalizeRepoUrl(repo)}:${branch || "main"}`;
 }
 
 /**
- * 从唯一键中解出 repo 和 branch
+ * Solve from unique key repo and branch
  */
 export function parseSourceKey(key: string): { repo: string; branch: string } {
   const lastColon = key.lastIndexOf(":");

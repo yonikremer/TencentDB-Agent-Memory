@@ -69,7 +69,7 @@ export async function batchDedup(params: {
   llmRunner?: LLMRunner;
   /** Isolation filter applied to candidate recall so dedup never crosses tenants. */
   filter?: IsolationFilter;
-  /** langfuse 上报身份四元组（team/user/agent/session），透传给 llmRunner。 */
+  /** Langfuse reporting identity tuple (team/user/agent/session), passed through to llmRunner. */
   traceContext?: TraceContext;
 }): Promise<DedupDecision[]> {
   const { memories, config, logger, model, promptMode = "chat", vectorStore, embeddingService, llmRunner, filter, traceContext } = params;
@@ -150,8 +150,8 @@ async function runLlmJudgment(
     const systemPrompt = getConflictDetectionSystemPrompt(promptMode);
     let result: string;
 
-    // langfuse trace 语义：见 l1-extractor.ts 里的说明。dedup 是 L1 的子步骤，
-    // 用独立 name 便于在 UI 上区分 "抽取阶段" vs "去重判定阶段"。
+    // Langfuse trace semantics: see explanation in l1-extractor.ts. Dedup is a sub-step of L1,
+    // using a distinct name to differentiate "extraction phase" vs "dedup decision phase" in the UI.
     const traceParams = buildTraceParams("memory.l1-dedup", traceContext);
 
     if (llmRunner) {

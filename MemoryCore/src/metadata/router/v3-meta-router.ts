@@ -1,13 +1,13 @@
 /**
- * v3 元数据路由（/v3/meta/*，55 接口）。
+ * v3 metadata routing (/v3/meta/*, 55 APIs).
  *
- * 对应设计文档 §7 + 实施计划 M3.3。镜像 v2-router 的 dispatch 模式：
- *   - 仅 POST，前缀 /v3/meta
- *   - x-tdai-user-key 用户鉴权 + bootstrap 路由例外（见 auth.ts）
- *   - 每个 handler 用 Zod schema 校验后调用 MetadataService
- *   - MetadataError → 对应 envelope code；未知异常 → 500
+ * Corresponds to design doc §7 + implementation plan M3.3. Mirrors v2-router dispatch pattern:
+ *   - POST only, prefix /v3/meta
+ *   - x-tdai-user-key user auth + bootstrap route exceptions (see auth.ts)
+ *   - Each handler validates with Zod schema then calls MetadataService
+ *   - MetadataError → corresponding envelope code; unknown exception → 500
  *
- * 复用 v2 的 envelope 工具，保证响应格式一致。
+ * Reuses v2 envelope tools to ensure consistent response format.
  */
 
 import type * as http from "node:http";
@@ -61,7 +61,7 @@ type Handler = (
   requestId: string,
 ) => Promise<ApiResponseEnvelope>;
 
-/** schema 校验 + 业务调用 + 成功封装；业务异常交由 dispatch 统一处理。 */
+/** Schema validation + business call + success envelope; business exceptions handled centrally by dispatch. */
 function bind<S2 extends ZodType>(schema: S2, fn: BizFn<S2["_output"]>): Handler {
   return async (body, ctx, svc, requestId) => {
     const parsed = schema.safeParse(body);
@@ -80,15 +80,15 @@ function orNotFound<T>(entity: T | null, code: string, id: string): T {
 
 const OK = { ok: true } as const;
 
-// ── Route table（55 接口）──
+// ── Route table (55 APIs) ──
 const routeTable: Record<string, Handler> = {
   // User
   [`${V3_PREFIX}/user/create`]: bind(S.userCreateSchema, async (d, c, s) => {
     s.assertCanManageUsers(c);
     return s.createNormalUser(d);
   }),
-  // 姊妹接口：允许 system_admin 建号时显式指定 user_key。鉴权与 /user/create 完全对称。
-  // Zod 只校验 username + user_key 非空，user_id 若被传入会被 zod strip 忽略。
+  // Sister API: allows system_admin to explicitly specify user_key when creating account. Auth is fully symmetric with /user/create.
+  // Zod only validates username + user_key are not empty, user_id will be stripped by zod if passed.
   [`${V3_PREFIX}/user/create-with-key`]: bind(S.userCreateWithKeySchema, async (d, c, s) => {
     s.assertCanManageUsers(c);
     return s.createNormalUserWithKey(d);
@@ -173,8 +173,8 @@ const routeTable: Record<string, Handler> = {
   [`${V3_PREFIX}/agent/list`]: bind(S.agentListSchema, async (d, _c, s) => {
     const pagination = resolvePagination(d);
     if (d.team_id) {
-      // team_id 分支：owner_user_id 若同传则叠加过滤（"团队内我 owner 的 agent"），
-      // 用于面板"私有 agent 可见性"场景。不传时行为不变（团队全量）。
+      // team_id branch: if owner_user_id is passed, apply additional filter ("agents owned by me in team"),
+      // used for panel "private agent visibility" scenario. If not passed, behavior is unchanged (full team).
       const filter: AgentFilter = {};
       if (d.status) filter.status = d.status;
       if (d.owner_user_id) filter.owner_user_id = d.owner_user_id;
@@ -312,10 +312,10 @@ const routeTable: Record<string, Handler> = {
   }),
 };
 
-/** 已注册的 v3 路由路径（供测试 / 文档）。 */
+/** Registered v3 route paths (for testing / docs). */
 export const V3_ROUTES = Object.keys(routeTable);
 
-/** MetadataError code → envelope code。 */
+/** MetadataError code → envelope code. */
 function mapErrorCode(code: string): number {
   if (code.endsWith("_not_found")) return 404;
   switch (code) {
@@ -353,7 +353,7 @@ function mapErrorCode(code: string): number {
 }
 
 /**
- * v3 路由分发。命中返回 true（已响应）；非 /v3/meta 或非 POST 返回 false（交还上层）。
+ * v3 route dispatch. Returns true if hit (already responded); returns false if not /v3/meta or not POST (yields back to upper layer).
  */
 export async function handleV3MetaRoute(
   req: http.IncomingMessage,
@@ -397,7 +397,7 @@ export async function handleV3MetaRoute(
     return true;
   }
 
-  // 鉴权：V3_NO_USER_KEY_ROUTES
+  // Auth: V3_NO_USER_KEY_ROUTES
   let ctx: Ctx;
   const headerUserKey = extractUserKeyHeader(req.headers);
   if (V3_NO_USER_KEY_ROUTES.has(pathname)) {

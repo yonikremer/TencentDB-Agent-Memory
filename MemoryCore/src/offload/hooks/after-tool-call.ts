@@ -213,11 +213,11 @@ export function createAfterToolCallHandler(
             }
             const mmdText = [
               `<current_task_context>`,
-              `【当前活跃任务的mermaid流程图】这是你最近正在执行的任务的阶段性记录（此条下方的tool use未被汇总，进程可能有延迟，仅供参考）。`,
-              taskGoal ? `**任务目标:** ${taskGoal}` : "",
-              `**任务文件:** ${activeMmdFile}`,
+              `[Mermaid flowchart of current active task] This is a phased record of the task you are currently executing (tool uses below this are not summarized, the process may be delayed, for reference only).`,
+              taskGoal ? `**Task goal:** ${taskGoal}` : "",
+              `**Task file:** ${activeMmdFile}`,
               "```mermaid", mmdContent, "```",
-              `标记为 "doing" 的节点是近期焦点（注：可能有延迟，下方的tool use未被统计，仅供参考），"done" 的已完成。请参考此保持方向感，避免重复已完成的工作。`,
+              `Nodes marked "doing" are the recent focus (note: there may be delays, tool uses below are not counted, for reference only), "done" ones are completed. Please refer to this to maintain a sense of direction and avoid repeating completed work.`,
               `</current_task_context>`,
             ].filter((line) => line !== "").join("\n");
 

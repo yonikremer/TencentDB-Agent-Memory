@@ -1,15 +1,15 @@
 /**
- * 按 Anthropic / OpenAI 协议构造伪造的 LLM 响应。
+ * Constructs a fake LLM response according to the Anthropic / OpenAI protocol.
  *
- * 返回的 Response 对 IDE 来说就是一条正常的 assistant 回复。
+ * The returned Response is just a normal assistant reply to the IDE.
  */
 
 // ── Anthropic non-streaming ─────────────────────────────────────────────────
 
 export function buildAnthropicResponse(text: string, requestId: string, thinking?: boolean): Response {
   const content: Record<string, unknown>[] = [];
-  // 当请求开启了 extended thinking 时，必须包含 thinking block，
-  // 否则 Claude Code 会认为响应不完整并发起额外请求。
+  // When extended thinking is enabled for the request, a thinking block must be included,
+  // otherwise Claude Code will think the response is incomplete and initiate additional requests.
   if (thinking) {
     content.push({ type: "thinking", thinking: "Processing mem: command.", signature: "" });
   }
@@ -42,8 +42,8 @@ export function buildAnthropicStreamResponse(text: string, requestId: string, th
 
   let blockIndex = 0;
 
-  // 当请求开启了 extended thinking 时，先发一个完整的 thinking block，
-  // 否则 Claude Code 会认为响应不完整并发起额外请求。
+  // When extended thinking is enabled for the request, first send a complete thinking block,
+  // otherwise Claude Code will think the response is incomplete and initiate additional requests.
   if (thinking) {
     lines.push(
       `event: content_block_start`,
@@ -180,9 +180,10 @@ export function buildResponsesStreamResponse(text: string, requestId: string): R
     usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
   };
 
-  // 关键：Responses API 里每个 event 的 data JSON **必须**带 `type` 字段
-  //（跟 SSE `event:` 头同名）。codex 客户端解析器优先读 data.type，缺字段
-  // 会丢弃事件，表现为伪造文本客户端不显示。对齐真实上游帧姿势。
+  // Key: The data JSON of each event in the Responses API **must** contain a `type` field
+  // (the same name as the SSE `event:` header). The codex client parser preferentially reads data.type,
+  // missing this field will cause the event to be dropped, which manifests as the client not displaying the forged text.
+  // Aligns with the true upstream frame posture.
   const sse = (event: string, d: Record<string, unknown>) =>
     `event: ${event}\ndata: ${JSON.stringify({ type: event, ...d })}\n\n`;
 
@@ -261,7 +262,7 @@ export interface BuildResponseOptions {
   protocol: "anthropic" | "openai" | "responses";
   stream: boolean;
   requestId?: string;
-  /** 请求是否开启了 extended thinking（Anthropic 专用） */
+  /** Whether extended thinking is enabled for the request (Anthropic only) */
   thinking?: boolean;
 }
 

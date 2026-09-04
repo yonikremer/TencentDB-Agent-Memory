@@ -1,6 +1,6 @@
 /**
- * v3 内部元数据路由（/v3/internal/meta/*）。
- * 运维 / 控制面专用；不写入公开 MetadataClient。
+ * v3 internal metadata routing (/v3/internal/meta/*).
+ * Dedicated to operations / control plane; not written to public MetadataClient.
  */
 import type * as http from "node:http";
 import type { ZodType } from "zod";
@@ -93,7 +93,7 @@ function resolveInstanceId(req: http.IncomingMessage, bodyInstance?: string): st
 }
 
 /**
- * 内部分发：仅 Bearer（Layer 1 已在 gateway 校验）；跳过 x-tdai-user-key。
+ * Internal dispatch: only Bearer (Layer 1 already verified in gateway); skip x-tdai-user-key.
  */
 export async function handleInternalMetaRoute(
   req: http.IncomingMessage,

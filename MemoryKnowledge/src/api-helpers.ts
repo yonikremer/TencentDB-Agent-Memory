@@ -33,7 +33,7 @@ export function isValidIdSegment(id: unknown): id is string {
 /**
  * Validate the `service_id` tenant identity taken from the `x-tdai-service-id`
  * header. Returns the value or null when missing/malformed (route → 400).
- * service_id 自报（内网信任，001 Q2/Q7），统一走 header（= 内核 x-tdai-service-id）。
+ * service_id Self-report (intranet trust,001 Q2/Q7), go together header(= Kernel x-tdai-service-id).
  */
 export function extractServiceId(headerValue: string | undefined | null): string | null {
   return isValidIdSegment(headerValue) ? headerValue : null;

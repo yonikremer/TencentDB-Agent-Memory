@@ -1,31 +1,33 @@
 /**
- * Core HTTP Trace 中间件 — 非侵入式 Trace 埋点（门面层）
+ * Core HTTP Trace middleware – non-invasive tracing (facade layer).
  *
- * 为每个 HTTP 请求创建 SERVER 类型的入口 Span（core.request），
- * 从 traceparent 头恢复上游 Trace Context，实现跨服务链路关联。
+ * For each HTTP request, creates a SERVER‑type entry Span (core.request) and
+ * restores upstream Trace Context from the `traceparent` header to enable cross‑service
+ * trace correlation.
  *
- * 使用方式（在 server.ts 中）：
+ * Usage (in `server.ts`):
  *   import { wrapWithTrace } from "../core/report/trace-middleware.js";
- *   // 在 createServer 时包装 handleRequest
- *   this.server = http.createServer((req, res) => wrapWithTrace(req, res, () => this.handleRequest(req, res)));
+ *   // Wrap the request handler when creating the server
+ *   this.server = http.createServer((req, res) =>
+ *     wrapWithTrace(req, res, () => this.handleRequest(req, res)));
  *
- * 不修改任何业务代码，纯可观测性组件。
- * 公开 API 签名保持不变，调用方无需修改。
+ * Does not modify any business logic – pure observability component.
+ * The public API signature remains unchanged, so callers need not adjust code.
  */
 
 import http from "node:http";
 import { getObservabilityBackend } from "./factory.js";
 import type { ISpan } from "./types.js";
 
-// 重导出 Span 类型（保持向后兼容）
+// Re-export Span type for backward compatibility
 export type { Span } from "@opentelemetry/api";
 
 /**
- * 包装 HTTP 请求处理器，添加 Trace 埋点。
+ * Wrap an HTTP request handler to add tracing.
  *
- * @param req HTTP 请求
- * @param res HTTP 响应
- * @param handler 原始请求处理器
+ * @param req - the incoming HTTP request
+ * @param res - the HTTP response object
+ * @param handler - the original request handler
  */
 export async function wrapWithTrace(
   req: http.IncomingMessage,
@@ -35,12 +37,12 @@ export async function wrapWithTrace(
   try {
     return await getObservabilityBackend().traceMiddleware.wrapWithTrace(req, res, handler);
   } catch (err) {
-    // 如果是 handler 本身抛出的异常，需要重新抛出
+    // Re-throw the error if it originated from the handler
     throw err;
   }
 }
 
-/** Noop Span — 后端不可用时的安全替代 */
+/** No‑op Span – safe fallback when the backend is unavailable */
 const noopSpan: ISpan = {
   end() {},
   setAttribute() { return this; },
@@ -54,11 +56,11 @@ const noopSpan: ISpan = {
 };
 
 /**
- * 创建一个子 Span（用于在业务处理器内部创建更细粒度的 Span）。
+ * Create a child Span (for finer‑grained spans inside business handlers).
  *
- * @param name Span 名称（如 "core.vdb.write"）
- * @param attrs Span 属性
- * @returns Span 实例，调用方需要手动 span.end()
+ * @param name - Span name (e.g., "core.vdb.write")
+ * @param attrs - Span attributes
+ * @returns A Span instance; caller must manually call `span.end()`.
  */
 export function startChildSpan(
   name: string,
@@ -73,12 +75,12 @@ export function startChildSpan(
 }
 
 /**
- * 在当前 Span context 中执行一个函数，并自动创建子 Span。
+ * Execute a function within the current Span context, automatically creating a child Span.
  *
- * @param name Span 名称
- * @param attrs Span 属性
- * @param fn 要执行的函数
- * @returns fn 的返回值
+ * @param name - Span name
+ * @param attrs - Span attributes
+ * @param fn - Function to execute
+ * @returns The return value of `fn`.
  */
 export async function withSpan<T>(
   name: string,
@@ -89,7 +91,7 @@ export async function withSpan<T>(
   try {
     return await getObservabilityBackend().traceMiddleware.withSpan(name, attrs, fn);
   } catch (err) {
-    // 如果是 fn 本身抛出的异常，需要重新抛出
+    // Re-throw the error if it originated from the function itself
     throw err;
   }
 }

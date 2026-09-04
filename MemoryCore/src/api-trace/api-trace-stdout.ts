@@ -1,5 +1,5 @@
 /**
- * 元数据 API trace → stdout 单行 JSON（CLS 复用）。
+ * Metadata API trace → stdout single-line JSON (CLS reuse).
  */
 export const API_TRACE_INTERFACE = "tdai-metadata-api";
 
@@ -30,16 +30,16 @@ export function writeApiTraceStdout(payload: Record<string, unknown>): void {
     const line = `${JSON.stringify(payload)}\n`;
     stdoutWriter(line);
   } catch {
-    // 静默失败
+    // Fail silently
   }
 }
 
-/** 测试用：替换 stdout 写入器。 */
+/** For testing: replace stdout writer. */
 export function setStdoutWriterForTests(writer: StdoutWriter | null): void {
   stdoutWriter = writer ?? ((line) => process.stdout.write(line));
 }
 
-/** 测试用：读取当前 stdout 写入器。 */
+/** For testing: read current stdout writer. */
 export function getStdoutWriterForTests(): StdoutWriter {
   return stdoutWriter;
 }

@@ -1,19 +1,19 @@
 /**
- * Auxiliary endpoint handler: 轻量透传处理器。
+ * Auxiliary endpoint handler: Light pass-through processor.
  *
- * 用于处理不需要路由决策的白名单端点：
- *  - `/v1/messages/count_tokens`（Anthropic）
- *  - `/v1/embeddings`（OpenAI）
- *  - `/v1/completions`（OpenAI 旧协议）
+ * Used for whitelist endpoints that do not require routing decisions:
+ *  - `/v1/messages/count_tokens` (Anthropic)
+ *  - `/v1/embeddings` (OpenAI)
+ *  - `/v1/completions` (OpenAI legacy protocol)
  *
- * 与主 handler (`handleAnthropicMessages` / `handleChatCompletions`) 的区别：
- *  - **跳过** 路由分析器与模型路由（这些端点无对话推理语义）
- *  - **跳过** opik/langfuse trace（这些端点不构成对话回合，避免可观测性噪音）
- *  - **保留** 鉴权头（apiKey）注入、credit 计算、JSONL/ClickHouse usage 落表
+ * Differences from main handlers (`handleAnthropicMessages` / `handleChatCompletions`):
+ *  - **Skips** routing analyzer and model routing (these endpoints lack conversation reasoning semantics)
+ *  - **Skips** opik/langfuse tracing (these endpoints do not constitute conversation turns, avoiding observability noise)
+ *  - **Retains** auth header (apiKey) injection, credit reporting, JSONL/ClickHouse usage logging
  *
- * 本 handler 的所有 body 都以 raw `ArrayBuffer` 形式透传，仅在 log/metadata 层面
- * 尝试解析 JSON 提取 `model` 字段（失败则回落为 "unknown"）。响应亦原样返回给客户端
- * （非 stream：完整读取后透传；stream：`ReadableStream` 直接 pipe）。
+ * All request bodies in this handler are passed through as raw `ArrayBuffer`. JSON is parsed
+ * only at the log/metadata level to extract the `model` field (falling back to "unknown" on failure).
+ * Responses are also returned to the client as-is (non-stream: read completely then pass through; stream: `ReadableStream` directly piped).
  */
 
 import type { Context } from "hono";
@@ -31,7 +31,7 @@ import { verifyUserKey } from "./auth.js";
 import { matchSystemUserByUserId, hasSystemUsers } from "./systemUser.js";
 import { handleSystemUserPassthrough } from "./systemUserPassthrough.js";
 
-/** Hop-by-hop headers 与 host header：不能透传到 upstream。 */
+/** Hop-by-hop headers and host header: cannot be forwarded upstream. */
 const SKIP_REQUEST_HEADERS = new Set([
   "host",
   "content-length",
@@ -39,7 +39,7 @@ const SKIP_REQUEST_HEADERS = new Set([
   "connection",
 ]);
 
-/** 响应头中不应回传给客户端的头（避免 stream 长度不一致等问题）。 */
+/** Response headers that should not be returned to client (avoids stream length mismatches, etc.). */
 const SKIP_RESPONSE_HEADERS = new Set([
   "content-length",
   "content-encoding",
@@ -48,11 +48,11 @@ const SKIP_RESPONSE_HEADERS = new Set([
 ]);
 
 /**
- * 构造转发到上游的请求头。
+ * Build request headers for forwarding upstream.
  *
- * 与主 handler 的差异：辅助端点不涉及路由的 auth override，只需按端点
- * 协议注入 `upstream.apiKey`：
- *  - `anthropic` → `x-api-key`（同时清除 `authorization`）
+ * Differences from main handlers: Auxiliary endpoints do not involve routing auth overrides,
+ * only injecting `upstream.apiKey` according to endpoint protocol:
+ *  - `anthropic` → `x-api-key` (clearing `authorization`)
  *  - `openai`    → `Authorization: Bearer`
  */
 function buildAuxUpstreamHeaders(
@@ -80,7 +80,7 @@ function buildAuxUpstreamHeaders(
   return headers;
 }
 
-/** 过滤响应头（剥离长度/编码相关字段），返回可直接下发的 Headers 对象。 */
+/** Filter response headers (strip length/encoding fields), returning Headers object ready to send. */
 function filterResponseHeaders(source: Headers): Headers {
   const out = new Headers();
   source.forEach((value, key) => {
@@ -92,8 +92,8 @@ function filterResponseHeaders(source: Headers): Headers {
 }
 
 /**
- * 从 request body 尝试解析出 `model` 字段用于日志。
- * body 非 JSON 或不含 model 时返回 "unknown"（不抛出）。
+ * Attempt to extract `model` field from request body for logging.
+ * Returns "unknown" (does not throw) if body is non-JSON or missing model.
  */
 function extractModelId(bodyText: string): string {
   if (!bodyText) return "unknown";
@@ -107,13 +107,13 @@ function extractModelId(bodyText: string): string {
 }
 
 /**
- * 从响应文本中提取 `usage` 字段（若存在）。
+ * Extract `usage` field from response text if present.
  *
- * 通用形状：
- *  - Anthropic count_tokens：整个 body 就是 `{ input_tokens: N }` — 直接作为 usage
- *  - OpenAI embeddings：`{ data: [...], usage: { prompt_tokens, total_tokens } }`
- *  - 其他：尝试读顶层 `usage` 字段
- *  - 无法解析：返回 `null`
+ * Common shapes:
+ *  - Anthropic count_tokens: entire body is `{ input_tokens: N }` — used directly as usage
+ *  - OpenAI embeddings: `{ data: [...], usage: { prompt_tokens, total_tokens } }`
+ *  - Others: attempt to read top-level `usage` field
+ *  - Unparseable: return `null`
  */
 function extractUsageFromResponse(
   respText: string,
@@ -129,13 +129,13 @@ function extractUsageFromResponse(
   if (!parsed || typeof parsed !== "object") return null;
   const obj = parsed as Record<string, unknown>;
 
-  // Anthropic count_tokens 的响应就是 { input_tokens: N }，没有 usage 包装
+  // Anthropic count_tokens response is { input_tokens: N } without usage wrapper
   if (entry.pathSuffix === "/v1/messages/count_tokens") {
     if (typeof obj.input_tokens === "number") return obj;
     return null;
   }
 
-  // OpenAI 系列（embeddings / completions）：usage 在顶层 usage 字段里
+  // OpenAI series (embeddings / completions): usage is in top-level usage field
   if (obj.usage && typeof obj.usage === "object") {
     return obj.usage as Record<string, unknown>;
   }
@@ -145,17 +145,17 @@ function extractUsageFromResponse(
 /**
  * Auxiliary endpoint handler.
  *
- * 请求生命周期：
- *  1. 从白名单表匹配当前路径（防御性；正常情况路由层已保证匹配）
- *  2. 提取 apiKey → keyId
- *  3. 读取 raw body（不解析），仅提取 `model` 字段用于日志
- *  4. `joinUrl` 拼接 upstream URL
- *  5. 按协议注入鉴权头
- *  6. fetch upstream（不 retry，简化处理）
- *  7. 分流：
- *     - stream 响应 → 直接 pipe body 回客户端（本期不解析 usage）
- *     - non-stream → 完整读取 → 提取 usage → credit 计算 + JSONL 落表
- *  8. 响应 status/headers/body 原样透传
+ * Request lifecycle:
+ *  1. Match current path against whitelist table (defensive; routing layer guarantees match under normal conditions)
+ *  2. Extract apiKey → keyId
+ *  3. Read raw body (unparsed), extract `model` field for logging only
+ *  4. `joinUrl` constructs upstream URL
+ *  5. Inject auth headers according to protocol
+ *  6. fetch upstream (no retries, simplified handling)
+ *  7. Split handling:
+ *     - stream response → pipe body directly back to client (usage parsing deferred)
+ *     - non-stream → read completely → extract usage → credit reporting + JSONL logging
+ *  8. Pass through status/headers/body as-is
  */
 export async function handleAuxiliaryEndpoint(
   c: Context,
@@ -166,12 +166,12 @@ export async function handleAuxiliaryEndpoint(
 
   const entry = matchWhitelistEndpoint(c.req.path);
   if (!entry) {
-    // Defensive: server.ts 应保证只有白名单路径路由到本 handler。
-    // 若到达此处说明配置或路由不一致，返回 404 便于快速定位。
+    // Defensive: server.ts should guarantee only whitelist paths route to this handler.
+    // Reaching here indicates configuration or routing mismatch; return 404 for quick diagnosis.
     return c.json({ error: "Unregistered endpoint" }, 404);
   }
 
-  // 1. 鉴权（先做本地 keyId 解析，再走 auth 服务校验以与主 handler 对称）
+  // 1. Authentication (resolve local keyId first, then verify via auth service to align with main handler)
   const apiKey =
     c.req.header("x-api-key") ??
     extractBearerToken(c.req.header("authorization") ?? c.req.header("Authorization") ?? "") ??
@@ -179,8 +179,8 @@ export async function handleAuxiliaryEndpoint(
 
   let keyId = apiKey ? apiKeyToKeyId(apiKey) : "unknown";
 
-  // 与主 handler 保持一致：调用 auth 服务校验，未通过则 401。
-  // spaceId 来源于请求路径 /proxy/<spaceId>/...；无路径前缀时为 ""。
+  // Align with main handler: call auth service verification, return 401 if unverified.
+  // spaceId originates from request path /proxy/<spaceId>/...; "" when path prefix is absent.
   const spaceId = extractSpaceIdFromPath(c.req.path) ?? "";
   const { userId, rejected: userKeyRejected, rejectReason } =
     await verifyUserKey(apiKey, spaceId);
@@ -205,18 +205,18 @@ export async function handleAuxiliaryEndpoint(
     }
   }
 
-  // 2. 读取 raw body（bytes 级透传）
+  // 2. Read raw body (byte-level passthrough)
   const rawBody = await c.req.arrayBuffer();
   const bodyText = new TextDecoder().decode(rawBody);
   const modelId = extractModelId(bodyText);
 
-  // 3. 拼接 upstream URL（复用 joinUrl，天然消费白名单表）
+  // 3. Construct upstream URL (reuse joinUrl, consuming whitelist table naturally)
   const upstreamUrl = joinUrl(config.upstream.url, c.req.path);
 
-  // 4. 构造上游请求头（按端点协议注入鉴权）
+  // 4. Construct upstream headers (inject auth based on endpoint protocol)
   const upstreamHeaders = buildAuxUpstreamHeaders(c, config, entry);
 
-  // 5. Pipeline log（简化：只发关键事件）
+  // 5. Pipeline log (simplified: emit key events only)
   const pipe = createPipeline(config, traceId, modelId);
   pipe.info(
     "AUX_ENDPOINT",
@@ -224,7 +224,7 @@ export async function handleAuxiliaryEndpoint(
   );
   pipe.forwardStart();
 
-  // 6. 转发（辅助端点简化：不 retry）
+  // 6. Forward (simplified for aux endpoints: no retry)
   let upstreamResp: Response;
   try {
     upstreamResp = await fetch(upstreamUrl, {
@@ -241,13 +241,13 @@ export async function handleAuxiliaryEndpoint(
   }
   pipe.forwardDone(upstreamResp.status);
 
-  // 7. 分流：stream vs non-stream
+  // 7. Branch: stream vs non-stream
   const contentType = upstreamResp.headers.get("content-type") ?? "";
   const isStream = contentType.includes("event-stream");
 
   if (isStream) {
-    // Stream 分支：直接 pipe，本期不做 SSE tap 提取 usage
-    // （credit 会在客户端断开或 tap 逻辑二期补齐时再实现）
+    // Stream branch: pipe directly, usage extraction in SSE tap deferred
+    // (credit reporting will be handled on client disconnect or tap logic phase 2)
     log.debug("aux.stream.passthrough", { path: c.req.path, upstreamUrl });
     return new Response(upstreamResp.body, {
       status: upstreamResp.status,
@@ -255,13 +255,13 @@ export async function handleAuxiliaryEndpoint(
     });
   }
 
-  // Non-stream：完整读取 body → 提取 usage → credit
+  // Non-stream: read full body → extract usage → credit
   const respBuf = await upstreamResp.arrayBuffer();
   const respText = new TextDecoder().decode(respBuf);
   const usage = extractUsageFromResponse(respText, entry);
 
   if (usage && upstreamResp.ok) {
-    // credit 上报（辅助端点走通用 credit-reporter）
+    // Credit reporting (auxiliary endpoints use generic credit-reporter)
     try {
       await tryReportCreditFromPath(
         config.creditReport,
@@ -280,13 +280,13 @@ export async function handleAuxiliaryEndpoint(
       );
     }
 
-    // JSONL + ClickHouse usage 落表（复用主 handler 的路径）
+    // JSONL + ClickHouse usage logging (reusing main handler path)
     writeLog(config, {
       timestamp: startTime,
       event: "usage",
       modelId,
       keyId,
-      sessionKey: keyId, // 辅助端点无 session 概念，用 keyId 兜底
+      sessionKey: keyId, // Auxiliary endpoints have no session concept, fallback to keyId
       upstreamUrl,
       stream: false,
       usage,
@@ -295,7 +295,7 @@ export async function handleAuxiliaryEndpoint(
 
   pipe.responseDone(usage);
 
-  // 8. 原样透传响应
+  // 8. Pass through response as-is
   return new Response(respBuf, {
     status: upstreamResp.status,
     headers: filterResponseHeaders(upstreamResp.headers),

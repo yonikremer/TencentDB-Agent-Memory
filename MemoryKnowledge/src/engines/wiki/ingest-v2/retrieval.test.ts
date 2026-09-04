@@ -1,47 +1,47 @@
 /**
- * retrieval.test.ts — 检索增强摄取纯函数单测。
+ * retrieval.test.ts — Unit tests for retrieval-augmented ingestion pure functions.
  *
- * 只测纯函数（buildSearchQuery / formatRetrievedPages），不碰 SQLite / LLM：
- * import 链为 retrieval.ts → tokenize.ts + frontmatter.ts，均为 leaf 模块。
+ * Tests pure functions only (buildSearchQuery / formatRetrievedPages), without touching SQLite / LLM:
+ * import chain is retrieval.ts -> tokenize.ts + frontmatter.ts, both leaf modules.
  */
 import { describe, it, expect } from "vitest";
 import { buildSearchQuery, formatRetrievedPages } from "./retrieval.js";
 
 describe("buildSearchQuery", () => {
-  it("过滤 stop words，按词频降序取前 queryTerms 个词", () => {
-    // "the" 是 stop word；eviction 出现 3 次 > cache 2 次 > policy 1 次
+  it("filters stop words, takes top queryTerms words sorted by frequency", () => {
+    // "the" is a stop word; eviction appears 3 times > cache 2 times > policy 1 time
     const q = buildSearchQuery("the cache cache eviction eviction eviction policy", 3);
     expect(q).toBe("eviction cache policy");
   });
 
-  it("queryTerms 限制返回词数", () => {
+  it("limits returned word count by queryTerms", () => {
     const q = buildSearchQuery("cache eviction policy", 2);
-    // 词频并列时按首次出现顺序（sort 稳定）
+    // When frequencies are tied, preserve first appearance order (stable sort)
     expect(q).toBe("cache eviction");
   });
 
-  it("queryTerms 至少为 1", () => {
+  it("ensures queryTerms is at least 1", () => {
     const q = buildSearchQuery("cache eviction", 0);
     expect(q).toBe("cache");
   });
 
-  it("中文 bigram + 整词，词频排序正确", () => {
-    // "缓存 缓存 管理"：缓存 2 次（bigram+整词 → token 流 4 个）、管理 1 次（2 个）
+  it("sorts frequency correctly for Chinese bigram + full words", () => {
+    // "缓存 缓存 管理": 缓存 2 times (bigram+word -> token stream 4 items), 管理 1 time (2 items)
     const q = buildSearchQuery("缓存 缓存 管理", 2);
     expect(q).toBe("缓存 管理");
   });
 
-  it("全 stop words 时返回空串", () => {
+  it("returns empty string when all input are stop words", () => {
     expect(buildSearchQuery("the a an of", 10)).toBe("");
   });
 });
 
 describe("formatRetrievedPages", () => {
-  it("空输入返回空串", () => {
+  it("returns empty string for empty input", () => {
     expect(formatRetrievedPages([], 12000)).toBe("");
   });
 
-  it("剥离 frontmatter，输出块头 + 页头 + 正文", () => {
+  it("strips frontmatter and outputs block header + page header + body", () => {
     const out = formatRetrievedPages(
       [
         {
@@ -62,10 +62,10 @@ describe("formatRetrievedPages", () => {
     expect(out).toContain("## Relevant Existing Knowledge");
     expect(out).toContain("### KV Cache (wiki/concepts/kv-cache.md)");
     expect(out).toContain("Key/value tensors cached across tokens.");
-    expect(out).not.toContain("type: concept"); // frontmatter 已剥离
+    expect(out).not.toContain("type: concept"); // frontmatter stripped
   });
 
-  it("多页依次输出", () => {
+  it("outputs multiple pages sequentially", () => {
     const out = formatRetrievedPages(
       [
         { relPath: "wiki/entities/a.md", title: "A", content: "body of a" },
@@ -78,12 +78,12 @@ describe("formatRetrievedPages", () => {
     );
   });
 
-  it("无 frontmatter 的页按原文处理", () => {
+  it("handles pages without frontmatter as raw body", () => {
     const out = formatRetrievedPages([{ relPath: "wiki/x.md", title: "X", content: "raw body" }], 12000);
     expect(out).toContain("raw body");
   });
 
-  it("超过 maxChars 预算时截断（含块头），输出明显短于全文", () => {
+  it("truncates when exceeding maxChars budget (including block header), output is significantly shorter than full text", () => {
     const longBody = "word ".repeat(600).trim(); // ~3000 chars
     const full = formatRetrievedPages([{ relPath: "wiki/x.md", title: "X", content: longBody }], 1500);
     expect(full.length).toBeGreaterThan(0);

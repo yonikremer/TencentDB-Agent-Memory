@@ -1,12 +1,12 @@
 /**
- * Wiki Source Manager — 管理文档源的注册、扫描、索引、查询生命周期
+ * Wiki Source Manager — Manages document source registration, scanning, indexing, and query lifecycle
  *
- * 摄取走 ingest-v2/ 引擎。
+ * Ingestion runs via ingest-v2/ engine.
  *
- * 索引存储（设计 006）：BM25 全文检索、知识图谱、页元数据不再常驻内存，改存每个
- * wiki 私有的 `index.db`（SQLite：wiki_fts + page_meta + graph_edge）。写走独立事务连接
- * （重建三表），读走 LRU 连接池；内存与 wiki 总数解耦，根治 MiniSearch 全量常驻的 OOM。
- * 图谱小，查询时从 graph_edge 临时构建内存 graphology 实例做多跳 BFS（复用现有算法）。
+ * Index storage (Design 006): BM25 full-text search, knowledge graph, and page metadata are no longer resident in memory,
+ * stored in each wiki's private `index.db` (SQLite: wiki_fts + page_meta + graph_edge). Writes use independent transaction connection
+ * (rebuilding three tables), reads use LRU connection pool; memory is decoupled from total wiki count, resolving MiniSearch full-residency OOM.
+ * Knowledge graph is small, temporarily constructed from graph_edge into memory graphology instance during queries to perform multi-hop BFS (reusing existing algorithm).
  */
 
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from "fs";
@@ -57,7 +57,7 @@ export { tokenize };
 
 const log = createLogger("wiki-mgr");
 
-// ── 内联 frontmatter/wikilink 解析（不依赖外部模块，确保可编译） ──
+// ── Inline frontmatter/wikilink parsing (no external module dependency, ensuring compilation) ──
 
 function extractFrontmatter(content: string): { title: string; type: string; sources: string[]; description: string } {
   const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
@@ -115,7 +115,7 @@ export interface SearchOptions {
   minScore?: number;
 }
 
-/** ingest 进度回调载荷（KS → Panel）。 */
+/** ingest progress callback payload (KS -> Panel). */
 export interface IngestProgress {
   phase: "extracting" | "merging" | "indexing";
   total: number;
@@ -127,12 +127,12 @@ export interface IngestProgress {
 
 export type ProgressFn = (progress: IngestProgress) => void;
 
-/** extracting 同阶段节流间隔；阶段切换（merging/indexing）始终立即上报。 */
+/** Throttle interval during extracting phase; phase transitions (merging/indexing) are always reported immediately. */
 export const PROGRESS_THROTTLE_MS = 500;
 
 /**
- * 节流 onProgress：阶段切换立即发；同阶段仅在 percent 上升且距上次 ≥ minIntervalMs
- * （或已到 extracting 末段 percent≥90）时发送，避免多源并发打爆 Panel。
+ * Throttles onProgress: emits immediately on phase change; during same phase, emits only when percent increases and elapsed time >= minIntervalMs
+ * (or reached tail of extracting phase percent >= 90), preventing concurrent multi-source ingest from flooding Panel.
  */
 export function createThrottledProgressFn(
   onProgress: ProgressFn | undefined,
@@ -176,10 +176,10 @@ export interface WikiSourceManager {
   ingest(name: string, llmConfig: any, opts?: IngestExecOptions): Promise<any[]>;
 }
 
-/** 图谱中不参与建边/展示的页类型（如内部 query 页）。 */
+/** Page types that do not participate in graph edge building/display (e.g. internal query pages). */
 const HIDDEN_TYPES = new Set(["query"]);
 
-// ── 图谱缓存结构（读时从 index.db 的 graph_edge 临时构建） ──
+// ── Graph cache structure (temporarily constructed from graph_edge in index.db during reads) ──
 
 export interface PageGraph {
   /** Public view (filtered, with linkCount/community). */
@@ -194,7 +194,7 @@ export interface PageGraph {
   degree: Map<string, number>;
 }
 
-/** 页元数据（读模型；正文不在库，snippet 为写入时预生成的静态摘要）。 */
+/** Page metadata (read model; body not stored in db, snippet is static summary pre-generated at write time). */
 interface PageMeta {
   id: string;
   title: string;
@@ -204,8 +204,8 @@ interface PageMeta {
 }
 
 /**
- * 解析页间 wikilink，产出有向边（source → target）用于写入 graph_edge。
- * 只在 visible（非 hidden 类型）页之间建边，过滤自环与无法解析的坏链接，(source,target) 去重。
+ * Parses wikilinks between pages, producing directed edges (source -> target) for writing to graph_edge.
+ * Only builds edges between visible (non-hidden type) pages, filters self-loops and unresolvable bad links, deduplicating (source,target).
  */
 function resolveEdges(pages: WikiPage[]): Array<{ source: string; target: string }> {
   const visible = pages.filter((p) => !HIDDEN_TYPES.has(p.type));
@@ -213,7 +213,7 @@ function resolveEdges(pages: WikiPage[]): Array<{ source: string; target: string
   if (visible.length === 0) return out;
 
   const nodeIds = new Set(visible.map((p) => p.id));
-  // title 的 slug → page id 映射：支持 wikilink 以页面标题（而非文件名）引用。
+  // title slug -> page id mapping: supports wikilinks referencing page titles (rather than filenames).
   const titleSlugToId = new Map<string, string>();
   for (const p of visible) {
     const ts = slugify(p.title);
@@ -235,8 +235,8 @@ function resolveEdges(pages: WikiPage[]): Array<{ source: string; target: string
 }
 
 /**
- * 从 page_meta + graph_edge 构建内存 PageGraph（读路径）。
- * 节点 = 非 hidden 类型的页；边 = graph_edge 有向边，公共 view 无向去重。
+ * Builds in-memory PageGraph from page_meta + graph_edge (read path).
+ * Nodes = non-hidden type pages; Edges = graph_edge directed edges, public view is undirected and deduplicated.
  */
 function buildPageGraphFromDb(
   metaById: Map<string, PageMeta>,
@@ -262,7 +262,7 @@ function buildPageGraphFromDb(
   const seenEdges = new Set<string>();
   const edges: GraphEdge[] = [];
   for (const { source_id: s, target_id: t } of edgeRows) {
-    // 端点必须都是 visible 节点（写库时已保证；读侧防御坏数据）。
+    // Endpoints must both be visible nodes (guaranteed at write time; defensive against bad data on read side).
     if (!outAdj.has(s) || !inAdj.has(t)) continue;
     outAdj.get(s)!.add(t);
     inAdj.get(t)!.add(s);
@@ -294,10 +294,10 @@ function resolveTarget(
 ): string | null {
   if (nodeIds.has(raw)) return raw;
 
-  // wikilink 目标可能是各种花式写法（带 .md 后缀、带斜杠路径、中英混合、大小写不一）。
-  // 统一用与文件名同源的 slugify 归一后比对 page id 的 basename（单一事实源，
-  // 避免在此重复造一套归一逻辑）。slugify 把 `/`、空格、标点都当段边界，
-  // 故 "/v3/wiki/create 接口" 与 "v3-wiki-create-接口" 归一后一致。
+  // Wikilink target can be in various formats (.md suffix, slash paths, mixed Chinese/English, case differences).
+  // Uses slugify with same origin as filename for unified comparison against page id basename (single source of truth,
+  // avoiding duplicate normalization logic here). slugify treats `/`, spaces, punctuation as segment boundaries,
+  // so "/v3/wiki/create endpoint" and "v3-wiki-create-endpoint" align after normalization.
   const target = slugify(raw.replace(/\.md$/i, ""));
   if (!target) return null;
 
@@ -307,7 +307,7 @@ function resolveTarget(
     const idBasename = id.split("/").pop() ?? id;
     if (slugify(idBasename) === target) return id;
   }
-  // 回退：按页面标题的 slug 命中（wikilink 用页面标题而非文件名引用时）。
+  // Fallback: match by page title slug (when wikilink references page title rather than filename).
   const byTitle = titleSlugToId.get(target);
   if (byTitle) return byTitle;
   return null;
@@ -318,9 +318,9 @@ function resolveTarget(
 const SNIPPET_CONTEXT = 80;
 
 /**
- * 预生成页摘要（写入 page_meta.snippet）：优先 frontmatter description，
- * 否则取正文（去 frontmatter/标题）前 SNIPPET_CONTEXT 个字符。
- * 正文不入库，检索时直接返回该静态摘要（消费者主要是 AI，无需按 query 动态高亮）。
+ * Pre-generates page summary (written to page_meta.snippet): prioritizes frontmatter description,
+ * otherwise takes first SNIPPET_CONTEXT characters of body (excluding frontmatter/headings).
+ * Body is not stored in DB; search returns static snippet directly (primary consumer is AI, no dynamic highlighting needed).
  */
 function makeSnippet(page: WikiPage): string {
   if (page.description) return page.description;
@@ -332,9 +332,9 @@ function makeSnippet(page: WikiPage): string {
 }
 
 /**
- * FTS5 检索：query → tokenize → 每 token 加 `*` 前缀 → OR 连接 → MATCH。
- * bm25() 越负越相关，取负转成"越大越相关"的正分，供图扩展的 decay/minScore 使用。
- * title_tok 权重 5.0、content_tok 1.0（对齐原 MiniSearch boost title×5）。
+ * FTS5 Search: query -> tokenize -> add `*` prefix to each token -> OR join -> MATCH.
+ * bm25() returns negative values for higher relevance; negated to positive score ("larger = more relevant") for graph expansion decay/minScore.
+ * title_tok weight 5.0, content_tok weight 1.0 (aligning with original MiniSearch boost title x 5).
  */
 function ftsSearch(db: DatabaseType.Database, query: string, limit: number): Array<{ id: string; score: number }> {
   const toks = tokenize(query);
@@ -348,7 +348,7 @@ function ftsSearch(db: DatabaseType.Database, query: string, limit: number): Arr
   return rows.map((r) => ({ id: r.page_id, score: -r.score }));
 }
 
-/** 事务内重建三张索引表（wiki_fts + page_meta + graph_edge）。由 withWriteDb 调用。 */
+/** Rebuilds three index tables (wiki_fts + page_meta + graph_edge) inside transaction. Called by withWriteDb. */
 function writeIndex(db: DatabaseType.Database, pages: WikiPage[]): void {
   db.prepare("DELETE FROM wiki_fts").run();
   db.prepare("DELETE FROM page_meta").run();
@@ -356,20 +356,20 @@ function writeIndex(db: DatabaseType.Database, pages: WikiPage[]): void {
 
   const insFts = db.prepare("INSERT INTO wiki_fts(page_id, title_tok, content_tok) VALUES (?,?,?)");
   const insMeta = db.prepare(
-    "INSERT INTO page_meta(page_id, title, type, rel_path, snippet) VALUES (?,?,?,?,?)",
+    "INSERT INTO page_meta(page_id, title, type, rel_path, snippet) VALUES (?,?,?,?,?)"
   );
   const insEdge = db.prepare("INSERT OR IGNORE INTO graph_edge(source_id, target_id) VALUES (?,?)");
 
   for (const p of pages) {
-    // wiki_fts + page_meta 收录所有页（含 hidden 类型，供检索）。
+    // wiki_fts + page_meta include all pages (including hidden types, for search).
     insFts.run(p.id, tokenize(p.title).join(" "), tokenize(p.content).join(" "));
     insMeta.run(p.id, p.title, p.type, p.relPath, makeSnippet(p));
   }
-  // graph_edge 只在 visible 页间。
+  // graph_edge only connects visible pages.
   for (const e of resolveEdges(pages)) insEdge.run(e.source, e.target);
 }
 
-/** 从读连接加载读模型：页元数据表 + 图（graph_edge 构建的内存图）。 */
+/** Loads read model from read connection: page metadata table + graph (in-memory graph constructed from graph_edge). */
 function loadReadModel(db: DatabaseType.Database): { pg: PageGraph; metaById: Map<string, PageMeta> } {
   const metaRows = db
     .prepare("SELECT page_id, title, type, rel_path, snippet FROM page_meta ORDER BY page_id")
@@ -472,7 +472,7 @@ function buildResultLinks(resultIds: string[], pg: PageGraph, metaById: Map<stri
   return links;
 }
 
-// ── 初始化模板 ──
+// ── Initialize Template ──
 
 function initWikiProject(projectPath: string): void {
   const dirs = ["raw/sources", "wiki/entities", "wiki/concepts", "wiki/sources", "wiki/comparisons", "wiki/synthesis", ".llm-wiki"];
@@ -488,9 +488,9 @@ function initWikiProject(projectPath: string): void {
   }
 }
 
-// ── Ingest（ingest-v2；增量抽取见设计 003） ──
+// ── Ingest (ingest-v2; incremental extraction see Design 003) ──
 
-/** 单源抽取结果（用于事务内登记 source.status）。 */
+/** Single-source extraction result (used for recording source.status in transaction). */
 interface ProcessedSource {
   filename: string;
   sha256: string;
@@ -500,21 +500,21 @@ interface ProcessedSource {
 }
 
 interface IngestOutcome {
-  /** 兼容旧返回：每个被抽取源的 {source, filesWritten, error}。 */
+  /** Compatible with legacy return: {source, filesWritten, error} for each extracted source. */
   results: any[];
-  /** 本次尝试抽取的源结果（登记 source 状态用）。 */
+  /** Source results attempted in this run (used for recording source status). */
   processed: ProcessedSource[];
-  /** 表中有但磁盘已无 → 待删 source 行。 */
+  /** Present in database table but missing on disk -> source rows to be deleted. */
   deletedSources: string[];
 }
 
 /**
- * 增量抽取（设计 003 §3.6 + wiki-ingest-optimization）：
- * 阶段1 并行 LLM 抽取 → 已删源级联清理 → 阶段2 串行 merge 落盘 → overview。
- * 不在此更新 source 表 / 不重建索引——那些交由 ingest() 在同一事务内完成（强一致）。
- * 全部失败检测不在此 throw，由上层 WikiSourceManager.ingest 写事务后判定。
+ * Incremental ingestion (Design 003 §3.6 + wiki-ingest-optimization):
+ * Stage 1 parallel LLM extraction -> deleted source cascade cleanup -> Stage 2 serial merge disk commit -> overview.
+ * Does not update source table / rebuild index here — those are performed by ingest() in the same transaction (strong consistency).
+ * All-failed detection is not thrown here; handled by upper WikiSourceManager.ingest after write transaction.
  *
- * 导出供编排层单测（进度相位 / skipped / 全失败不 throw）。
+ * Exported for orchestration unit testing (progress phase / skipped / all-failed no throw).
  */
 export async function runIngestIncremental(
   projectPath: string,
@@ -578,8 +578,9 @@ export async function runIngestIncremental(
       try {
         const candidates = await withSpan("ingest-source", async (span) => {
           span.setAttribute("source.name", d.filename);
-          // 检索增强摄取：把检索函数注入 extractSource，由其在每个源分块上逐块检索
-          // 相关既有页（函数内部 + extractSource 内均降级为无增强，不阻断摄取）。
+          // RAG ingest: inject retrieval function into extractSource to retrieve relevant existing 
+          // pages per chunk (both internal logic and extractSource are degraded to non-RAG if 
+          // retriever is missing, without blocking ingest).
           const run = () => extractSource(projectPath, d.abs, llmConfig, existingPages, { retrieveContext });
           return globalLlmLimit ? globalLlmLimit(run) : run();
         });
@@ -799,7 +800,7 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
     }
   }
 
-  /** 重建 wiki 的 index.db 索引（幂等建库 → 事务重建三表 → 驱逐读连接防 stale）。 */
+  /** Rebuilds wiki's index.db index (idempotent DB init -> transaction rebuild 3 tables -> evict read connections to prevent stale reads). */
   function rebuildIndex(name: string, pages: WikiPage[]) {
     const state = sources.get(name);
     if (!state) throw new Error(`rebuildIndex: unknown wiki ${name}`);
@@ -816,7 +817,7 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
     try {
       db = getReadDb(name, state.path);
     } catch {
-      // 库不存在（wiki 未 ingest/未建索引）→ 返回空，与旧"无引擎"行为一致。
+      // DB does not exist (wiki not ingested/indexed) -> return empty, consistent with legacy "no engine" behavior.
       return { results: [], links: [], count: 0 };
     }
 
@@ -867,9 +868,9 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
   }
 
   loadState();
-  // 启动时恢复 BM25 搜索索引（重建每个 ready wiki 的 index.db / pagesMap / searchEngines）。
-  // loadState 只恢复元数据（sources map）；索引数据虽持久，但为对齐磁盘正文并避免
-  // search / pages / graph 在重启后返回空，仍从磁盘扫描重建一次。
+  // Restores BM25 search index on startup (rebuilds index.db / pagesMap / searchEngines for each ready wiki).
+  // loadState only restores metadata (sources map); index data is persistent, but to align with disk text and avoid
+  // search / pages / graph returning empty after restart, resubmits scan and rebuild from disk once.
   log.info("Restoring wiki indexes", { count: sources.size });
   let restored = 0;
   let failed = 0;
@@ -988,7 +989,7 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
       );
     });
 
-    // 重建索引 + 登记 source 状态 + 删已删源行：**同一写事务**（设计 003 §3.6 step 6，强一致）。
+    // Rebuild index + record source status + delete removed source rows: **SAME WRITE TRANSACTION** (Design 003 §3.6 step 6, strong consistency).
     state.status = "scanning";
     const t0 = Date.now();
     try {
@@ -998,7 +999,7 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
         for (const p of outcome.processed) recordSourceIngestResult(db, p);
         if (outcome.deletedSources.length > 0) deleteSources(db, outcome.deletedSources);
       });
-      evictWikiDb(name); // 丢弃可能持旧快照的读连接
+      evictWikiDb(name); // Evict read connections holding old snapshot
 
       const attempted = outcome.processed.length;
       const failed = outcome.processed.filter((p) => !p.ok);
@@ -1031,15 +1032,15 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
     return outcome.results;
   }
 
-  /** 读取既有 wiki 页正文（id 或 relPath 均可）。检索增强摄取复用同一读取路径。 */
+  /** Reads existing wiki page body (accepts id or relPath). Retrieval-augmented ingestion reuses same reading path. */
   function readPageInternal(name: string, relPath: string): string | null {
     const state = sources.get(name);
     if (!state) return null;
 
-    // 支持 raw/ 前缀：直接从项目根读取
+    // Supports raw/ prefix: read directly from project root
     if (relPath.startsWith("raw/")) {
       const fullPath = join(state.path, relPath);
-      if (!fullPath.startsWith(join(state.path, "raw"))) return null; // 防路径穿越
+      if (!fullPath.startsWith(join(state.path, "raw"))) return null; // Path traversal protection
       try { return readFileSync(fullPath, "utf-8"); } catch {}
       if (!relPath.endsWith(".md")) {
         try { return readFileSync(fullPath + ".md", "utf-8"); } catch {}
@@ -1047,15 +1048,15 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
       return null;
     }
 
-    // 支持多种格式：
-    //   "wiki/concepts/l0-录入.md" → 完整 relPath
-    //   "concepts/l0-录入.md"      → 去掉 wiki/ 前缀
-    //   "concepts/l0-录入"         → id 格式（不带 .md）
+    // Supports multiple formats:
+    //   "wiki/concepts/l0-ingest.md" -> full relPath
+    //   "concepts/l0-ingest.md"      -> remove wiki/ prefix
+    //   "concepts/l0-ingest"         -> id format (without .md)
     const cleanPath = relPath.replace(/^wiki\//, "");
     const base = join(state.path, "wiki");
     let fullPath = join(base, cleanPath);
     if (!fullPath.startsWith(base)) return null;
-    // 先直接尝试，再补 .md
+    // Try directly first, then append .md
     try { return readFileSync(fullPath, "utf-8"); } catch {}
     if (!cleanPath.endsWith(".md")) {
       try { return readFileSync(fullPath + ".md", "utf-8"); } catch {}
@@ -1070,9 +1071,9 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
     remove: (name) => {
       const state = sources.get(name);
       sources.delete(name);
-      // 先关读连接（内部 checkpoint+close），目录 rmSync 由调用方（wiki-service/route）负责。
+      // Close read connection first (internal checkpoint+close), directory rmSync handled by caller (wiki-service/route).
       evictWikiDb(name);
-      if (state) { /* index.db 随目录删除一并清理 */ }
+      if (state) { /* index.db cleaned up with directory deletion */ }
       persist();
     },
     search: (name, query, limit, options) => searchInternal(name, query, limit ?? DEFAULT_LIMIT, options ?? {}),

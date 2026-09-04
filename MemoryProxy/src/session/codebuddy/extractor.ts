@@ -1,17 +1,17 @@
 /**
  * CodeBuddy Session Init — Extractor.
  *
- * 解析用户从 `ask_followup_question` form 的回复。
+ * Parses the user's response from the `ask_followup_question` form.
  *
- * ── 为什么看上去像在解析 XML，但跨 team 多轮 form 也能用 ──
+ * ── Why does it look like parsing XML, yet works for multi-round cross-team forms? ──
  *
- * 当前只解析 `<question_answer>` XML（CodeBuddy 旧格式）。
- * 实测中 CodeBuddy 实际回写格式是 `role: "tool"` 消息中的 `multi_question_result` JSON
- * （详见 cleaner.ts 头部注释中的抓包格式），但 extractor 的 substring 兜底匹配
- * 能在无关 user 消息文本中"碰巧"匹配到 team/agent/task 名，使得 session init 侥幸成功。
- * 这是 fragile 依赖，不是精确解析。如需可靠提取，需增加 JSON 解析路径。
+ * Currently, it only parses `<question_answer>` XML (CodeBuddy old format).
+ * In practice, CodeBuddy's actual write-back format is `multi_question_result` JSON inside `role: "tool"` messages
+ * (see the capture format in the header comment of cleaner.ts). However, the extractor's substring fallback matching
+ * "coincidentally" matches the team/agent/task names within unrelated user message text, enabling session init to succeed by chance.
+ * This is a fragile dependency, not a precise parse. For reliable extraction, a JSON parsing path must be added.
  *
- * 不含任何 Claude Code 逻辑（不解析 JSON tool_result）。
+ * Contains no Claude Code logic (does not parse JSON tool_result).
  */
 
 import type { SessionInitData, TeamOption } from "../types.js";
@@ -22,28 +22,28 @@ import { SKIP_LABEL, PATH_SEP, ASSET_CONFIRM_YES, ASSET_CONFIRM_NO } from "./for
 const SKIP_RE = /跳过|不关联|skip|do not associate/i;
 export const BYPASS_MARKER = "__bypass__" as const;
 
-// ── opencode tool-result 剥壳 ───────────────────────────────────────────────
+// ── opencode tool-result unwrapping ───────────────────────────────────────────────
 //
-// opencode CLI 的原生 `question` tool 收到用户选择后，把答案以纯文本形式回给
-// model 作为 tool-result，格式为：
-//   User has answered your questions: "问题描述..."="用户答案"[, "问题2"="答案2"]
+// After opencode CLI's native `question` tool receives the user selection, it returns the answer as plain text
+// to the model as a tool-result, formatted as:
+//   User has answered your questions: "question description..."="user answer"[, "question 2"="answer 2"]
 //
-// 这里的**问题描述里往往包含"跳过"、"不关联"等字样**（因为我们在 form 里让
-// 用户看到"跳过"选项）。如果直接把整段 content 喂给 extractAgentOnly /
-// extractTaskOnly，第一行 SKIP_RE.test 就会命中问题描述里的"跳过" →
-// 误判为 BYPASS_MARKER，导致 agent_select / task_select 阶段永远走不通。
+// The **question description often contains words like "skip" or "do not associate"** (since we show the user
+// a "skip" option in the form). If we feed the entire content directly to extractAgentOnly /
+// extractTaskOnly, the first line's SKIP_RE.test will hit the "skip" in the question description →
+// falsely identifying it as BYPASS_MARKER, causing the agent_select / task_select stages to never complete.
 //
-// 修复：在这些 extractor 入口先剥壳——只提取所有 `="..."` 右边的 answer 段
-// 拼接后再做后续判断。非 opencode 场景（CB XML / codex 裸文本 / wb 直接
-// answer）不含此包裹层，helper 返回 null，走原始 content 老路径。
+// Fix: Unwrap at the entry of these extractors—only extract all the answer segments to the right of `="..."`,
+// concatenate them, and then proceed with the evaluation. Non-opencode scenarios (CB XML / codex raw text / wb direct
+// answer) do not have this wrapper layer; the helper returns null, falling back to the original content path.
 //
-// asset_confirm 场景不用这个 helper，因为 extractAssetConfirm 是"先找肯定
-// 标记再找否定标记"的白名单式匹配，问题描述里的"跳过"字样天然无害。
+// The asset_confirm scenario does not use this helper because extractAssetConfirm uses an allowlist approach of
+// "look for positive markers first, then negative markers", so the word "skip" in the question description is naturally harmless.
 //
-// 匹配 `="value"` 中的 value——注意 value 里可能出现被 opencode 转义过的
-// 内层引号，实测（2026-08-19）opencode 客户端遇到内层引号会输出转义后的
-// `\"` 或直接透传全角引号 `"`，为最大兼容用 `[^"]*` 简易匹配即可（覆盖
-// 我们 form.ts 里所有 label——纯 label 文本没有裸英文引号）。
+// Match the value in `="value"`—note that the value may contain inner quotes escaped by opencode.
+// In practice (2026-08-19), when the opencode client encounters inner quotes, it outputs escaped
+// `\"` or passes through full-width quotes `"`. For maximum compatibility, a simple `[^"]*` match suffices (covering
+// all labels in our form.ts—pure label text contains no bare English quotes).
 function extractOpencodeAnswers(content: string): string | null {
   if (!content.includes("User has answered your questions:")) return null;
   const answers: string[] = [];
@@ -56,8 +56,8 @@ function extractOpencodeAnswers(content: string): string | null {
 }
 
 /**
- * 从用户答复中提取 asset_confirm 选择。
- * 返回 true=是（关联资产），false=否（bypass），null=未识别。
+ * Extract asset_confirm selection from user reply.
+ * Returns true=yes (associate assets), false=no (bypass), null=unrecognized.
  */
 export function extractAssetConfirm(content: string): boolean | null {
   // XML parsing
@@ -83,7 +83,7 @@ export function extractAssetConfirm(content: string): boolean | null {
   return null;
 }
 
-// ── XML 解析 ───────────────────────────────────────────────────────────────────
+// ── XML Parsing ───────────────────────────────────────────────────────────────────
 
 /**
  * Parse CodeBuddy's `<question_answer>` XML from user message.
@@ -103,7 +103,7 @@ function parseQuestionAnswerXml(
   const itemRe =
     /<question_item\s+id="([^"]+)"\s*>[\s\S]*?<answers>\s*([\s\S]*?)\s*<\/answers>/g;
 
-  // 先扫描所有 question_item 判断总数（轮1: 1个, 轮2: 2个）
+  // First scan all question_items to determine the total count (round 1: 1, round 2: 2)
   const allIds: string[] = [];
   const idRe = /<question_item\s+id="([^"]+)"\s*>/g;
   let idM: RegExpExecArray | null;
@@ -142,11 +142,11 @@ function parseQuestionAnswerXml(
   return result.teamAnswer || result.agentAnswer || result.taskAnswer ? result : null;
 }
 
-// ── Team 匹配 ──────────────────────────────────────────────────────────────────
+// ── Team Matching ──────────────────────────────────────────────────────────────────
 
 /**
- * 轮1 提取：从用户答复中识别选定的 team_id。
- * CodeBuddy: 用户选择在 `role: "user"` 消息中，走 `<question_answer>` XML 解析。
+ * Round 1 Extraction: Identify the selected team_id from the user's response.
+ * CodeBuddy: User selection is in a `role: "user"` message, processed via `<question_answer>` XML parsing.
  */
 export function extractTeamFromOptionText(
   content: string,
@@ -154,8 +154,8 @@ export function extractTeamFromOptionText(
 ): string | null {
   if (cachedTeams.length === 0) return null;
 
-  // opencode: 剥壳 tool-result 包裹，避免问题描述里的"跳过"字样触发误 SKIP。
-  // 见 extractOpencodeAnswers 头部注释。
+  // opencode: Unwrap tool-result to prevent "skip" keywords in the question description from triggering false SKIPs.
+  // See the header comment of extractOpencodeAnswers.
   const opencodeAnswer = extractOpencodeAnswers(content);
   if (opencodeAnswer !== null) content = opencodeAnswer;
 
@@ -167,17 +167,16 @@ export function extractTeamFromOptionText(
     teamText = xml.teamAnswer ?? null;
   }
 
-  // 匹配策略（team 选项 label 格式: "team名 (id尾8位)"）
+  // Matching strategy (team option label format: "team name (id trailing 8 chars)")
   const hay = teamText ?? content;
   const trimmed = hay.trim();
 
-  // 检测"本次不关联" / SKIP_RE → bypass。
-  // (P1-4) 早期只对 XML 解析出的 teamText 判 SKIP_RE, 非 XML content 走不到;
-  // 真 codex CLI 里 codexFormAnswersAsMessages 把 JSON 答案抽成裸 content
-  // (如 "跳过"), 结果 SKIP_RE 永远不触发 → 走到普通 team 名匹配 → 未命中 →
-  // 被上层 (init.ts pending_team_select) 当"未识别"计 attemptCount, 3 次才
-  // maxRetries 强制 bypass。对齐 extractAgentOnly (line 293) /
-  // extractTaskOnly (line 324) 的姿势: 在正式匹配前无条件测 SKIP_RE。
+  // Detect "do not associate this time" / SKIP_RE → bypass.
+  // (P1-4) Earlier, SKIP_RE was only evaluated on teamText parsed from XML, and non-XML content wouldn't reach it;
+  // In the real codex CLI, codexFormAnswersAsMessages extracts JSON answers into bare content
+  // (e.g., "skip"), resulting in SKIP_RE never triggering → falls through to normal team name matching → misses →
+  // treated as "unrecognized" by the upper layer (init.ts pending_team_select) incrementing attemptCount, forcing bypass
+  // only after 3 maxRetries. Align with extractAgentOnly / extractTaskOnly: unconditionally test SKIP_RE before formal matching.
   if (SKIP_RE.test(trimmed) || trimmed.includes(SKIP_LABEL)) {
     return BYPASS_MARKER;
   }
@@ -206,7 +205,7 @@ export function extractTeamFromOptionText(
   return null;
 }
 
-// ── Agent / Task 匹配 ─────────────────────────────────────────────────────────
+// ── Agent / Task Matching ─────────────────────────────────────────────────────────
 
 function matchAgentInTeam(text: string, team: TeamOption): string | null {
   const trimmed = text.trim();
@@ -262,8 +261,8 @@ function matchTaskInTeam(text: string, team: TeamOption): string | undefined {
 }
 
 /**
- * 轮2 提取：从用户答复中识别 agent + task，**强制限定在已选定的 team 内**。
- * CodeBuddy: 走 `<question_answer>` XML 解析。
+ * Round 2 Extraction: Identify agent + task from the user's response, **strictly scoped to the selected team**.
+ * CodeBuddy: Processed via `<question_answer>` XML parsing.
  */
 export function extractFromOptionText(
   content: string,
@@ -291,7 +290,7 @@ export function extractFromOptionText(
     taskText = xml.taskAnswer ?? null;
   }
 
-  // 检测 Agent 选了"本次不关联"→ bypass
+  // Detect if Agent was selected as "do not associate this time" → bypass
   if (agentText && (agentText.includes(SKIP_LABEL) || SKIP_RE.test(agentText.trim()))) {
     return { agent_id: BYPASS_MARKER };
   }
@@ -302,38 +301,38 @@ export function extractFromOptionText(
   if (!agentId) agentId = matchAgentInTeam(content, team);
   if (!agentId) return null;
 
-  // Resolve task。defaultTaskId 兜底通过 fetchTeamsAndAgents 头部注入实现：
-  // 用户选中"本次不关联任务"label 会 matchTaskInTeam 命中虚拟条目返回
-  // defaultTaskId，无需在此单独处理。SKIP_RE 兜底放到 match 失败之后，避免
-  // 虚拟条目的"不关联"文案误伤。
+  // Resolve task. defaultTaskId fallback is implemented via header injection in fetchTeamsAndAgents:
+  // User selecting the "do not associate task this time" label hits the virtual entry in matchTaskInTeam,
+  // returning defaultTaskId, needing no separate handling here. SKIP_RE fallback is placed after matching fails
+  // to avoid false positives from the virtual entry's "do not associate" text.
   let taskId: string | undefined;
   const taskHay = taskText ?? content;
   taskId = matchTaskInTeam(taskHay, team);
   if (!taskId && SKIP_RE.test(taskHay)) {
-    taskId = undefined; // 显式手打"跳过"→ 保持 undefined（走 completeRegistration bypass）
+    taskId = undefined; // Explicitly typed "skip" → keep undefined (trigger completeRegistration bypass)
   }
 
   return { agent_id: agentId, task_id: taskId };
 }
 
-// ── codex-only 单题提取器 ─────────────────────────────────────────────────────
+// ── codex-only Single Question Extractors ─────────────────────────────────────────────────────
 //
-// 2026-08-08 codex session-init 重构：拆分 pending_agent_task 为独立的
-// pending_agent_select + pending_task_select 后，每一步都只提取一个字段。
-// 复用 matchAgentInTeam / matchTaskInTeam 上面的模糊匹配（含 label/name/
-// suffix/substring 兜底），保证 codex handler 传下来的 "AgentName (xxxxxxxx)"
-// 之类原样 label 也能命中。
+// 2026-08-08 codex session-init refactor: After splitting pending_agent_task into independent
+// pending_agent_select + pending_task_select, each step extracts only one field.
+// Reuses the fuzzy matching in matchAgentInTeam / matchTaskInTeam (including label/name/
+// suffix/substring fallbacks), ensuring raw labels like "AgentName (xxxxxxxx)" passed down
+// from the codex handler are also matched.
 //
-// CB 客户端老路径（一发同时问 agent+task）继续走 extractFromOptionText，不
-// 触碰这两个新函数。
+// The CB client legacy path (asking agent+task together in one shot) continues to use extractFromOptionText,
+// leaving these two new functions untouched.
 
 /**
- * 仅从纯文本 answer 里识别一个 agent_id（codex 单 agent_select stage）。
+ * Identifies a single agent_id exclusively from a plain text answer (codex single agent_select stage).
  *
- * 返回：
- *   - BYPASS_MARKER：用户显式表达"跳过/不关联"
- *   - agent_id：命中候选
- *   - null：未识别
+ * Returns:
+ *   - BYPASS_MARKER: User explicitly expressed "skip/do not associate"
+ *   - agent_id: Matched candidate
+ *   - null: Unrecognized
  */
 export function extractAgentOnly(
   content: string,
@@ -356,13 +355,13 @@ export function extractAgentOnly(
 }
 
 /**
- * 仅从纯文本 answer 里识别一个 task_id（codex 单 task_select stage）。
+ * Identifies a single task_id exclusively from a plain text answer (codex single task_select stage).
  *
- * 返回：
- *   - BYPASS_MARKER：用户显式表达"跳过/不关联"（此处的"不关联任务"由 defaultTaskId
- *     虚拟条目命中 matchTaskInTeam 走返回 task_id 分支，而不会跑到 BYPASS 分支）
- *   - task_id：命中候选
- *   - null：未识别
+ * Returns:
+ *   - BYPASS_MARKER: User explicitly expressed "skip/do not associate" (Note: "do not associate task" here
+ *     hits the defaultTaskId virtual entry in matchTaskInTeam returning a task_id, bypassing the BYPASS branch)
+ *   - task_id: Matched candidate
+ *   - null: Unrecognized
  */
 export function extractTaskOnly(
   content: string,
@@ -380,9 +379,9 @@ export function extractTaskOnly(
   if (opencodeAnswer !== null) content = opencodeAnswer;
   const trimmed = content.trim();
   if (!trimmed) return null;
-  // 先尝试匹配真实/虚拟 task 条目（虚拟条目由 fetchTeamsAndAgents 头部注入,
-  // label="本次不关联任务"命中后返回的是 defaultTaskId，符合"跳过 task 但保
-  // 留 agent"契约，不当作 BYPASS）。
+  // First attempt to match real/virtual task entries (virtual entry injected by fetchTeamsAndAgents header,
+  // matching label "do not associate task this time" returns defaultTaskId, satisfying the "skip task but retain
+  // agent" contract, and is not treated as a BYPASS).
   const matched = matchTaskInTeam(trimmed, team);
   if (matched) return matched;
   if (SKIP_RE.test(trimmed) || trimmed.includes(SKIP_LABEL)) return BYPASS_MARKER;

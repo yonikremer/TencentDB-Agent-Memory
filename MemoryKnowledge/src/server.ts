@@ -87,7 +87,7 @@ export function createApp() {
     llmBindingStore: knowledgeModule.llmBindingStore,
   }));
 
-  // auto-sync admin — 定时同步调度器状态查询 + 手动触发
+  // auto-sync admin — Periodic sync scheduler status query and manual trigger
   api.route("/", createAutoSyncRoutes({
     scheduler: knowledgeModule.autoSyncScheduler,
     config: knowledgeModule.autoSyncConfig,

@@ -6,9 +6,8 @@ import { pluginZod } from "@kubb/plugin-zod";
 export default defineConfig({
   root: ".",
   input: {
-    // 团队记忆扩展版契约：在 offload.yaml 13 个接口基础上叠加可选 IdFields
-    // (team_id / agent_id / user_id / task_id)，用于服务化模式的身份隔离。
-    // 旧客户端不传 IdFields 时按 offload.yaml 原语义工作。
+    // Team memory extension version contract: adds optional IdFields (team_id / agent_id / user_id / task_id) on top of the 13 offload.yaml interfaces for service-mode isolation.
+    // (When old clients omit IdFields they work with the original offload.yaml semantics.)
     path: "./docs/team-api-仅memory.yaml",
   },
   output: {

@@ -93,11 +93,11 @@ const SKILL_LISTING_FOOTER =
 export function wrapAvailableSkillsBlock(listing: string): string {
   return [
     SKILL_LISTING_HEADER,
-    "以下是你（当前 agent）自带的云端 skill 列表。这些 skill 存储在你的 agent 名下，",
-    "优先使用它们完成任务。如果你觉得自带的 skill 不够，可以用 skill_search 工具",
-    "在团队的 skill 库中检索更多（跨 agent 共享）。",
+    "Below is the list of cloud skills that you (the current agent) inherently own. These skills are stored under your agent name.",
+    "Prioritize using them to complete tasks. If you feel the inherent skills are insufficient, you can use the skill_search tool",
+    "to retrieve more from the team's skill library (shared across agents).",
     "",
-    "**重要：这些 skill 存储在云端，不能使用 read_file / tool_use 直接访问，\n必须用 Bash 执行 curl 调用上方 <skill_tools> 块中的 skill-bridge 工具。**",
+    "**IMPORTANT: These skills are stored in the cloud and cannot be accessed directly via read_file / tool_use.\nYou MUST use Bash to execute curl calls to the skill-bridge tools in the <skill_tools> block above.**",
     "",
     listing,
     SKILL_LISTING_FOOTER,

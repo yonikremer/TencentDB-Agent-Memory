@@ -91,9 +91,9 @@ export interface AgentContextMetadata {
    */
   userId?: string;
   /**
-   * SpaceId (aka memory instance id). P4 (kernel-sts) 新增 —— STS 权限按 space
-   * 隔离，key 路径也随之带 spaceId 段。上游 handler 从 URL path 解析
-   * (`extractSpaceIdFromPath`) 后传进来。缺省时 Repo 层用 `_default` 兜底。
+   * SpaceId (aka memory instance id). Added in P4 (kernel-sts) — STS permissions are isolated by space,
+   * so key paths also carry a spaceId segment. Upstream handler parses this from the URL path
+   * (`extractSpaceIdFromPath`) and passes it in. When absent, Repo layer falls back to the `_default` segment.
    */
   spaceId?: string;
   /**
@@ -108,19 +108,19 @@ export interface AgentContextMetadata {
   turnSeq?: number;
   /**
    * Raw request URL path (e.g. `/codebuddy/default/analyse/v1/messages`).
-   * Optional —— 用于需要按 URL marker 决定行为的 injector（如
-   * `AssetReflectionInjector` 用它调 `hasAnalyseMarker`）。缺省时
-   * marker 一律视为未命中，injector 静默降级。
+   * Optional — used by injectors that determine behavior based on URL markers (e.g.,
+   * `AssetReflectionInjector` uses it to call `hasAnalyseMarker`). When absent,
+   * markers are unconditionally treated as missed, and the injector silently degrades.
    */
   requestPath?: string;
   /** Allow injectors to attach custom key-value pairs. */
   custom?: Record<string, unknown>;
   /**
-   * Read-only mode: cache-miss 分支时**不 self-heal put**（只用 hook.execute() 拿
-   * 结果，不写回 hook-cache）。用于 FORK 类请求 —— 它们的目的是复用主对话的 cache 命中，
-   * 如果 miss 时 self-heal，写入的内容跟主对话那次不一定 byte-level 一致，反而破坏 cache。
+   * Read-only mode: on the cache-miss branch, **do not self-heal put** (only use hook.execute() to get
+   * the result, do not write back to hook-cache). Used for FORK requests — their purpose is to reuse the cache hit from the main dialog;
+   * if they self-heal on miss, the written content may not be byte-level identical to the main dialog, breaking the cache.
    *
-   * 主对话请求（默认）不设或设 false —— 保留 self-heal，保证首次 miss 后续能命中。
+   * Main dialog requests (default) do not set this or set to false — preserving self-heal to ensure hits after initial miss.
    */
   readOnly?: boolean;
 }
@@ -301,7 +301,7 @@ export interface PrewarmInput {
    */
   agentSource: string;
   /**
-   * SpaceId (memory instance id). P4 kernel-sts 新增；缺省时 Repo 用 `_default` 兜底段。
+   * SpaceId (memory instance id). Added in P4 kernel-sts; when absent, Repo uses the `_default` fallback segment.
    */
   spaceId?: string;
   sessionInfo: import("../session/types.js").SessionInfo;
@@ -310,10 +310,10 @@ export interface PrewarmInput {
   /** Per-user asset capability flags, resolved from tdai meta config/user/get. */
   assetCapabilities?: AssetCapabilityFlags;
   /**
-   * Session-init 发起者的 API key（sk-... / ck-...）。
-   * 用于 prewarm 阶段构造 AgentContext.metadata.custom.userKey，让下游
-   * TDAI ACL 校验能拿到 caller 身份（Layer 3 x-tdai-user-key）。
-   * 敏感字段：只在内存中流转，不写入日志/持久化。
+   * API key (sk-... / ck-...) of the session-init initiator.
+   * Used during the prewarm phase to construct AgentContext.metadata.custom.userKey, allowing downstream
+   * TDAI ACL checks to retrieve the caller identity (Layer 3 x-tdai-user-key).
+   * Sensitive field: Only flows in memory, not written to logs/persistence.
    */
   callerUserKey?: string;
 }

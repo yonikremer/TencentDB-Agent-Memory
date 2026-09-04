@@ -1,18 +1,18 @@
 /**
- * SkillAgentTaskQueue — agent 级调度信号 + `_tasks.json` 短锁保护。
+ * SkillAgentTaskQueue — agent-level scheduling signals + `_tasks.json` short lock protection.
  *
- * 对应设计文档 §5、§9。
+ * Corresponds to design docs §5, §9.
  *
- * 抽象接口 `ISkillAgentTaskQueue` 定义三组能力：
- *   1) agent 队列 (List + Set)：enqueueAgent / dequeueAgent / requeueAgent / removeAgent
- *   2) tasks-mutex（保护 `_tasks.json` 读改写，TTL 秒级）：withTasksMutex
- *   3) extract-lock（Worker 独占 agent 抽取权，TTL 10 min）：acquire/renew/releaseExtractLock
+ * Abstract interface `ISkillAgentTaskQueue` defines three sets of capabilities:
+ *   1) Agent queue (List + Set): enqueueAgent / dequeueAgent / requeueAgent / removeAgent
+ *   2) tasks-mutex (protects `_tasks.json` read-modify-write, TTL in seconds): withTasksMutex
+ *   3) extract-lock (Worker exclusive agent extraction right, TTL 10 min): acquire/renew/releaseExtractLock
  *
- * 生产实现走 Redis（`RedisSkillAgentTaskQueue`，本文件），
- * 测试实现走内存（`LocalSkillAgentTaskQueue`，本文件）。
+ * Production implementation uses Redis (`RedisSkillAgentTaskQueue`, this file).
+ * Test implementation uses memory (`LocalSkillAgentTaskQueue`, this file).
  *
- * agent tuple 序列化格式：
- *   `{space}|{user}|{team}|{agent}` — 与 Redis List 元素、锁 key 后缀完全一致。
+ * Agent tuple serialization format:
+ *   `{space}|{user}|{team}|{agent}` — identical to Redis List elements and lock key suffixes.
  */
 
 import { randomUUID } from "node:crypto";
@@ -20,18 +20,18 @@ import { randomUUID } from "node:crypto";
 // ── Common types ──────────────────────────────────────────────────────────
 
 /**
- * Agent 五元组: (instance_id, space_id, user_id, team_id, agent_id)。
+ * Agent 5-tuple: (instance_id, space_id, user_id, team_id, agent_id).
  *
- * 2026-07-30 由 4 段扩展到 5 段: 新增 instance_id，让 worker 从队列元素
- * 本身能路由到对应 instance 的 CoS / VDB / LLM 资源, 不再依赖"per-instance
- * 绑资源的 worker"这个历史耦合。详见
- * docs/design/2026-07-30-skill-worker-instance-decoupling.md。
+ * 2026-07-30: Expanded from 4 to 5 segments: added instance_id, allowing the worker
+ * to route from the queue element itself to the corresponding instance's COS / VDB / LLM resources,
+ * no longer relying on the historical coupling of "per-instance workers bound to resources".
+ * See docs/design/2026-07-30-skill-worker-instance-decoupling.md for details.
  *
- * 兼容:
- *   - parseAgentTuple 收到 4 段字符串 → instance_id = "__legacy__"，
- *     由上层 worker 见到 __legacy__ 时丢弃 + error log。
- *   - 各段禁止含 `|`（跟 add-handler 里的 ID_FORBIDDEN_CHAR 对齐），
- *     serialize 检测到会抛。
+ * Compatibility:
+ *   - parseAgentTuple receiving a 4-segment string → instance_id = "__legacy__",
+ *     discarded and error-logged by upper-layer worker upon encountering __legacy__.
+ *   - Each segment forbids containing `|` (aligns with ID_FORBIDDEN_CHAR in add-handler),
+ *     serialize throws if detected.
  */
 export interface AgentTuple {
   instance_id: string;
@@ -41,7 +41,7 @@ export interface AgentTuple {
   agent_id: string;
 }
 
-/** 老 4 段 tuple 反序列化时的兜底 instance_id 值。见 AgentTuple 注释。 */
+/** Fallback instance_id value when deserializing legacy 4-segment tuples. See AgentTuple comments. */
 export const LEGACY_INSTANCE_ID = "__legacy__";
 
 const TUPLE_FORBIDDEN_CHAR = "|";
@@ -75,9 +75,9 @@ export function parseAgentTuple(raw: string): AgentTuple | null {
     return { instance_id, space_id, user_id, team_id, agent_id };
   }
   if (parts.length === 4) {
-    // Legacy 4 段: 升级过渡期 Redis 里可能有老格式残留。视为 __legacy__，
-    // 上层 worker 拿到会丢弃并 error log。这里不返回 null 是为了让上层
-    // 能明确识别为 legacy 而不是解析错误 (返回 null 会当作损坏数据处理)。
+    // Legacy 4-segment: during upgrade transition, there might be old format remnants in Redis. Treat as __legacy__,
+    // upper-layer workers will discard and error log upon seeing it. Returning null here would treat it as
+    // corrupted data, so we don't return null to let the upper layer clearly identify it as legacy.
     const [space_id, user_id, team_id, agent_id] = parts;
     if (!space_id || !user_id || !team_id || !agent_id) return null;
     return {
@@ -92,99 +92,99 @@ export function parseAgentTuple(raw: string): AgentTuple | null {
 }
 
 export interface ExtractLockHandle {
-  key: string;      // agent tuple 序列化后的字符串
-  token: string;    // 释放/续约凭证
+  key: string;      // Serialized agent tuple string
+  token: string;    // Release/renew credential
 }
 
 /**
- * peekAgent 实现策略, 反映底层 Redis 的能力级别 (三级兜底):
+ * peekAgent implementation strategy, reflecting underlying Redis capability levels (three-tier fallback):
  *
- *   - "lmove"                — 原生 LMOVE k k RIGHT LEFT (Redis 6.2+), 服务端原子
- *   - "evalsha"              — SCRIPT LOAD + EVALSHA (Redis 2.6+), lua 单线程原子等价
- *   - "eval"                 — 每次 EVAL 全脚本 (evalsha 失败但 eval 可用时的中间态; 目前未使用)
- *   - "rpop_lpush_downgrade" — 最后兜底: 只做 RPOP, 由 caller (extract-worker) 在 tasks-mutex
- *                              内自行 requeue。**非原子**, 有 v1 §4.5 的毫秒窗口, 走这条路径
- *                              时必须打开 selfHealScan 周期性扫描兜底
+ *   - "lmove"                — Native LMOVE k k RIGHT LEFT (Redis 6.2+), server-side atomic
+ *   - "evalsha"              — SCRIPT LOAD + EVALSHA (Redis 2.6+), lua single-thread atomic equivalent
+ *   - "eval"                 — Always EVAL full script (intermediary state when evalsha fails but eval works; unused currently)
+ *   - "rpop_lpush_downgrade" — Final fallback: RPOP only, caller (extract-worker) requeues manually inside tasks-mutex.
+ *                              **Non-atomic**, has the millisecond window from v1 §4.5; when using this path,
+ *                              selfHealScan periodic scanning MUST be enabled.
  *
- * 策略由 `RedisSkillAgentTaskQueue.probePeekStrategy` 在首次 peekAgent 调用时探测,
- * 结果缓存到实例, 之后每次直接分支。详见 docs/design/2026-07-21-skill-worker-crash-recovery.md §5.
+ * Strategy is probed by `RedisSkillAgentTaskQueue.probePeekStrategy` on the first peekAgent call,
+ * result is cached in the instance, branching directly thereafter. See docs/design/2026-07-21-skill-worker-crash-recovery.md §5.
  */
 export type PeekStrategy = "lmove" | "evalsha" | "eval" | "rpop_lpush_downgrade";
 
 export interface ISkillAgentTaskQueue {
   // ── Agent queue ──
   /**
-   * 幂等入队。Set 已含则不重复 LPUSH。返回本次是否是"新入队"（首次进入 Set 返回 true）。
+   * Idempotent enqueue. If Set already contains it, skip LPUSH. Returns whether this was a "new enqueue" (true if newly added to Set).
    */
   enqueueAgent(tuple: AgentTuple): Promise<boolean>;
   /**
-   * BRPOP-style 出队。阻塞直到有元素或超时；超时返回 null。
-   * 注意：出队仅从 List 弹出，Set 不删除（Worker 会在处理完后决定 requeue 还是 remove）。
+   * BRPOP-style dequeue. Blocks until element exists or times out; returns null on timeout.
+   * Note: Dequeues only pop from the List; Set is not deleted (Worker decides whether to requeue or remove after processing).
    */
   dequeueAgent(blockMs: number): Promise<AgentTuple | null>;
   /**
-   * At-least-once peek: 拿到 agent 后, agent 仍留在 List 里 (原子 LMOVE 语义:
-   * pop tail → push head)。任何时刻 worker 崩溃, 下一轮 peek/dequeue 都能重新拿到,
-   * 彻底封闭 v1 §4.5 遗留的"取出但未处理完"毫秒窗口。
+   * At-least-once peek: after getting the agent, it remains in the List (atomic LMOVE semantics:
+   * pop tail → push head). If worker crashes at any time, next peek/dequeue can grab it again,
+   * fully closing the "taken but not fully processed" millisecond window inherited from v1 §4.5.
    *
-   * 语义:
-   *   - blockMs=0    → 尝试一次 peek 就返回 (List 空立即 null)
-   *   - blockMs>0    → 每 pollIntervalMs 轮询一次直到拿到或超时, 超时 null
-   *   - 拿到时: agent 在 List 中的位置 = 队头 (等价 RPOP + LPUSH), 下一次 peek 仍能拿到同 agent
+   * Semantics:
+   *   - blockMs=0    → Tries peek once and returns (List empty immediately null)
+   *   - blockMs>0    → Polls every pollIntervalMs until grabbed or timeout, timeout null
+   *   - When grabbed: agent's position in List = head (equivalent to RPOP + LPUSH), next peek can still grab same agent
    *
-   * 三级兜底见 `PeekStrategy`; 走 rpop_lpush_downgrade 时 caller 必须自行 requeue (原子性丢失)。
+   * Three-tier fallback see `PeekStrategy`; when using rpop_lpush_downgrade, caller must manually requeue (atomicity lost).
    */
   peekAgent(blockMs: number): Promise<AgentTuple | null>;
   /**
-   * 返回当前底层实际使用的 peek 策略。extract-worker 用来判断是否走降级路径 (需要显式 requeue)。
-   * 调用前若未跑过探测, 返回默认值 (通常是 "lmove", 乐观预设)。
+   * Returns current underlying peek strategy. Used by extract-worker to determine if it's on degraded path (requiring explicit requeue).
+   * If unprobed before calling, returns default value (usually "lmove", optimistic preset).
    */
   getPeekStrategy(): PeekStrategy;
   /**
-   * 处理完 tasks 仍非空时调用，塞回队头（等价排到队尾轮转）。Set 保持。
+   * Called when tasks are still non-empty after processing, pushes back to head (equivalent to rotating to tail of queue). Set preserved.
    */
   requeueAgent(tuple: AgentTuple): Promise<void>;
   /**
-   * tasks 空时下线该 agent：SREM Set；如果 List 里还有残留则一并清理。
+   * Takes the agent offline when tasks are empty: SREM Set; cleans up any remaining traces in List as well.
    */
   removeAgent(tuple: AgentTuple): Promise<void>;
 
   /**
-   * 按 raw 字符串强制清除 Set + List 残留 (跳过 tuple serialize)。
+   * Forcibly purges Set + List remnants by raw string (skips tuple serialize).
    *
-   * 2026-08-03: peek 语义下 legacy 4 段 tuple 会被 LMOVE 反复搬回队头, 造成
-   * loop 空转。用这个接口让 caller 按原始字符串直接 SREM + LREM 清除。
-   * 也用作 selfHealScan 里对 legacy 4 段残留的清理。
+   * 2026-08-03: under peek semantics, legacy 4-segment tuples are repeatedly moved to the head by LMOVE, causing
+   * empty loops. This interface allows callers to clear them via SREM + LREM directly by raw string.
+   * Also used in selfHealScan to clean up legacy 4-segment remnants.
    */
   purgeRawAgent(raw: string): Promise<void>;
 
-  // ── selfHealScan 需要的原语 (2026-08-03 crash-recovery PR-3) ──────────────
+  // ── Primitives required by selfHealScan (2026-08-03 crash-recovery PR-3) ──────────────
   /**
-   * 一次性快照 pending-agents-set 的所有 raw 字符串, 供 selfHealScan 遍历。
-   * Redis 用 SMEMBERS, Local 返回 Array.from(set)。
+   * One-time snapshot of all raw strings in pending-agents-set for selfHealScan traversal.
+   * Redis uses SMEMBERS, Local returns Array.from(set).
    */
   scanAgentSet(): Promise<string[]>;
 
   /**
-   * 查 List 里是否含指定 raw。Redis 用 LPOS (6.0.6+), Local 遍历数组。
+   * Checks if List contains the specified raw. Redis uses LPOS (6.0.6+), Local iterates array.
    */
   listContains(raw: string): Promise<boolean>;
 
   /**
-   * 按 raw 字符串直接 LPUSH 到 List, 跳过 SADD (调用方保证 Set 已存在)。
-   * selfHealScan 补 List 时用: 已经 SMEMBERS 拿到 raw 说明 Set 里就有, 只补 List。
+   * Directly LPUSH to List by raw string, skipping SADD (caller guarantees it exists in Set).
+   * Used when selfHealScan patches List: SMEMBERS already got raw so it's in Set, just patch List.
    */
   enqueueRawAgent(raw: string): Promise<void>;
 
-  // ── tasks-mutex（短锁保护 `_tasks.json` 读改写） ──
+  // ── tasks-mutex (short lock protecting `_tasks.json` read-modify-write) ──
   /**
-   * 争抢 tasks-mutex 执行 fn，失败时**退避重试直到 waitDeadlineMs**，锁本身有 lockTtlMs 兜底防死锁。
+   * Contends for tasks-mutex to execute fn; on failure, **backs off and retries until waitDeadlineMs**, lock has lockTtlMs fallback to prevent deadlocks.
    *
-   * 两个参数分离的原因（旧实现把 deadline 和 ttl 用同一值 → 30 并发同 agent 全 timeout 500）：
-   *   - `lockTtlMs`：锁自身在 Redis 上的过期时间；用于持锁进程崩溃时兜底自动释放（几秒足够）。
-   *   - `waitDeadlineMs`：调用方最多愿意阻塞多久排队；应该 >> lockTtlMs，
-   *     覆盖 N 个并发排队所需的累计临界区时长（例如 30 个 300ms 临界区 = 9s，
-   *     waitDeadline 至少 15-30s 才不误报 timeout）。
+   * Reasons for separating the two params (old implementation used the same value for deadline and ttl → 30 concurrent same-agent ops all timed out at 500):
+   *   - `lockTtlMs`: the lock's own expiration time in Redis; used to automatically release if holding process crashes (a few seconds is enough).
+   *   - `waitDeadlineMs`: max time caller is willing to block queuing; should be >> lockTtlMs,
+   *     covering the cumulative critical section time needed for N concurrent queueers (e.g., 30 * 300ms critical sections = 9s,
+   *     waitDeadline must be at least 15-30s to avoid false timeouts).
    */
   withTasksMutex<T>(
     tuple: AgentTuple,
@@ -192,14 +192,14 @@ export interface ISkillAgentTaskQueue {
     fn: () => Promise<T>,
   ): Promise<T>;
 
-  // ── extract-lock（Worker 独占 agent 抽取权） ──
+  // ── extract-lock (Worker exclusive agent extraction right) ──
   acquireExtractLock(tuple: AgentTuple, ttlMs: number): Promise<ExtractLockHandle | null>;
   renewExtractLock(handle: ExtractLockHandle, ttlMs: number): Promise<boolean>;
   releaseExtractLock(handle: ExtractLockHandle): Promise<void>;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Local (in-memory) implementation — 单元测试专用
+// Local (in-memory) implementation — for unit tests only
 // ────────────────────────────────────────────────────────────────────────────
 
 interface WaitingConsumer {
@@ -208,7 +208,7 @@ interface WaitingConsumer {
 }
 
 export class LocalSkillAgentTaskQueue implements ISkillAgentTaskQueue {
-  private readonly list: string[] = [];      // 头 = LPUSH, 尾 = RPOP —— 匹配 Redis 语义
+  private readonly list: string[] = [];      // head = LPUSH, tail = RPOP —— matches Redis semantics
   private readonly set = new Set<string>();
   private readonly tasksMutex = new Map<string, { token: string; expireAt: number }>();
   private readonly extractLocks = new Map<string, { token: string; expireAt: number }>();
@@ -252,8 +252,8 @@ export class LocalSkillAgentTaskQueue implements ISkillAgentTaskQueue {
   }
 
   /**
-   * at-least-once peek: 内存版本 = 单进程 Node, pop + unshift 天然原子。
-   * 语义等价 Redis 6.2+ 的 LMOVE k k RIGHT LEFT。
+   * at-least-once peek: memory version = single-process Node, pop + unshift naturally atomic.
+   * Semantics match Redis 6.2+ LMOVE k k RIGHT LEFT.
    */
   async peekAgent(blockMs: number): Promise<AgentTuple | null> {
     const deadline = Date.now() + Math.max(0, blockMs);
@@ -266,18 +266,18 @@ export class LocalSkillAgentTaskQueue implements ISkillAgentTaskQueue {
       if (blockMs === 0) return null;
       const remaining = deadline - Date.now();
       if (remaining <= 0) return null;
-      // Node 内存实现里没 Redis 那种阻塞唤醒, 轮询 20 ms 即可
+      // No blocking wakeups like Redis in Node memory implementation, polling 20ms is fine
       await sleep(Math.min(20, remaining));
     }
   }
 
   getPeekStrategy(): PeekStrategy {
-    return "lmove"; // 语义等价, 单进程内存原子
+    return "lmove"; // Semantically equivalent, single-process memory atomic
   }
 
   async requeueAgent(tuple: AgentTuple): Promise<void> {
     const key = serializeAgentTuple(tuple);
-    // 塞回队头（LPUSH 语义）；Set 保持
+    // Push back to head (LPUSH semantics); Set preserved
     this.set.add(key);
     this.list.unshift(key);
     this.notify();
@@ -383,11 +383,11 @@ function sleep(ms: number): Promise<void> {
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * 最小 ioredis 客户端子集，避免直接 import Redis 类型（保持与现有 redis-queue-v2 一致）。
+ * Minimal ioredis client subset, avoids directly importing Redis types (maintains consistency with existing redis-queue-v2).
  *
- * 2026-08-03: `lmove` / `evalsha` / `script` 三个方法被 peekAgent 用作三级兜底探测。
- * 三者都是 optional —— 老/降级 Redis 上可能没有 (LMOVE < 6.2)、被禁 (集群策略禁 EVAL) 或
- * 被 client 库省略。缺失时 peekAgent 会按顺序自动降级到下一层。
+ * 2026-08-03: `lmove` / `evalsha` / `script` methods are used by peekAgent as three-tier fallbacks.
+ * All three are optional — they might be absent on old/degraded Redis (LMOVE < 6.2), forbidden (cluster policy restricts EVAL),
+ * or omitted by the client library. If missing, peekAgent automatically degrades to the next fallback level in sequence.
  */
 export interface RedisLike {
   sadd(key: string, ...members: string[]): Promise<number>;
@@ -402,46 +402,46 @@ export interface RedisLike {
   del(...keys: string[]): Promise<number>;
   eval(script: string, numKeys: number, ...args: (string | number)[]): Promise<unknown>;
   pexpire(key: string, ms: number): Promise<number>;
-  // ── Optional (探测时按需调用, 缺失 → 走下一级兜底) ──
+  // ── Optional (called on-demand during probe, if missing → drop to next fallback) ──
   lmove?(src: string, dst: string, srcSide: string, dstSide: string): Promise<string | null>;
   evalsha?(sha: string, numKeys: number, ...args: (string | number)[]): Promise<unknown>;
   script?(subcommand: string, ...args: string[]): Promise<string>;
   /**
-   * LPOS 查询 raw 在 List 中的位置 (Redis 6.0.6+); null = 不在。缺失时降级到
-   * `LRANGE + JS 遍历`, 见 RedisSkillAgentTaskQueue.listContains 实现。
+   * LPOS queries raw's position in List (Redis 6.0.6+); null = absent. Falls back to
+   * `LRANGE + JS traversal` if missing, see RedisSkillAgentTaskQueue.listContains implementation.
    */
   lpos?(key: string, value: string): Promise<number | null>;
-  /** LRANGE 用作 lpos 不可用时的兜底。 */
+  /** LRANGE serves as a fallback when lpos is unavailable. */
   lrange?(key: string, start: number, stop: number): Promise<string[]>;
 }
 
 export interface RedisSkillAgentTaskQueueOptions {
   client: RedisLike;
-  /** Redis key 前缀，默认 "skill"。 */
+  /** Redis key prefix, defaults to "skill". */
   keyPrefix?: string;
   /**
-   * dequeueAgent 轮询间隔 ms，默认 200。
+   * dequeueAgent polling interval ms, defaults to 200.
    *
-   * 2026-07-21 —— 历史上 dequeueAgent 走的是 `BRPOP <key> 5`,零延迟唤醒是
-   * 拿到了,但 BRPOP 是**阻塞命令**,共用同一条 ioredis 连接的其他 skill
-   * 命令 (`SET NX PX` 抢 tasks-mutex、`SADD`/`LPUSH` enqueueAgent、`EVAL`
-   * 释放锁) 全部要排在 BRPOP 后面等,handler 每次归档撞 3 次 BRPOP 窗口
-   * ≈ 15s。改成非阻塞 `RPOP` + `setTimeout(pollIntervalMs)` 轮询后,主
-   * 连接不再被卡,handler 侧 Redis IO 恢复毫秒级；代价是最坏 pollInterval
-   * 的唤醒延迟(默认 200ms,skill 抽取本身 LLM 十几秒,这点延迟无感)。
+   * 2026-07-21 — Historically dequeueAgent used `BRPOP <key> 5`. Zero-latency wakeups were
+   * achieved, but BRPOP is a **blocking command**, so other skill commands sharing the same ioredis
+   * connection (`SET NX PX` contending for tasks-mutex, `SADD`/`LPUSH` enqueueAgent, `EVAL` releasing
+   * locks) all had to queue behind BRPOP. Handlers archiving 3 times would hit the BRPOP window
+   * taking ≈ 15s. Changed to non-blocking `RPOP` + `setTimeout(pollIntervalMs)` polling, freeing up the
+   * main connection, restoring handler-side Redis IO to millisecond levels; trade-off is at most pollInterval
+   * wakeup latency (default 200ms, skill extraction itself LLM takes 10+ seconds, this delay is unnoticeable).
    *
-   * 语义跟 memory 侧 `RedisStateBackend.consumeTask` 对齐
-   * (redis-backend.ts:312 —— XREADGROUP 不带 BLOCK,外层 sleep 200ms)。
+   * Semantics align with memory-side `RedisStateBackend.consumeTask`
+   * (redis-backend.ts:312 — XREADGROUP without BLOCK, outer sleep 200ms).
    */
   pollIntervalMs?: number;
 }
 
 /**
- * Redis key 前缀默认值。
+ * Default Redis key prefix.
  *
- * 生产建议：wire 层传入形如 `${memoryPrefix}:skill-conv` 的前缀，跟 memory 的
- * `keyPrefix`（例如 `tdai_memory_prod_v3`）挂钩，避免不同环境的 Redis
- * key 撞。默认值 `"skill-conv"` 只在没显式传时兜底。
+ * Production recommendation: pass a prefix like `${memoryPrefix}:skill-conv` at the wire layer, linking it to memory's
+ * `keyPrefix` (e.g., `tdai_memory_prod_v3`), avoiding collisions across different environment Redis instances.
+ * Default `"skill-conv"` is only a fallback when not explicitly provided.
  */
 const DEFAULT_PREFIX = "skill-conv";
 
@@ -460,11 +460,11 @@ return 0
 `;
 
 /**
- * peek lua: 原子 "RPOP tail + LPUSH head", 语义等价 LMOVE k k RIGHT LEFT。
- * 只在 Redis < 6.2 走 EVALSHA/EVAL 兜底时使用。
+ * peek lua: atomic "RPOP tail + LPUSH head", semantics identical to LMOVE k k RIGHT LEFT.
+ * Used only when falling back to EVALSHA/EVAL on Redis < 6.2.
  *
  * KEYS[1] = pending-agents list
- * return  = 拿到的 raw (string) 或 nil
+ * return  = raw string retrieved or nil
  */
 const LUA_PEEK = `
 local raw = redis.call('RPOP', KEYS[1])
@@ -475,9 +475,9 @@ return raw
 `;
 
 /**
- * 判断一个 Redis 错误消息是否说明"命令不支持" (LMOVE 在 Redis < 6.2 或某些 mock)。
- * 语义边界: 只匹配"命令不认识 / 未启用"这一类, 其他错误 (连接断、认证失败) 必须穿透
- * 抛给 caller, 避免误判导致降级到非原子路径。
+ * Checks if a Redis error message indicates "command unsupported" (LMOVE in Redis < 6.2 or some mocks).
+ * Semantic boundary: only matches "command unrecognized / disabled" category; other errors (disconnected, auth failed)
+ * must bubble up to the caller to avoid misjudged degradation to non-atomic paths.
  */
 function isUnknownCommand(err: unknown): boolean {
   const msg = (err as Error)?.message ?? "";
@@ -485,8 +485,8 @@ function isUnknownCommand(err: unknown): boolean {
 }
 
 /**
- * 判断是否 EVALSHA 返回的 NOSCRIPT (Redis 重启 / 脚本缓存被清)。收到 NOSCRIPT 时
- * 应该重新 SCRIPT LOAD 再 EVALSHA, 而不是当成失败降级。
+ * Checks if EVALSHA returned NOSCRIPT (Redis restarted / script cache cleared). When NOSCRIPT is received,
+ * it should SCRIPT LOAD then EVALSHA again, rather than degrading as a failure.
  */
 function isNoScript(err: unknown): boolean {
   const msg = (err as Error)?.message ?? "";
@@ -494,8 +494,8 @@ function isNoScript(err: unknown): boolean {
 }
 
 /**
- * 判断是否 EVAL / SCRIPT 被集群策略拒 (permission / 集群禁用)。这一类跟
- * unknown-command 同样是"能力不支持", 需要降级到下一层。
+ * Checks if EVAL / SCRIPT is rejected by cluster policy (permission / cluster disabled). This category is
+ * also "capability unsupported" like unknown-command, needing fallback to the next tier.
  */
 function isEvalDisabled(err: unknown): boolean {
   const msg = (err as Error)?.message ?? "";
@@ -518,11 +518,11 @@ export class RedisSkillAgentTaskQueue implements ISkillAgentTaskQueue {
     this.client = opts.client;
     this.pollIntervalMs = opts.pollIntervalMs ?? 200;
     const prefix = opts.keyPrefix ?? DEFAULT_PREFIX;
-    // key 布局（对齐 §5 & §21.5）：
-    //   {prefix}:pending-agents         — List (LPUSH 入队 / RPOP 轮询出队)
-    //   {prefix}:pending-agents-set     — Set (SADD/SREM 幂等去重)
-    //   {prefix}:extract-lock:{tuple}   — Worker 独占 agent 抽取权 (10min TTL)
-    //   {prefix}:tasks-mutex:{tuple}    — 保护 _tasks.json 读改写 (5s TTL)
+    // Key layout (aligns with §5 & §21.5):
+    //   {prefix}:pending-agents         — List (LPUSH enqueue / RPOP poll dequeue)
+    //   {prefix}:pending-agents-set     — Set (SADD/SREM idempotent deduplication)
+    //   {prefix}:extract-lock:{tuple}   — Worker exclusive agent extraction right (10min TTL)
+    //   {prefix}:tasks-mutex:{tuple}    — Protects _tasks.json read-modify-write (5s TTL)
     this.listKey = `${prefix}:pending-agents`;
     this.setKey = `${prefix}:pending-agents-set`;
     this.extractLockPrefix = `${prefix}:extract-lock:`;
@@ -540,28 +540,28 @@ export class RedisSkillAgentTaskQueue implements ISkillAgentTaskQueue {
   }
 
   async dequeueAgent(blockMs: number): Promise<AgentTuple | null> {
-    // 非阻塞 RPOP + sleep 轮询,拒绝 BRPOP。见 pollIntervalMs 处的注释。
+    // Non-blocking RPOP + sleep polling, rejects BRPOP. See comments at pollIntervalMs.
     //
-    // blockMs=0 —— 只试一次,list 空立刻返回 null。
-    // blockMs>0 —— 每 pollIntervalMs 试一次,直到拿到元素或超过 deadline。
+    // blockMs=0 —— tries only once, returns null immediately if list is empty.
+    // blockMs>0 —— tries every pollIntervalMs until element grabbed or deadline crossed.
     const deadline = Date.now() + Math.max(0, blockMs);
     while (true) {
       const raw = await this.client.rpop(this.listKey);
       if (raw !== null) return parseAgentTuple(raw);
       const remaining = deadline - Date.now();
       if (remaining <= 0) return null;
-      // pollInterval 与 remaining 取小,保证 blockMs 小于 pollInterval 时能按预期尽快返回。
+      // take the min of pollInterval and remaining, ensuring it returns promptly when blockMs < pollInterval.
       await sleep(Math.min(this.pollIntervalMs, remaining));
     }
   }
 
   /**
-   * At-least-once peek — 详见 ISkillAgentTaskQueue.peekAgent 文档 + docs/design/2026-07-21 §5。
+   * At-least-once peek — details in ISkillAgentTaskQueue.peekAgent doc + docs/design/2026-07-21 §5.
    *
-   * 主线走 Redis 6.2+ 的 `LMOVE k k RIGHT LEFT`; 老 Redis 通过 LUA_PEEK 脚本走 EVALSHA;
-   * EVAL 被禁时降级到非原子 RPOP (caller 负责在 mutex 内 requeue)。
+   * Mainline uses Redis 6.2+ `LMOVE k k RIGHT LEFT`; Old Redis uses EVALSHA via LUA_PEEK script;
+   * Falls back to non-atomic RPOP when EVAL is forbidden (caller responsible for requeueing in mutex).
    *
-   * 探测: 首次调用时通过 `probePeekStrategy` 决定策略并缓存 (幂等, 并发安全)。
+   * Probing: determines strategy via `probePeekStrategy` on first call and caches it (idempotent, concurrency-safe).
    */
   async peekAgent(blockMs: number): Promise<AgentTuple | null> {
     if (!this.peekProbed) await this.probePeekStrategy();
@@ -579,16 +579,15 @@ export class RedisSkillAgentTaskQueue implements ISkillAgentTaskQueue {
     return this.peekStrategy;
   }
 
-  // ── peek 三级兜底探测 ─────────────────────────────────────────────────
+  // ── peek three-tier fallback probe ─────────────────────────────────────────────────
   //
-  // 首次 peekAgent 调用触发一次探测, 结果缓存到 peekStrategy 之后每次直接分支。
-  // 探测本身也可能拿到元素 (对空 list LMOVE 返回 null, no-op; 对非空 list LMOVE
-  // 拿到元素后仍留在 List, 语义正确)。
+  // First peekAgent call triggers a probe once, caches result in peekStrategy, branches directly thereafter.
+  // Probing itself might grab an element (null/no-op on empty list; on non-empty list, element remains in List after LMOVE, semantics intact).
   //
-  // 并发安全: 用 `probePromise` 保证并发首次调用只跑一次探测, 其它 caller 等这一次
-  // 探测的结果。探测抛错 (非"能力不支持") 时不缓存, 下次仍会再探。
+  // Concurrency safety: `probePromise` guarantees first concurrent calls only probe once, other callers wait for the result.
+  // If probing throws an error (not "capability unsupported"), it won't cache, retries probing next time.
 
-  private peekStrategy: PeekStrategy = "lmove";     // 乐观默认
+  private peekStrategy: PeekStrategy = "lmove";     // Optimistic default
   private peekScriptSha: string | null = null;
   private peekProbed = false;
   private probePromise: Promise<void> | null = null;
@@ -600,8 +599,8 @@ export class RedisSkillAgentTaskQueue implements ISkillAgentTaskQueue {
       return;
     }
     this.probePromise = (async () => {
-      // Level 1: 探 LMOVE。对着真实的 listKey 试一次 —— 拿到 null 也算探测成功
-      // (只要不抛 unknown-command)。对非空 list, 拿到的元素仍在 List 中, 语义正确。
+      // Level 1: Probe LMOVE. Try once on the real listKey — getting null also counts as success
+      // (as long as unknown-command is not thrown). On non-empty lists, grabbed element remains in List, semantics correct.
       try {
         if (typeof this.client.lmove === "function") {
           await this.client.lmove(this.listKey, this.listKey, "RIGHT", "LEFT");
@@ -610,14 +609,14 @@ export class RedisSkillAgentTaskQueue implements ISkillAgentTaskQueue {
           return;
         }
       } catch (err) {
-        if (!isUnknownCommand(err)) throw err; // 非能力问题穿透
+        if (!isUnknownCommand(err)) throw err; // Non-capability issues bubble up
       }
 
-      // Level 2: 探 EVALSHA + SCRIPT LOAD。
+      // Level 2: Probe EVALSHA + SCRIPT LOAD.
       if (typeof this.client.script === "function" && typeof this.client.evalsha === "function") {
         try {
           this.peekScriptSha = await this.client.script("LOAD", LUA_PEEK);
-          // 立即用一次 EVALSHA 验证能跑 (对空 list 返回 null 亦 OK)
+          // Immediately verify it runs with EVALSHA (returning null on empty list is OK)
           await this.client.evalsha(this.peekScriptSha, 1, this.listKey);
           this.peekStrategy = "evalsha";
           this.peekProbed = true;
@@ -627,10 +626,10 @@ export class RedisSkillAgentTaskQueue implements ISkillAgentTaskQueue {
         }
       }
 
-      // Level 3: 最后兜底 —— 非原子 RPOP。
-      // 打 P1 告警; caller (extract-worker) 需要通过 getPeekStrategy 判断走这条路径时
-      // 自己在 tasks-mutex 内做显式 requeue (v1 §4.5 原方案), 并且 pool 侧要打开周期性
-      // selfHealScan (PR-3 交付)。
+      // Level 3: Final fallback — non-atomic RPOP.
+      // Triggers P1 alert; caller (extract-worker) must use getPeekStrategy to detect this path
+      // and do explicit requeue inside tasks-mutex (v1 §4.5 original plan), and pool must enable
+      // periodic selfHealScan (delivered in PR-3).
       this.peekStrategy = "rpop_lpush_downgrade";
       this.peekProbed = true;
     })().finally(() => {
@@ -642,8 +641,8 @@ export class RedisSkillAgentTaskQueue implements ISkillAgentTaskQueue {
   private async executePeek(): Promise<string | null> {
     switch (this.peekStrategy) {
       case "lmove":
-        // 探测成功后不会再走 unknown-command 分支; 这里也不再兜底降级 (让错误穿透), 避免
-        // 中途 Redis 版本切换导致的隐蔽降级。
+        // After successful probe, unknown-command won't hit; no fallback drop here (let errors bubble),
+        // preventing silent degradation from midway Redis version switches.
         return this.client.lmove!(this.listKey, this.listKey, "RIGHT", "LEFT");
 
       case "evalsha":
@@ -653,8 +652,8 @@ export class RedisSkillAgentTaskQueue implements ISkillAgentTaskQueue {
             | null;
         } catch (err) {
           if (isNoScript(err)) {
-            // Redis 重启导致脚本缓存丢失: 补 LOAD 再 EVALSHA 一次。
-            // 只重试一次, 二次仍 NOSCRIPT 就穿透 (说明 client 或 server 有异常, 不该悄悄降级)。
+            // Redis restart lost script cache: re-LOAD then EVALSHA once more.
+            // Retries only once; if NOSCRIPT persists, bubbles up (indicates client/server anomaly, shouldn't silently degrade).
             this.peekScriptSha = await this.client.script!("LOAD", LUA_PEEK);
             return (await this.client.evalsha!(this.peekScriptSha, 1, this.listKey)) as
               | string
@@ -667,7 +666,7 @@ export class RedisSkillAgentTaskQueue implements ISkillAgentTaskQueue {
         return (await this.client.eval(LUA_PEEK, 1, this.listKey)) as string | null;
 
       case "rpop_lpush_downgrade": {
-        // 非原子: 只 RPOP, caller 在 mutex 内自己 requeue。语义等同 dequeueAgent 一次 pop。
+        // Non-atomic: RPOP only, caller requeues manually inside mutex. Semantics identical to dequeueAgent popping once.
         return this.client.rpop(this.listKey);
       }
     }
@@ -675,7 +674,7 @@ export class RedisSkillAgentTaskQueue implements ISkillAgentTaskQueue {
 
   async requeueAgent(tuple: AgentTuple): Promise<void> {
     const raw = serializeAgentTuple(tuple);
-    // 幂等：保证 Set 里也在
+    // Idempotent: ensures it's also in Set
     await this.client.sadd(this.setKey, raw);
     await this.client.lpush(this.listKey, raw);
   }
@@ -683,13 +682,13 @@ export class RedisSkillAgentTaskQueue implements ISkillAgentTaskQueue {
   async removeAgent(tuple: AgentTuple): Promise<void> {
     const raw = serializeAgentTuple(tuple);
     await this.client.srem(this.setKey, raw);
-    // List 里可能还有残留（Worker 已经 pop 就没了；此处兜底）
+    // Remnants might still be in List (Worker already popped, so it's gone; this is a fallback)
     await this.client.lrem(this.listKey, 0, raw);
   }
 
   async purgeRawAgent(raw: string): Promise<void> {
-    // 直接按 raw 字符串清 Set + List, 不走 tuple serialize。用于 legacy 4 段清理
-    // + selfHealScan 里对损坏残留的兜底。
+    // Purge Set + List directly by raw string, skipping tuple serialize. Used for legacy 4-segment cleanup
+    // + fallback for corrupt residuals in selfHealScan.
     await this.client.srem(this.setKey, raw);
     await this.client.lrem(this.listKey, 0, raw);
   }
@@ -704,17 +703,17 @@ export class RedisSkillAgentTaskQueue implements ISkillAgentTaskQueue {
       return pos !== null && pos >= 0;
     }
     if (typeof this.client.lrange === "function") {
-      // 兜底: LRANGE 拿全量遍历。规模上 List 长度 = 活跃 agent, 一般 <= 千级, 可接受。
+      // Fallback: LRANGE to get all and traverse. At scale, List length = active agents, typically <= thousands, acceptable.
       const all = await this.client.lrange(this.listKey, 0, -1);
       return all.includes(raw);
     }
-    // 都缺 → 保守认为 List 里有 (少补一次 LPUSH 强于误重复 LPUSH; 反正下一轮
-    // selfHealScan 会再来一次)。
+    // Both missing → conservatively assume List has it (skipping one LPUSH is better than falsely repeating LPUSH; next
+    // selfHealScan round will retry anyway).
     return true;
   }
 
   async enqueueRawAgent(raw: string): Promise<void> {
-    // Set 已在 (caller 保证), 只需要补 List。
+    // Set already has it (caller guarantees), only need to patch List.
     await this.client.lpush(this.listKey, raw);
   }
 
@@ -727,7 +726,7 @@ export class RedisSkillAgentTaskQueue implements ISkillAgentTaskQueue {
     const token = randomUUID();
     const deadline = Date.now() + opts.waitDeadlineMs;
     while (true) {
-      // SET NX PX：短 TTL 兜底崩溃场景；waitDeadline 覆盖并发排队时间
+      // SET NX PX: short TTL fallback for crash scenarios; waitDeadline covers concurrent queuing time
       const ok = await this.client.set(key, token, "NX", "PX", opts.lockTtlMs);
       if (ok === "OK") {
         try {

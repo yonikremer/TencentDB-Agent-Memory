@@ -1,17 +1,17 @@
 /**
- * PipelineWorker — 竞争消费 Pipeline 任务
+ * PipelineWorker - Competing Consumer for Pipeline Tasks
  *
- * 需求 #12 Worker 竞争消费 + #13 死信队列与失败处理
+ * Requirement #12 Worker Competing Consumption + #13 Dead Letter Queue and Failure Handling
  *
- * 架构文档 §方案C:
- * - XREADGROUP Consumer Group 竞争消费 task (单一队列)
- * - 分布式锁保护：per-session (L1/L2), per-instance (L3)
- * - 锁续约：每 30s 续约，续约失败 abort
- * - LLM 执行 + 写入：取 buffer → 调 LLM → 写 VDB/COS
- * - 级联调度：L1→L2 (via onL1Complete timer推进), L2→L3 (直接入队)
- * - 死信队列：超过重试上限 → 写入死信
- * - 重试策略：抢锁失败 5s 重投, LLM 超时指数退避 5s/15s/45s
- * - 幂等：VDB upsert by record_id, COS 覆盖写
+ * Architecture Doc §Plan C:
+ * - XREADGROUP Consumer Group competing consumption task (single queue)
+ * - Distributed lock protection: per-session (L1/L2), per-instance (L3)
+ * - Lock renewal: renew every 30s, abort on failure
+ * - LLM execution + Write: fetch buffer -> call LLM -> write VDB/COS
+ * - Cascading schedule: L1->L2 (via onL1Complete timer advance), L2->L3 (direct enqueue)
+ * - Dead letter queue: exceed retry limit -> write to dead letter
+ * - Retry strategy: lock grab failure 5s requeue, LLM timeout exponential backoff 5s/15s/45s
+ * - Idempotency: VDB upsert by record_id, COS overwrite
  */
 
 import type { IStateBackend, TaskPayload } from "../core/state/types.js";
@@ -29,7 +29,7 @@ interface Logger {
   error: (message: string) => void;
 }
 
-/** L1/L2/L3 任务执行器 (由上层注入具体的 LLM + VDB 逻辑)
+/** L1/L2/L3 Task Executor (Concrete LLM + VDB logic injected by upper layer)
  *
  * H-11 Step 2: methods optionally accept an AbortSignal. When the worker loses
  * its distributed lock mid-execution, it aborts the signal so the executor
@@ -48,60 +48,61 @@ export interface TaskExecutor {
 }
 
 export interface PipelineWorkerConfig {
-  /** Worker 节点 ID */
+  /** Worker Node ID */
   workerId?: string;
-  /** 并发消费协程数 (default: 60). 每个协程独立消费任务，不同 session 并行执行。 */
+  /** Concurrency consumption coroutine count (default: 60). Each coroutine independently consumes tasks, different sessions execute in parallel. */
   concurrency?: number;
-  /** 消费轮询间隔 ms (default: 200) */
+  /** Consumption polling interval ms (default: 200) */
   pollIntervalMs?: number;
   /**
-   * 锁 TTL ms (default: 600000 = 10min)。
-   * 必须 ≥ 2 × max(LLM timeout)：默认 LLM timeout 是 120s，
-   * 留足buffer 保证即便续约 timer 因 GC / 事件循环阻塞错过 1-2 次
-   * tick，锁也不会过期被别人抢走。
+   * Lock TTL ms (default: 600000 = 10min).
+   * Must be >= 2 * max(LLM timeout): default LLM timeout is 120s,
+   * leave enough buffer to ensure that even if the renewal timer misses 1-2
+   * ticks due to GC / event loop blocking, the lock will not expire and be grabbed by others.
    *
-   * 同时决定锁冲突时的单轮退避窗口长度：海量导入下同agent 多 session
-   * 排队较长，窗口过短会频繁触发重新入队（见 MAX_LOCK_REQUEUE）。
+   * Also determines the single-round backoff window length on lock conflict: under massive import,
+   * multiple sessions of the same agent may queue for a long time, a window that is too short
+   * will frequently trigger re-enqueue (see MAX_LOCK_REQUEUE).
    */
   lockTtlMs?: number;
-  /** 锁续约间隔 ms (default: 30000 = TTL 的 1/8，避免续约失败) */
+  /** Lock renewal interval ms (default: 30000 = 1/8 of TTL, avoid renewal failure) */
   lockRenewIntervalMs?: number;
-  /** 最大重试次数 (default: 3) */
+  /** Max retry count (default: 3) */
   maxRetries?: number;
-  /** 重试基础延迟 ms (default: 5000, 指数退避) */
+  /** Retry base delay ms (default: 5000, exponential backoff) */
   retryBaseDelayMs?: number;
-  /** Pending 消息回收间隔 ms (default: 30000) */
+  /** Pending message recovery interval ms (default: 30000) */
   pendingRecoveryIntervalMs?: number;
-  /** Pending 消息超时判定 ms (default: 300000 = 5min, 必须 > lockTtlMs) */
+  /** Pending message timeout threshold ms (default: 300000 = 5min, must be > lockTtlMs) */
   pendingStaleMs?: number;
-  /** 死信任务持久化回调 */
+  /** Dead letter task persistence callback */
   onDeadLetter?: (task: TaskPayload, error: string, retryCount: number) => Promise<void>;
   /**
-   * L1 完成后的回调，用于推进 L2 timer（解决 L2 快路径）。
-   * 由 server.ts 注入 statefulManager.advanceL2TimerAfterL1。
-   * 不注入则 L2 只靠 maxInterval 兜底。
+   * Callback after L1 completes, used to advance L2 timer (solves L2 fast path).
+   * Injected by server.ts via statefulManager.advanceL2TimerAfterL1.
+   * If not injected, L2 relies solely on maxInterval as fallback.
    */
   onL1Complete?: (sessionId: string, instanceId: string, teamId?: string, agentId?: string) => Promise<void>;
   /**
-   * L2 完成后的回调，用于设置 L2 maxInterval timer。
-   * 由 server.ts 注入 statefulManager.armL2MaxInterval。
+   * Callback after L2 completes, used to set L2 maxInterval timer.
+   * Injected by server.ts via statefulManager.armL2MaxInterval.
    */
   onL2Complete?: (sessionId: string, instanceId: string, teamId?: string, agentId?: string) => Promise<void>;
   /**
-   * 分布式锁粒度 (default: "session")
-   * - "session": L1/L2 per-session 锁, L3 per-instance 锁 (原行为, 最大并发)
-   * - "instance": L1/L2/L3 全部 per-instance 锁 (CR-1 临时缓解: 防止同 instance 不同 session
-   *   并发 append 到 daily JSONL 共享 key. 代价是单 instance 内 task 完全串行.)
+   * Distributed lock granularity (default: "session")
+   * - "session": L1/L2 per-session lock, L3 per-instance lock (original behavior, max concurrency)
+   * - "instance": L1/L2/L3 all per-instance lock (CR-1 temporary mitigation: prevents concurrent append
+   *   to daily JSONL shared key for same instance different session. Trade-off is complete serial execution within instance.)
    *
-   * 切换该值不影响持久状态 (lock 是 TTL=120s 的临时 key).
-   * 灰度时必须在 lockTtlMs 时间内完成全 worker 同步切换, 避免新老 worker 用不同 key 同时持锁.
+   * Switching this value does not affect persistent state (lock is a temporary key with TTL=120s).
+   * During rollout, the switch must be synchronized across all workers within lockTtlMs to avoid old/new workers holding locks simultaneously with different keys.
    */
   lockGranularity?: "session" | "instance";
 
   /**
-   * PipelineWorker 内部的并发信号量。historically 跨 memory + skill V2 worker 共享,
-   * 2026-07-17 skill 改造后 skill 侧不再用信号量做并发上限, 现在只有 memory
-   * pipeline 一个 consumer。未注入时行为不变。processTask 入口 acquire、finally release。
+   * Concurrency semaphore inside PipelineWorker. Historically shared across memory + skill V2 worker,
+   * after skill refactor on 2026-07-17, the skill side no longer uses semaphores for concurrency limit, now memory
+   * pipeline is the only consumer. Behavior unchanged if not injected. processTask entry acquire, finally release.
    */
   permitPool?: import("./worker-permit-pool.js").WorkerPermitPool;
 }
@@ -116,12 +117,12 @@ export interface DeadLetterEntry {
 const TAG = "[pipeline-worker]";
 
 /**
- * 锁冲突后允许的最大重新入队次数。
+ * Max requeue count allowed after lock conflict.
  *
- * 海量导入场景下，同一 agent 可能有上千个 session 排队等同一把锁；
- * 单次退避窗口（lockTtlMs）不足以让所有任务拿到锁，因此超时后重新入队
- * 而不是丢弃。15 次配合 lockTtlMs 提供足够长的总重试窗口，
- * 同时防止异常情况下任务无限重排。
+ * In massive import scenarios, thousands of sessions of the same agent may queue for the same lock;
+ * A single backoff window (lockTtlMs) is not enough for all tasks to acquire the lock, so they are requeued
+ * after timeout instead of being dropped. 15 times coupled with lockTtlMs provides a sufficiently long total retry window,
+ * while preventing tasks from infinite requeuing in abnormal situations.
  */
 const MAX_LOCK_REQUEUE = 15;
 
@@ -152,7 +153,7 @@ export class PipelineWorker {
   // Service mode never reads this — it just costs a Map.set/delete per task.
   private runningTasks = new Map<string, TaskPayload>();
 
-  // Dead letter queue (进程内 + 可选回调持久化)
+  // Dead letter queue (in-process + optional callback persistence)
   private deadLetterQueue: DeadLetterEntry[] = [];
 
   // Metrics
@@ -203,10 +204,10 @@ export class PipelineWorker {
 
     this.logger.info(`${TAG} Starting (workerId=${this.config.workerId}, concurrency=${this.config.concurrency})`);
 
-    // 启动 pending 消息回收循环
+    // Start pending message recovery loop
     this.startPendingRecovery();
 
-    // 启动 N 个并发消费协程
+    // Start N concurrent consumption coroutines
     for (let i = 0; i < this.config.concurrency; i++) {
       this.consumeLoop();
     }
@@ -217,10 +218,10 @@ export class PipelineWorker {
     this.destroyed = true;
     this.running = false;
 
-    // 停止 pending recovery
+    // Stop pending recovery
     if (this.recoveryTimer) { clearInterval(this.recoveryTimer); this.recoveryTimer = null; }
 
-    // 释放所有活跃锁
+    // Release all active locks
     for (const lockKey of this.activeLocks) {
       try { await this.backend.releaseLock(lockKey, this.config.workerId); } catch { /* best effort */ }
     }
@@ -265,7 +266,7 @@ export class PipelineWorker {
       } catch (err) {
         if (!this.destroyed) {
           this.logger.error(`${TAG} Consume loop error: ${err instanceof Error ? err.message : String(err)}`);
-          await this.sleep(1000); // 避免疯狂重试
+          await this.sleep(1000); // Avoid crazy retries
         }
       }
     }
@@ -279,9 +280,9 @@ export class PipelineWorker {
     const lockKey = this.getLockKey(task);
     const retryCount = (task.data?.retryCount as number) ?? 0;
 
-    // permitPool acquire：memory pipeline 内部并发限流 (历史上跨 skill V2 共用，
-    // 2026-07 后 skill 侧不再用信号量做并发上限)。未注入 pool 时是 no-op。
-    // lock-free 与 with-lock 两条分支都要 finally release —— 用 releasePermitOnce 幂等。
+    // permitPool acquire: memory pipeline internal concurrency rate limiting (historically shared across skill V2,
+    // after 2026-07 skill side no longer uses semaphores for concurrency limit). No-op if pool not injected.
+    // Both lock-free and with-lock branches must finally release -- use releasePermitOnce for idempotency.
     const permitPool = this.config.permitPool;
     if (permitPool) {
       await permitPool.acquire();
@@ -345,7 +346,7 @@ export class PipelineWorker {
       return;
     }
 
-    // Step 1: 抢分布式锁
+    // Step 1: Grab distributed lock
     const locked = await this.backend.acquireLock(lockKey, this.config.workerId, this.config.lockTtlMs);
     if (!locked) {
       this.metrics.lockConflicts++;
@@ -363,8 +364,8 @@ export class PipelineWorker {
 
       // Lock conflict: current coroutine waits locally (no re-enqueue to stream).
       // Exponential backoff: 200ms → 600ms → 1.8s → 5s (capped), retry until lockTtlMs exhausted.
-      // 旧版本固定 sleep(5000) 在 instance 级锁下会造成排队体感差(同 instance 多 session 累积秒级延迟);
-      // 改为指数退避后, 大多数冲突在 1s 内解决, 同时保留长尾退避避免后端压力.
+      // Old version fixed sleep(5000) under instance level lock caused poor queueing experience (accumulation of seconds delay for multi-session same instance);
+      // Changed to exponential backoff, most conflicts resolved within 1s, while retaining long-tail backoff to avoid backend pressure.
       // Only this coroutine is occupied; other 9 continue consuming different sessions.
       const deadline = Date.now() + this.config.lockTtlMs;
       let acquired = false;
@@ -379,14 +380,14 @@ export class PipelineWorker {
         delay = Math.min(delay * 3, 5000);
       }
       if (!acquired) {
-        // 退避窗口内没抢到锁：重新入队而不是丢弃。
+        // Failed to grab lock within backoff window: requeue instead of dropping.
         //
-        // 为什么必须先 ACK 再以新 id 重投（而不是直接不 ACK 让 XPENDING 重投）：
-        // CR-1 已验证不ACK 会导致 stale recovery 无限重复认领同一 msgId，
-        // 耗尽 worker 槽位。这里 ACK 掉旧消息 + enqueue 一条新任务，
-        // 既保证不丢，又不依赖 pending 重投机制。
+        // Why must ACK first then requeue with new id (instead of not ACKing and letting XPENDING requeue):
+        // CR-1 verified not ACKing causes stale recovery to infinitely re-claim the same msgId,
+        // exhausting worker slots. ACKing the old message + enqueuing a new task here
+        // guarantees no loss and does not rely on pending requeue mechanism.
         //
-        // lockRetryCount 防止无限循环：同一任务最多重排 MAX_LOCK_REQUEUE 次。
+        // lockRetryCount prevents infinite loop: same task requeued max MAX_LOCK_REQUEUE times.
         const retryCount = Number((task.data as Record<string, unknown> | undefined)?.lockRetryCount ?? 0);
         const msgId = (task as any)._msgId;
 
@@ -448,7 +449,7 @@ export class PipelineWorker {
     // writing data after the lock has been transferred to another worker).
     const abortController = new AbortController();
 
-    // Step 2: 启动锁续约 (局部 timer，per-task 独立)
+    // Step 2: Start lock renewal (local timer, per-task independent)
     const renewTimer = setInterval(async () => {
       try {
         const renewed = await this.backend.renewLock(lockKey, this.config.workerId, this.config.lockTtlMs);
@@ -481,7 +482,7 @@ export class PipelineWorker {
       }
     }, this.config.lockRenewIntervalMs);
 
-    // Step 3: 执行任务
+    // Step 3: Execute task
     try {
       await this.executeTask(task, abortController.signal);
 
@@ -510,12 +511,12 @@ export class PipelineWorker {
       this.metrics.tasksCompleted++;
       this.logger?.debug?.(`${TAG} Task completed: ${task.type} [${task.instanceId}/${task.sessionId}]`);
 
-      // Step 5: 级联调度 (L1→L2, L2→L3)
+      // Step 5: Cascading schedule (L1->L2, L2->L3)
       await this.cascadeSchedule(task);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
 
-      // 检查锁是否丢失 → 如果丢失，不重试（避免重复执行）
+      // Check if lock is lost -> if lost, do not retry (avoid duplicate execution)
       if (lockLost) {
         this.logger.warn(`${TAG} Lock lost during execution, aborting: ${task.type} [${task.instanceId}/${task.sessionId}]`);
         this.metrics.tasksFailed++;
@@ -524,7 +525,7 @@ export class PipelineWorker {
 
       this.metrics.tasksFailed++;
 
-      // 指数退避重试
+      // Exponential backoff retry
       if (retryCount < this.config.maxRetries) {
         const delay = this.config.retryBaseDelayMs * Math.pow(3, retryCount); // 5s, 15s, 45s
         this.logger.warn(
@@ -544,15 +545,15 @@ export class PipelineWorker {
         await this.moveToDeadLetter(task, errMsg, retryCount);
       }
     } finally {
-      // Step 6: 停止续约 + 释放锁
+      // Step 6: Stop renewal + release lock
       clearInterval(renewTimer);
       this.activeLocks.delete(lockKey);
       this.runningTasks.delete(task.id);
       try { await this.backend.releaseLock(lockKey, this.config.workerId); } catch { /* best effort */ }
       releasePermitOnce();
 
-      // Step 7: 延迟入队 — executor 可通过 task._deferredEnqueue 暂存需要在锁释放后才入队的任务，
-      // 避免新任务立即被消费时因同 session 锁仍被持有而产生不必要的锁冲突。
+      // Step 7: Deferred enqueue - executor can use task._deferredEnqueue to temporarily store tasks that need to be enqueued after the lock is released,
+      // avoiding unnecessary lock conflicts caused by new tasks being consumed immediately while the same session lock is still held.
       const deferred = (task as any)._deferredEnqueue as TaskPayload[] | undefined;
       if (deferred?.length) {
         for (const dTask of deferred) {
@@ -582,7 +583,7 @@ export class PipelineWorker {
   }
 
   // ============================
-  // 级联调度
+  // Cascading Schedule
   // ============================
 
   private async cascadeSchedule(task: TaskPayload): Promise<void> {
@@ -619,8 +620,8 @@ export class PipelineWorker {
         return;
       }
 
-      // L2 完成 → 直接入队 L3（携带 trace context 用于跨异步链路关联）
-      // L3 task 也带 team/agent，保锁粒度对齐
+      // L2 completed -> enqueue L3 directly (carrying trace context for cross-async link correlation)
+      // L3 task also carries team/agent, keep lock granularity aligned
       await this.backend.enqueueTask({
         id: `L3-${task.instanceId}-${now}`,
         type: "L3",
@@ -636,7 +637,7 @@ export class PipelineWorker {
         l2_pending_l1_count: 0,
         l2_last_extraction_time: new Date().toISOString(),
       }, tid, aid);
-      // onL2Complete 由 server.ts 注入 statefulManager.armL2MaxInterval
+      // onL2Complete is injected by server.ts via statefulManager.armL2MaxInterval
       if (this.config.onL2Complete) {
         try {
           await this.config.onL2Complete(task.sessionId, task.instanceId, tid, aid);
@@ -653,32 +654,32 @@ export class PipelineWorker {
   // ============================
 
   /**
-   * Lock key 设计：
+   * Lock key design:
    *
-   * v2 pipeline 默认 (lockGranularity="session", 实际是 (instance, team, agent) 散开):
-   *   - L1: pipeline:{inst:tid:aid}:s:{sess}   — session 级锁
-   *           L1 数据按 (team,user,agent,session) 在 TCVDB 隔离，
-   *           不同 session 真并发抽取
-   *   - L2: pipeline:{inst:tid:aid}            — agent 级锁
-   *           L2 落地是 profiles/team:T|agent:X/scene_blocks/ 共享目录，
-   *           同 agent 不同 session 的 L2 必须互斥避免撞写 scene/index 文件
-   *   - L3: pipeline:{inst:tid:aid}            — agent 级锁（同 L2）
-   *           L3 写 profiles/team:T|agent:X/persona.md 一个 agent 一份
+   * v2 pipeline default (lockGranularity="session", actually dispersed by (instance, team, agent)):
+   *   - L1: pipeline:{inst:tid:aid}:s:{sess}   - session level lock
+   *           L1 data is isolated by (team,user,agent,session) in TCVDB,
+   *           different sessions extract concurrently.
+   *   - L2: pipeline:{inst:tid:aid}            - agent level lock
+   *           L2 lands in profiles/team:T|agent:X/scene_blocks/ shared directory,
+   *           L2 of different sessions of the same agent must be mutually exclusive to avoid collision when writing scene/index files.
+   *   - L3: pipeline:{inst:tid:aid}            - agent level lock (same as L2)
+   *           L3 writes profiles/team:T|agent:X/persona.md, one copy per agent.
    *
-   * 跨 agent 完全并发：不同 (tid, aid) 散到不同 Redis Cluster slot，
-   * 避免单 instance 集中到一个 hash slot 形成大 key 热点。
+   * Fully concurrent across agents: different (tid, aid) disperse to different Redis Cluster slots,
+   * avoiding centralization to a single hash slot in a single instance causing a large key hot spot.
    *
-   * teamId / agentId 缺失（旧调用 / offload）时退化到 "_:_" 占位，
-   * 等价于按 instance 维度落同一 slot —— 兼容老行为，不会破坏锁互斥。
+   * When teamId / agentId are missing (old calls / offload), fallback to "_:_" placeholder,
+   * equivalent to falling into the same slot by instance dimension - compatible with old behavior, won't break lock mutual exclusion.
    *
-   * lockGranularity="instance" (legacy CR-1 缓解):
-   *   - L1/L2/L3: pipeline:{instanceId}        — 全部 instance 级共享同一把锁
-   *   不推荐使用，保留向后兼容。新部署用默认即可。
+   * lockGranularity="instance" (legacy CR-1 mitigation):
+   *   - L1/L2/L3: pipeline:{instanceId}        - All share the same lock at instance level
+   *   Not recommended, kept for backward compatibility. New deployments should use the default.
    *
    * Rolling upgrade caveat:
-   *   升级窗口期，新旧 pod 看到的 lock key 格式不同，可能短暂破坏跨 pod
-   *   互斥。本次升级已通过 keyPrefix 从 tdai_memory → tdai_memory_v2 物理隔离，
-   *   新老 pod 走不同 redis 命名空间，无交叉。
+   *   During the upgrade window, new and old pods see different lock key formats, which may temporarily break cross-pod
+   *   mutual exclusion. This upgrade is physically isolated by keyPrefix from tdai_memory -> tdai_memory_v2,
+   *   new and old pods go to different redis namespaces, no intersection.
    */
   private getLockKey(task: TaskPayload): string | null {
     // offload-l1 is lock-free: rename guarantees exclusive file ownership,
@@ -700,23 +701,23 @@ export class PipelineWorker {
       return `pipeline:{${task.instanceId}}`;
     }
 
-    // v2 默认：按 (instance, team, agent) 散开 hash tag
+    // v2 default: disperse hash tag by (instance, team, agent)
     //
-    // teamId/agentId 优先级：
-    //   1. task.teamId / task.agentId（v2 入队时显式带）
-    //   2. task.data.teamId / task.data.agentId（兼容老调用）
-    //   3. 从 task.sessionId 解析（timer-scanner 入队的 L2/L3 task,
-    //      sessionId 形如 "profile:team:T|agent:A" 或
-    //      "profile:team:T|agent:A|session:S" 时从里面抠出 tid/aid）
-    //   4. "_" 占位退化到 instance 级（不推荐，hash 集中）
+    // teamId/agentId priority:
+    //   1. task.teamId / task.agentId (explicitly carried when v2 enqueues)
+    //   2. task.data.teamId / task.data.agentId (compatible with old calls)
+    //   3. parsed from task.sessionId (L2/L3 tasks enqueued by timer-scanner,
+    //      sessionId is like "profile:team:T|agent:A" or
+    //      "profile:team:T|agent:A|session:S", extract tid/aid from it)
+    //   4. "_" placeholder fallback to instance level (not recommended, hash centralized)
     let tid = task.teamId || (task.data as any)?.teamId;
     let aid = task.agentId || (task.data as any)?.agentId;
     if (!tid || !aid) {
       const m = task.sessionId.match(/^profile:team:([^|]+)\|agent:([^|]+)(?:\|session:.+)?$/);
       if (m) {
-        // profile scope 里的 team 字段实际是 (teamId || userId)，与 buildProfileIsolationScope 一致。
-        // 这里直接当 teamId 用即可，hash 分桶维度对齐就行。
-        // 如果 key 携带 source session，它只作为 L2 输入边界，不进入锁粒度。
+        // The team field in profile scope is actually (teamId || userId), consistent with buildProfileIsolationScope.
+        // Just use it as teamId here, as long as the hash bucketing dimension aligns.
+        // If the key carries a source session, it only serves as L2 input boundary, not entering lock granularity.
         tid = tid || m[1];
         aid = aid || m[2];
       }
@@ -726,10 +727,10 @@ export class PipelineWorker {
     const ns = `{${task.instanceId}:${tid}:${aid}}`;
 
     if (task.type === "L2" || task.type === "L3") {
-      // agent 级锁：同 agent 的 L2/L3 互斥，避免共享目录撞写
+      // agent level lock: L2/L3 of the same agent are mutually exclusive to avoid collision when writing to shared directory
       return `pipeline:${ns}`;
     }
-    // L1 + flush 仍是 session 级
+    // L1 + flush are still session level
     return `pipeline:${ns}:s:${task.sessionId}`;
   }
 
@@ -763,7 +764,7 @@ export class PipelineWorker {
       await this.backend.removeTimer(task.instanceId, buildPipelineTimerMember(task.sessionId, "L2_schedule", { teamId: tid, agentId: aid }));
     } catch { /* best effort */ }
 
-    // 关键节点日志：任务进入死信队列
+    // Critical node log: task enters dead letter queue
     obsLogger.error("core.task.dead_letter", {
       instance_id: task.instanceId,
       session_id: task.sessionId,
@@ -773,7 +774,7 @@ export class PipelineWorker {
       retry_count: retryCount,
     });
 
-    // 持久化回调（写 COS / Stream）
+    // Persistence callback (write to COS / Stream)
     if (this.config.onDeadLetter) {
       try {
         await this.config.onDeadLetter(task, error, retryCount);
@@ -793,21 +794,21 @@ export class PipelineWorker {
   }
 
   // ============================
-  // Pending Message Recovery (#13.2: XPENDING 超时检测 + XCLAIM)
+  // Pending Message Recovery (#13.2: XPENDING timeout check + XCLAIM)
   // ============================
 
   /**
-   * 定期扫描远程队列中超时未 ACK 的 pending 消息。
+   * Periodically scan for pending messages in the remote queue that timed out without ACK.
    *
-   * 当某个 Worker 进程挂了，它消费过但未 ACK 的消息会卡在 pending 列表。
-   * 存活的 Worker 通过后端的 claimStaleTasks 接管这些消息重新处理。
+   * When a Worker process dies, the messages it consumed but did not ACK will be stuck in the pending list.
+   * Surviving Workers take over these messages for reprocessing via the backend's claimStaleTasks.
    *
-   * 保证：
-   * - 幂等: VDB upsert by record_id, COS 覆盖写
-   * - 不重复: 后端原子转移所有权，同一消息只会被一个 Worker 认领
+   * Guarantees:
+   * - Idempotency: VDB upsert by record_id, COS overwrite
+   * - No duplication: Backend atomically transfers ownership, the same message will only be claimed by one Worker
    */
   private startPendingRecovery(): void {
-    if (!this.backend.claimStaleTasks) return; // LocalStateBackend 不需要
+    if (!this.backend.claimStaleTasks) return; // LocalStateBackend does not need this
 
     this.recoveryTimer = setInterval(async () => {
       if (this.destroyed) return;
@@ -815,13 +816,13 @@ export class PipelineWorker {
         const stale = await this.backend.claimStaleTasks!(
           this.config.workerId,
           this.config.pendingStaleMs,
-          10, // 每次最多认领 10 条
+          10, // claim up to 10 at a time
         );
         if (stale.length > 0) {
           this.logger.info(`${TAG} Recovered ${stale.length} stale pending task(s)`);
           for (const task of stale) {
             this.metrics.tasksConsumed++;
-            // 直接处理认领到的任务（走正常 processTask 流程）
+            // Directly process the claimed task (goes through normal processTask flow)
             this.processTask(task).catch((err) => {
               this.logger.error(`${TAG} Recovery task failed: ${err instanceof Error ? err.message : String(err)}`);
             });

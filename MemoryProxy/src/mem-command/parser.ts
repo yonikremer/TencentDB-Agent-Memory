@@ -1,62 +1,62 @@
 /**
  * mem: command parser
  *
- * 从 request body.messages 中检测最后一条 user message 是否为 mem: 命令。
+ * Detects if the last user message in the request body.messages is a mem: command.
  *
- * 判定规则：
- * 1. 取 messages 数组最后一条 role="user" 的消息
- * 2. 通过 agentAdapter.extractUserText 按客户端规则提取用户真实输入：
- *    - claude-code: 取最后一个 text block（跳过 <system-reminder> 前缀元数据）
- *    - codebuddy / unknown: 走保守的"拼接所有 text"（待抓包适配）
- * 3. trim 后以 "mem:" 开头（大小写不敏感）
- * 4. 整条消息就是命令（不是嵌在其他文字中间）
+ * Rules:
+ * 1. Takes the last message with role="user" from the messages array
+ * 2. Extracts the real user input based on client rules via agentAdapter.extractUserText:
+ *    - claude-code: Takes the last text block (skips <system-reminder> prefix metadata)
+ *    - codebuddy / unknown: Uses a conservative "concatenate all text" (pending capture adaptation)
+ * 3. After trimming, starts with "mem:" (case-insensitive)
+ * 4. The entire message is the command (not embedded in other text)
  */
 
 import { resolveAgentAdapter } from "../agent-adapters/index.js";
 
 export interface ParsedMemCommand {
-  /** 命令名（小写），如 "sync"、"create-skill"、"help" */
+  /** Command name (lowercase), e.g., "sync", "create-skill", "help" */
   command: string;
-  /** 命令后的参数文本（如 create-skill 的提示词） */
+  /** Parameter text after the command (e.g., prompt for create-skill) */
   args: string;
-  /** 原始 user 消息（审计 / L0 写入用） */
+  /** Original user message (used for auditing / L0 writing) */
   rawMessage: string;
 }
 
 /**
- * 已知 mem 命令的 args 约束表。
- * - `false`：命令**严格匹配** —— 命令后不能跟任何非空白内容（如 `mem:help 你好` 视为
- *   普通对话，透传上游 LLM 而非拦截）。
- * - `true` ：命令**接受可选 args** —— `mem:create-skill 数据库迁移总结` 命中且携带
- *   args；`mem:create-skill`（无 args）也命中。
+ * Known mem command args constraint table.
+ * - `false`: Command **strictly matches** — no non-whitespace content is allowed after the command (e.g., `mem:help hello` is treated
+ *   as a normal conversation, passed through to the upstream LLM instead of being intercepted).
+ * - `true`: Command **accepts optional args** — `mem:create-skill database migration summary` matches and carries
+ *   args; `mem:create-skill` (no args) also matches.
  *
- * 未列表的命令（用户 typo 如 `mem:helpp` / `mem:foo`）不受此校验影响 —— parser
- * 仍返回 ParsedMemCommand，交给 `executeMemCommand` 走"未知命令"分支反馈
- * `❌ 未知命令 mem:xxx，输入 mem:help 查看`，给用户 typo 兜底。
+ * Commands not listed (user typos like `mem:helpp` / `mem:foo`) are not affected by this validation — parser
+ * still returns ParsedMemCommand, handing it over to the `executeMemCommand` "unknown command" branch to feedback
+ * `❌ Unknown command mem:xxx, type mem:help to view`, providing a fallback for user typos.
  */
 const MEM_COMMANDS_ARGS: Record<string, boolean> = {
   help: false,
   sync: false,
   "create-skill": true,
-  // task 命令族：args 语义与 create-skill 对齐 —— 作为 LLM 生成 title/description
-  // 的额外提示（reason）；空 args 表示纯从近 30 条上下文自动生成。
+  // task command family: args semantics align with create-skill — acts as an additional prompt (reason) for LLM to generate title/description;
+  // empty args means purely auto-generating from the last 30 contexts.
   "create-task": true,
   "update-task": true,
   "session-reset": false,
 };
 
 /**
- * 从 request body 中检测是否为 mem: 命令。
- * 返回 null 表示非 mem: 命令，继续走正常链路。
+ * Detects if it's a mem: command from the request body.
+ * Returns null if it's not a mem: command, continuing the normal flow.
  *
- * ⚠️ 只支持 body.messages[] 形态 (CC/CB)。Codex 走 body.input[]，
- * 调用方（codexHandler）应先用 `codexAdapter.extractUserText(input)` 拿
- * 到 text，再直接调 `parseCommandFromText(text)`（跳过 body 解析这一步）。
+ * ⚠️ Only supports body.messages[] format (CC/CB). Codex uses body.input[],
+ * so the caller (codexHandler) should first use `codexAdapter.extractUserText(input)` to get
+ * the text, then directly call `parseCommandFromText(text)` (skipping the body parsing step).
  *
- * @param body - 请求 body（含 messages 数组）
- * @param agentSource - 客户端类型（URL 前缀），用于选择 agentAdapter
- * @param options.checkFirst - 为 true 时检查第一条 user message 而非最后一条。
- *   用于 session init 刚完成的场景：最后一条是 init 交互回答，首条才是用户原始命令。
+ * @param body - Request body (including messages array)
+ * @param agentSource - Client type (URL prefix), used to select agentAdapter
+ * @param options.checkFirst - If true, checks the first user message instead of the last.
+ *   Used for scenarios where session init just finished: the last is the init interaction reply, and the first is the user's original command.
  */
 export function parseMemCommand(
   body: Record<string, unknown>,
@@ -66,7 +66,7 @@ export function parseMemCommand(
   const messages = (body as any)?.messages;
   if (!Array.isArray(messages) || messages.length === 0) return null;
 
-  // 取目标消息：默认最后一条，checkFirst 时取第一条 user message
+  // Get target message: default is the last one, if checkFirst is true, get the first user message
   let targetMsg: any;
   if (options?.checkFirst) {
     targetMsg = messages.find((m: any) => m && m.role === "user");
@@ -76,7 +76,7 @@ export function parseMemCommand(
   if (!targetMsg || targetMsg.role !== "user") return null;
   const lastMsg = targetMsg;
 
-  // 通过 adapter 按客户端规则提取纯文本
+  // Extract plain text based on client rules via adapter
   const adapter = resolveAgentAdapter(agentSource);
   const text = adapter.extractUserText(lastMsg.content);
   if (text === null) return null;
@@ -85,31 +85,31 @@ export function parseMemCommand(
 }
 
 /**
- * 从已提取的用户文本判定是否为 mem: 命令。
+ * Determines if it's a mem: command from the extracted user text.
  *
- * 抽出这一层是为了让 codex handler 能复用同一套 mem 命令语义：
- * codex body 用 `input[]` 而非 `messages[]`，parseMemCommand 从 body
- * 起步的路径认不出 codex，早期直接返 null，导致所有 mem:xxx 静默透传给
- * LLM，模型编造"Memory synced"之类假回复（P0-1 QA 报告）。codex handler
- * 现在拿 `codexAdapter.extractUserText(input)` 得到 text 后直接调本函数。
+ * This layer is extracted so that the codex handler can reuse the same mem command semantics:
+ * codex body uses `input[]` instead of `messages[]`, and the path of parseMemCommand starting from body
+ * couldn't recognize codex early on, directly returning null, which caused all mem:xxx to be silently passed to
+ * the LLM, and the model fabricated fake replies like "Memory synced" (P0-1 QA report). Now the codex handler
+ * gets the text with `codexAdapter.extractUserText(input)` and directly calls this function.
  *
- * CC/CB 的 `parseMemCommand(body, agentSource)` 内部也走这条路径，行为
- * 完全不变。
+ * The `parseMemCommand(body, agentSource)` for CC/CB also goes through this path internally, and the behavior
+ * remains completely unchanged.
  */
 export function parseCommandFromText(text: string): ParsedMemCommand | null {
-  // trim 后判断
+  // Judge after trimming
   const trimmed = text.trim();
 
-  // 必须以 mem: 开头（大小写不敏感）
+  // Must start with mem: (case-insensitive)
   if (!trimmed.toLowerCase().startsWith("mem:")) return null;
 
-  // 提取命令部分（mem: 之后的内容）
-  const afterPrefix = trimmed.slice(4); // 去掉 "mem:"
+  // Extract the command part (content after mem:)
+  const afterPrefix = trimmed.slice(4); // Remove "mem:"
 
-  // 兼容冒号后的可选空格
+  // Compatible with optional space after the colon
   const stripped = afterPrefix.trimStart();
 
-  // 拆分命令名和参数（第一个空格分割）
+  // Split command name and parameters (split by the first space)
   const spaceIdx = stripped.indexOf(" ");
   let command: string;
   let args: string;
@@ -124,12 +124,12 @@ export function parseCommandFromText(text: string): ParsedMemCommand | null {
 
   command = command.toLowerCase();
 
-  // 命令名不能为空
+  // Command name cannot be empty
   if (!command) return null;
 
-  // 已知命令的 args 严格校验：命令不接受 args 时，args 非空即视为普通对话。
-  // 例：`mem:help 你好` → 用户"输入了 mem:help 并同时问了个问题"，应该走上游
-  // LLM 正常回答，而非返回 help 帮助文本。未知命令不受此约束（见 MEM_COMMANDS_ARGS 说明）。
+  // Strict args validation for known commands: when the command doesn't accept args, non-empty args is treated as a normal conversation.
+  // Example: `mem:help hello` → User "entered mem:help and asked a question at the same time", which should go to the upstream
+  // LLM for a normal reply, instead of returning the help text. Unknown commands are not bound by this (see MEM_COMMANDS_ARGS explanation).
   if (MEM_COMMANDS_ARGS[command] === false && args.length > 0) {
     return null;
   }

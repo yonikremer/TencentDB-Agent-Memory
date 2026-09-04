@@ -1,10 +1,10 @@
 /**
- * mem-command 模块统一入口
+ * mem-command module unified entry point
  *
- * 提供：
- *  - parseMemCommand()  — 检测是否为 mem: 命令
- *  - executeMemCommand() — 执行命令并返回结果
- *  - isMemCommandEnabled() — 检查配置开关
+ * Provides:
+ *  - parseMemCommand()  — Detects if it's a mem: command
+ *  - executeMemCommand() — Executes the command and returns the result
+ *  - isMemCommandEnabled() — Checks the configuration switch
  */
 
 import type { MemCommandConfig } from "../types.js";
@@ -24,7 +24,7 @@ export type { MemCommandContext, MemCommandResult, MemCommandName, MemCommandMes
 export { getHelpText } from "./commands/help.js";
 export { extractSimpleMessages, truncateArgs } from "./utils.js";
 
-/** 已知命令列表 */
+/** Known command list */
 const KNOWN_COMMANDS = new Set([
   "sync",
   "create-skill",
@@ -35,19 +35,19 @@ const KNOWN_COMMANDS = new Set([
 ]);
 
 /**
- * 检查 memCommand 功能是否启用，且命令是否在白名单中。
+ * Checks if the memCommand feature is enabled, and if the command is in the allowlist.
  */
 export function isMemCommandAllowed(config: MemCommandConfig, command: string): boolean {
   if (!config.enabled) return false;
-  // session-reset 豁免白名单(session 管理命令)
+  // session-reset is exempt from the allowlist (session management command)
   if (command === "session-reset") return true;
   if (config.allowedCommands.length === 0) return true;
   return config.allowedCommands.includes(command);
 }
 
 /**
- * 执行已解析的 mem: 命令。
- * 调用方已确认 isMemCommandAllowed 通过。
+ * Executes a parsed mem: command.
+ * The caller has already confirmed that isMemCommandAllowed passes.
  */
 export async function executeMemCommand(
   cmd: ParsedMemCommand,
@@ -55,7 +55,7 @@ export async function executeMemCommand(
 ): Promise<MemCommandResult> {
   const requestId = `mem-cmd-${Date.now()}`;
 
-  // 未知命令
+  // Unknown command
   if (!KNOWN_COMMANDS.has(cmd.command)) {
     const text = `❌ 未知命令：\`mem:${cmd.command}\`。输入 \`mem:help\` 查看可用命令。`;
     return {

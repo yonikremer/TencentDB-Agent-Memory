@@ -1,9 +1,9 @@
 /**
- * 带业务前缀的唯一 ID 生成。
+ * Unique ID generation with business prefixes.
  *
- * 对应设计文档 §4 ID 生成规范（v3.1）：
- *   - 主体/资源实体：`{prefix}-{4位时间戳Base36}{6位随机Base36}`（§4.4 方案 A）
- *   - 关联关系表：UUID v4（`randomUUID()`）
+ * Corresponds to design doc §4 ID generation specification (v3.1):
+ *   - Subject/resource entity: `{prefix}-{4-char timestamp Base36}{6-char random Base36}` (§4.4 Scheme A)
+ *   - Relationship table: UUID v4 (`randomUUID()`)
  */
 
 import { randomUUID } from "node:crypto";
@@ -13,10 +13,10 @@ const BASE = CHARS.length; // 36
 const TS_LEN = 4;
 const RAND_LEN = 6;
 
-/** @deprecated v3.1 关联表改 UUID；保留常量供旧测试迁移参考。 */
+/** @deprecated Relationship tables use UUID in v3.1; keeping constant for old test migration reference. */
 export const RELATION_ID_LEN = 36;
 
-/** 业务实体 ID 前缀映射（关联表无前缀）。 */
+/** Business entity ID prefix mapping (relationship tables have no prefix). */
 export const ID_PREFIX = {
   user: "usr",
   team: "team",
@@ -28,7 +28,7 @@ export const ID_PREFIX = {
 
 export type IdPrefix = (typeof ID_PREFIX)[keyof typeof ID_PREFIX];
 
-/** 把非负整数编码为定长 Base36（不足左侧补 0）。 */
+/** Encode non-negative integer to fixed-length Base36 (left-padded with 0). */
 function encodeBase36(value: number, length: number): string {
   let out = "";
   let remaining = value;
@@ -39,7 +39,7 @@ function encodeBase36(value: number, length: number): string {
   return out;
 }
 
-/** 生成 length 位随机 Base36 串。 */
+/** Generate random Base36 string of length. */
 function randomBase36(length: number): string {
   let out = "";
   for (let i = 0; i < length; i++) {
@@ -49,9 +49,9 @@ function randomBase36(length: number): string {
 }
 
 /**
- * 生成带前缀的实体 ID，如 `usr-3mfxa3b9c1`。
+ * Generate entity ID with prefix, e.g. `usr-3mfxa3b9c1`.
  *
- * @param prefix 业务前缀（见 ID_PREFIX）
+ * @param prefix Business prefix (see ID_PREFIX)
  */
 export function generateId(prefix: string): string {
   const ts = Math.floor(Date.now() / 1000) % BASE ** TS_LEN;
@@ -60,17 +60,17 @@ export function generateId(prefix: string): string {
   return `${prefix}-${tsPart}${randPart}`;
 }
 
-/** 生成关联表主键（UUID v4）。 */
+/** Generate relationship table primary key (UUID v4). */
 export function generateRelationId(): string {
   return randomUUID();
 }
 
 /**
- * 校验 ID 合法性。
+ * Validate ID legality.
  *
- * @param id 待校验 ID
- * @param prefix 可选，指定时要求 ID 以 `{prefix}-` 开头；不指定时仅校验非空
- *               （兼容存量 ULID 格式）。
+ * @param id ID to validate
+ * @param prefix Optional, when specified requires ID to start with `{prefix}-`; when omitted only validates non-empty
+ *               (compatible with existing ULID format).
  */
 export function isValidId(id: string, prefix?: string): boolean {
   if (!id || typeof id !== "string") return false;

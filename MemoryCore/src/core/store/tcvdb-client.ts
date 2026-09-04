@@ -89,8 +89,8 @@ export class TcvdbClient {
   private readonly dispatcher?: Dispatcher;
 
   constructor(config: TcvdbClientConfig, logger?: StoreLogger) {
-    // 防御性 normalize：Shark 某些实例的 VdbUrl 可能只返回 `host:port`（缺 scheme），
-    // 此时 undici.request() 会抛 Invalid URL。这里补齐 http://（默认 VDB 内网走 HTTP）。
+    // Defensive normalize: Shark instances might only return host:port (missing scheme),
+    // causing undici.request() to throw Invalid URL. Prepend http:// (default VDB intranet uses HTTP).
     let url = config.url.replace(/\/+$/, "");
     if (!/^https?:\/\//i.test(url)) {
       url = `http://${url}`;

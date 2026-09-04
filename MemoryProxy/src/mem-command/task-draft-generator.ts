@@ -1,125 +1,125 @@
 /**
- * task-draft-generator · mem:create-task / mem:update-task 的 LLM 草稿生成器。
+ * task-draft-generator · LLM draft generator for mem:create-task / mem:update-task.
  *
- * proxy 首个"主动"向 LLM 发起请求的模块（其它 LLM 调用都是 passthrough 反向代理）。
- * 骨架仿 packages/cost-guard/src/compressor/cfq/llm-infer.ts —— 直接 fetch OpenAI
- * chat/completions + AbortSignal.timeout，不引第三方 SDK。
+ * The proxy's first module that "proactively" initiates a request to the LLM (other LLM calls are passthrough reverse proxies).
+ * Skeleton modeled after packages/cost-guard/src/compressor/cfq/llm-infer.ts — directly fetch OpenAI
+ * chat/completions + AbortSignal.timeout, without pulling in third-party SDKs.
  *
- * 与 CFQ LLMInfer 的关键差异：
- * - CFQ 失败 = 返回 null 数组（silent fallback），因为 CFQ 是可选增强；
- * - 本模块失败 = 返回 { ok: false, error }（**显式错误**），因为 Task 是持久化实体，
- *   坏草稿会污染库；上层 command 会把 error 拼进"❌ Task 生成失败：..."文案。
+ * Key differences from CFQ LLMInfer:
+ * - CFQ failure = returns null array (silent fallback), because CFQ is an optional enhancement;
+ * - This module's failure = returns { ok: false, error } (**explicit error**), because Task is a persistent entity,
+ *   a bad draft will pollute the database; the upper command layer will splice the error into the "❌ Task generation failed: ..." message.
  *
- * 使用方：mem-command/commands/create-task.ts / update-task.ts（阶段 3.2 / 3.3）
+ * Used by: mem-command/commands/create-task.ts / update-task.ts (Phases 3.2 / 3.3)
  *
- * 参考：docs/design/... TODO(阶段5) 补设计文档
+ * Ref: docs/design/... TODO(Phase5) add design docs
  */
 
-/** LLM 端点配置。字段与 LLMInferConfig 保持形状一致，便于将来抽公共。 */
+/** LLM endpoint configuration. Fields have the same shape as LLMInferConfig for easy future extraction. */
 export interface TaskDraftConfig {
-  /** 总开关。默认 false —— 未启用时命令层直接返"未配置"错误。 */
+  /** Master switch. Default false — when disabled, the command layer directly returns a "not configured" error. */
   enabled: boolean;
-  /** 模型名，如 "deepseek-v3-0324"。 */
+  /** Model name, e.g., "deepseek-v3-0324". */
   model: string;
-  /** API 端点（不含 /chat/completions）。 */
+  /** API endpoint (without /chat/completions). */
   url: string;
-  /** API Key，以 Bearer 头传递。 */
+  /** API Key, passed as Bearer header. */
   apiKey: string;
-  /** 单次调用超时（毫秒）。建议 15000-30000（草稿要写完整）。 */
+  /** Single call timeout (milliseconds). Recommended 15000-30000 (drafts need to be complete). */
   timeoutMs: number;
 }
 
-/** 最近对话消息片段（供 LLM 理解上下文）。 */
+/** Recent conversation message snippet (for LLM context understanding). */
 export interface DraftMessage {
   role: "user" | "assistant" | "system";
   content: string;
 }
 
-/** 现有 Task（update 模式必填）。 */
+/** Current Task (required for update mode). */
 export interface CurrentTask {
   title: string;
   description: string;
   status: string;
 }
 
-/** 生成器输入。 */
+/** Generator input. */
 export interface TaskDraftInput {
-  /** create：新建一个 task；update：基于现有 task 判定变更 + 改写。 */
+  /** create: create a new task; update: determine changes based on existing task + rewrite. */
   mode: "create" | "update";
-  /** 用户 mem:create-task/update-task 后的额外提示（reason），可空。 */
+  /** Additional prompt (reason) after user's mem:create-task/update-task, nullable. */
   hint?: string;
-  /** 最近对话消息（proxy 从 sessionMessages 剪出来，通常近 30 条）。 */
+  /** Recent conversation messages (cut by proxy from sessionMessages, usually the last 30). */
   recentMessages: DraftMessage[];
-  /** update 模式必填，其它模式忽略。 */
+  /** Required for update mode, ignored for other modes. */
   currentTask?: CurrentTask;
   /**
-   * 仅 create 模式生效。用户已在 mem:create-task 后写明 title，proxy 强制锁定：
-   * LLM 只负责根据对话生成 description，返回的 title 字段会被忽略。
-   * 上层调用方需自行把 lockedTitle 传下来（generator 不做 40 字截断，调用方保证）。
+   * Only effective in create mode. If the user explicitly specified a title after mem:create-task, proxy forces a lock:
+   * The LLM is only responsible for generating a description based on the conversation, and the returned title field is ignored.
+   * The caller needs to pass lockedTitle down (generator doesn't truncate to 40 chars, caller guarantees it).
    */
   lockedTitle?: string;
 }
 
-/** 生成器输出：成功携带结构化草稿；失败带 error 文案。 */
+/** Generator output: on success carries a structured draft; on failure carries an error message. */
 export type TaskDraftResult =
   | {
       ok: true;
       title: string;
       description: string;
-      /** 建议状态，允许模型给出（可选）。 */
+      /** Suggested status, allowed to be provided by the model (optional). */
       suggestedStatus?: string;
       /**
-       * 仅 update 模式有效。false 表示"最近对话未产生新进展，Task 无需更新"—— 上层
-       * 应直接返"Task 无需更新"给用户，不再进弹窗流程。create 模式恒为 true。
+       * Only effective in update mode. false means "recent conversation produced no new progress, Task doesn't need update" — the caller
+       * should return "Task needs no update" directly to the user, without entering the popup flow. Always true for create mode.
        */
       changed: boolean;
     }
   | { ok: false; error: string };
 
 /**
- * Status 校验（放宽版）：
- *   按 TAPD 需求 & 用户决策，proxy 不做 status 枚举校验，LLM 出啥透传啥；
- *   仅做 trim + 空/非字符串过滤，最终由内核决定是否接受。
+ * Status validation (relaxed version):
+ *   Per TAPD requirements & user decisions, the proxy doesn't do enum validation on status, passes through whatever LLM outputs;
+ *   Only does trim + empty/non-string filtering, ultimately decided by the kernel whether to accept.
  */
 const MAX_STATUS_LEN = 40;
-/** 输出 schema 上限。 */
+/** Output schema limit. */
 const MAX_TITLE_LEN = 40;
 const MAX_DESC_LEN = 300;
-/** 最近对话截断（防 prompt 过长）。 */
+/** Recent conversation truncation (prevents prompt from being too long). */
 const MAX_RECENT_MSGS = 30;
 const MAX_MSG_CONTENT_LEN = 800;
 /**
- * LLM 单次生成的 token 上限。
+ * Token limit for single LLM generation.
  *
- * 从 800 提到 2000（2026-08-18 修复）：实际观察到 desc + title + status + JSON
- * 结构字符总量在中英混杂场景经常 >800 而被截断，导致 JSON 中途结束 parse 失败。
- * 参考：wiki-ingest 用 8192，L1 extractor 用 4096；本处 draft 输出限制在 title≤40
- * + desc≤300 + status，理论最大 ~800 字符 → tokens 上限给 2000 有充分余量。
+ * Raised from 800 to 2000 (fixed 2026-08-18): actually observed that the total characters of desc + title + status + JSON
+ * structure in mixed English/Chinese scenarios often > 800 and got truncated, causing JSON parsing to fail midway.
+ * Ref: wiki-ingest uses 8192, L1 extractor uses 4096; here the draft output limit is title≤40
+ * + desc≤300 + status, theoretical max ~800 chars → giving 2000 tokens has ample margin.
  */
 const LLM_MAX_TOKENS = 2000;
 
 /**
- * LLM 调用重试策略（2026-08-18 加入）。
+ * LLM call retry strategy (added 2026-08-18).
  *
- * 触发场景：LLM 偶发抖动（空对象 / 截断 / 超时），单次成功率不到 100%，
- * 但连续 2 次全部空对象/截断的概率很低。用户视角：无感，一次点击 = 一次成功。
+ * Trigger scenarios: LLM occasional jitter (empty object / truncation / timeout), single success rate is not 100%,
+ * but the probability of 2 consecutive empty object/truncations is very low. User perspective: seamless, one click = one success.
  *
- * 参数：
- *   - LLM_RETRY_MAX_ATTEMPTS=3：总共 3 次机会（1 次首发 + 2 次重试）
- *   - LLM_RETRY_BASE_DELAY_MS=200：指数退避基数，第 2 次等 200ms，第 3 次等 400ms
+ * Parameters:
+ *   - LLM_RETRY_MAX_ATTEMPTS=3: Total 3 chances (1 initial + 2 retries)
+ *   - LLM_RETRY_BASE_DELAY_MS=200: Exponential backoff base, 2nd try waits 200ms, 3rd try waits 400ms
  *
- * 什么时候重试：只要 attemptDraftOnce 返回 ok=false 就重试（不区分具体错误类型，
- * 因为空对象 / 截断 / schema 违规 / 上游 5xx 都是"再来一次可能就好了"的情况）。
- * 什么时候不重试：cfg.enabled=false / 参数校验不通过 / 3 次都失败。
+ * When to retry: As long as attemptDraftOnce returns ok=false, retry (does not distinguish specific error types,
+ * because empty object / truncation / schema violation / upstream 5xx are all "it might work if tried again" situations).
+ * When not to retry: cfg.enabled=false / parameter validation fails / all 3 attempts fail.
  */
 const LLM_RETRY_MAX_ATTEMPTS = 3;
 const LLM_RETRY_BASE_DELAY_MS = 200;
 
 /**
- * 首次尝试的超时上限（2026-08-20）：现网观察到 gateway 偶发挂 20-30s，
- * 首次就用 cfg.timeoutMs（默认 30s）会让用户干等。首次改成 min(cfg.timeoutMs,
- * FIRST_TIMEOUT_MS=10s)，超时后立刻退避 200ms + retry，retry 用完整 timeoutMs
- * 兜底"真的慢但会成功"的场景。env TDAI_TASK_DRAFT_FIRST_TIMEOUT_MS 可覆盖。
+ * Timeout limit for the first attempt (2026-08-20): observed in production that gateway occasionally hangs for 20-30s,
+ * using cfg.timeoutMs (default 30s) on the first try leaves the user hanging. Change the first attempt to min(cfg.timeoutMs,
+ * FIRST_TIMEOUT_MS=10s), backoff 200ms + retry immediately upon timeout, retry uses the full timeoutMs
+ * to cover "really slow but will succeed" scenarios. Env TDAI_TASK_DRAFT_FIRST_TIMEOUT_MS can override.
  */
 const LLM_FIRST_ATTEMPT_TIMEOUT_MS_DEFAULT = 10_000;
 
@@ -130,14 +130,14 @@ function firstAttemptTimeoutMs(configuredTimeoutMs: number): number {
     const n = Number(raw);
     if (Number.isFinite(n) && n > 0) cap = n;
   }
-  // 不能超过配置本身（不然改动无效）
+  // Cannot exceed the configuration itself (otherwise modifications are invalid)
   return Math.min(configuredTimeoutMs, cap);
 }
 
 /**
- * 指令关键词剥离表：LLM 有时会把用户输入的原始指令字面搬进 title（如
- * "Fix mem:create-task LLM ..."），这些前缀既冗余又占字符预算。
- * 匹配到就截掉，让真正的语义部分能落到 40 字以内。
+ * Command keyword stripping table: LLM sometimes literally moves the user's input command into the title (e.g.,
+ * "Fix mem:create-task LLM ..."), these prefixes are redundant and eat into the character budget.
+ * Strip if matched, so the real semantic part fits within 40 characters.
  */
 const COMMAND_KEYWORD_PATTERNS = [
   /^\s*(?:mem:[a-z-]+)\s*[:：、,，]?\s*/i,
@@ -145,12 +145,12 @@ const COMMAND_KEYWORD_PATTERNS = [
 ];
 
 /**
- * create 模式 system prompt。
+ * create mode system prompt.
  *
- * 2026-08-18 强化（针对生产失败根因）：
- *   - 用 STRICT / MUST NOT / NEVER 等硬约束词，代替之前的 ≤ 40（LLM 会越界）
- *   - 加正确示例 + 反例，让 LLM 明确"什么是超长"、"什么是空对象"
- *   - 明确禁止空对象：如果信息不够也要给合理默认，避免 `{}`
+ * Strengthened 2026-08-18 (addressing root causes of production failures):
+ *   - Used STRICT / MUST NOT / NEVER hard constraint words, instead of previous ≤ 40 (LLM will exceed)
+ *   - Added positive and negative examples to clarify to the LLM "what is too long", "what is an empty object"
+ *   - Explicitly prohibited empty objects: give a reasonable default even if information is insufficient, avoiding `{}`
  */
 const SYSTEM_PROMPT_CREATE = `You are a task drafting assistant for a coding agent's memory system.
 
@@ -174,7 +174,7 @@ Examples of BAD output (DO NOT produce these):
 
 Return ONLY the JSON object with keys: title, description, suggestedStatus. No prose, no markdown fence.`;
 
-/** create 模式（title 已锁定）system prompt —— 只让 LLM 出 description。 */
+/** create mode (title locked) system prompt —— only lets LLM output description. */
 const SYSTEM_PROMPT_CREATE_LOCKED_TITLE = `You are a task drafting assistant for a coding agent's memory system.
 
 The user has ALREADY specified the task title. Your ONLY job is to write a good description
@@ -189,7 +189,7 @@ STRICT rules:
 
 Return ONLY a JSON object with a single key: description. No prose, no markdown fence.`;
 
-/** update 模式 system prompt。 */
+/** update mode system prompt. */
 const SYSTEM_PROMPT_UPDATE = `You are a task update assistant for a coding agent's memory system.
 
 Given an existing task and recent conversation, decide:
@@ -214,7 +214,7 @@ STRICT rules:
 Return ONLY a JSON object. No prose, no markdown fence.`;
 
 /**
- * 构造发给 LLM 的 user message。
+ * Constructs the user message to send to the LLM.
  */
 function buildUserMessage(input: TaskDraftInput): string {
   const lines: string[] = [];
@@ -254,28 +254,28 @@ function buildUserMessage(input: TaskDraftInput): string {
 }
 
 /**
- * 从 LLM 原始输出里提取 JSON 对象。
+ * Extracts a JSON object from the LLM's raw output.
  *
- * 三级降级：
- *   1) 直接 JSON.parse —— 覆盖标准场景
- *   2) 剥离 markdown fence（```json ... ``` 或 ``` ... ```）后再 parse
- *   3) 括号平衡扫描：找到第一个 `{`，向后配对到匹配的 `}` 截取子串再 parse
- *      —— 覆盖 LLM 前后加了自然语言的场景，如：
- *      "好的，这是 JSON：{...}"、"Here you go:\n{...}\n希望有帮助"
+ * Three-level fallback:
+ *   1) Direct JSON.parse —— covers standard scenarios
+ *   2) Strip markdown fence (```json ... ``` or ``` ... ```) then parse
+ *   3) Bracket balancing scan: find the first `{`, match up to the corresponding `}` and parse the substring
+ *      —— covers scenarios where the LLM surrounds the output with natural language, e.g.:
+ *      "Here is the JSON: {...}", "Here you go:\n{...}\nHope this helps"
  *
- * 扫描时会正确处理字符串字面量内的 `{` `}` `"`（不参与平衡计数）。
+ * During the scan, `{`, `}`, `"` within string literals are correctly handled (ignored in balancing count).
  *
- * 若三级都失败返回 null（调用方产出 "LLM output is not valid JSON" 错误）。
+ * If all three levels fail, returns null (caller will yield "LLM output is not valid JSON" error).
  */
 export function extractJsonObject(raw: string): unknown | null {
-  // 1) 直接 parse
+  // 1) Direct parse
   try {
     return JSON.parse(raw);
   } catch {
     // fall-through
   }
 
-  // 2) 剥离 markdown fence
+  // 2) Strip markdown fence
   const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   if (fenceMatch && fenceMatch[1]) {
     try {
@@ -285,7 +285,7 @@ export function extractJsonObject(raw: string): unknown | null {
     }
   }
 
-  // 3) 括号平衡扫描
+  // 3) Bracket balancing scan
   const balanced = findBalancedJsonObject(raw);
   if (balanced !== null) {
     try {
@@ -299,8 +299,8 @@ export function extractJsonObject(raw: string): unknown | null {
 }
 
 /**
- * 括号平衡扫描：从 raw 里找第一个能自洽闭合的 `{...}` 子串。
- * 状态机处理字符串字面量与转义，防止字符串里的 `{}` 干扰计数。
+ * Bracket balancing scan: finds the first self-contained `{...}` substring in raw.
+ * A state machine handles string literals and escapes to prevent `{}` inside strings from messing up the count.
  */
 function findBalancedJsonObject(raw: string): string | null {
   const start = raw.indexOf("{");
@@ -341,14 +341,14 @@ function findBalancedJsonObject(raw: string): string | null {
 }
 
 /**
- * 归一化字符串字段：trim + 长度校验。
+ * Normalize string field: trim + length check.
  *
  * mode:
- *   - "strict"（默认）：超长返 null（老行为，用于必须严格的场景）
- *   - "clip"：超长自动截到 maxLen（保留有效内容，用于 title/description
- *     这类"哪怕不完美也比失败强"的字段）
+ *   - "strict" (default): returns null if too long (old behavior, for strictly required fields)
+ *   - "clip": automatically truncates to maxLen if too long (preserves valid content, for fields like title/description
+ *     where "imperfect is better than failing")
  *
- * 空字符串一律返 null（没有任何截断能救空串）。
+ * Empty string always returns null (no truncation can save an empty string).
  */
 function normalizeStr(
   v: unknown,
@@ -365,10 +365,10 @@ function normalizeStr(
 }
 
 /**
- * 从 title 里剥离 mem:xxx 之类的指令关键词前缀。
- * LLM 常把用户当前指令写进 title（如 "Fix mem:create-task JSON parse"），
- * 剥离后能让真正的语义部分不超字数上限。
- * 只剥前缀、不剥中间；空匹配就原样返回。
+ * Strip command keyword prefixes like mem:xxx from the title.
+ * LLM often puts the user's current command literally into the title (e.g., "Fix mem:create-task JSON parse"),
+ * stripping it allows the real semantic part to stay within the character limit.
+ * Strips only the prefix, not the middle; returns as-is on empty match.
  */
 function stripCommandKeywords(s: string): string {
   let out = s;
@@ -378,7 +378,7 @@ function stripCommandKeywords(s: string): string {
   return out.trim();
 }
 
-/** 归一化 status 字段：可选，允许缺失；不做枚举校验，只做基本清洗。 */
+/** Normalize status field: optional, allowed to be missing; no enum validation, basic cleaning only. */
 function normalizeStatus(v: unknown): string | undefined {
   if (typeof v !== "string") return undefined;
   const s = v.trim();
@@ -387,14 +387,14 @@ function normalizeStatus(v: unknown): string | undefined {
 }
 
 /**
- * 生成 Task 草稿（带自动 retry）。
+ * Generate Task draft (with automatic retry).
  *
- * 外层职责：
- *   - 前置参数校验（不重试）
- *   - 循环调 attemptDraftOnce，最多 LLM_RETRY_MAX_ATTEMPTS 次
- *   - 每次失败记录日志（attempt=N/M reason=xxx），指数退避后再试
+ * Outer layer responsibilities:
+ *   - Pre-parameter validation (no retries)
+ *   - Loop calling attemptDraftOnce, up to LLM_RETRY_MAX_ATTEMPTS times
+ *   - Log on each failure (attempt=N/M reason=xxx), retry after exponential backoff
  *
- * @returns { ok:true, ... } 或 { ok:false, error }
+ * @returns { ok:true, ... } or { ok:false, error }
  */
 export async function generateTaskDraft(
   cfg: TaskDraftConfig,
@@ -421,7 +421,7 @@ export async function generateTaskDraft(
     const result = await attemptDraftOnce(cfg, input, systemPrompt, userMessage, attempt);
     if (result.ok) {
       if (attempt > 1) {
-        // 打点：让运维知道触发过 retry，但最终成功了
+        // Logging: Let operations know a retry was triggered, but eventually succeeded
         console.log(
           `[task-draft] mode=${input.mode} RETRY_SUCCEEDED attempt=${attempt}/${LLM_RETRY_MAX_ATTEMPTS} prev_error=${JSON.stringify(lastError)}`,
         );
@@ -429,7 +429,7 @@ export async function generateTaskDraft(
       return result;
     }
     lastError = result.error;
-    // 最后一次失败，不再等待
+    // Last failure, do not wait
     if (attempt < LLM_RETRY_MAX_ATTEMPTS) {
       const delay = LLM_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
       console.log(
@@ -446,13 +446,13 @@ export async function generateTaskDraft(
 }
 
 /**
- * 单次 LLM 调用 + 结果解析。**内部函数，外层不要直接调**。
+ * Single LLM call + result parsing. **Internal function, do not call directly from outside**.
  *
- * 与老的 generateTaskDraft 主体逻辑一致，只是：
- *   - 参数校验移到了外层
- *   - 加了 finish_reason / usage / http_status 观测日志（第一次成功也打，方便看抖动率）
+ * Consistent with the main logic of the old generateTaskDraft, just that:
+ *   - Parameter validation is moved to the outer layer
+ *   - Added finish_reason / usage / http_status observability logs (even on first success, for tracking jitter rate)
  *
- * attempt 参数只用于日志。
+ * The attempt parameter is only used for logging.
  */
 async function attemptDraftOnce(
   cfg: TaskDraftConfig,
@@ -462,7 +462,7 @@ async function attemptDraftOnce(
   attempt: number,
 ): Promise<TaskDraftResult> {
   let resp: Response;
-  // 首次用短 timeout（默认 10s），后续用完整 cfg.timeoutMs
+  // Use short timeout for the first time (default 10s), then use full cfg.timeoutMs
   const effectiveTimeoutMs = attempt === 1 ? firstAttemptTimeoutMs(cfg.timeoutMs) : cfg.timeoutMs;
   try {
     resp = await fetch(`${cfg.url}/chat/completions`, {
@@ -503,11 +503,11 @@ async function attemptDraftOnce(
     return { ok: false, error: `LLM response not JSON: ${msg}` };
   }
 
-  // 观测：finish_reason + usage.completion_tokens。三种典型值：
-  //   - "stop"          正常完成
-  //   - "length"        触到 max_tokens 被截断 → 需要扩大 max_tokens
-  //   - "content_filter" 触发安全策略 → prompt/context 有问题
-  //   - null            上游没吐（多半是空对象场景）
+  // Observe: finish_reason + usage.completion_tokens. Three typical values:
+  //   - "stop"          Normal completion
+  //   - "length"        Truncated by max_tokens limit → needs max_tokens increase
+  //   - "content_filter" Hit safety policy → issue with prompt/context
+  //   - null            Upstream gave nothing (mostly empty object scenario)
   const finishReason =
     (payload as { choices?: Array<{ finish_reason?: string | null }> }).choices?.[0]
       ?.finish_reason ?? "unknown";
@@ -524,15 +524,15 @@ async function attemptDraftOnce(
     return { ok: false, error: "LLM response content empty" };
   }
 
-  // 观测公共字段（每条 FAIL 日志都会带这三个，方便一眼看出根因）
+  // Observe common fields (every FAIL log will carry these three, for quick root cause spotting)
   const obs = `attempt=${attempt} finish_reason=${finishReason} completion_tokens=${completionTokens}`;
 
-  // 三级兜底：直接 parse → markdown fence → 括号平衡扫描
+  // Three-level fallback: direct parse → markdown fence → bracket balancing scan
   const parsed = extractJsonObject(content);
   if (parsed === null) {
-    // 关键排查日志：把 LLM 原始 content 前 500 字打出来，方便定位是哪种失败模式
-    // （标准场景 / markdown fence / 前后带自然语言 / 完全无 JSON）
-    // finish_reason=length 就说明是 max_tokens 截断，需要扩大上限
+    // Crucial troubleshooting log: Print the first 500 characters of the LLM's raw content to pinpoint the failure mode
+    // (standard scenario / markdown fence / natural language wrapping / no JSON at all)
+    // finish_reason=length means max_tokens truncation, limit needs to be increased
     console.log(
       `[task-draft] mode=${input.mode} FAIL=json_parse ${obs} content_preview=${JSON.stringify(previewContent(content))}`,
     );
@@ -547,9 +547,9 @@ async function attemptDraftOnce(
 
   const obj = parsed as Record<string, unknown>;
 
-  // update 模式：先看 changed 字段
+  // update mode: look at the changed field first
   if (input.mode === "update" && obj.changed === false) {
-    // 保留 currentTask 值原样返回，changed=false 上层直接跳过弹窗
+    // Keep currentTask values intact and return, upper layer will directly skip popup if changed=false
     return {
       ok: true,
       changed: false,
@@ -559,10 +559,10 @@ async function attemptDraftOnce(
     };
   }
 
-  // create 模式 + lockedTitle：title 强制使用 lockedTitle，只解析 description
+  // create mode + lockedTitle: force use of lockedTitle, only parse description
   //
-  // 宽容策略（2026-08-18）：description 只在**完全缺失/空串/非字符串**时才失败；
-  // 超长自动截断到 MAX_DESC_LEN——LLM 少写几个字比返错给用户强得多。
+  // Forgiveness policy (2026-08-18): description only fails on **complete absence/empty string/non-string**;
+  // if too long, automatically truncates to MAX_DESC_LEN——LLM writing a few less words is much better than returning an error to the user.
   if (input.mode === "create" && input.lockedTitle) {
     const description = normalizeStr(obj.description, MAX_DESC_LEN, "clip");
     if (!description) {
@@ -581,9 +581,9 @@ async function attemptDraftOnce(
     };
   }
 
-  // title 归一化：先剥指令关键词前缀，再走 clip 模式。
-  //   典型场景："Fix mem:create-task JSON parse failure"（42 字，会因超 40 拒绝）
-  //   → 剥离 "Fix mem:create-task " → "JSON parse failure"（更精炼且不超字）
+  // title normalization: first strip command keyword prefixes, then use clip mode.
+  //   Typical scenario: "Fix mem:create-task JSON parse failure" (42 chars, would be rejected for exceeding 40)
+  //   → Strip "Fix mem:create-task " → "JSON parse failure" (more concise and within character limit)
   const rawTitle = typeof obj.title === "string" ? stripCommandKeywords(obj.title) : obj.title;
   const title = normalizeStr(rawTitle, MAX_TITLE_LEN, "clip");
   if (!title) {
@@ -611,8 +611,8 @@ async function attemptDraftOnce(
 }
 
 /**
- * 日志辅助：截断长字符串，防止 LLM 洗版把日志撑爆。
- * 500 字够看清 JSON 结构与主要内容，多余的用 `...[truncated N]` 标记。
+ * Logging helper: Truncate long strings to prevent the LLM's spam from blowing up the logs.
+ * 500 characters is enough to see the JSON structure and main content, the rest is marked with `...[truncated N]`.
  */
 function previewContent(s: string): string {
   const MAX = 500;
@@ -620,8 +620,8 @@ function previewContent(s: string): string {
 }
 
 /**
- * 日志辅助：把已解析的 obj 序列化为紧凑字符串再截断（保留结构）。
- * 用于失败分支——让排查时能一眼看到 LLM 到底填了什么字段、什么值。
+ * Logging helper: Serialize the parsed obj into a compact string then truncate (retaining structure).
+ * Used in failure branches—so that during troubleshooting you can see at a glance what fields and values the LLM actually filled.
  */
 function previewObj(obj: Record<string, unknown>): string {
   try {

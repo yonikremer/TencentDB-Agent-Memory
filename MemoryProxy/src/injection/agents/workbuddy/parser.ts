@@ -68,7 +68,7 @@ export function parseWorkbuddySystemPrompt(text: string): PromptModule[] {
     if (preamble.length > 0) {
       modules.push({
         id: "preamble",
-        name: "系统开场白",
+        name: "System Preamble",
         tag: null,
         rawText: preamble,
         innerText: preamble,
@@ -80,7 +80,7 @@ export function parseWorkbuddySystemPrompt(text: string): PromptModule[] {
   } else if (!firstMatch) {
     modules.push({
       id: "preamble",
-      name: "系统开场白",
+      name: "System Preamble",
       tag: null,
       rawText: text,
       innerText: text,
@@ -100,7 +100,7 @@ export function parseWorkbuddySystemPrompt(text: string): PromptModule[] {
       if (remainder.length > 0) {
         modules.push({
           id: `suffix-${index}`,
-          name: "系统结尾",
+          name: "System Suffix",
           tag: null,
           rawText: remainder,
           innerText: remainder,
@@ -118,7 +118,7 @@ export function parseWorkbuddySystemPrompt(text: string): PromptModule[] {
       if (betweenText.length > 0) {
         modules.push({
           id: `text-${index}`,
-          name: `中间文本段 ${index}`,
+          name: `Intermediate Text Segment ${index}`,
           tag: null,
           rawText: betweenText,
           innerText: betweenText,
@@ -141,7 +141,7 @@ export function parseWorkbuddySystemPrompt(text: string): PromptModule[] {
       if (remainder.length > 0) {
         modules.push({
           id: `suffix-${index}`,
-          name: "未闭合标签尾部",
+          name: "Unclosed Tag Tail",
           tag: null,
           rawText: remainder,
           innerText: remainder,

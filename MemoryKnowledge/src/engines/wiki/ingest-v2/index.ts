@@ -1,11 +1,12 @@
 /**
- * index.ts — ingest 引擎入口。
+ * index.ts — Ingest engine entry.
  *
- * 两阶段模型（wiki-ingest-optimization）：
- *   1. extractSource() — 纯 LLM 抽取，返回候选页 Map（可并发）
- *   2. commitCandidates() — 串行 merge + 落盘 + index.md/log.md 收尾
+ * Two-stage model (wiki-ingest-optimization):
+ *   1. extractSource() — Pure LLM extraction, returning candidate pages Map (concurrentable)
+ *   2. commitCandidates() — Serial merge + disk write + index.md/log.md finalize
  *
- * ingestSource() 保留为薄封装（= extract + commit 串行），现有单测/外部调用不变。 */
+ * ingestSource() remains as a thin wrapper (= extract + commit serially), leaving existing unit tests/external calls unchanged.
+ */
 
 import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
@@ -31,7 +32,7 @@ import { createLogger } from "../../../logger.js";
 
 const log = createLogger("wiki-ingest");
 
-/** generate 解析失败时落盘原文，便于 FILE 协议排查（不改变成功路径）。 */
+/** Dumps raw text to disk on generate parse failure to facilitate FILE protocol troubleshooting (does not alter success path). */
 export function dumpGenerateFailure(args: {
   projectPath: string;
   sourceName: string;
@@ -60,12 +61,12 @@ export function dumpGenerateFailure(args: {
     writeFileSync(file, header + output, "utf-8");
     return file;
   } catch (err) {
-    log.warn("generate 失败原文落盘失败", { source: sourceName, error: String(err) });
+    log.warn("Failed to dump generate failure raw text to disk", { source: sourceName, error: String(err) });
     return null;
   }
 }
 
-/** 不允许 ingest 写入/覆盖的结构性文件（PRD §3.7-2）。 */
+/** Structural files not allowed for ingest write/overwrite (PRD §3.7-2). */
 const STRUCTURAL_FILES = new Set([
   "wiki/index.md",
   "wiki/schema.md",
@@ -74,47 +75,47 @@ const STRUCTURAL_FILES = new Set([
   "wiki/overview.md",
 ]);
 
-/** 粗略上下文预算（字符）：保留余量给 prompt 框架与输出。 */
+/** Rough context budget (chars): reserve margin for prompt frame and output. */
 export const SOURCE_CHAR_BUDGET = 28_000;
 
 export interface IngestOptions {
-  /** 注入的 LLM 客户端（测试用）；不传则用 llmConfig 构造真实客户端。 */
+  /** Injected LLM client (for testing); if unprovided, constructs real client with llmConfig. */
   llm?: LlmClient;
-  /** 合并时旧页正文超过此字符数则走追加模式（OQ-1）；不传用 merge 默认值。 */
+  /** When old page body exceeds this char limit during merge, fallback to append mode (OQ-1); uses merge default if omitted. */
   mergeFullRewriteMaxChars?: number;
   /**
-   * 摄取流程（OQ-4）：
-   *   - "two-stage"（默认）：先分析（抽取计划）再生成 FILE 块，质量更稳。
-   *   - "single-stage"：源全文直接产出 FILE 块（少一次 LLM 调用，省 token）。
+   * Ingestion flow (OQ-4):
+   *   - "two-stage" (default): Analyze first (extraction plan) then generate FILE blocks, higher quality stability.
+   *   - "single-stage": Full source directly produces FILE blocks (saves 1 LLM call, saves tokens).
    */
   mode?: "two-stage" | "single-stage";
   /**
-   * 检索增强摄取：调用方（manager）注入的检索函数。
-   * 对每个源分块文本调用一次，返回该块相关的既有页正文上下文——实现"逐块检索"，
-   * 而非整文件一次、所有块共用同一上下文。长文档拆块后，每块用自身高频词检索，
-   * 更能命中该块真正依赖的既有页。返回空串 = 该块不增强（任何失败同样降级为空串）。
+   * Retrieval-augmented ingestion: Retrieval function injected by caller (manager).
+   * Called once per source chunk text, returning existing page body context related to that chunk—implementing "per-chunk retrieval",
+   * rather than once for entire file with all chunks sharing identical context. After splitting long documents, each chunk retrieves
+   * using its own high-frequency words, better matching existing pages truly depended upon by that chunk. Empty string = no augmentation (any failure degrades to empty string).
    */
   retrieveContext?: (chunkText: string) => string;
 }
 
 export interface CommitResult {
   written: string[];
-  /** 合并阶段按页失败记录（不影响其他页） */
+  /** Per-page merge error records in merge stage (does not affect other pages) */
   mergeErrors: Array<{ relPath: string; source: string; error: string }>;
 }
 
 export interface CommitOptions extends MergeOptions {
-  /** 全局 LLM 信号量（mergePage 内 LLM 合并调用纳入限流） */
+  /** Global LLM semaphore (LLM merge calls inside mergePage throttled under this limit) */
   globalLlmLimit?: LimitFunction;
-  /** 跳过 batch log 写入（薄封装调用时由外层自行写单源日志） */
+  /** Skip batch log writing (thin wrapper caller handles single-source log writing externally) */
   skipLog?: boolean;
 }
 
 /**
- * 阶段1：对单个源文件调 LLM 生成候选 wiki 页（纯内存，不落盘）。
- * 可安全并发调用。
+ * Stage 1: Calls LLM for a single source file to generate candidate wiki pages (pure in-memory, no disk write).
+ * Safe for concurrent execution.
  *
- * 空候选语义：candidates.size === 0 视为失败（throw），与现有行为一致。
+ * Empty candidate semantics: candidates.size === 0 is treated as failure (throw), consistent with existing behavior.
  */
 export async function extractSource(
   projectPath: string,
@@ -123,10 +124,10 @@ export async function extractSource(
   existingPages: ExistingPageInfo[],
   options: IngestOptions = {},
 ): Promise<Map<string, string>> {
-  if (!existsSync(sourcePath)) throw new Error(`源文件不存在: ${sourcePath}`);
+  if (!existsSync(sourcePath)) throw new Error(`Source file does not exist: ${sourcePath}`);
   const sourceText = readFileSync(sourcePath, "utf-8");
   const sourceName = basename(sourcePath);
-  if (!sourceText.trim()) throw new Error(`源文件为空: ${sourceName}`);
+  if (!sourceText.trim()) throw new Error(`Source file is empty: ${sourceName}`);
 
   const llm = options.llm ?? createLlmClient(llmConfig);
   const template = loadTemplate(projectPath);
@@ -138,7 +139,7 @@ export async function extractSource(
       ? chunkText(sourceText, { targetChars: SOURCE_CHAR_BUDGET })
       : [sourceText];
 
-  log.info("extractSource 开始", {
+  log.info("extractSource start", {
     source: sourceName,
     sourceChars: sourceText.length,
     mode,
@@ -154,31 +155,31 @@ export async function extractSource(
     const chunkLabel = chunks.length > 1 ? `${sourceName} (chunk ${i + 1}/${chunks.length})` : sourceName;
     const tag = chunks.length > 1 ? `${sourceName}#${i + 1}` : sourceName;
 
-    // 检索增强摄取：逐块检索——每块用其自身文本搜相关既有页（而非整文件一次、所有块共用）。
-    // 任何失败降级为该块无增强，绝不阻断该块提取。
+    // Retrieval-augmented ingestion: per-chunk retrieval—each chunk searches relevant existing pages with its own text (rather than once per whole file).
+    // Any failure degrades to no augmentation for that chunk, never blocking extraction of that chunk.
     let retrievalContext = "";
     if (options.retrieveContext) {
       try {
         retrievalContext = options.retrieveContext(chunks[i]);
       } catch (err) {
-        log.warn("分块检索增强失败，该块降级无增强", { chunk: tag, error: err instanceof Error ? err.message : String(err) });
+        log.warn("Per-chunk retrieval augmentation failed, chunk degraded to no augmentation", { chunk: tag, error: err instanceof Error ? err.message : String(err) });
       }
     }
 
     let out: string;
     if (mode === "two-stage") {
-      log.debug("阶段A 分析开始", { chunk: tag });
+      log.debug("Stage A analysis start", { chunk: tag });
       const analysis = await llm.chat({
         system: buildAnalysisSystemPrompt(template),
         prompt: buildAnalysisPrompt({ sourceName: chunkLabel, sourceText: chunks[i], existingPages, retrievalContext }),
         label: `analysis:${tag}`,
       });
-      log.debug("阶段A 分析完成", { chunk: tag, analysisChars: analysis.length, empty: !analysis.trim() });
-      log.debug("阶段A 分析内容预览", { chunk: tag, preview: analysis.slice(0, 200) });
+      log.debug("Stage A analysis complete", { chunk: tag, analysisChars: analysis.length, empty: !analysis.trim() });
+      log.debug("Stage A analysis preview", { chunk: tag, preview: analysis.slice(0, 200) });
       const genPrompt = analysis.trim()
         ? buildGenerateFromAnalysisPrompt({ sourceName: chunkLabel, sourceText: chunks[i], analysis, existingPages, retrievalContext })
         : buildGeneratePrompt({ sourceName: chunkLabel, sourceText: chunks[i], existingPages, retrievalContext });
-      if (!analysis.trim()) log.warn("分析为空，降级单阶段生成", { chunk: tag });
+      if (!analysis.trim()) log.warn("Analysis empty, fallback to single-stage generation", { chunk: tag });
       out = await llm.chat({ system: systemPrompt, prompt: genPrompt, label: `generate:${tag}` });
     } else {
       const prompt = buildGeneratePrompt({ sourceName: chunkLabel, sourceText: chunks[i], existingPages, retrievalContext });
@@ -187,7 +188,7 @@ export async function extractSource(
 
     const { files, warnings: w } = parseFileBlocks(out);
     warnings.push(...w);
-    log.debug("FILE 块解析", { chunk: tag, outChars: out.length, files: files.length, warnings: w.length });
+    log.debug("FILE block parsing", { chunk: tag, outChars: out.length, files: files.length, warnings: w.length });
     if (files.length === 0 && out.trim()) {
       const dumpPath = dumpGenerateFailure({
         projectPath,
@@ -196,12 +197,12 @@ export async function extractSource(
         output: out,
         reason: w.length ? `parse_empty warnings=${w.length}` : "parse_empty files=0",
       });
-      if (dumpPath) log.warn("generate 无合法 FILE，已落盘", { source: sourceName, dumpPath });
+      if (dumpPath) log.warn("generate has no valid FILE, dumped to disk", { source: sourceName, dumpPath });
     }
     for (const f of files) {
       const canonicalPath = canonicalizePagePath(f.path, f.content);
       if (STRUCTURAL_FILES.has(canonicalPath)) {
-        warnings.push(`跳过结构性文件: ${canonicalPath}`);
+        warnings.push(`Skip structural file: ${canonicalPath}`);
         continue;
       }
       candidates.set(canonicalPath, ensureSources(f.content, sourceName));
@@ -209,27 +210,27 @@ export async function extractSource(
   }
 
   if (candidates.size === 0) {
-    log.error("未生成任何合法 wiki 页", { source: sourceName, warnings });
+    log.error("No valid wiki pages generated", { source: sourceName, warnings });
     throw new Error(
-      `未生成任何合法 wiki 页（no files generated）: ${sourceName}${warnings.length ? ` [${warnings.join("; ")}]` : ""}`,
+      `Failed to generate any valid wiki pages (no files generated): ${sourceName}${warnings.length ? ` [${warnings.join("; ")}]` : ""}`,
     );
   }
 
-  log.info("extractSource 完成", { source: sourceName, candidates: candidates.size, warnings: warnings.length });
+  log.info("extractSource complete", { source: sourceName, candidates: candidates.size, warnings: warnings.length });
   return candidates;
 }
 
 /**
- * 阶段2：串行落盘 + 收尾。
- * - 按 relPath 聚合所有源产出的候选页，逐页 merge。
- * - 每页 try/catch：单页 merge 失败不阻塞其他页。
- * - mergePage 内部可能调 LLM，通过 globalLlmLimit 纳入全局限流。
- * - 全部落盘完成后统一跑一次 rebuildIndexFile + appendIngestLogBatch。
+ * Stage 2: Serial disk write + finalize.
+ * - Aggregates candidate pages produced by all sources by relPath, merging page by page.
+ * - Per-page try/catch: single page merge failure does not block other pages.
+ * - mergePage internally may call LLM, throttled under global rate limit via globalLlmLimit.
+ * - Runs rebuildIndexFile + appendIngestLogBatch once after all disk writes complete.
  */
 export async function commitCandidates(
   projectPath: string,
   allCandidates: Array<{ sourceFilename: string; candidates: Map<string, string> }>,
-  /** 无候选页时可省略（仅 rebuild index）；有候选但缺失时对应页记入 mergeErrors。 */
+  /** Omit when no candidates exist (only rebuild index); when candidates exist but LLM missing, record corresponding page into mergeErrors. */
   llm: LlmClient | undefined,
   options?: CommitOptions,
 ): Promise<CommitResult> {
@@ -264,17 +265,17 @@ export async function commitCandidates(
           ? await globalLlmLimit(() => mergePage(existing, entry.content, llm, mergeOpts))
           : await mergePage(existing, entry.content, llm, mergeOpts);
         if (decision.action === "skip") {
-          log.debug("跳过页（locked）", { relPath, source: entry.source });
+          log.debug("Skip page (locked)", { relPath, source: entry.source });
           continue;
         }
         mkdirSync(dirname(fullPath), { recursive: true });
         writeFileSync(fullPath, decision.content, "utf-8");
         existing = decision.content;
         if (!written.includes(relPath)) written.push(relPath);
-        log.debug("写盘", { relPath, source: entry.source, bytes: decision.content.length });
+        log.debug("Disk write", { relPath, source: entry.source, bytes: decision.content.length });
       } catch (err) {
         mergeErrors.push({ relPath, source: entry.source, error: String(err) });
-        log.error("页面合并失败", { relPath, source: entry.source, error: String(err) });
+        log.error("Page merge failed", { relPath, source: entry.source, error: String(err) });
       }
     }
   }
@@ -282,7 +283,7 @@ export async function commitCandidates(
   try {
     rebuildIndexFile(projectPath);
   } catch (err) {
-    log.warn("index.md 重建失败（不影响主流程）", { error: String(err) });
+    log.warn("index.md rebuild failed (does not affect main workflow)", { error: String(err) });
   }
 
   try {
@@ -294,16 +295,16 @@ export async function commitCandidates(
       });
     }
   } catch (err) {
-    log.warn("log.md 写入失败（不影响主流程）", { error: String(err) });
+    log.warn("log.md write failed (does not affect main workflow)", { error: String(err) });
   }
 
   return { written, mergeErrors };
 }
 
 /**
- * 单源完整流程（抽取 + 合并 + index.md + log.md），
- * 等价于 extractSource → commitCandidates 的串行组合。
- * 现有单测和外部直接调用无需改动。
+ * Single-source full workflow (extract + merge + index.md + log.md),
+ * equivalent to serial combination of extractSource → commitCandidates.
+ * Existing unit tests and external direct calls require no changes.
  */
 export async function ingestSource(
   projectPath: string,
@@ -322,19 +323,19 @@ export async function ingestSource(
     { fullRewriteMaxChars: options.mergeFullRewriteMaxChars, skipLog: true },
   );
   if (written.length === 0) {
-    log.warn("无页写入（全部 locked 跳过）", { source: sourceName });
+    log.warn("No pages written (all locked skipped)", { source: sourceName });
     return [];
   }
   try {
     appendIngestLog(projectPath, sourceName, written.length);
   } catch (err) {
-    log.warn("log.md 追加失败", { error: err instanceof Error ? err.message : String(err) });
+    log.warn("log.md append failed", { error: err instanceof Error ? err.message : String(err) });
   }
-  log.info("ingestSource 完成", { source: sourceName, written: written.length });
+  log.info("ingestSource complete", { source: sourceName, written: written.length });
   return written;
 }
 
-/** 扫 wiki/ 得到已有页的精简信息（供 LLM 判断新建/更新）。不含结构性文件。 */
+/** Scans wiki/ to get lightweight info of existing pages (for LLM to judge create/update). Excludes structural files. */
 export function scanExistingPages(projectPath: string): ExistingPageInfo[] {
   const wikiDir = join(projectPath, "wiki");
   if (!existsSync(wikiDir)) return [];
@@ -373,15 +374,15 @@ function walk(baseDir: string, dir: string, out: ExistingPageInfo[]): void {
           description: typeof frontmatter.description === "string" ? frontmatter.description : undefined,
         });
       } catch {
-        /* 坏页跳过 */
+        /* Skip malformed page */
       }
     }
   }
 }
 
 /**
- * 确保候选页 frontmatter 的 sources 至少包含当前源文件名（§3.7-3 / AC-10）。
- * LLM 可能漏写或写错 sources，这里强制补上当前源。
+ * Ensures sources array in candidate page frontmatter contains at least the current source filename (§3.7-3 / AC-10).
+ * LLM might omit or write wrong sources, forcibly backfill current source here.
  */
 export function ensureSources(content: string, sourceName: string): string {
   const parsed = parseFrontmatter(content);
@@ -393,19 +394,19 @@ export function ensureSources(content: string, sourceName: string): string {
 }
 
 /**
- * OQ-6: 规范化页面落盘路径，保证 dedup 稳定性。
+ * OQ-6: Canonicalizes page disk path to guarantee dedup stability.
  *
- * LLM 选的 path（如 `wiki/entity/redis.md`）可能与我方目录约定（`wiki/entities/redis.md`）
- * 不一致，或对同一实体在不同次摄取里给出不同 slug，破坏「同一实体 → 同一路径」的去重不变量。
+ * The path chosen by LLM (e.g. `wiki/entity/redis.md`) might disagree with our directory convention (`wiki/entities/redis.md`),
+ * or give different slugs for the same entity across different ingest runs, breaking the "same entity → same path" dedup invariant.
  *
- * 策略：优先用页面 frontmatter 的 `type` + `title` 通过 `pageRelPath` 推导规范路径
- * （目录由 type 决定、文件名由 title slug 决定，与 dedup 命中逻辑一致）。
- * 当 frontmatter 缺 type/title 时，回退到「规范化 LLM 原路径的目录段」——
- * 即把目录通过 `dirForType` 归一（entity→entities），文件名沿用原 slug。
+ * Strategy: Preferably use page frontmatter `type` + `title` to derive canonical path via `pageRelPath`
+ * (directory determined by type, filename determined by title slug, matching dedup hit logic).
+ * When frontmatter lacks type/title, fallback to "canonicalizing directory segment of LLM original path"—
+ * i.e., normalize directory via `dirForType` (entity→entities), reusing original slug for filename.
  *
- * @param llmPath  LLM 在 FILE 块里声明的 path（已过 normalizeWikiPath 白名单校验）
- * @param content  页面完整内容（含 frontmatter）
- * @returns 规范化后的 wiki 相对路径（始终以 `wiki/` 开头）
+ * @param llmPath  Path declared by LLM in FILE block (passed normalizeWikiPath whitelist validation)
+ * @param content  Complete page content (including frontmatter)
+ * @returns Normalized wiki relative path (always starting with `wiki/`)
  */
 export function canonicalizePagePath(llmPath: string, content: string): string {
   const { frontmatter } = parseFrontmatter(content);

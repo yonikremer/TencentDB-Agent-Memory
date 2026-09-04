@@ -1,12 +1,12 @@
 /**
- * SkillResourceStore — 资源字节读写（仅 files/ 子树）
+ * SkillResourceStore — Resource byte read and write (files/ subtree only)
  *
- * 与旧 SkillContentManager 的差异：
- *   - 路径键改为 `<skill_id>/v<version>/files/<relative_path>`（不再用 name）
- *   - 不再管理 SKILL.md（DB 是权威源）
- *   - manifest 由 `listResources` 直接从磁盘列出（不需要 DB 同步）
+ * Differences from old SkillContentManager:
+ *   - Path key changed to `<skill_id>/v<version>/files/<relative_path>` (no longer using name)
+ *   - SKILL.md is no longer managed here (DB is authoritative source)
+ *   - manifest is listed directly from disk via `listResources` (no DB sync required)
  *
- * 设计文档对应：§2.4 物理 storage 布局；§3.5.9~3.5.11 接口。
+ * Design document mapping: §2.4 physical storage layout; §3.5.9~3.5.11 interfaces.
  */
 
 import type { StorageAdapter } from "../storage/adapter.js";
@@ -47,7 +47,7 @@ export interface SkillResourceReadResult {
 export interface SkillResourceStoreOptions {
   storage: StorageAdapter;
   maxResourceSizeBytes?: number;
-  /** 整 skill 资源总大小上限。默认 50 MB（设计 §3.5.1）。 */
+  /** Total skill resource size cap. Default 50 MB (design §3.5.1). */
   maxSkillTotalBytes?: number;
 }
 
@@ -62,22 +62,22 @@ export class SkillResourceStore {
     this.maxTotalBytes = opts.maxSkillTotalBytes ?? DEFAULT_MAX_SKILL_TOTAL_BYTES;
   }
 
-  /** 整 skill 总字节数上限（外部用于聚合校验前查阅）。 */
+  /** Total skill bytes upper bound (queried externally prior to aggregate checks). */
   getMaxSkillTotalBytes(): number {
     return this.maxTotalBytes;
   }
 
   /**
-   * 估算 payload 的解码后字节大小，不写盘。
-   * 用于 SkillVersioning 在落盘前做整 skill 总大小聚合校验。
+   * Estimate the decoded byte size of payload without writing to disk.
+   * Used by SkillVersioning for aggregate total size validation before saving to disk.
    */
   estimatePayloadSize(payload: SkillResourcePayload): number {
     return decodeContent(payload.content, payload.encoding).length;
   }
 
   /**
-   * 聚合校验：当前 manifest + 新写入 - 要删除/被覆盖 ≤ maxTotalBytes。
-   * 超限抛 RESOURCE_TOO_LARGE，由 versioning 在落盘前调用。
+   * Aggregate check: current manifest + newly written - to remove/overwritten <= maxTotalBytes.
+   * Throws RESOURCE_TOO_LARGE on exceedance, called by versioning before saving to disk.
    */
   assertTotalSize(
     currentManifest: SkillManifestEntry[],
@@ -103,7 +103,7 @@ export class SkillResourceStore {
     }
   }
 
-  /** 写入资源字节，校验 path 和 size。如果 path 已存在则覆盖。 */
+  /** Write resource bytes, validating path and size. Overwrites if path already exists. */
   async writeResource(skillId: string, version: number, payload: SkillResourcePayload): Promise<SkillManifestEntry> {
     this.assertPath(payload.path);
     const buf = decodeContent(payload.content, payload.encoding);
@@ -116,7 +116,7 @@ export class SkillResourceStore {
     const key = this.fileKey(skillId, version, payload.path);
     const mime = payload.mime_type ?? guessMime(payload.path);
     const isExec = payload.is_executable ?? false;
-    // 用 backend.putObject 直接写以保留 metadata（is_executable）
+    // Write directly using backend.putObject to preserve metadata (is_executable)
     await this.storage.getBackend().putObject(key, buf, {
       contentType: mime,
       metadata: { is_executable: isExec ? "1" : "0" },
@@ -129,7 +129,7 @@ export class SkillResourceStore {
     };
   }
 
-  /** 读取资源字节；不存在 → null。 */
+  /** Read resource bytes; returns null if not exists. */
   async readResource(
     skillId: string,
     version: number,
@@ -146,12 +146,12 @@ export class SkillResourceStore {
       encoding,
       size_bytes: buf.length,
       mime_type: guessMime(path),
-      is_executable: false, // 不从 storage 元数据反推（local-fs 与 COS 行为不一致）
+      is_executable: false, // Do not infer from storage metadata (inconsistent between local-fs and COS)
       version,
     };
   }
 
-  /** 删除资源（幂等：不存在不抛错）。 */
+  /** Remove resource (idempotent: does not throw if missing). */
   async removeResource(skillId: string, version: number, path: string): Promise<void> {
     this.assertPath(path);
     const key = this.fileKey(skillId, version, path);
@@ -162,7 +162,7 @@ export class SkillResourceStore {
     }
   }
 
-  /** 列出某版本目录下的全部资源元信息（不含字节）。 */
+  /** List all resource metadata under a version directory (excluding bytes). */
   async listResources(skillId: string, version: number): Promise<SkillManifestEntry[]> {
     const prefix = this.filesPrefix(skillId, version);
     const result = await this.storage.getBackend().listObjects(prefix, {
@@ -173,7 +173,7 @@ export class SkillResourceStore {
     for (const e of result.entries) {
       if (e.isDirectory) continue;
       const path = e.key.startsWith(prefix) ? e.key.slice(prefix.length) : e.key;
-      // 读元数据拿到 is_executable / contentType（开销比读字节小很多）
+      // Read metadata to get is_executable / contentType (much cheaper than reading bytes)
       const obj = await this.storage.getBackend().getObject(e.key);
       const isExec = obj?.metadata?.is_executable === "1";
       const mime = obj?.contentType ?? guessMime(path);
@@ -187,7 +187,7 @@ export class SkillResourceStore {
     return out;
   }
 
-  /** 拿到该版本目录的相对前缀，便于 skill-versioning 调 storage.copyTree。 */
+  /** Get relative prefix of the version directory, facilitating skill-versioning to call storage.copyTree. */
   versionDir(skillId: string, version: number): string {
     return `${STORAGE_PREFIX}${skillId}/v${version}`;
   }
@@ -208,7 +208,7 @@ export class SkillResourceStore {
       throw new SkillResourceError("INVALID_PATH", `absolute path not allowed: ${path}`);
     if (path.includes("\0"))
       throw new SkillResourceError("INVALID_PATH", `NUL not allowed: ${path}`);
-    // ".." 段防越界
+    // Check ".." segment to prevent directory traversal
     const segs = path.split(/[\\/]/);
     if (segs.some((s) => s === "..")) {
       throw new SkillResourceError("INVALID_PATH", `traversal not allowed: ${path}`);
@@ -217,7 +217,7 @@ export class SkillResourceStore {
 }
 
 // ═════════════════════════════════════════════════════════════════════
-//  独立工具
+//  Standalone Helpers
 // ═════════════════════════════════════════════════════════════════════
 
 function decodeContent(content: string, encoding: "utf-8" | "base64"): Buffer {

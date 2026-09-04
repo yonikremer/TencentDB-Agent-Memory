@@ -101,7 +101,7 @@ npm run dev
 | `pnpm test:knowledge:e2e` | 运行 Knowledge E2E |
 | `cd web && npm run dev` | 启动前端开发服务器 |
 | `cd web && npm run build` | 构建前端到 `web/dist/` |
-| `bash scripts/secret-scan.sh` | 扫描敏感信息 |
+| `bash scripts/secret-leak-check.sh` | 检查敏感信息泄漏 |
 
 ## 公开 API
 
@@ -128,7 +128,7 @@ Control 的公开入口统一位于 `/api/v1`：
 - 实例注册表中的 `api_key` 仅供服务端调用外部服务，不得返回浏览器。
 - `.env`、真实实例注册表、Smoke 环境文件、日志和测试报告不得提交。
 - 文档和示例只能使用 `example.com`、回环地址及明显的占位符。
-- 提交前运行 `bash scripts/secret-scan.sh --strict`。
+- 提交前运行 `bash scripts/secret-leak-check.sh --strict`。
 
 如果凭证曾进入 Git 历史，应立即轮换凭证，并在发布仓库前清理历史记录。
 

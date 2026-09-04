@@ -1,14 +1,14 @@
 /**
- * IMetadataStore — 元数据存储抽象接口。
+ * IMetadataStore — Abstract metadata store interface.
  *
- * 对应设计文档 §6.1。所有后端实现（SQLite / MongoDB / MySQL 预留）必须满足此契约，
- * 由 metadata-store.contract.ts 中的共用测试套件统一验证，保证后端行为一致。
+ * Corresponds to design doc §6.1. All backend implementations (SQLite / MongoDB / MySQL reserved) must satisfy this contract,
+ * verified uniformly by the shared test suite in metadata-store.contract.ts to ensure consistent backend behavior.
  *
- * 约定：
- *   - 所有方法可同步或异步，调用方一律 await。
- *   - 复合写入（createTeam + 自动 admin、createTask + linkAgents、setAgentFixedAssets 全量替换）
- *     必须在实现内部保证原子性（SQLite 串行事务 / MongoDB withTransaction）。
- *   - get* 找不到返回 null；delete* 返回 BatchDeleteResult。
+ * Conventions:
+ *   - All methods can be synchronous or asynchronous; callers always await.
+ *   - Composite writes (createTeam + auto admin, createTask + linkAgents, setAgentFixedAssets full replacement)
+ *     must guarantee atomicity internally (SQLite serial transaction / MongoDB withTransaction).
+ *   - get* returns null if not found; delete* returns BatchDeleteResult.
  */
 
 import type {
@@ -53,9 +53,9 @@ import type {
 export type MaybePromise<T> = T | Promise<T>;
 
 /**
- * 调用方指定 default_key_value / key_value 时，命中 meta_user_keys.key_value UNIQUE 约束。
- * Service 层 catch 后翻译为 MetadataError("duplicate_user_key")；HTTP 层映射为 409。
- * Store 层直接抛此错，独立于业务层 MetadataError（避免存储层反向依赖 service）。
+ * When callers specify default_key_value / key_value, hitting meta_user_keys.key_value UNIQUE constraint.
+ * Service layer catches and translates to MetadataError("duplicate_user_key"); mapped to 409 at HTTP layer.
+ * Store layer throws this error directly, independent of business layer MetadataError (avoids reverse dependency from store to service).
  */
 export class DuplicateUserKeyError extends Error {
   constructor(public readonly keyValue: string) {
@@ -65,9 +65,9 @@ export class DuplicateUserKeyError extends Error {
 }
 
 export interface IMetadataStore {
-  /** 初始化存储（建表/建索引/建连接）。幂等。 */
+  /** Initialize store (create tables/indexes/connections). Idempotent. */
   init(): MaybePromise<void>;
-  /** 关闭存储连接。 */
+  /** Close store connection. */
   close(): MaybePromise<void>;
 
   // ── User ──
@@ -92,7 +92,7 @@ export interface IMetadataStore {
   countSystemAdmins(): MaybePromise<number>;
   countTeams(): MaybePromise<number>;
 
-  // ── UserKey（多 API 密钥）──
+  // ── UserKey (Multiple API keys) ──
   createUserKey(input: CreateUserKeyInput): MaybePromise<UserKeyEntity>;
   getUserKeyById(keyId: string): MaybePromise<UserKeyEntity | null>;
   listUserKeys(userId: string, pagination?: PaginationParams | null): MaybePromise<ListPage<UserKeyEntity>>;
@@ -103,7 +103,7 @@ export interface IMetadataStore {
   revokeAllUserKeysForUser(userId: string): MaybePromise<void>;
   getDefaultUserKey(userId: string): MaybePromise<UserKeyEntity | null>;
 
-  // ── Team ──（createTeam 自动把 owner 加为 admin 成员）
+  // ── Team ── (createTeam automatically adds owner as admin member)
   createTeam(input: CreateTeamInput): MaybePromise<TeamEntity>;
   getTeamById(teamId: string): MaybePromise<TeamEntity | null>;
   updateTeam(teamId: string, patch: Partial<TeamEntity>): MaybePromise<TeamEntity | null>;
@@ -129,7 +129,7 @@ export interface IMetadataStore {
   listAgentsByTeam(teamId: string, pagination?: PaginationParams | null, filter?: AgentFilter): MaybePromise<ListPage<AgentEntity>>;
   listAgentsByOwner(userId: string, pagination?: PaginationParams | null, filter?: AgentFilter): MaybePromise<ListPage<AgentEntity>>;
 
-  // ── Task ──（createTask 可同时 linkAgents）
+  // ── Task ── (createTask can linkAgents simultaneously)
   createTask(input: CreateTaskInput): MaybePromise<TaskEntity>;
   getTaskById(taskId: string): MaybePromise<TaskEntity | null>;
   updateTask(taskId: string, patch: Partial<TaskEntity>): MaybePromise<TaskEntity | null>;
@@ -149,7 +149,7 @@ export interface IMetadataStore {
     pagination?: PaginationParams | null,
   ): MaybePromise<ListPage<ParticipationLogEntity>>;
 
-  // ── Asset ──（仅主表；详情表留在 control 面板）
+  // ── Asset ── (Main table only; detail tables remain in control panel)
   createAsset(input: CreateAssetInput): MaybePromise<AssetEntity>;
   getAssetById(assetId: string): MaybePromise<AssetEntity | null>;
   updateAsset(assetId: string, patch: Partial<AssetEntity>): MaybePromise<AssetEntity | null>;
@@ -157,30 +157,30 @@ export interface IMetadataStore {
   listAssetsByTeam(teamId: string, pagination?: PaginationParams | null, filter?: AssetFilter): MaybePromise<ListPage<AssetEntity>>;
   touchAssetUsage(assetId: string): MaybePromise<void>;
 
-  // ── AgentFixedAsset ──（setAgentFixedAssets 全量替换）
+  // ── AgentFixedAsset ── (setAgentFixedAssets replaces all bindings)
   setAgentFixedAssets(agentId: string, bindings: FixedAssetBindingInput[]): MaybePromise<void>;
   /**
-   * 追加一条 agent 绑定，**保留**该 agent 已有的其他绑定；(agent_id, asset_id)
-   * 已存在时视作 no-op（幂等）。
+   * Appends an agent binding while **preserving** other existing bindings for that agent;
+   * if (agent_id, asset_id) already exists, treated as no-op (idempotent).
    *
-   * 场景：写入 memory 时自动登记 chat_memory 资产并绑定到 agent，且必须与
-   * skill / wiki / code_graph 等其他资产的现有绑定共存 —— setAgentFixedAssets
-   * 是全量替换会覆盖那些绑定，因此需要一个 append 语义的操作。
+   * Scenario: Auto-register chat_memory asset and bind to agent when writing memory, which must coexist
+   * with existing bindings to other assets like skill / wiki / code_graph. Since setAgentFixedAssets
+   * is a full replacement that overwrites those bindings, an append-semantic operation is needed.
    */
   addAgentFixedAsset(agentId: string, binding: FixedAssetBindingInput): MaybePromise<void>;
   listAgentFixedAssets(
     agentId: string,
     pagination?: PaginationParams | null,
     /**
-     * 可选过滤：仅返回 asset 类型在列表中的绑定。空/省略 = 不过滤。
-     * store 内部 JOIN meta_assets 做 SQL 层过滤，避免"分页在前、类型过滤在后"截断。
+     * Optional filter: only return bindings whose asset type is in the list. Empty/omitted = no filtering.
+     * Store performs SQL-level JOIN with meta_assets internally to avoid truncation from "paginating before filtering".
      */
     filter?: { assetTypes?: readonly string[] },
   ): MaybePromise<ListPage<FixedAssetBindingEntity>>;
   getAgentFixedAsset(agentId: string, assetId: string): MaybePromise<FixedAssetBindingEntity | null>;
   /**
-   * 按 agent_id + asset_type 聚合 COUNT(DISTINCT asset_id)。
-   * 不补全缺失 agent / 缺失 type（由 Service 层补零）。
+   * Aggregates COUNT(DISTINCT asset_id) by agent_id + asset_type.
+   * Does not pad missing agents / missing types (zero-padded by Service layer).
    */
   summarizeAgentFixedAssetsByAgents(
     agentIds: string[],
@@ -205,7 +205,7 @@ export interface IMetadataStore {
   listConfigParams(filter: ListConfigParamsFilter): MaybePromise<ConfigParamEntity[]>;
 }
 
-/** 后端类型。 */
+/** Backend type. */
 export type MetadataBackend = "sqlite" | "mongodb" | "mysql";
 
 export type { TeamRole };

@@ -8,19 +8,19 @@ import { getMetadataClient } from "../../meta/client.js";
 import { resolveFixedAssetCtxs, type FixedAssetCtx } from "./tdai-fixed-asset.js";
 
 /**
- * L2/L3 注入（按 openclaw / hermes 官方做法重构）：
- *   - L3 (persona) → 注入完整内容（稳定且通常较短，作为长期画像）
- *   - L2 (scenarios) → **只注入 Scene Navigation 索引（路径列表 + summary）**，
- *     不预读全文。LLM 需要细节时主动调 `tdai_read_scene` 工具按 path 拉取。
- *   - 同时附 memory-tools-guide 文案，告诉 LLM 怎么用工具 + 调用上限。
+ * L2/L3 Injection (refactored following openclaw/hermes official patterns):
+ *   - L3 (persona) → Inject full content (stable and usually short, used as long-term profile).
+ *   - L2 (scenarios) → **Only inject Scene Navigation index (path list + summary)**,
+ *     do not pre-read full text. The LLM will actively call the `tdai_read_scene` tool to fetch via path when details are needed.
+ *   - Includes memory-tools-guide text, instructing the LLM how to use tools + call limits.
  *
- * 这样可以：
- *   1. 大幅降低首轮 token 消耗（L2 全文经常上千 chars × N 个）
- *   2. 让 LLM 按需取文，而不是被无关的场景污染上下文
+ * This achieves:
+ *   1. Significantly reduced first-turn token consumption (L2 full text is often thousands of chars × N items).
+ *   2. Allows LLM to fetch text on demand, instead of polluting the context with irrelevant scenes.
  *
- * 跨 agent："自有 + 借入"按 agent 分段；每段下面 L3 + Scene 索引并列。
+ * Cross-agent: "Self + Imported" segmented by agent; L3 + Scene index are listed side-by-side under each segment.
  *
- * 控制面不可达时降级：仅注入当前 agent 的 L3 + Scene 索引。
+ * Graceful degradation when control plane is unreachable: only injects the current agent's L3 + Scene index.
  */
 export class TdaiProfileMemoryInjector implements InjectionHook {
   id = "tdai-profile-memory-injector";
@@ -60,9 +60,9 @@ export class TdaiProfileMemoryInjector implements InjectionHook {
 
     const session = (ctx.metadata.custom as any)?.session as { user_key?: string; space_id?: string } | undefined;
     const userKey = session?.user_key;
-    // spaceId 来自 session 注册时保存的 URL path 中的 `/proxy/<spaceId>/...`；
-    // 用作内核的 `x-tdai-service-id` 头做租户路由。空字符串会被内核拒绝（invalid_user_key）
-    // —— caller 已在 session-init 阶段做 bypass 处理。
+    // spaceId comes from the `/proxy/<spaceId>/...` URL path saved during session registration;
+    // used as the `x-tdai-service-id` header in the kernel for tenant routing. Empty strings will be rejected by kernel (invalid_user_key)
+    // — caller handles bypass during session-init phase.
     const spaceId = session?.space_id ?? "";
     const mc = this.coreSkillCfg && userKey
       ? getMetadataClient(this.coreSkillCfg, spaceId, userKey)
@@ -76,10 +76,10 @@ export class TdaiProfileMemoryInjector implements InjectionHook {
       serviceId: spaceId || this.baseConfig.serviceId,
     });
 
-    // 对每个 agent 独立拉 L3 + L2 索引（不读 L2 全文）
+    // Fetch L3 + L2 index independently for each agent (do not read L2 full text)
     const groups = await Promise.all(ctxs.map((c) => loadAgentProfile(client, c)));
 
-    // 全部为空 → 仍注入 tools-guide（LLM 可主动 search L1 / 读 L2）
+    // All empty → still inject tools-guide (LLM can actively search L1 / read L2)
     const hasAnything = groups.some((g) => g.l3 || g.l2Entries.length > 0);
     if (!hasAnything) {
       return [{
@@ -91,7 +91,7 @@ export class TdaiProfileMemoryInjector implements InjectionHook {
 
     const lines: string[] = [
       "<tdai_profile_memory>",
-      "以下是 TDAI 为当前 agent 维护的长期工作记忆（自有 + 借入分段；L2 仅给索引，按需用工具读全文）：",
+      "Below is the long-term working memory maintained by TDAI for the current agent (self + imported segments; L2 only provides an index, use tools to read full text as needed):",
     ];
 
     let l2TotalCount = 0;
@@ -110,7 +110,7 @@ export class TdaiProfileMemoryInjector implements InjectionHook {
         lines.push("<l2_scene_index>");
         for (const e of g.l2Entries) {
           l2TotalCount++;
-          // 索引行：路径 + summary（如果有）；正文用 tool 拉
+          // Index row: path + summary (if available); body fetched via tool
           if (e.summary) {
             lines.push(`- \`${e.path}\` — ${truncate(e.summary, 200)}`);
           } else {
@@ -123,7 +123,7 @@ export class TdaiProfileMemoryInjector implements InjectionHook {
     }
 
     lines.push("</tdai_profile_memory>");
-    // 紧跟一段 memory-tools-guide，告诉 LLM 三个工具的用法 + 调用上限
+    // Followed by the memory-tools-guide to instruct LLM on tool usage + rate limits
     lines.push("");
     lines.push(MEMORY_TOOLS_GUIDE);
 
@@ -160,67 +160,67 @@ function createPrewarmAgentContext(input: PrewarmInput): AgentContext {
   };
 }
 
-/** 记忆使用指南：L0/L1 按需用工具检索（不再自动召回），L3 直注、L2 索引直注。 */
+/** Memory usage guide: L0/L1 searched on demand via tools (no longer auto-recalled), L3 injected directly, L2 index injected directly. */
 export const MEMORY_TOOLS_GUIDE = `<memory-tools-guide>
-## ⚠️ 重要：这不是文档，这是你的可用能力
+## ⚠️ IMPORTANT: This is not documentation, these are capabilities available to you
 
-以下 \`<tdai_memory_tools>\` 中列出的 tdai_memory_search / tdai_conversation_search
-等，是**你可以主动调用的能力**（不是仅供参考的文档）。它们通过 **Bash + curl**
-使用（见上方 \`<tdai_memory_tools>\` 段里的完整调用说明与 URL）。
+The tools listed below in \`<tdai_memory_tools>\` such as tdai_memory_search / tdai_conversation_search
+are **capabilities you can actively call** (not just reference documents). They are used via **Bash + curl**
+(see the complete usage instructions and URLs in the \`<tdai_memory_tools>\` section above).
 
-**禁止**回答类似"我没有这个工具 / 需要 MCP / 需要斜杠命令"。
-**正确做法**：判定需要查记忆时，直接在 Bash 里执行 curl，proxy 会自动注入身份与鉴权。
+**Do NOT** reply with phrases like "I don't have this tool / needs MCP / needs slash command".
+**Correct approach**: When determining the need to search memory, directly execute curl in Bash; proxy will automatically inject identity and authentication.
 
-## 记忆使用规则（遇到以下场景必须先查再答）
+## Memory Usage Rules (Must search first before answering when encountering the following scenarios)
 
-L3（persona 长期画像）与 L2 场景索引已直接注入 system。L0/L1 需要用工具主动检索。
+L3 (persona long-term profile) and L2 scene index are directly injected into system. L0/L1 need to be actively searched using tools.
 
-### 必须先查记忆再回答的场景（命中任一条即触发工具调用）
+### Scenarios where you must search memory before answering (trigger tool call if any condition is met)
 
-1. **用户提及历史/过去/之前**：如 "我之前说过 / 我告诉过你 / 上次 / 你还记不记得 / 我们聊过 / 之前那个"
-   → 用 \`tdai_conversation_search\`（L0 原文找具体消息）
-2. **用户涉及自己身份/偏好/习惯**：如 "我叫什么 / 我的名字 / 我喜欢 / 我的团队 / 我常用 / 我不喜欢 / 我不允许"
-   → 用 \`tdai_memory_search\`（L1 原子记忆查偏好/规则）
-3. **用户要求你回忆/找**：如 "回忆一下 / 想起 / 找出 / 有没有关于 X 的记录 / 查我们之前"
-   → 直接触发工具，不要凭空回答
-4. **答案强依赖历史事实**：如 "那个 bug 我们怎么修的 / 上次方案是啥 / 我们的约定是什么"
-   → 关键词化后 \`tdai_memory_search\`
+1. **User mentions history/past/before**: e.g., "I said before / I told you / last time / do you remember / we chatted / that previous thing"
+   → Use \`tdai_conversation_search\` (find specific message in L0 raw text)
+2. **User refers to their identity/preferences/habits**: e.g., "what is my name / my name / I like / my team / I usually use / I don't like / I do not allow"
+   → Use \`tdai_memory_search\` (search L1 atomic memory for preferences/rules)
+3. **User asks you to recall/find**: e.g., "recall / remember / find out / are there any records about X / check our previous"
+   → Directly trigger tool, do not make up an answer
+4. **Answer strongly depends on historical facts**: e.g., "how did we fix that bug / what was the last plan / what did we agree on"
+   → Extract keywords then \`tdai_memory_search\`
 
-**典型流程**（用户："我叫什么"）：
+**Typical workflow** (User: "What is my name?"):
 \`\`\`bash
-# Step 1: 先查
+# Step 1: Search first
 curl -sfk -X POST <bridge>/atomic/search \\
   -H 'Content-Type: application/json' -H 'x-conversation-id: <sid>' \\
-  -d '{"query": "用户姓名 name 身份", "limit": 5}'
-# Step 2: 从 items[].content 里提取答案后回复
-# 若为空: 明确告诉用户 "我在记忆里没找到，你叫什么？" —— 不要装作知道
+  -d '{"query": "user name identity", "limit": 5}'
+# Step 2: Extract answer from items[].content and reply
+# If empty: explicitly tell the user "I couldn't find it in memory, what is your name?" — Do not pretend to know
 \`\`\`
 
-### 不需要查的场景
+### Scenarios where searching is NOT needed
 
-- 用户问 "你是谁" / "帮我改代码" / "写个脚本" / 通用编程问题
-- 当前会话上下文（同轮消息）里已能回答
-- 已经在 \`<l3_core_memory>\` 段落里直接看到答案
+- User asks "who are you" / "help me modify code" / "write a script" / general programming questions
+- The answer is already available in the current conversation context (same round of messages)
+- The answer can be directly seen in the \`<l3_core_memory>\` section
 
-### ⚠️ 调用约束
+### ⚠️ Calling Constraints
 
-- 每轮 \`tdai_memory_search\` + \`tdai_conversation_search\` **合计 ≤ 3 次**（\`tdai_read_scene\` / \`tdai_scenario_ls\` / \`tdai_atomic_query\` 不计入）
-- 检索无果时**明确说明**"我在记忆里没找到 X"，不要幻想
-- 同一 L2 path 不要重复读
+- Total of \`tdai_memory_search\` + \`tdai_conversation_search\` per round **must be ≤ 3 times** (\`tdai_read_scene\` / \`tdai_scenario_ls\` / \`tdai_atomic_query\` do not count towards this limit)
+- When search yields no result, **explicitly state** "I didn't find X in memory", do not hallucinate
+- Do not repeatedly read the same L2 path
 </memory-tools-guide>`;
 
 interface AgentProfileBundle {
   ctx: FixedAssetCtx;
   l3: { content: string } | null;
-  /** L2 索引：仅 path + 可选 summary，**不**读全文。 */
+  /** L2 index: path only + optional summary, **does not** read full text. */
   l2Entries: Array<{ path: string; summary?: string }>;
 }
 
 async function loadAgentProfile(client: TdaiClient, c: FixedAssetCtx): Promise<AgentProfileBundle> {
   const tdaiCtx = { teamId: c.teamId, userId: c.userId, agentId: c.agentId, agentName: c.agentName };
   const [l3, l2Entries] = await Promise.all([client.readL3ForCtx(tdaiCtx), client.listL2ForCtx(tdaiCtx)]);
-  // L3(persona) 可能在尾部内嵌一份「Scene Navigation」场景索引（plugin 侧 read 会带导航段）。
-  // 我们已经单独注入 <l2_scene_index>，必须剥掉 persona 尾部这份，避免 L2 索引重复注入。
+  // L3 (persona) might embed a 'Scene Navigation' index at the tail (plugin side read may append it).
+  // We already inject <l2_scene_index> separately, so we must strip this from the persona tail to avoid duplicate L2 index injection.
   const l3Stripped = l3 ? stripSceneNavigation(l3.content) : "";
   return {
     ctx: c,
@@ -230,13 +230,13 @@ async function loadAgentProfile(client: TdaiClient, c: FixedAssetCtx): Promise<A
 }
 
 /**
- * 剥离 persona 尾部的「Scene Navigation (Scene Index)」段。
- * 与 plugin 端 scene-navigation.ts 的 NAV_HEADER 对齐（带或不带前置 `---` 都能命中）。
+ * Strip the "Scene Navigation (Scene Index)" segment from the tail of persona.
+ * Aligns with NAV_HEADER in scene-navigation.ts on the plugin side (matches with or without preceding `---`).
  */
 export function stripSceneNavigation(personaContent: string): string {
   const idx = personaContent.indexOf("## 🗺️ Scene Navigation");
   if (idx === -1) return personaContent;
-  // 连同紧邻的 `---` 分隔符与前后空白一起去掉
+  // Remove the immediately adjacent `---` separator and surrounding whitespace as well
   let cut = personaContent.slice(0, idx);
   cut = cut.replace(/\s*-{3,}\s*$/, "");
   return cut.trimEnd();

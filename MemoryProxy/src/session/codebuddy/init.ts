@@ -1,11 +1,11 @@
 /**
- * CodeBuddy Session Initialization — 状态机入口.
+ * CodeBuddy Session Initialization — State Machine Entry.
  *
  * Flow:
- *   1. uninitialized → 内核拉 teams[], 发 `ask_followup_question` form
- *   2. pending_team_select → 解析用户 team 选择, 发 agent_task form
- *   3. pending_agent_task → 解析 agent+task, fetch 详情, register, inject
- *   4. initialized → 每次请求 strip + inject
+ *   1. uninitialized → Kernel pulls teams[], sends `ask_followup_question` form
+ *   2. pending_team_select → Parses user team selection, sends agent_task form
+ *   3. pending_agent_task → Parses agent+task, fetches details, registers, injects
+ *   4. initialized → Strips + injects on every request
  */
 
 import type { SessionInitConfig } from "../../types.js";
@@ -59,21 +59,21 @@ export interface SessionRequestContext {
   modelId: string;
   protocol?: "openai" | "anthropic";
   /**
-   * codex 客户端专属：codex 的答复不走 CB 兼容的 messages[]，而是塞在
-   * `body.input[]` 里的 `function_call_output` 项。codexHandler 已经用
-   * `codexFormAnswersAsMessages` 转出一份 `messages` 交给 CB 状态机做正常的
-   * 选项匹配，但状态机内部还需要**原始** input[] 才能：
-   *   1. 检测 Default 模式 gate 字符串（客户端每次会回放历史 gate output）
-   *   2. 按 question id 精确定位 MORE 命中的是 team/agent/task 哪个
+   * codex client exclusive: codex replies do not use the CB-compatible messages[], but are embedded
+   * as the `function_call_output` item in `body.input[]`. codexHandler has already used
+   * `codexFormAnswersAsMessages` to extract a copy of `messages` to hand over to the CB state machine for normal
+   * option matching, but the state machine internally still needs the **raw** input[] to:
+   *   1. Detect Default mode gate strings (the client replays historical gate outputs every time)
+   *   2. Accurately pinpoint whether MORE hit team/agent/task based on question id
    *
-   * CC/普通 CB 场景永远不传此字段。
+   * CC/normal CB scenarios never pass this field.
    */
   codexAnswerInput?: unknown[];
   /**
-   * CB v1.106+ 的 ask_followup_question schema 要求 questions 为真 array；
-   * 老版本期望 JSON 字符串。handler 从 body.tools 中检测后填入此字段，
-   * form builder 据此决定是否 JSON.stringify(questions)。
-   * 未设置时默认 true（向新版对齐）。
+   * CB v1.106+ ask_followup_question schema requires questions to be a true array;
+   * older versions expect a JSON string. The handler detects this from body.tools and fills this field,
+   * the form builder uses this to decide whether to JSON.stringify(questions).
+   * Defaults to true if unset (aligning with newer versions).
    */
   questionsAsArray?: boolean;
 }
@@ -89,18 +89,18 @@ export interface SessionInitResult {
   /** 用户选"否"不关联团队资产 → bypass 路径，所有注入钩子应跳过。 */
   bypassed?: boolean;
   /**
-   * bypass 触发原因（仅 `bypassed === true` 时有意义）。codexHandler 用它决定
-   * 首次 gate 命中是否要返 "Plan 模式提示" 而非直接透传。
+   * Bypass trigger reason (meaningful only when `bypassed === true`). codexHandler uses it to decide
+   * whether the first gate hit should return a "Plan mode hint" rather than passing through directly.
    *
-   * - "default-gate"  → codex 客户端 Default 模式截断了我们的 request_user_input
-   *                     并伪造出 "request_user_input is unavailable in Default mode"
-   *                     字符串；codexHandler 应返一次 Plan 模式提示后再进入 bypass
-   *                     稳态。
-   * - undefined       → 其它 bypass 路径（用户显式选"否"、no-agents、preset
-   *                     mismatch 等），走各自 handler 的默认 bypass 行为。
+   * - "default-gate"  → codex client's Default mode intercepted our request_user_input
+   *                     and forged a "request_user_input is unavailable in Default mode"
+   *                     string; codexHandler should return a Plan mode hint once before entering steady
+   *                     bypass state.
+   * - undefined       → Other bypass paths (user explicitly selected "No", no-agents, preset
+   *                     mismatch, etc.), takes the respective handler's default bypass behavior.
    *
-   * CC/CB 客户端本身触发不到 default-gate（客户端不会伪造 gate 字符串），保留
-   * 常量供跨 handler 判定即可。
+   * CC/CB clients themselves cannot trigger default-gate (clients don't forge gate strings), keeping
+   * the constant for cross-handler evaluation is sufficient.
    */
   bypassReason?: "default-gate";
   /**
@@ -126,28 +126,29 @@ export interface SessionInitResult {
 type MessageArr = Record<string, unknown>[];
 
 /**
- * codex-only: 判定 `body.input[]` 里最后一个 function_call_output 是否为
- * 客户端 Default 模式 gate 拦截。客户端每轮会带上历史 gate output，因此
- * "是否首次命中"由调用方看 sessionStore.bypassed 判断，这里只负责结构识别。
+ * codex-only: Determine whether the last function_call_output in `body.input[]` is a
+ * client Default mode gate interception. Since the client carries historical gate outputs every round,
+ * "whether it's the first hit" is judged by the caller by checking sessionStore.bypassed;
+ * here we are only responsible for structural identification.
  *
- * CB/CC 客户端从不会发这个字符串，所以放在 CB 状态机里 opt-in 检测 codex 专属
- * 场景（agentSource==="codex" + reqCtx.codexAnswerInput 非空）依然安全。
+ * CB/CC clients never send this string, so it remains safe to opt-in checking this codex-exclusive
+ * scenario in the CB state machine (agentSource==="codex" + reqCtx.codexAnswerInput non-empty).
  */
 function detectCodexDefaultGate(input: unknown): boolean {
   if (!Array.isArray(input)) return false;
-  // 只识别"input 的最后一个 item 就是 gate output"的情况 —— 即这一轮 codex 客户端
-  // 拦截了 tool_call 并直接 replay gate。
+  // Only recognize the case where "the very last item in input is the gate output" — meaning this round
+  // the codex client intercepted the tool_call and directly replayed the gate.
   //
-  // 为什么必须看**最末 item** 而不是"最新的 function_call_output"：
-  // codex 客户端每一轮都 replay 整个历史 input,一旦历史里出现过 Default 模式的
-  // gate output,它会永远沉淀在 input 里。用户从 Default 切到 Plan 后重发命令,
-  // 客户端会在 input 尾部**追加一条新的 user message**（那条 mem:session-reset
-  // 或用户对 form 的答复）,老 gate output 仍留在中间。若扫"最新 function_call_output"
-  // 则永远命中老 gate,死循环卡住"请切到 Plan 模式"文案。
+  // Why must we look at the **last item** rather than the "latest function_call_output":
+  // The codex client replays the entire historical input every round. Once a Default mode
+  // gate output appears in history, it will permanently settle in the input. When the user switches from Default to Plan and resends the command,
+  // the client will append a **new user message** at the end of the input (that mem:session-reset
+  // or the user's answer to the form), while the old gate output remains in the middle. If we scan for the "latest function_call_output",
+  // it would permanently hit the old gate, creating an infinite loop stuck on the "please switch to Plan mode" message.
   //
-  // 只有当尾部就是 function_call_output(说明客户端刚 replay gate,还没让用户输入)
-  // 才判 Default;若尾部是 user message / tool_use / 其他 → 说明当前是新一轮 turn,
-  // 忽略历史残留 gate。
+  // Only when the tail is function_call_output (meaning the client just replayed the gate and hasn't let the user input yet)
+  // do we judge it as Default; if the tail is a user message / tool_use / etc. → it means the current turn is a new turn,
+  // ignoring historical residual gates.
   const last = input[input.length - 1] as Record<string, unknown> | null | undefined;
   if (!last || typeof last !== "object") return false;
   if (last.type !== "function_call_output") return false;
@@ -156,13 +157,13 @@ function detectCodexDefaultGate(input: unknown): boolean {
 }
 
 /**
- * codex-only: 根据 recovered.status + detectCodexMore().perQuestion 决定
- * 应该 bump 的 pageIndex（team/agent/task）。返回 bump 结果与已经填好的
- * 新 codexPageIndex object；调用方拿去写 state + 重发同 stage 的 form。
+ * codex-only: Based on recovered.status + detectCodexMore().perQuestion, decide
+ * which pageIndex (team/agent/task) should be bumped. Returns the bump result and the pre-filled
+ * new codexPageIndex object; the caller uses it to write state + resend the form of the same stage.
  *
- * partialMore 场景（agent 是真选、task=更多）：直接把 task 那侧 pageIndex+1
- * 后交给 CB 状态机继续消费——CB 只会命中真选 agent 推进大状态；task 那侧靠
- * 下一 stage form 的 taskPage 值重新出题。
+ * partialMore scenario (agent is a real choice, task=more): directly increment pageIndex on the task side by 1
+ * and pass it to the CB state machine for continued consumption — CB will only hit the real chosen agent and advance the grand state;
+ * the task side relies on the taskPage value of the next stage form to re-prompt.
  */
 function computeCodexPageBumps(
   cur: { teamPage?: number; agentPage?: number; taskPage?: number } | undefined,
@@ -188,8 +189,8 @@ function computeCodexPageBumps(
 }
 
 /**
- * 生成带上 codex 分页页码的 FormData，供 codex handler 重渲染。CB 客户端
- * 会忽略这些页码字段（CB `ask_followup_question` 不分页）。
+ * Generates a FormData equipped with codex pagination page numbers for the codex handler to re-render. CB clients
+ * will ignore these page number fields (CB `ask_followup_question` doesn't paginate).
  */
 function withCodexPageIndex(
   fd: FormData,
@@ -205,25 +206,25 @@ function withCodexPageIndex(
 }
 
 /**
- * WorkBuddy-only: 检测某一 stage 的用户答复是否点了 "更多 →"，命中则算出翻页后
- * 的 pageIndex（越界回绕到第 0 页）。
+ * WorkBuddy-only: Detects if the user's answer in a certain stage clicked "More →", and if hit, calculates the post-flip
+ * pageIndex (wrapping back to page 0 if out of bounds).
  *
- * 背景：WorkBuddy（agentSource="workbuddy"）复用 CB 状态机跑
- * uninitialized → pending_team_select → pending_agent_select → pending_task_select
- * 全套流程，但 form 渲染走 workbuddy/form.ts（AskUserQuestion + CC 分页，
- * MORE_LABEL="更多 →"）。CB 状态机原本只在 agentSource="codex" 分支拦截 MORE
- * （B 段的 isCodexSource 门控），WorkBuddy 落到 pending_*_select 分支后
- * extractAgentOnly/extractTaskOnly 不识别 "更多 →" → 未识别 → 无限重发第 1 页。
+ * Background: WorkBuddy (agentSource="workbuddy") reuses the CB state machine to run the entire flow:
+ * uninitialized → pending_team_select → pending_agent_select → pending_task_select,
+ * but form rendering goes through workbuddy/form.ts (AskUserQuestion + CC pagination,
+ * MORE_LABEL="More →"). The CB state machine originally only intercepts MORE in the agentSource="codex" branch
+ * (the isCodexSource gate in Section B). When WorkBuddy falls into the pending_*_select branch,
+ * extractAgentOnly/extractTaskOnly fails to recognize "More →" → unrecognized → infinitely resends page 1.
  *
- * 修法：在每个 pending_*_select 分支入口、跑 extractor 之前，先用本函数判定
- * MORE。命中就 bump 对应 stage 的页码并重发同 stage form（页码经
- * session/index.ts 的 workbuddy 重渲染分支按 stage 从 codexPageIndex 挑出，
- * 传给 workbuddy/form.ts 的 pageIndex）。
+ * Fix: At the entry of each pending_*_select branch, before running the extractor, first use this function to evaluate
+ * MORE. If hit, bump the page number of the corresponding stage and resend the same-stage form (the page number is
+ * picked from codexPageIndex by the workbuddy re-rendering branch in session/index.ts according to the stage,
+ * and passed to workbuddy/form.ts's pageIndex).
  *
- * @param answerText  getLastUserMessageText(messages) 提取的用户答复文本
- * @param currentPage 当前 stage 的页码（0-based）
- * @param total       当前 stage 候选总数（agents.length / tasks.length / teams.length）
- * @returns null=非 MORE；number=翻页后的 pageIndex（越界回绕 0）
+ * @param answerText  The user answer text extracted by getLastUserMessageText(messages)
+ * @param currentPage The current stage's page number (0-based)
+ * @param total       Total candidates in the current stage (agents.length / tasks.length / teams.length)
+ * @returns null=not MORE; number=post-flip pageIndex (wraps to 0 on out of bounds)
  */
 function detectWorkbuddyMorePage(
   answerText: string,
@@ -232,8 +233,9 @@ function detectWorkbuddyMorePage(
 ): number | null {
   if (!answerText.includes(WB_MORE_LABEL)) return null;
   const nextPage = currentPage + 1;
-  // 用与 form 侧同款分页算法判越界，防止翻过末页后停在越界页导致 form 抛
-  // solo-page 断言；对齐 claude-code/init.ts 的 safeNextPage 回绕逻辑。
+  // Use the same pagination algorithm as the form side to check for out-of-bounds, preventing it from stopping
+  // at an out-of-bounds page after flipping past the last page which causes the form to throw
+  // a solo-page assertion; aligns with safeNextPage wrap-around logic in claude-code/init.ts.
   const totalPages = computeCCPagination(Math.max(0, total), 0).totalPages;
   return nextPage > totalPages - 1 ? 0 : nextPage;
 }

@@ -27,18 +27,18 @@ export interface LlmConfig {
    * Per-instance bindings always override this default.
    */
   mode: "proxy" | "custom";
-  /** LLM 协议：openai 走 /chat/completions，anthropic 走 /messages。默认 openai（向后兼容）。 */
+  /** LLM protocol:openai Walk /chat/completions,anthropic Walk /messages. default openai(Backwards compatible). */
   protocol: "openai" | "anthropic";
   provider: string;
   apiKey: string;
   model: string;
   baseUrl: string;
   maxTokens: number;
-  /** LLM request timeout in ms. Defaults to 1200000 (20min) — reasoning 模型需要更长时间。 */
+  /** LLM request timeout in ms. Defaults to 1200000 (20min) — reasoning Models take longer. */
   timeoutMs: number;
   /**
-   * 是否用流式请求(streamText)调用上游。默认 false(非流式)。
-   * 个别只接受流式请求的兼容上游需置 true。per-instance binding 不覆盖此字段(部署级开关)。
+   * Whether to use streaming requests(streamText)Call upstream. default false(non-streaming).
+   * Some compatible upstreams that only accept streaming requests need to be configured true.per-instance binding Do not override this field(Deployment level switch).
    */
   stream?: boolean;
 }
@@ -94,8 +94,8 @@ function clamp(n: number, min: number, max: number): number {
 }
 
 /**
- * 单 wiki 内阶段1 并发 LLM 抽取数。
- * KNOWLEDGE_WIKI_INGEST_CONCURRENCY，默认 3，clamp 1~10。
+ * one wiki inner stage1 concurrent LLM Number of draws.
+ * KNOWLEDGE_WIKI_INGEST_CONCURRENCY,default 3,clamp 1~10.
  */
 export function getIngestConcurrency(env: NodeJS.ProcessEnv = process.env): number {
   const raw = parseInt(env.KNOWLEDGE_WIKI_INGEST_CONCURRENCY ?? "", 10);
@@ -103,8 +103,8 @@ export function getIngestConcurrency(env: NodeJS.ProcessEnv = process.env): numb
 }
 
 /**
- * 全局 LLM 最大并发数（跨所有 wiki 的 extract + merge）。
- * KNOWLEDGE_LLM_GLOBAL_CONCURRENCY，默认 5，clamp 1~20。
+ * overall situation LLM Maximum number of concurrencies (across all wiki of extract + merge).
+ * KNOWLEDGE_LLM_GLOBAL_CONCURRENCY,default 5,clamp 1~20.
  */
 export function getGlobalLlmConcurrency(env: NodeJS.ProcessEnv = process.env): number {
   const raw = parseInt(env.KNOWLEDGE_LLM_GLOBAL_CONCURRENCY ?? "", 10);
@@ -112,8 +112,8 @@ export function getGlobalLlmConcurrency(env: NodeJS.ProcessEnv = process.env): n
 }
 
 /**
- * Wiki 检索增强摄取开关：提取前把相关既有页正文注入 prompt。
- * KNOWLEDGE_WIKI_RETRIEVAL_ENABLED，默认 true。
+ * Wiki Search enhanced ingestion switch: Inject relevant existing page text before extraction prompt.
+ * KNOWLEDGE_WIKI_RETRIEVAL_ENABLED,default true.
  */
 export function getWikiRetrievalEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const raw = env.KNOWLEDGE_WIKI_RETRIEVAL_ENABLED;
@@ -122,8 +122,8 @@ export function getWikiRetrievalEnabled(env: NodeJS.ProcessEnv = process.env): b
 }
 
 /**
- * Wiki 检索增强摄取：注入提取 prompt 的既有页数上限。
- * KNOWLEDGE_WIKI_RETRIEVAL_TOP_K，默认 3，clamp 1~10。
+ * Wiki Retrieve Enhanced Ingestion: Inject Extraction prompt existing page limit.
+ * KNOWLEDGE_WIKI_RETRIEVAL_TOP_K,default 3,clamp 1~10.
  */
 export function getWikiRetrievalTopK(env: NodeJS.ProcessEnv = process.env): number {
   const raw = parseInt(env.KNOWLEDGE_WIKI_RETRIEVAL_TOP_K ?? "", 10);
@@ -131,8 +131,8 @@ export function getWikiRetrievalTopK(env: NodeJS.ProcessEnv = process.env): numb
 }
 
 /**
- * Wiki 检索增强摄取：注入上下文的总字符预算（含块头）。
- * KNOWLEDGE_WIKI_RETRIEVAL_MAX_CHARS，默认 12000，clamp 1000~60000。
+ * Wiki Retrieve enhanced ingestion: The total character budget (including chunk headers) of the injected context.
+ * KNOWLEDGE_WIKI_RETRIEVAL_MAX_CHARS,default 12000,clamp 1000~60000.
  */
 export function getWikiRetrievalMaxChars(env: NodeJS.ProcessEnv = process.env): number {
   const raw = parseInt(env.KNOWLEDGE_WIKI_RETRIEVAL_MAX_CHARS ?? "", 10);
@@ -140,8 +140,8 @@ export function getWikiRetrievalMaxChars(env: NodeJS.ProcessEnv = process.env): 
 }
 
 /**
- * Wiki 检索增强摄取：构造搜索 query 时使用的源词数上限。
- * KNOWLEDGE_WIKI_RETRIEVAL_QUERY_TERMS，默认 24，clamp 4~100。
+ * Wiki Retrieval Enhanced Ingestion: Structured Search query The upper limit of the number of source words used.
+ * KNOWLEDGE_WIKI_RETRIEVAL_QUERY_TERMS,default 24,clamp 4~100.
  */
 export function getWikiRetrievalQueryTerms(env: NodeJS.ProcessEnv = process.env): number {
   const raw = parseInt(env.KNOWLEDGE_WIKI_RETRIEVAL_QUERY_TERMS ?? "", 10);

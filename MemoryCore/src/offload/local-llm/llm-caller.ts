@@ -17,8 +17,8 @@ export interface LlmCallerConfig {
   temperature: number;
   timeoutMs: number;
   /**
-   * 是否用流式请求(streamText)调用上游。默认 false(generateText 非流式)。
-   * 个别 OpenAI 兼容上游只接受流式请求时置 true。
+   * Whether to use streaming requests (streamText) to call upstream. Default false (generateText non-streaming).
+   * Set to true when some OpenAI compatible upstream only accepts streaming requests.
    */
   stream?: boolean;
 }
@@ -75,8 +75,8 @@ export async function callLlm(
       },
     };
 
-    // stream=true → streamText(给只吃流式的上游);否则 generateText。
-    // streamText 的 text 是 Promise,await 后与 generateText 用法对齐。
+    // stream=true → streamText (for upstream that only accepts streaming); otherwise generateText.
+    // streamText's text is a Promise, aligned with generateText usage after await.
     const text = config.stream
       ? ((await streamText(callParams).text) ?? "").trim()
       : (await generateText(callParams)).text.trim();

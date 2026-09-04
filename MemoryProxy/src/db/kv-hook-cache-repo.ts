@@ -1,16 +1,16 @@
 /**
  * KvHookCacheRepo —— HookCacheRepo backed by ProxyStorage.
  *
- * 见 docs/design/2026-07-12-cos-shark-sts-credential-plan.md §3.2 §3.6。
+ * See docs/design/2026-07-12-cos-shark-sts-credential-plan.md §3.2 §3.6.
  *
- * Key 路径：
+ * Key path:
  *   ttl/<spaceId>/<userId>/<agentSource>/<sessionId>/inj-hook/<hookId>.json
  *
- * spaceId 是 P4 (kernel-sts) 新增的隔离段。老 caller 传空字符串时用 `_default` 兜底。
+ * spaceId is the isolation segment added in P4 (kernel-sts). When old callers pass an empty string, `_default` is used as fallback.
  *
- * QPS 放大警告：`putMany` 从 1 次 HSET 变成 N 次并发 PUT；`getAllForSession`
- * 从 1 次 HGETALL 变成 1 次 LIST + N 次 GET。注入层通常 3–5 个 hookId/session，
- * 可接受；压测发现瓶颈可退化为整 session 打包。
+ * QPS amplification warning: `putMany` changes from 1 HSET to N concurrent PUTs; `getAllForSession`
+ * changes from 1 HGETALL to 1 LIST + N GETs. The injection layer typically has 3-5 hookId/session,
+ * which is acceptable; if stress testing finds bottlenecks, it can degrade to whole-session packing.
  */
 import type { HookCacheRepo, HookCacheEntry } from "./hookCacheRepo.js";
 import type { ContextBlock } from "../injection/types.js";
@@ -62,7 +62,7 @@ export class KvHookCacheRepo implements HookCacheRepo {
     entries: HookCacheEntry[],
   ): Promise<void> {
     if (entries.length === 0) return;
-    // 并发 PUT —— 保持 wall-clock ≈ 单次 PUT，而不是 N 倍串行
+    // Concurrent PUT —— keeps wall-clock ≈ single PUT, rather than N times serialized
     await Promise.all(
       entries.map((e) =>
         this.storage

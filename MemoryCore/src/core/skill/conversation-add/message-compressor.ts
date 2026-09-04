@@ -2,17 +2,19 @@
  * SkillMessageCompressor — compress oversized tool_call / tool_result payloads
  * before they enter the skill buffer.
  *
- * 对应设计文档 `2026-07-15-skill-trigger-in-core-design.md` §6：
- *   - 只压 tool_call / tool_result；user / assistant / system 永不压缩
- *   - content 字节数 > 2KB 才压缩，头 1KB + 尾 1KB + 中间占位提示
- *   - metadata.truncated = true, metadata.original_bytes = <原始字节数>
+ * Corresponds to design doc `2026-07-15-skill-trigger-in-core-design.md` §6:
+ *   - Only compresses tool_call / tool_result; user / assistant / system are never compressed
+ *   - Content is only compressed when byte count > 2KB: head 1KB + tail 1KB + middle placeholder
+ *   - metadata.truncated = true, metadata.original_bytes = <original byte count>
  *
- * 字节切分实现说明：
- *   直接对 Buffer 做 slice 可能截到 UTF-8 多字节字符的中间，转回 string 会
- *   出现 U+FFFD 替换字符。这里我们对 Buffer 做切片、再 toString('utf8')，
- *   Node 侧会把结尾/开头不完整的多字节序列替换成 U+FFFD——但整体不影响
- *   下游 LLM review 的语义（提示语里说明了截断）。对于 tool payload 这种
- *   通常是 ASCII/JSON 的场景，边界字符损坏概率极低；测试对齐宽松断言。
+ * Byte-splitting implementation note:
+ *   Slicing a Buffer directly may cut in the middle of a UTF-8 multi-byte character,
+ *   resulting in U+FFFD replacement characters when converting back to string.
+ *   We slice the Buffer and then call toString('utf8'), where Node will replace
+ *   incomplete multi-byte sequences at the boundary with U+FFFD — but this does not
+ *   affect the downstream LLM review semantics (the prompt indicates truncation).
+ *   For tool payloads which are typically ASCII/JSON, boundary character corruption
+ *   is extremely rare; tests use relaxed assertions accordingly.
  */
 
 export type CompressibleRole =
@@ -33,13 +35,13 @@ export interface CompressibleMessage {
 }
 
 export interface CompressOptions {
-  /** 字节阈值；tool 消息 content bytes > 阈值才压缩。默认 2048 (2KB)。 */
+  /** Byte threshold; tool message content is only compressed when bytes > threshold. Default 2048 (2KB). */
   toolContentThresholdBytes: number;
-  /** 头部保留字节数。默认 1024 (1KB)。 */
+  /** Head bytes to keep. Default 1024 (1KB). */
   headBytes: number;
-  /** 尾部保留字节数。默认 1024 (1KB)。 */
+  /** Tail bytes to keep. Default 1024 (1KB). */
   tailBytes: number;
-  /** 中间占位字符串。 */
+  /** Middle placeholder string. */
   placeholder: string;
 }
 
@@ -47,7 +49,7 @@ export const DEFAULT_COMPRESS_OPTIONS: CompressOptions = {
   toolContentThresholdBytes: 2048,
   headBytes: 1024,
   tailBytes: 1024,
-  placeholder: "\n\n[中间内容过长已被压缩，只展示头尾]\n\n",
+  placeholder: "\n\n[Middle content too large and has been compressed — only head and tail shown]\n\n",
 };
 
 const COMPRESSIBLE_ROLES = new Set<CompressibleRole>(["tool_call", "tool_result"]);

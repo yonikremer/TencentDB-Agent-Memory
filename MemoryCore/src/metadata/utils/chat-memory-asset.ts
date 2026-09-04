@@ -1,37 +1,37 @@
 /**
- * chat_memory 资产 ID 生成规则。
+ * chat_memory asset ID generation rules.
  *
- * 约定：每个 (team, agent) 组合对应**一个**稳定的 chat_memory 资产，asset_id
- * 由 team_id 与 agent_id 拼出：
+ * Convention: Each (team, agent) combination corresponds to **one** stable chat_memory asset, asset_id
+ * is constructed from team_id and agent_id:
  *
  *     chat_memory-{team_id}-{agent_id}
  *
- * 这种确定性 ID 让写入路径自动幂等 —— 同一 (team, agent) 无论请求多少次，
- * 计算出的 asset_id 相同，store 层的主键约束会自然拦截重复插入。
+ * This deterministic ID makes the write path automatically idempotent — no matter how many times same (team, agent) is requested,
+ * the calculated asset_id is identical, and store layer primary key constraints naturally intercept duplicate inserts.
  *
- * 正向拼接不需要反解。`/v3/chat-memory/clear` 需要从 asset_id 定位到
- * (team, agent) 才能清内容，但**不做字符串切分** —— team_id / agent_id 内部
- * 都可能含 `-`，切分会产生歧义。反向定位统一走 `resolveChatMemoryAgentId`：
- * 拿资产已知的 team_id + 候选 agent_id 正向拼接后比对，命中即确认。
+ * Forward concatenation doesn't need reversing. `/v3/chat-memory/clear` needs to locate (team, agent) from asset_id
+ * to clear content, but **does not split string** — team_id / agent_id internally
+ * might contain `-`, splitting causes ambiguity. Reverse locating uniformly uses `resolveChatMemoryAgentId`:
+ * concatenating asset's known team_id + candidate agent_id and comparing, confirming upon match.
  */
 
-/** chat_memory 资产 ID 前缀。 */
+/** chat_memory asset ID prefix. */
 export const CHAT_MEMORY_ASSET_PREFIX = "chat_memory-";
 
-/** 稳定生成一个 (team, agent) 对应的 chat_memory 资产 ID。 */
+/** Stably generate a chat_memory asset ID corresponding to (team, agent). */
 export function buildChatMemoryAssetId(teamId: string, agentId: string): string {
   return `${CHAT_MEMORY_ASSET_PREFIX}${teamId}-${agentId}`;
 }
 
 /**
- * 在候选 agent 列表里找出与 assetId 匹配的那个 agent_id。
+ * Find the agent_id matching assetId from candidate agent list.
  *
- * 用正向拼接比对而非切分字符串，所以 team_id / agent_id 含 `-` 时依然正确。
+ * Uses forward concatenation comparison instead of string splitting, so it's still correct when team_id / agent_id contains `-`.
  *
- * @param assetId    chat_memory 资产 ID
- * @param teamId     该资产记录上的 team_id（权威值，不从 assetId 里猜）
- * @param agentIds   该team 下的候选 agent_id 列表
- * @returns          命中的 agent_id；无匹配返回 undefined
+ * @param assetId    chat_memory asset ID
+ * @param teamId     team_id on the asset record (authoritative value, not guessed from assetId)
+ * @param agentIds   candidate agent_id list under the team
+ * @returns          matched agent_id; undefined if no match
  */
 export function resolveChatMemoryAgentId(
   assetId: string,

@@ -1,11 +1,11 @@
 /**
- * MongoDB 实现的 IMetadataStore。
+ * MongoDB implementation of IMetadataStore.
  *
- * 对应设计文档 §6.1 / §6.4（MongoDB 事务处理）。
- * 复合写入（createTeam + admin、createTask + linkAgents、setAgentFixedAssets 全量替换、
- * deleteAssets 级联）使用 multi-document transaction（需副本集）保证原子性。
+ * Corresponds to design doc §6.1 / §6.4 (MongoDB transaction handling).
+ * Composite writes (createTeam + admin, createTask + linkAgents, setAgentFixedAssets full replacement,
+ * deleteAssets cascade) use multi-document transactions (replica set required) to guarantee atomicity.
  *
- * 集合命名与 SQLite 表对齐（meta_*）。读操作统一投影掉 `_id`。
+ * Collection naming aligns with SQLite tables (meta_*). Read operations project out `_id` uniformly.
  */
 
 import type {
@@ -84,7 +84,7 @@ function isStorePkCollision(err: unknown): boolean {
   return isPkCollision(err) || isMongoRelationIdCollision(err);
 }
 
-/** E11000 on meta_user_keys.key_value (调用方显式指定 default_key_value 时并发命中)。 */
+/** E11000 on meta_user_keys.key_value (hits concurrency when caller explicitly specifies default_key_value). */
 function isUserKeyValueCollision(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
   const e = err as { code?: number; keyPattern?: Record<string, unknown> };
@@ -94,9 +94,9 @@ function isUserKeyValueCollision(err: unknown): boolean {
 const PROJECT_NO_ID = { projection: { _id: 0 } } as const;
 
 export interface MongoMetadataStoreOptions {
-  /** 是否启用多文档事务（需副本集）。默认 true。 */
+  /** Whether to enable multi-document transactions (replica set required). Default true. */
   useTransactions?: boolean;
-  /** false 时 close() 不关闭 client（MetadataStorePool 共享连接）。 */
+  /** When false, close() does not close client (shared connection in MetadataStorePool). */
   ownsClient?: boolean;
 }
 
@@ -262,7 +262,7 @@ export class MongoMetadataStore implements IMetadataStore {
   }
 
   /**
-   * 安全创建索引：索引创建失败不会中断初始化流程，但会记录日志便于线上排查。
+   * Safely creates an index: failures during index creation will not interrupt initialization, but are logged for troubleshooting.
    */
   private async ensureIndex(
     colName: string,
@@ -277,13 +277,13 @@ export class MongoMetadataStore implements IMetadataStore {
         ?? (err instanceof Error ? err.message : String(err));
       const specStr = `${colName}(${JSON.stringify(spec)})`;
       if (code === 85 || code === 86) {
-        // 索引已存在但定义不同（如 options 变化），索引创建被跳过，功能不受影响
+        // Index already exists with different options, index creation skipped, functionality unaffected
         console.warn(`[mongodb-adapter] ensureIndex skipped (index exists with different options) ${specStr}: ${msg}`);
       } else if (code === 11000) {
-        // 存量数据违反 unique 约束，索引创建失败，该字段的唯一性校验无法生效
+        // Existing data violates unique constraint, index creation failed, uniqueness check on field disabled
         console.warn(`[mongodb-adapter] ensureIndex skipped (duplicate data violates unique constraint) ${specStr}: ${msg}`);
       } else {
-        // 非预期错误（网络超时、权限不足等），需要人工排查
+        // Unexpected error (network timeout, insufficient permissions, etc.), requires manual investigation
         console.warn(`[mongodb-adapter] ensureIndex failed (unexpected error, code=${code}) ${specStr}: ${msg}`);
       }
     }
@@ -394,7 +394,7 @@ export class MongoMetadataStore implements IMetadataStore {
         });
         return doc;
       } catch (err) {
-        // 调用方显式指定 default_key_value 命中 UNIQUE:翻译业务错(HTTP 409),不 retry。
+        // Caller explicitly specified default_key_value hit UNIQUE: translate to business error (HTTP 409), no retry.
         if (isUserKeyValueCollision(err)) {
           throw new DuplicateUserKeyError(defaultKeyValue);
         }
@@ -1050,8 +1050,8 @@ export class MongoMetadataStore implements IMetadataStore {
   }
 
   async deleteAssets(assetIds: string[]): Promise<BatchDeleteResult> {
-    // 物理删除 meta_assets，并级联清理绑定与 ACL。
-    // 已不存在视为幂等成功（Skill 钩子/handler 双通道会二次调用）。
+    // Physically delete meta_assets, and cascade clean bindings and ACL.
+    // Already non-existent treated as idempotent success (Skill hook/handler dual channel invokes twice).
     const result: BatchDeleteResult = { deleted_ids: [], failed: [] };
     for (const id of assetIds) {
       const existing = await this.getAssetById(id);
@@ -1086,7 +1086,7 @@ export class MongoMetadataStore implements IMetadataStore {
   }
 
   // ============================================================
-  // AgentFixedAsset（全量替换）
+  // AgentFixedAsset (Full replacement)
   // ============================================================
   async setAgentFixedAssets(agentId: string, bindings: FixedAssetBindingInput[]): Promise<void> {
     const now = nowIso();
@@ -1120,8 +1120,8 @@ export class MongoMetadataStore implements IMetadataStore {
   }
 
   async addAgentFixedAsset(agentId: string, b: FixedAssetBindingInput): Promise<void> {
-    // (agent_id, asset_id) 上有 unique index（见 initIndexes）。冲突 = 已存在
-    // → 视作 no-op，天然幂等。
+    // (agent_id, asset_id) has unique index (see initIndexes). Collision = already exists
+    // → treated as no-op, naturally idempotent.
     try {
       await this.col("meta_agent_fixed_assets").insertOne({
         id: generateRelationId(),
@@ -1157,7 +1157,7 @@ export class MongoMetadataStore implements IMetadataStore {
         (d) => d as FixedAssetBindingEntity,
       );
     }
-    // 类型过滤：先按 asset_type 拿 asset_id 集合，再用它过滤 binding。
+    // Type filtering: fetch asset_id set by asset_type first, then filter bindings using it.
     const assetIds = await this.col("meta_assets")
       .find({ asset_type: { $in: [...types] } } as Document, { projection: { asset_id: 1 } })
       .map((d) => (d as { asset_id: string }).asset_id)

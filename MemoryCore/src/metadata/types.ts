@@ -1,15 +1,15 @@
 /**
  * Metadata module — Entity types & shared contracts.
  *
- * 对应设计文档 08-metadata-migration-and-permission-design.md §2 / §6。
+ * Corresponds to design doc 08-metadata-migration-and-permission-design.md §2 / §6.
  *
- * 这是从 team-memory-control 搬迁到记忆内核的元数据实体类型定义。
- * 与 core/store 中已有的简化 entity_* 类型不同，这里是完整的业务模型
- * （含 user_key / password / visibility / acl 等）。
+ * This contains metadata entity type definitions migrated from team-memory-control to memory core.
+ * Unlike the simplified entity_* types in core/store, this is the full business model
+ * (including user_key / password / visibility / acl, etc.).
  */
 
 // ============================
-// 枚举与字面量类型
+// Enums and Literal Types
 // ============================
 
 export type UserStatus = "active" | "inactive" | "invited";
@@ -33,7 +33,7 @@ export type AssetStatus =
 
 export type InjectionMode = "direct" | "summary" | "tool" | "reference";
 
-/** 权限动作（6 类）。 */
+/** Permission actions (6 categories). */
 export type Permission =
   | "read"
   | "write"
@@ -42,21 +42,21 @@ export type Permission =
   | "share"
   | "use";
 
-/** ACL 授权主体类型。 */
+/** ACL subject type. */
 export type AclSubjectType = "user" | "team_role" | "agent";
 
-/** ACL 效果（一期仅 allow，deny 预留）。 */
+/** ACL effect (Phase 1 allow only, deny reserved). */
 export type AclEffect = "allow" | "deny";
 
 // ============================
-// 实体类型
+// Entity Types
 // ============================
 
 export type UserKeyStatus = "active" | "revoked";
 
 export interface UserEntity {
   user_id: string;
-  /** scrypt+pepper 哈希后的密码（`$scrypt$...`），可空。 */
+  /** Scrypt+pepper hashed password (`$scrypt$...`), nullable. */
   password?: string | null;
   auth_provider: string;
   external_id: string;
@@ -91,7 +91,7 @@ export interface TeamMemberEntity {
   status: MemberStatus;
 }
 
-/** team-member/list · get 响应：成员关系 + 读时 JOIN 的 username（不落库）。 */
+/** team-member/list · get response: member relationship + username JOINed on read (not persisted). */
 export interface TeamMemberView extends TeamMemberEntity {
   username: string;
 }
@@ -135,7 +135,7 @@ export interface TaskAgentEntity {
   created_at: string;
 }
 
-/** Task/Agent 参与事件日志（append-only）。 */
+/** Task/Agent participation event log (append-only). */
 export interface ParticipationLogEntity {
   id: string;
   team_id: string;
@@ -165,7 +165,7 @@ export interface ParticipationLogFilter {
   user_id?: string;
   created_after?: string;
   created_before?: string;
-  /** 是否按 user_id 去重；默认 false。 */
+  /** Whether to deduplicate by user_id; default false. */
   dedupe?: boolean;
 }
 
@@ -202,7 +202,7 @@ export interface FixedAssetBindingEntity {
   created_at: string;
 }
 
-/** 按 asset_type 聚合的固定资产绑定计数（distinct asset_id）。 */
+/** Fixed asset binding count aggregated by asset_type (distinct asset_id). */
 export interface FixedAssetTypeCounts {
   skill: number;
   code_graph: number;
@@ -210,35 +210,35 @@ export interface FixedAssetTypeCounts {
   chat_memory: number;
 }
 
-/** 单个 agent 的固定资产分配汇总。 */
+/** Fixed asset allocation summary for a single agent. */
 export interface AgentFixedAssetSummary {
   agent_id: string;
   counts: FixedAssetTypeCounts;
-  /** 该 agent 匹配到的 binding 总行数（非去重）。 */
+  /** Total count of matching binding rows for this agent (non-deduplicated). */
   total: number;
 }
 
-/** summary-by-agents 响应。 */
+/** summary-by-agents response. */
 export interface AgentFixedAssetSummaryResult {
   items: AgentFixedAssetSummary[];
   total: number;
 }
 
-/** Store/Service：按多 agent 分组统计固定资产绑定。 */
+/** Store/Service: aggregate fixed asset bindings grouped by multiple agents. */
 export interface SummarizeAgentFixedAssetsParams {
   agent_ids: string[];
-  /** 可选：只统计绑定了该 asset 的行；用于 bound_agent_count。 */
+  /** Optional: count only rows bound to this asset; used for bound_agent_count. */
   asset_id?: string;
 }
 
-/** Store 层原始聚合行（未补零）。 */
+/** Store layer raw aggregated row (unpadded). */
 export interface AgentFixedAssetCountRow {
   agent_id: string;
   asset_type: AssetType;
   cnt: number;
 }
 
-/** 用户 API 密钥行（存储层，含完整 key_value）。 */
+/** User API key row (storage layer, contains full key_value). */
 export interface UserKeyEntity {
   key_id: string;
   user_id: string;
@@ -253,7 +253,7 @@ export interface UserKeyEntity {
   metadata_json: string;
 }
 
-/** API 脱敏结构（list / get）。 */
+/** API sanitized structure (list / get). */
 export interface UserKeyPublic {
   key_id: string;
   user_id: string;
@@ -267,7 +267,7 @@ export interface UserKeyPublic {
   revoked_at?: string | null;
 }
 
-/** create 响应：仅此一次返回完整 key_value。 */
+/** create response: returns full key_value once only. */
 export interface UserKeyCreated extends UserKeyPublic {
   key_value: string;
 }
@@ -285,7 +285,7 @@ export interface AclEntity {
 }
 
 // ============================
-// 输入类型（创建/更新）
+// Input Types (Create/Update)
 // ============================
 
 export interface UserPublic {
@@ -295,14 +295,14 @@ export interface UserPublic {
   created_at: string;
 }
 
-/** 公开 user/list 可选过滤（internal list-by-instance 另含 status / user_type）。 */
+/** Public user/list optional filter (internal list-by-instance additionally contains status / user_type). */
 export interface UserListFilter {
   user_ids?: string[];
-  /** 精确匹配用户名（用于查重等场景）。 */
+  /** Exact username match (used for deduplication, etc.). */
   username?: string;
 }
 
-/** user/create 响应：不含 username（见 08 §CreateUserResult）。 */
+/** user/create response: does not contain username (see 08 §CreateUserResult). */
 export interface CreateUserApiResult {
   user_id: string;
   user_type: UserType;
@@ -322,11 +322,11 @@ export interface InitAdminResult {
 
 export interface CreateUserInput {
   user_id?: string;
-  /** 内部：init-admin 可指定默认 user_key。 */
+  /** Internal: init-admin can specify default user_key. */
   default_key_value?: string;
-  /** 存储层默认 `local`（API 不暴露）。 */
+  /** Storage layer default `local` (not exposed by API). */
   auth_provider?: string;
-  /** 存储层默认 `user_id`（API 不暴露）。 */
+  /** Storage layer default `user_id` (not exposed by API). */
   external_id?: string;
   username: string;
   display_name?: string | null;
@@ -334,9 +334,9 @@ export interface CreateUserInput {
   raw_profile_json?: string;
   status?: UserStatus;
   metadata_json?: string;
-  /** 仅存储层内部使用；API create 固定 normal，init-admin 固定 system_admin。 */
+  /** Storage layer internal use only; API create fixed normal, init-admin fixed system_admin. */
   user_type?: UserType;
-  /** v3.1：新用户恒 NULL；仅 store 层写入。 */
+  /** v3.1: Always NULL for new users; written by store layer only. */
   password?: string | null;
 }
 
@@ -390,12 +390,12 @@ export interface CreateTaskInput {
   auto_assign_floating_assets?: boolean;
   risk_level?: string | null;
   metadata_json?: string;
-  /** 创建 task 时可同时关联的 agent。 */
+  /** Agents that can be linked simultaneously when creating a task. */
   linked_agents?: Array<{ agent_id: string; role_in_task?: string }>;
 }
 
 export interface CreateAssetInput {
-  /** 由调用方（外部资产系统）提供，元数据模块仅记录与鉴权，不生成 asset_id。 */
+  /** Provided by caller (external asset system), metadata module only logs and checks permission, does not generate asset_id. */
   asset_id: string;
   team_id: string;
   asset_type: AssetType;
@@ -431,30 +431,30 @@ export interface GrantAclInput {
 }
 
 // ============================
-// 过滤器类型
+// Filter Types
 // ============================
 
 export interface AgentFilter {
   status?: AgentStatus;
   /**
-   * 组合过滤：与 team_id 一起使用时表示"团队内某用户 owner 的 agent"。
-   * 单独使用 owner_user_id 时走 listAgentsByOwner，无需该字段。
+   * Combined filter: when used with team_id indicates "agents owned by a user within the team".
+   * Using owner_user_id alone routes to listAgentsByOwner, does not require team_id.
    */
   owner_user_id?: string;
-  /** 精确匹配 agent 名称（用于查重等场景）。 */
+  /** Exact match for agent name (used for deduplication, etc.). */
   name?: string;
 }
 
 export interface TaskFilter {
   status?: TaskStatus;
   creator_user_id?: string;
-  /** 精确匹配 task 标题（用于查重等场景）。 */
+  /** Exact match for task title (used for deduplication, etc.). */
   title?: string;
 }
 
-/** team/list 可选过滤（用于查重等场景）。 */
+/** team/list optional filter (used for deduplication, etc.). */
 export interface TeamFilter {
-  /** 精确匹配 team 名称。 */
+  /** Exact match for team name. */
   name?: string;
 }
 
@@ -466,22 +466,22 @@ export interface AssetFilter {
 }
 
 // ============================
-// 通用结果类型
+// Common Result Types
 // ============================
 
-/** list 接口分页入参（可选；未传时服务端默认 limit=20、offset=0）。 */
+/** list API pagination input parameters (optional; defaults to limit=20, offset=0 on server if omitted). */
 export interface PaginationInput {
   limit?: number;
   offset?: number;
 }
 
-/** 解析后的分页参数（limit/offset 均有确定值）。 */
+/** Parsed pagination parameters (both limit and offset have concrete values). */
 export interface PaginationParams {
   limit: number;
   offset: number;
 }
 
-/** list 接口分页响应信封。 */
+/** list API pagination response envelope. */
 export interface PaginatedResult<T> {
   items: T[];
   total: number;
@@ -489,13 +489,13 @@ export interface PaginatedResult<T> {
   offset: number;
 }
 
-/** Store 层 list 查询结果（内部分页切片 + 总数）。 */
+/** Store layer list query result (internal pagination slice + total count). */
 export interface ListPage<T> {
   items: T[];
   total: number;
 }
 
-/** internal list-by-instance 可选过滤（扩展 UserListFilter）。 */
+/** internal list-by-instance optional filter (extends UserListFilter). */
 export interface InstanceUserListFilter extends UserListFilter {
   status?: UserStatus;
   user_type?: UserType;
@@ -507,7 +507,7 @@ export interface BatchDeleteResult {
 }
 
 // ============================
-// ConfigParam 类型
+// ConfigParam Types
 // ============================
 
 export type ConfigParamScope = "global" | "user";

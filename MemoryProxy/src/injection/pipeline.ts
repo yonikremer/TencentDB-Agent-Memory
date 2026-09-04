@@ -175,10 +175,10 @@ export class InjectionPipeline {
     ];
 
     const sessionId = this.getSessionId(ctx);
-    // Hook cache 隔离键 —— userId 从 metadata 里取（handler 层已透传）；
-    // 缺省时 fallback 到 "anonymous"（与 handler 层一致，防止未鉴权请求撞
-    // 到已鉴权用户的缓存）。agentSource 由 URL path 派生，缺省 "claude-code"。
-    // spaceId 是 P4 新增（kernel-sts）；缺省时 Repo 用 `_default` 兜底段。
+    // Hook cache isolation key — userId is fetched from metadata (passed through from handler layer);
+    // falls back to "anonymous" when missing (consistent with handler layer, prevents unauthenticated
+    // requests from hitting authenticated user cache). agentSource is derived from URL path, defaults to "claude-code".
+    // spaceId is added in P4 (kernel-sts); when missing, the Repo uses the `_default` segment as a fallback.
     const userId = (ctx.metadata.userId && ctx.metadata.userId.length > 0)
       ? ctx.metadata.userId
       : "anonymous";
@@ -198,7 +198,7 @@ export class InjectionPipeline {
           const durationMs = Date.now() - hookStartMs;
 
           if (blocks.length > 0) {
-            // 💡 显式打印注入成功的日志和文本前 120 字符预览，极大方便开发者排查和联调
+            // 💡 Explicitly log successful injection and a 120-char preview of the text, greatly assisting developer debugging and integration
             console.log(
               `[injection] ✓ Hook "${hook.id}" successfully injected ${blocks.length} block(s) ` +
               `at point "${point}" (cacheStrategy=${hook.cacheStrategy ?? "none"})`
@@ -295,10 +295,10 @@ export class InjectionPipeline {
       // hook.execute() and self-heal the cache so subsequent turns hit the
       // fast path.
       //
-      // Exception: `metadata.readOnly === true` (FORK 请求) —— cache-miss 时**不
-      // self-heal put**。因为 fork 请求的目的是复用 MAIN 已建的 cache 命中；如果
-      // miss 时 self-heal，写入内容可能跟 MAIN 那次不 byte-level 一致，反而破坏
-      // 后续主对话的 cache 语义。
+      // Exception: `metadata.readOnly === true` (FORK requests) — on cache-miss, **do not
+      // self-heal put**. The purpose of a fork request is to reuse the cache hit established by MAIN; if
+      // it self-heals on miss, the written content might not be byte-level consistent with MAIN, thus destroying
+      // cache semantics for subsequent main dialogs.
       const fresh = await hook.execute(ctx);
       const readOnly = ctx.metadata.readOnly === true;
       if (fresh.length > 0 && !readOnly) {
@@ -417,11 +417,11 @@ export class InjectionPipeline {
       case "system.after_tools": {
         // Fallback semantics for anchor-unresolved hooks: append to the end of
         // the system message. The previous behavior for `system.before_tools`
-        // was to prepend (顶到最前面)，会把 knowledge/skill/rules 等资产块甩到
-        // 用户 persona 前面污染开场，尤其在子 agent / 简化 system prompt 场景
-        // (锚点永远解析不到) 直接看到 <knowledge_tools> 位于 offset 0。
-        // 统一收敛为 "锚点找不到 → 挂到系统提示词末尾"，跟 system.suffix 行为
-        // 一致，跟 asset-reflection / tdai-tools 这些 suffix 类块的落位对齐。
+        // was to prepend (at the very beginning), which would throw asset blocks like knowledge/skill/rules
+        // in front of the user persona, polluting the opening, especially in sub-agent / simplified system prompt scenarios
+        // (where anchors can never be resolved) directly exposing <knowledge_tools> at offset 0.
+        // Unified to "anchor not found → append to system prompt end", consistent with system.suffix behavior,
+        // and aligned with the placement of suffix-class blocks like asset-reflection / tdai-tools.
         const sysMsg = getSystemMessage(ctx);
         if (!sysMsg) break;
         for (const block of blocks) {

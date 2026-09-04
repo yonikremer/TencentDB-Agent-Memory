@@ -60,7 +60,7 @@ export interface ScannerConfig {
 
 export interface WorkerConfig {
   pollMs: number;
-  /** 并发消费协程数 (default: 60) */
+  /** Concurrent consumption coroutine count (default: 60) */
   concurrency: number;
 }
 
@@ -71,80 +71,80 @@ export interface CosExtraConfig {
 }
 
 export interface KafkaConfig {
-  /** 是否启用 Kafka (默认: false) */
+  /** Whether to enable Kafka (default: false) */
   enabled: boolean;
-  /** Kafka Broker 列表 (逗号分隔) */
+  /** Kafka Broker list (comma separated) */
   brokers: string;
-  /** Topic 名称 (默认: "memory_monitor") */
+  /** Topic name (default: "memory_monitor") */
   topic: string;
-  /** 消费者组 ID（仅 Consumer 使用，如 Monitor） */
+  /** Consumer group ID (used only by Consumer, e.g. Monitor) */
   groupId?: string;
-  /** 分区总数（仅 Producer 使用，用于 hash 分区） */
+  /** Total partition count (used only by Producer, for hash partitioning) */
   totalPartitions?: number;
 }
 
 export interface OTelConfig {
-  /** 是否启用 OTel SDK (默认: false) */
+  /** Whether to enable OTel SDK (default: false) */
   enabled: boolean;
-  /** Collector endpoint (默认: http://localhost:4317) */
+  /** Collector endpoint (default: http://localhost:4317) */
   endpoint: string;
-  /** 协议: "grpc" | "http/protobuf" (默认: "grpc") */
+  /** Protocol: "grpc" | "http/protobuf" (default: "grpc") */
   protocol: "grpc" | "http/protobuf";
-  /** OTLP 请求头，用于鉴权等，格式 key=value 逗号分隔 */
+  /** OTLP request headers, for auth etc., format key=value comma separated */
   headers?: string;
-  /** 服务名 (默认: "core") */
+  /** Service name (default: "core") */
   serviceName: string;
-  /** 服务版本 */
+  /** Service version */
   serviceVersion: string;
-  /** 实例标识 */
+  /** Instance ID */
   instanceId?: string;
-  /** 智研 APM 租户 ID */
+  /** Zhiyan APM tenant ID */
   tenantId: string;
-  /** Metric 导出间隔 (秒, 默认: 60) */
+  /** Metric export interval (seconds, default: 60) */
   metricExportInterval?: number;
-  /** Log 导出间隔 (秒, 默认: 5) */
+  /** Log export interval (seconds, default: 5) */
   logExportInterval: number;
 }
 
 export interface ClickHouseConfig {
-  /** 是否启用 ClickHouse 双写 (默认: false) */
+  /** Whether to enable ClickHouse dual write (default: false) */
   enabled: boolean;
   /** ClickHouse HTTP endpoint */
   endpoint: string;
-  /** 用户名 */
+  /** Username */
   username: string;
-  /** 密码 */
+  /** Password */
   password: string;
-  /** 数据库名 */
+  /** Database name */
   database: string;
-  /** 写入的目标表名（Monitor 使用，其他组件可留空） */
+  /** Target table name for writing (used by Monitor, other components can leave empty) */
   table?: string;
-  /** 批量写入最大条数 */
+  /** Maximum batch write size */
   maxBatchSize?: number;
-  /** 刷新间隔（秒） */
+  /** Flush interval (seconds) */
   flushInterval?: number;
-  /** 缓冲队列最大长度，超出时丢弃数据 */
+  /** Maximum buffer queue size, data discarded when exceeded */
   maxQueueSize?: number;
 }
 
 export interface LangfuseConfig {
-  /** 是否启用 Langfuse LLM trace 上报 (默认: false) */
+  /** Whether to enable Langfuse LLM trace reporting (default: false) */
   enabled: boolean;
-  /** Langfuse 实例地址 (如 http://langfuse.example.local:3000) */
+  /** Langfuse instance address (e.g. http://langfuse.example.local:3000) */
   host: string;
-  /** Langfuse 公钥 */
+  /** Langfuse public key */
   publicKey: string;
-  /** Langfuse 私钥 */
+  /** Langfuse secret key */
   secretKey: string;
 }
 
 /**
- * 可观测性配置（统一格式，四组件共用）。
- * 各组件按需启用对应子配置，未使用的子配置保持 enabled=false 即可。
+ * Observability config (unified format, shared by four components).
+ * Each component enables corresponding sub-configs as needed, unused sub-configs just keep enabled=false.
  *
- * 各子配置按部署需要启用；未使用的子配置保持 enabled=false 即可。
+ * Sub-configs are enabled per deployment needs; unused sub-configs just keep enabled=false.
  *
- * yaml 示例:
+ * yaml example:
  * ```yaml
  * observability:
  *   otel:
@@ -178,53 +178,53 @@ export interface LangfuseConfig {
  * ```
  */
 export interface ObservabilityConfig {
-  /** OTel SDK 配置 (Trace + Log)。 */
+  /** OTel SDK config (Trace + Log). */
   otel: OTelConfig;
-  /** ClickHouse 双写配置。 */
+  /** ClickHouse dual write config. */
   clickhouse: ClickHouseConfig;
-  /** Kafka 配置。 */
+  /** Kafka config. */
   kafka: KafkaConfig;
-  /** Barad 云监控上报配置。 */
+  /** Barad cloud monitor reporting config. */
   barad?: BaradConfig;
-  /** 智研监控宝 Metric 上报配置。 */
+  /** Zhiyan monitor Metric reporting config. */
   zhiyan?: ZhiYanConfig;
-  /** Langfuse LLM trace 上报配置。 */
+  /** Langfuse LLM trace reporting config. */
   langfuse: LangfuseConfig;
 }
 
-/** Barad 云监控上报配置。 */
+/** Barad cloud monitor reporting config. */
 export interface BaradConfig {
-  /** 是否启用 Barad 上报 (默认: false) */
+  /** Whether to enable Barad reporting (default: false) */
   enabled: boolean;
-  /** 上报地域，如 ap-guangzhou */
+  /** Reporting region, e.g. ap-guangzhou */
   region: string;
-  /** 命名空间 (默认: "qce/memory") */
+  /** Namespace (default: "qce/memory") */
   namespace: string;
-  /** 上报频率（秒）(默认: 60) */
+  /** Reporting frequency (seconds) (default: 60) */
   freq: number;
-  /** 测试环境上报地址（覆盖默认的 region 拼接地址） */
+  /** Test environment reporting address (overrides default region concatenated address) */
   testEndpoint?: string;
-  /** 测试环境查询地址（用于集成测试验证数据） */
+  /** Test environment query address (used for integration testing to verify data) */
   testQueryEndpoint?: string;
-  /** 采集间隔（秒）(默认: 10) */
+  /** Collection interval (seconds) (default: 10) */
   collectInterval?: number;
 }
 
-/** 智研监控宝 Metric 上报配置。使用组件: Monitor ✓ */
+/** Zhiyan monitor Metric reporting config. Using component: Monitor ✓ */
 export interface ZhiYanConfig {
-  /** 是否启用智研 Metric 上报 (默认: false) */
+  /** Whether to enable Zhiyan Metric reporting (default: false) */
   enabled: boolean;
-  /** 智研监控宝上报地址 */
+  /** Zhiyan monitor reporting address */
   endpoint: string;
-  /** 应用标识（智研监控宝必需），格式: {业务ID}_{应用ID}_{应用名} */
+  /** App identifier (required for Zhiyan monitor), format: {BusinessID}_{AppID}_{AppName} */
   appMark: string;
-  /** 分组名称 (默认: "default") */
+  /** Group name (default: "default") */
   group: string;
-  /** 环境标识，如 dev/test/prod */
+  /** Environment identifier, e.g. dev/test/prod */
   env: string;
-  /** 指标命名空间前缀 (默认: "memory") */
+  /** Metric namespace prefix (default: "memory") */
   namespace: string;
-  /** 上报间隔（秒）(默认: 60) */
+  /** Reporting interval (seconds) (default: 60) */
   exportInterval: number;
 }
 
@@ -300,15 +300,15 @@ export interface GatewayConfig {
   scanner: ScannerConfig;
   worker: WorkerConfig;
   cos: CosExtraConfig;
-  /** 可观测性配置 (yaml: observability, env: KAFKA_METRIC_*) */
+  /** Observability config (yaml: observability, env: KAFKA_METRIC_*) */
   observability: ObservabilityConfig;
   /**
-   * 元数据模块配置（env 优先于 yaml；见 applyMetadataEnvFromGatewayConfig）。
+   * Metadata module config (env takes precedence over yaml; see applyMetadataEnvFromGatewayConfig).
    * yaml: metadata.*
    * env: TDAI_METADATA_*
    */
   metadata: GatewayMetadataConfig;
-  /** Offload server executor 配置 (yaml: offload) */
+  /** Offload server executor config (yaml: offload) */
   offload: {
     forceTriggerThreshold: number;
     pendingMaxAgeSeconds: number;
@@ -329,13 +329,13 @@ export interface GatewayConfig {
   };
 }
 
-/** v3 元数据 Gateway yaml 配置（§6.3）。 */
+/** v3 metadata Gateway yaml config (§6.3). */
 export interface GatewayMetadataStoreConfig {
   sqliteBaseDir?: string;
   mongoUri?: string;
   mongoTransactions?: boolean;
   storeCacheMaxInstances?: number;
-  /** 元数据库名前缀，默认 tdai_metadata；库名 {prefix}_{instance_id} */
+  /** Metadata DB name prefix, default tdai_metadata; DB name {prefix}_{instance_id} */
   mongoDbPrefix?: string;
 }
 
@@ -354,7 +354,7 @@ export interface GatewayMetadataConfig {
   maxTeamsPerInstance: number;
   configParamsFile?: string;
   store?: GatewayMetadataStoreConfig;
-  /** 内部静态系统用户（仅 auth/verify；不落库）。 */
+  /** Internal static system user (auth/verify only; not persisted to DB). */
   systemUser?: GatewayMetadataSystemUserConfig;
 }
 
@@ -367,14 +367,14 @@ export interface GatewayMetadataConfig {
 // ============================
 
 /**
- * 将 Kafka brokers 配置值转换为 string[] 数组。
+ * Convert Kafka brokers config value to string[] array.
  *
- * 背景：gateway config 中 KafkaConfig.brokers 类型为 string（逗号分隔），
- * 但 MetricBackendConfig.brokers 期望 string[]。如果直接传入字符串，
- * KafkaJS 会按字符解析导致端口号变成 NaN。
+ * Background: In gateway config, KafkaConfig.brokers type is string (comma separated),
+ * but MetricBackendConfig.brokers expects string[]. If passed directly as a string,
+ * KafkaJS parses by character causing port number to become NaN.
  *
- * @param brokers - 逗号分隔的 broker 地址字符串，或已经是 string[] 数组
- * @returns broker 地址数组（已 trim，已过滤空元素）
+ * @param brokers - comma separated broker address string, or already a string[] array
+ * @returns array of broker addresses (trimmed, empty elements filtered)
  */
 export function parseBrokers(brokers: string | string[]): string[] {
   if (Array.isArray(brokers)) return brokers;
@@ -457,8 +457,8 @@ export function loadGatewayConfig(overrides?: Partial<GatewayConfig>): GatewayCo
     proxy: {
       useMemorySystemUserKey: bool(llmProxyConfig, "useMemorySystemUserKey") ?? true,
     },
-    // env 存在时直接用 env 解析(可显式关闭 yaml);
-    // env 未设置才回退 yaml,与其他 LLM 字段语义一致。
+    // When env exists, parse directly using env (can explicitly override yaml);
+    // fallback to yaml only when env is unset, consistent with other LLM field semantics.
     stream: (() => {
       const envVal = env("TDAI_LLM_STREAM");
       if (envVal !== undefined) return envVal === "true";
@@ -482,8 +482,8 @@ export function loadGatewayConfig(overrides?: Partial<GatewayConfig>): GatewayCo
   // configured (baseUrl + apiKey), splice it onto memory.llm so the
   // SkillExtractor / L1 / L2 / L3 runners see a usable runner without
   // requiring the user to duplicate the block under `memory.llm`.
-  // provider=proxy 模式下即使 apiKey 为空也要 splice —— 因为最终 apiKey 由
-  // memory systemUser.userKey 提供，llm.apiKey 只是 provider=openai 时的显式配置。
+  // In provider=proxy mode, splice even if apiKey is empty —— because the final apiKey is provided
+  // by memory systemUser.userKey, llm.apiKey is only an explicit config when provider=openai.
   const shouldSpliceLlm =
     !memory.llm.enabled && llm.baseUrl && (llm.apiKey || llm.provider === "proxy");
   if (shouldSpliceLlm) {
@@ -568,10 +568,10 @@ export function loadGatewayConfig(overrides?: Partial<GatewayConfig>): GatewayCo
     port: envInt("REDIS_PORT") ?? num(redisConfig, "port") ?? 6379,
     password: env("REDIS_PASSWORD") ?? str(redisConfig, "password"),
     db: envInt("REDIS_DB") ?? num(redisConfig, "db") ?? 0,
-    // v2 默认 prefix：与升级前的 "tdai_memory" 物理隔离。
-    // 升级原因：sk/bk 的 hash tag 从 {p:inst} 升级到 {p:inst:tid:aid}，
-    // 旧 key 与新 key 不互斥，混跑会破坏锁互斥语义；切 prefix 直接物理隔离，
-    // 老数据丢弃。升级时若需保留 redis 中 pending 任务，先停服务 + 等队列空。
+    // v2 default prefix: physically isolated from pre-upgrade "tdai_memory".
+    // Upgrade reason: sk/bk hash tag upgraded from {p:inst} to {p:inst:tid:aid},
+    // old keys and new keys are not mutually exclusive, mixing them destroys lock mutual exclusion semantics; switching prefix isolates them physically,
+    // old data is discarded. If pending tasks in redis need to be kept during upgrade, stop service first + wait for queue to empty.
     keyPrefix: env("REDIS_KEY_PREFIX") ?? str(redisConfig, "keyPrefix") ?? "tdai_memory_v2",
   };
 
@@ -612,7 +612,7 @@ export function loadGatewayConfig(overrides?: Partial<GatewayConfig>): GatewayCo
     throw new Error("cos.generationLogRetentionDays must be a non-negative integer");
   }
 
-  // Observability config (yaml: observability.{otel,clickhouse,kafka}, env 兜底)
+  // Observability config (yaml: observability.{otel,clickhouse,kafka}, env fallback)
   const observabilityConfig = obj(fileConfig, "observability");
 
   // OTel config

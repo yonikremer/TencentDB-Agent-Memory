@@ -95,7 +95,7 @@ export async function resolveFixedAssetCtxs(
           isSelf: false,
         });
       } catch {
-        // 绑定的来源 agent 已删除/不可见时跳过，避免用 chat_memory asset_id 当 agent_id 查询导致空召回。
+        // Skip if the bound source agent is deleted or invisible, avoiding empty recall when using chat_memory asset_id as agent_id.
       }
     }
 

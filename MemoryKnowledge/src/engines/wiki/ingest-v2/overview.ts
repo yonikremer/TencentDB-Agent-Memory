@@ -1,11 +1,11 @@
 /**
- * overview.ts — 生成 wiki/overview.md 全局综述页（llm-wiki synthesis 思想，OQ-9）。
+ * overview.ts — Generates wiki/overview.md global overview page (llm-wiki synthesis idea, OQ-9).
  *
- * 在一批源全部摄取完成后调用一次：把当前 wiki 的所有页（标题 + 描述）喂给 LLM，
- * 让它写一篇把各实体/概念串成叙事的全局综述，帮助人类与 LLM 快速建立整体认知。
+ * Called once after all sources in a batch are ingested: passes all pages (title + description) of current wiki to LLM,
+ * asking it to write a global overview weaving entities/concepts into a narrative, helping humans and LLM quickly build overall mental model.
  *
- * overview.md 带 frontmatter（type: overview），正文鼓励用 [[wikilink]] 指向各页。
- * 失败不影响摄取主流程（调用方 try/catch）。
+ * overview.md carries frontmatter (type: overview), body encouraged to use [[wikilink]] to point to pages.
+ * Failure does not affect main ingestion workflow (caller try/catch).
  */
 
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "node:fs";
@@ -16,7 +16,7 @@ import { createLogger } from "../../../logger.js";
 
 const log = createLogger("wiki-overview");
 
-/** 结构性文件不纳入综述输入，也不被综述覆盖。 */
+/** Structural files are not included in overview input nor overwritten by overview. */
 const STRUCTURAL = new Set(["index.md", "schema.md", "purpose.md", "log.md", "overview.md"]);
 
 interface PageBrief {
@@ -79,15 +79,15 @@ Requirements:
 - Output only the overview body (markdown) — no frontmatter, no FILE blocks, no extra commentary.`;
 
 /**
- * 生成/更新 wiki/overview.md。页太少（<2）时跳过（综述意义不大）。
+ * Generates/updates wiki/overview.md. Skips if page count is too low (<2) (overview has little value).
  *
- * @returns 是否写入了 overview。
+ * @returns Whether overview was written.
  */
 export async function generateOverview(projectPath: string, llm: LlmClient): Promise<boolean> {
   const wikiDir = join(projectPath, "wiki");
   const briefs = collectBriefs(wikiDir);
   if (briefs.length < 2) {
-    log.debug("页面太少，跳过 overview 生成", { pages: briefs.length });
+    log.debug("Too few pages, skipping overview generation", { pages: briefs.length });
     return false;
   }
 

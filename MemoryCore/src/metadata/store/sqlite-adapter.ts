@@ -1,10 +1,10 @@
 /**
- * SQLite 实现的 IMetadataStore。
+ * SQLite implementation of IMetadataStore.
  *
- * 对应设计文档 §6.1 / §6.2。基于 Node 内置 `node:sqlite`（DatabaseSync，Node 22+）。
- * 单连接隐式串行 + 显式 BEGIN/COMMIT 保证复合写入原子性。
+ * Corresponds to design doc §6.1 / §6.2. Based on Node built-in `node:sqlite` (DatabaseSync, Node 22+).
+ * Implicit single-connection serialization + explicit BEGIN/COMMIT guarantee composite write atomicity.
  *
- * 表前缀 `meta_`，与内核已有 entity_* / l0 / l1 表隔离。
+ * Table prefix `meta_`, isolated from existing entity_* / l0 / l1 tables in core.
  */
 
 import { createRequire } from "node:module";
@@ -95,7 +95,7 @@ export class SqliteMetadataStore implements IMetadataStore {
   private readonly dbPath: string;
   private initialized = false;
 
-  /** @param dbPath 文件路径或 ":memory:"。 */
+  /** @param dbPath File path or ":memory:". */
   constructor(dbPath: string) {
     this.dbPath = dbPath;
   }
@@ -328,7 +328,7 @@ export class SqliteMetadataStore implements IMetadataStore {
     this.db.exec(`DROP INDEX IF EXISTS ux_meta_users_single_system_admin`);
   }
 
-  /** 存量库：若 meta_users 仍有 user_key 列，回填 meta_user_keys 后不再写入该列。 */
+  /** Existing DBs: if meta_users still has user_key column, backfill meta_user_keys and stop writing to this column. */
   private migrateLegacyUserKeys(): void {
     const hasUserKeyCol = this.all<{ name: string }>(
       "SELECT name FROM pragma_table_info('meta_users') WHERE name = 'user_key'",
@@ -492,8 +492,8 @@ export class SqliteMetadataStore implements IMetadataStore {
         });
         return this.getUserById(userId)!;
       } catch (err) {
-        // 调用方显式指定 default_key_value 时命中 UNIQUE：翻译为业务错(HTTP 409)。
-        // 不 retry：随机 key_value 生成场景下 192bit 熵不可能碰撞，能到这里的只有显式指定。
+        // Caller explicitly specified default_key_value hit UNIQUE: translate to business error (HTTP 409).
+        // No retry: under random key_value generation 192bit entropy collision is impossible, only explicitly specified values reach here.
         if (isUserKeyValueCollision(err)) {
           throw new DuplicateUserKeyError(defaultKeyValue);
         }
@@ -734,7 +734,7 @@ export class SqliteMetadataStore implements IMetadataStore {
   }
 
   // ============================================================
-  // Team（自动 admin 成员）
+  // Team (auto admin member)
   // ============================================================
   createTeam(input: CreateTeamInput): TeamEntity {
     const now = nowIso();
@@ -999,7 +999,7 @@ export class SqliteMetadataStore implements IMetadataStore {
   }
 
   // ============================================================
-  // Task（含 linkAgents 原子）
+  // Task (including linkAgents atomic write)
   // ============================================================
   createTask(input: CreateTaskInput): TaskEntity {
     const now = nowIso();
@@ -1321,8 +1321,8 @@ export class SqliteMetadataStore implements IMetadataStore {
   }
 
   deleteAssets(assetIds: string[]): BatchDeleteResult {
-    // 物理删除 meta_assets，并级联清理绑定与 ACL。
-    // 已不存在视为幂等成功（Skill 钩子/handler 双通道会二次调用）。
+    // Physically delete meta_assets, and cascade clean bindings and ACL.
+    // Already non-existent treated as idempotent success (Skill hook/handler dual channel invokes twice).
     const result: BatchDeleteResult = { deleted_ids: [], failed: [] };
     for (const id of assetIds) {
       const existing = this.getAssetById(id);
@@ -1378,7 +1378,7 @@ export class SqliteMetadataStore implements IMetadataStore {
   }
 
   // ============================================================
-  // AgentFixedAsset（全量替换）
+  // AgentFixedAsset (Full replacement)
   // ============================================================
   setAgentFixedAssets(agentId: string, bindings: FixedAssetBindingInput[]): void {
     const now = nowIso();
@@ -1412,8 +1412,8 @@ export class SqliteMetadataStore implements IMetadataStore {
   }
 
   addAgentFixedAsset(agentId: string, b: FixedAssetBindingInput): void {
-    // UNIQUE(agent_id, asset_id) 已在 schema 里定义（sqlite-adapter.ts:227 段），
-    // INSERT OR IGNORE 命中冲突时 no-op，天然幂等。
+    // UNIQUE(agent_id, asset_id) defined in schema (sqlite-adapter.ts:227 section),
+    // INSERT OR IGNORE is no-op on collision, naturally idempotent.
     this.run(
       `INSERT OR IGNORE INTO meta_agent_fixed_assets
         (id, agent_id, asset_id, asset_type, injection_mode, priority, created_by, created_at)
@@ -1436,7 +1436,7 @@ export class SqliteMetadataStore implements IMetadataStore {
   ): ListPage<FixedAssetBindingEntity> {
     const types = filter?.assetTypes ?? [];
     if (types.length > 0) {
-      // JOIN meta_assets 做类型过滤，避免"分页在前、类型过滤在后"截断
+      // JOIN meta_assets for type filtering, avoiding truncation from "paginating before filtering"
       const placeholders = types.map(() => "?").join(",");
       const base = `FROM meta_agent_fixed_assets b
         INNER JOIN meta_assets a ON a.asset_id = b.asset_id

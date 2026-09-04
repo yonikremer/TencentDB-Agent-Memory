@@ -1,14 +1,14 @@
 /**
- * tokenize.ts — 中英文混合分词器（BM25/FTS5 共用）。
+ * tokenize.ts — Mixed Chinese/English tokenizer (shared by BM25/FTS5).
  *
- * 从 manager.ts 抽出为独立 leaf 模块：manager 与 ingest-v2/retrieval.ts 都需要它，
- * 独立放置避免静态 import 环（manager 已动态 import ingest-v2/index.js）。
+ * Extracted from manager.ts as an independent leaf module: both manager and ingest-v2/retrieval.ts need it.
+ * Placed independently to avoid static import cycles (manager dynamically imports ingest-v2/index.js).
  *
- * - 英文：按空格/标点切分，保留完整单词，过滤 stop words
- * - 中文：bigram + 单字
+ * - English: split by spaces/punctuation, preserve full words, filter stop words
+ * - Chinese: bigram + single characters
  *
- * 导出供 FTS5 预分词复用（006）与 bm25 评测：写入 FTS5 时把 content/title
- * 经此函数分词后以空格拼接存入，查询时对 query 用同一分词，保证中文逻辑一致。
+ * Exported for FTS5 pre-tokenization reuse (006) and BM25 evaluation: when writing to FTS5, content/title
+ * are tokenized via this function, joined with spaces, and stored; during queries, the same tokenizer is applied to query, ensuring consistent Chinese logic.
  */
 
 const STOP_WORDS = new Set([
@@ -31,7 +31,7 @@ export function tokenize(text: string): string[] {
     const hasLatin = /[a-z]/.test(token);
 
     if (hasCJK && hasLatin) {
-      // 混合 token（如 "l0录入"）：拆分中英文部分分别处理
+      // Mixed token (e.g. "l0ingest"): split Chinese and English parts and process separately
       const parts = token.split(/(?<=[a-z0-9])(?=[一-鿿])|(?<=[一-鿿])(?=[a-z0-9])/);
       for (const part of parts) {
         if (/[一-鿿]/.test(part) && part.length > 1) {
@@ -43,12 +43,12 @@ export function tokenize(text: string): string[] {
         }
       }
     } else if (hasCJK && token.length > 1) {
-      // 纯中文：bigram
+      // Pure Chinese: bigram
       const chars = [...token];
       for (let i = 0; i < chars.length - 1; i++) result.push(chars[i] + chars[i + 1]);
       result.push(token);
     } else if (!STOP_WORDS.has(token) && token.length > 0) {
-      // 纯英文/数字：保留完整 token
+      // Pure English/digits: preserve full token
       result.push(token);
     }
   }

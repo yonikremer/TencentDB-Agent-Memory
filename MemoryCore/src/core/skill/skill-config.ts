@@ -40,7 +40,7 @@ export interface ResolverLogger {
 
 const TAG = "[skill][config]";
 
-/** 通用正整数校验: 传入值有效则用, 否则 warn 落回默认。 */
+/** Common positive integer validation: use if valid, otherwise warn and fallback to default. */
 function validPositiveInteger(
   raw: number | undefined,
   fallback: number,
@@ -157,10 +157,10 @@ export function resolveSkillConfig(
     );
   }
 
-  // --------------- archiveBytes (单一归档尺寸旋钮) ---------------
-  // 派生 7 个内部字段: bytesThreshold / requestCompressThresholdBytes /
-  // chunkMaxBytes / headKeepBytes / tailKeepBytes / headChars / tailChars。
-  // 无效值 (<=0 或非整数) 落回默认 40KB + warn。
+  // --------------- archiveBytes (Single archive size knob) ---------------
+  // Derives 7 internal fields: bytesThreshold / requestCompressThresholdBytes /
+  // chunkMaxBytes / headKeepBytes / tailKeepBytes / headChars / tailChars.
+  // Invalid values (<=0 or non-integer) fall back to default 40KB + warn.
   const DEFAULT_ARCHIVE_BYTES = 40 * 1024;
   const rawArchive = input.extraction?.archiveBytes;
   let archiveBytes = DEFAULT_ARCHIVE_BYTES;
@@ -176,12 +176,12 @@ export function resolveSkillConfig(
   }
 
   // --------------- worker (2026-07-30) ---------------
-  // Worker pool concurrency. 优先级: env > yaml > 默认 60。无效值 warn 落回默认。
+  // Worker pool concurrency. Priority: env > yaml > default 60. Invalid values warn and fall back to default.
   const DEFAULT_WORKER_CONCURRENCY = 60;
   const DEFAULT_WORKER_BRPOP_MS = 5000;
   const DEFAULT_EXTRACT_LOCK_TTL_MS = 600_000;
-  // 优先级: env (合法) > yaml (合法) > 默认。env/yaml 非法值都 warn 并继续
-  // fall through, 让高优先级的坏值不吃掉低优先级的好值。
+  // Priority: env (valid) > yaml (valid) > default. Invalid env/yaml both warn and
+  // fall through, so bad high-priority values don't eat good low-priority values.
   let workerConcurrency = DEFAULT_WORKER_CONCURRENCY;
   const envConcurrencyRaw = process.env.TDAI_SKILL_WORKER_CONCURRENCY;
   let envConcurrencyValid = false;
@@ -246,8 +246,8 @@ export function resolveSkillConfig(
         logger,
         "extraction.prefixSkillsLimit",
       ),
-      // 派生字段 — 命名和默认值来自 add-handler.ts / oversize-strategy.ts
-      // 的 DEFAULT_* 常量，保持"改一个 archiveBytes 一切随动"的语义。
+      // Derived fields — names and defaults sourced from add-handler.ts / oversize-strategy.ts
+      // DEFAULT_* constants, maintaining the semantics of "change one archiveBytes, everything follows".
       bytesThreshold: archiveBytes,
       requestCompressThresholdBytes: archiveBytes,
       chunkMaxBytes: 2 * archiveBytes,

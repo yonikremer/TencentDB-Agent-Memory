@@ -1,15 +1,15 @@
 /**
- * template.ts — 读取 wiki/schema.md 与 wiki/purpose.md 作为抽取模板（FR-4b）。
+ * template.ts — Reads wiki/schema.md and wiki/purpose.md as extraction templates (FR-4b).
  *
- * 这两个文件让用户/调用方自定义"这个 wiki 想抽什么、怎么组织"：
- *   - purpose.md：声明 wiki 的目标领域与用途。
- *   - schema.md：声明抽取偏好（想要哪些页面类型、关注字段、命名/语言约定）。
+ * These two files allow users/callers to customize "what this wiki wants to extract and how to organize it":
+ *   - purpose.md: declares the target domain and purpose of the wiki.
+ *   - schema.md: declares extraction preferences (desired page types, key fields, naming/language conventions).
  *
- * ingest 时把它们「原样拼进 system prompt」（不强制机器解析骨架，容错）。
- * 为空/不存在时用领域中立的默认骨架兜底，保证开箱即用。
+ * During ingest, they are concatenated into system prompt as-is (no forced machine parsing of skeleton for fault tolerance).
+ * When empty/non-existent, falls back to domain-neutral default skeleton, ensuring out-of-the-box functionality.
  *
- * 注意：init 已存在的默认文件（manager.initWikiProject）可能只是空壳
- * （如仅 `# Wiki Schema\n\nDefine ... here.`），这类视为"无有效内容"，用默认。
+ * Note: Default files initialized by init (manager.initWikiProject) may just be empty shells
+ * (such as only `# Wiki Schema\n\nDefine ... here.`), which are treated as "no effective content" and use defaults.
  */
 
 import { readFileSync, existsSync } from "node:fs";
@@ -17,11 +17,11 @@ import { join } from "node:path";
 import { parseFrontmatter } from "./frontmatter.js";
 
 export interface WikiTemplate {
-  /** purpose.md 的有效正文（去 frontmatter），无则为默认。 */
+  /** Effective body of purpose.md (frontmatter stripped), default if absent. */
   purpose: string;
-  /** schema.md 的有效正文（去 frontmatter），无则为默认。 */
+  /** Effective body of schema.md (frontmatter stripped), default if absent. */
   schema: string;
-  /** 是否使用了用户自定义内容（用于日志/调试）。 */
+  /** Whether user-customized content was used (for logging/debugging). */
   customized: boolean;
 }
 
@@ -59,11 +59,11 @@ Other types (comparison, synthesis, etc.) may be created as needed.
 - slug: lowercase, spaces→hyphens
 - Output language: follow the source document — do not switch`;
 
-/** 判断一段正文是否"有实质内容"（排除 init 写入的空壳占位）。 */
+/** Determines whether body text has "meaningful content" (excluding empty shell placeholders created by init). */
 function hasMeaningfulContent(body: string): boolean {
   const stripped = body
-    .replace(/^#.*$/gm, "")              // 去掉标题行
-    .replace(/Define\b[^.。]*[.。]?/gi, "") // 去掉 "Define ..." 占位句（init 默认壳）
+    .replace(/^#.*$/gm, "")              // Remove heading lines
+    .replace(/Define\b[^.。]*[.。]?/gi, "") // Remove "Define ..." placeholder sentence (init default shell)
     .replace(/\s+/g, "");
   return stripped.length >= 8;
 }
@@ -83,7 +83,7 @@ function readTemplateFile(projectPath: string, name: string): string | null {
 }
 
 /**
- * 加载抽取模板。存在且有实质内容则用用户的；否则用领域中立默认。
+ * Loads extraction template. Uses user content if present and meaningful; otherwise falls back to domain-neutral defaults.
  */
 export function loadTemplate(projectPath: string): WikiTemplate {
   const purpose = readTemplateFile(projectPath, "purpose.md");

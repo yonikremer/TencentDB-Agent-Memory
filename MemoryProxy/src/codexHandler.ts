@@ -72,12 +72,12 @@ const SKIP_RESPONSE_HEADERS = new Set([
   "connection",
 ]);
 
-// ── TDAI L0 helpers (对齐 anthropicHandler / handler 姿势) ───────────────────
+// ── TDAI L0 helpers (aligned with anthropicHandler / handler pattern) ────────
 
 /**
- * TDAI L0 客户端工厂 —— 跟 anthropicHandler.ts::createTdaiClient 语义一致。
- * spaceId 优先于 config 默认 serviceId, 便于多租户下 codex 请求上报到正确的
- * kernel 实例。config.tdai.memory.enabled=false 时返 null。
+ * TDAI L0 client factory — semantic equivalent of anthropicHandler.ts::createTdaiClient.
+ * spaceId takes precedence over config default serviceId to report multi-tenant codex
+ * requests to the correct kernel instance. Returns null when config.tdai.memory.enabled=false.
  */
 function createCodexTdaiClient(config: ProxyConfig, spaceId?: string): TdaiClient | null {
   if (!config.tdai.enabled || !config.tdai.memory.enabled || !config.tdai.endpoint) return null;
@@ -96,11 +96,11 @@ function createCodexTdaiClient(config: ProxyConfig, spaceId?: string): TdaiClien
 }
 
 /**
- * 从 codex `input[]` 抽最后一条 role=user 的真实用户文本, 组装 TdaiMessage。
- * 相当于 tdai/recorder.ts::extractLatestUserMessage 的 codex 变体 —— 差别在
- * 遍历判据 (type==="message" && role==="user") 与文本取值 (content[].input_text)。
- * 复用 codexAdapter.extractUserText, 保证跟 codexHandler 里 langfuse traceInput
- * 使用同一份用户提问文本 (docs/2026-08-07-codex-integration-plan.md §9)。
+ * Extracts the latest role=user message text from codex `input[]` and builds a TdaiMessage.
+ * Equivalent to the codex variant of tdai/recorder.ts::extractLatestUserMessage — key differences are
+ * traversal condition (type==="message" && role==="user") and text extraction (content[].input_text).
+ * Reuses codexAdapter.extractUserText to ensure consistency with langfuse traceInput in codexHandler
+ * (docs/2026-08-07-codex-integration-plan.md §9).
  */
 function extractLatestCodexUserMessage(input: unknown): TdaiMessage | null {
   if (!Array.isArray(input)) return null;
@@ -183,13 +183,13 @@ export function extractCodexSessionId(
  * calls and fabricates a `function_call_output.output` starting with
  * "request_user_input is unavailable in".
  *
- * 本函数是历史工具函数，实际拦截逻辑现已内化到 CB 状态机
- * （session/codebuddy/init.ts 的 codex-only pre-checks 段）。保留 export
- * 是因为 codex-handler.test.ts 有单测直接使用它验证结构识别。
+ * Legacy utility function; interception logic is now internalized inside CB state machine
+ * (codex-only pre-checks section of session/codebuddy/init.ts). Export retained because
+ * codex-handler.test.ts has unit tests directly invoking it to verify structural recognition.
  */
 export function detectDefaultModeGate(input: unknown): boolean {
   if (!Array.isArray(input)) return false;
-  // 只识别"input 最后一个 item 就是 gate output": 详见 codebuddy/init.ts 同名注释。
+  // Only match when "last item of input is gate output": see comment with same name in codebuddy/init.ts.
   const last = input[input.length - 1] as Record<string, unknown> | null | undefined;
   if (!last || typeof last !== "object") return false;
   if (last.type !== "function_call_output") return false;
@@ -327,11 +327,10 @@ export async function handleCodexEndpoint(
   // ── 4. Classify request ────────────────────────────────────────────────────
   const requestKind = classifyCodexRequest(body, path, headers);
   const isAuxiliary = requestKind === "auxiliary";
-  // 调用签名是 resolveModelId(creditPricingConfig, requestedModel) —— 之前
-  // 错把 body 当第一参数（漏传 config）导致返回值是整个 body 对象。这个 bug
-  // 从 codex P1 接入首帧就存在，之前 codex 未接 langfuse 没被发现——接入后
-  // Langfuse trace name / observation name 都成了 " / usr-xxx" 空串前缀。
-  // 对齐 handler.ts:482 / anthropicHandler.ts 的调用姿势。
+  // Invocation signature is resolveModelId(creditPricingConfig, requestedModel) — previously
+  // mistakenly passed body as first param (missing config), causing return value to be whole body object.
+  // This bug existed since codex P1 onboarding initial frames, but was unobserved until langfuse integration.
+  // Aligned with invocation pattern in handler.ts:482 / anthropicHandler.ts.
   const requestedModel = typeof body.model === "string" ? body.model : "";
   const modelId = resolveModelId(config.creditPricing, requestedModel);
 
@@ -340,7 +339,7 @@ export async function handleCodexEndpoint(
   // ── 5. Aux passthrough ─────────────────────────────────────────────────────
   if (isAuxiliary) {
     pipe.info("CODEX_AUX", `auxiliary request → passthrough (path=${path})`);
-    // aux 不上报 langfuse（跟 CC/CB 对齐——sidequery/fork 类 aux 不算真对话轮）
+    // aux does not report to langfuse (aligned with CC/CB — sidequery/fork aux are not main dialog turns)
     return forwardToUpstream(c, config, body, traceId, startTime, keyId, modelId, pipe, null);
   }
 
@@ -353,10 +352,10 @@ export async function handleCodexEndpoint(
   const callerUserKey = apiKey || null;
 
   // ── 6b. Langfuse turn context (one trace = one turn) ────────────────────────
-  // codex 的 turn 序号从 body.input[] 里"人类输入"数量推导（同 CC/CB 惯例；
-  // 同 turn 内的工具循环请求会算出相同的 turnSeq → 同一 trace）。用户问题
-  // 走 codex adapter 的 extractUserText——codex 用 input[] 而非 messages[]，
-  // 通用 resolveLatestUserQuery 靠 costGuard profile 走 messages[]，这里不合用。
+  // Turn sequence for codex derived from number of "human inputs" in body.input[] (same convention as CC/CB;
+  // tool loop requests within same turn compute identical turnSeq → same trace). User queries
+  // use codex adapter extractUserText — codex uses input[] instead of messages[];
+  // generic resolveLatestUserQuery relies on costGuard profile for messages[] which is unsuitable here.
   const turnSeq = countHumanTurnsCodex(body.input);
   const userQuery = codexAdapter.extractUserText(body.input) ?? "";
   const lf: LangfuseTurnContext = {
@@ -365,7 +364,7 @@ export async function handleCodexEndpoint(
     traceName: `${modelId} / ${keyId}`,
     userId: keyId,
     sessionId: sessionKey,
-    // agent_source tag 标明客户端族群；protocol:responses 区分 codex 的 wire。
+    // agent_source tag indicates client family; protocol:responses distinguishes codex wire format.
     tags: [
       `agent_source:${agentSource}`,
       "protocol:responses",
@@ -382,11 +381,11 @@ export async function handleCodexEndpoint(
   let injectionSkipped = false;
   let sessionJustRegistered = false;
   let _resetFlowResult: { agentName: string; agentIdShort: string; teamId: string; taskName?: string | null; bypassed?: boolean } | null = null;
-  // 存 initResult 的 agent/task detail 供 § 9 注入阶段构造 <session_context>。
-  // handleSessionInit 内部本会通过 messages[0] 塞进 session_context，但那份
-  // messages 是我们传进去的临时 synthesizedMessages，不会回到 codex body。
-  // 这里显式抓 detail，让下面合成 body 时用 buildSessionContextBlockWithToggles
-  // 造同款 block 并预填到合成 system message 前面。
+  // Store initResult agent/task detail for § 9 injection phase to construct <session_context>.
+  // handleSessionInit originally inserts session_context via messages[0], but that messages
+  // array was a temporary synthesizedMessages array passed in, which doesn't return to codex body.
+  // Explicitly capture detail here so synthetic body below uses buildSessionContextBlockWithToggles
+  // to build the same block and prefill in front of synthetic system message.
   let cachedAgentDetail: unknown = null;
   let cachedTaskDetail: unknown = null;
 
@@ -406,7 +405,7 @@ export async function handleCodexEndpoint(
         const compositeKey = `${agentSource}:${sessionKey}`;
         store.bind(compositeKey, { userId: userId || "anonymous", agentSource, sessionId: sessionKey, spaceId });
 
-        // ── 强制归档旧 agent 的 skill buffer（best-effort）──
+        // ── Force archive old agent skill buffer (best-effort) ──
         const oldState = store.get(compositeKey);
         if (oldState?.status === "initialized" && oldState.sessionInfo && config.coreSkill?.endpoint) {
           const si = oldState.sessionInfo as Record<string, string>;
@@ -444,11 +443,11 @@ export async function handleCodexEndpoint(
 
   // ── 7. Session-init state machine (reuses CB with agentSource="codex") ────
   //
-  // 老版本 7a (Default gate 独立拦截) + 7b.1 (MORE 独立拦截) 已收敛进 CB 状态机内部
-  // (session/codebuddy/init.ts 顶部 codex-only pre-checks 段)。codexHandler 只
-  // 负责把 body.input[] 透传给 reqCtx.codexAnswerInput 让状态机自己识别 gate/MORE。
-  // 首次 Default gate 命中会拿到 initResult.bypassReason === "default-gate", 由
-  // 本 handler 返一次 Plan 模式提示；后续同 session 请求 bypass 稳态透传。
+  // Legacy version 7a (independent Default gate interception) + 7b.1 (independent MORE interception) consolidated into CB state machine
+  // (codex-only pre-checks block at top of session/codebuddy/init.ts). codexHandler is only
+  // responsible for passing body.input[] to reqCtx.codexAnswerInput for state machine to recognize gate/MORE.
+  // First Default gate hit returns initResult.bypassReason === "default-gate", with Plan mode prompt returned
+  // by this handler; subsequent requests for same session passthrough under bypass steady state.
   if (config.sessionInit?.enabled && sessionId) {
     try {
       const { getSessionStore, handleSessionInit, parsePresetIdentity } = await import("./session/index.js");
@@ -474,7 +473,7 @@ export async function handleCodexEndpoint(
 
       let initResult: Awaited<ReturnType<typeof handleSessionInit>>;
       const isTerminalState = recovered?.status === "initialized";
-      // Recovery hit source 决定是否需要 prewarm（详见 handler.ts 对称位置注释）。
+      // Recovery hit source determines whether prewarm is needed (see detailed notes at symmetric position in handler.ts).
       const needsPrewarm =
         recovered?.__recoverySource === "l2b" ||
         recovered?.__recoverySource === "history-scan";
@@ -527,8 +526,8 @@ export async function handleCodexEndpoint(
             stream: isStream,
             modelId: modelId as string,
             protocol: "responses" as any,
-            // 把原始 input[] 交给 CB 状态机，用于识别 codex 客户端专属的
-            // Default gate 字符串和 MORE 翻页标记。
+            // Pass raw input[] to CB state machine to recognize codex client-specific
+            // Default gate string and MORE pagination marker.
             codexAnswerInput: input,
           },
           agentSource,
@@ -540,10 +539,9 @@ export async function handleCodexEndpoint(
       }
 
       if (initResult.intercepted) {
-        // CB state machine intercepted → 直接用它已经带上 pageIndex 的
-        // formData 通过 codex builder 重渲染成 Responses API SSE。CB 状态机
-        // 内部会在 codex source 时把 latest state.codexPageIndex 塞进
-        // formData.{teamPage,agentPage,taskPage}。
+        // CB state machine intercepted → directly use formData already carrying pageIndex
+        // re-rendered into Responses API SSE via codex builder. CB state machine internally
+        // populates latest state.codexPageIndex into formData.{teamPage,agentPage,taskPage} for codex source.
         if (initResult.formData) {
           return buildCodexFormResponse({
             teams: initResult.formData.teams,
@@ -615,8 +613,8 @@ export async function handleCodexEndpoint(
         }
       }
 
-      // Prewarm 前置短路：mem-command 命中的 turn 不走 forward、不消费 hook-cache，
-      // 若照常 prewarm 会白花 2-3s + 3 次网络请求。见 handler.ts 对称位置详注。
+      // Prewarm front short-circuit: turn matching mem-command doesn't forward or consume hook-cache;
+      // normal prewarm would waste 2-3s + 3 network requests. See symmetric notes in handler.ts.
       let memCommandPending = false;
       if (config.memCommand?.enabled) {
         try {
@@ -668,16 +666,16 @@ export async function handleCodexEndpoint(
       if (sessionInfo && !sessionInfo.space_id && spaceId) {
         sessionInfo.space_id = spaceId;
       }
-      // 缓存 detail 给下面 § 9 用（构造 <session_context> block）——两条分支都写：
-      // recovered 分支的 initResult 是我们手工组装的，walked-through 分支来自
-      // handleSessionInit 返回，字段都是 SessionInitResult 里的 agent/taskDetail。
+      // Cache detail for § 9 below (to construct <session_context> block) — written in both branches:
+      // recovered branch initResult is manually constructed; walked-through branch comes from
+      // handleSessionInit return, fields are agent/taskDetail from SessionInitResult.
       cachedAgentDetail = initResult.agentDetail ?? null;
       cachedTaskDetail = initResult.taskDetail ?? null;
 
-      // 记录 resetFlow 到外层供块外返回确认响应
+      // Record resetFlow to outer scope for confirmation response return
       if (initResult.resetFlow && initResult.justRegistered && !initResult.bypassed) {
         _resetFlowResult = {
-          agentName: initResult.agentDetail?.name ?? "未知",
+          agentName: initResult.agentDetail?.name ?? "Unknown",
           agentIdShort: (initResult.sessionInfo as Record<string, unknown>)?.agent_id
             ? String((initResult.sessionInfo as Record<string, unknown>).agent_id).slice(-8) : "",
           teamId: (initResult.sessionInfo as Record<string, unknown>)?.team_id
@@ -720,22 +718,22 @@ export async function handleCodexEndpoint(
   // ── 8. mem-command intercept ────────────────────────────────────────────────
   // Position: after session-init, before injection (same as CC/CB).
   //
-  // ⚠️ 不走 parseMemCommand(body, ...) —— 该函数只解 body.messages[] (CC/CB
-  // 形态)，codex body 用 input[]，进去立即返 null → mem 命令全部静默透传给
-  // LLM，模型会编造"Memory synced" 之类假回复 (P0-1 QA 报告)。
-  // 直接用已提取的 userText 走 parseCommandFromText。
+  // ⚠️ Do not use parseMemCommand(body, ...) — that function only parses body.messages[] (CC/CB
+  // format), while codex body uses input[], returning null immediately → mem commands silently passthrough to
+  // LLM, model hallucinates fake responses like "Memory synced".
+  // Directly use extracted userText with parseCommandFromText.
   if (config.memCommand?.enabled) {
     const userText = codexAdapter.extractUserText(input);
     if (userText) {
       const { parseCommandFromText, isMemCommandAllowed, executeMemCommand, buildMemResponse, extractSimpleMessages, truncateArgs } =
         await import("./mem-command/index.js");
       let memCmd = parseCommandFromText(userText);
-      // session-reset 已由 pre-hook 处理，跳过防止重复执行
+      // session-reset already handled by pre-hook, skip to prevent double execution
       if (memCmd?.command === "session-reset") memCmd = null;
       if (memCmd && isMemCommandAllowed(config.memCommand, memCmd.command)) {
         // Session not initialized → command not available
         if (!sessionInfo || injectionSkipped) {
-          const errText = `⚠️ 会话未初始化，命令不可用。请先完成 session 初始化（选择 Team/Agent）后重试。`;
+          const errText = `⚠️ Session not initialized; command unavailable. Please complete session initialization (select Team/Agent) and try again.`;
           const errResponse = buildMemResponse(errText, {
             protocol: "responses",
             stream: isStream,
@@ -756,15 +754,15 @@ export async function handleCodexEndpoint(
           protocol: "responses",
           stream: isStream,
           args: memCmd.args,
-          // task 命令族用最近对话生成草稿。Responses API body.input[] 结构：
+          // Task command family uses recent conversation to generate draft. Responses API body.input[] structure:
           //   { type:"message", role, content:[{type:"input_text"|"output_text", text}] }
-          // extractSimpleMessages 已内置对该形态的识别，转成 {role, content} 极简格式。
+          // extractSimpleMessages includes built-in recognition for this format, converting it to minimal {role, content} format.
           bodyMessages: extractSimpleMessages(input),
         });
 
-        // ── L0 写入（同步 await，跟 CC/CB mem 命令路径对齐）──
-        //   mem 命令是此 turn 唯一的落盘机会，不能 fire-and-forget (trackWrite)，
-        //   必须显式等待落盘后再返回，避免进程未 flush 就退出导致丢失。
+        // ── L0 write (synchronous await, aligned with CC/CB mem command path) ──
+        //   mem command is the only persistence opportunity for this turn; cannot be fire-and-forget (trackWrite).
+        //   Must explicitly await persistence before returning to avoid loss if process exits before flush.
         const tdaiClientForMem = createCodexTdaiClient(config, spaceId);
         const tdaiIdentityForMem = deriveTdaiIdentity({
           sessionInfo: sessionInfo as Record<string, unknown> | null | undefined,
@@ -781,7 +779,7 @@ export async function handleCodexEndpoint(
           }
         }
 
-        // ── Skill extract（同步 await，保证对话轮次计数正常累积）──
+        // ── Skill extract (synchronous await to ensure conversation turn count accumulates properly) ──
         if (isExtractionAllowed(config, "skill")) {
           try {
             const assistantMessage = {
@@ -804,8 +802,8 @@ export async function handleCodexEndpoint(
           }
         }
 
-        // ── Langfuse: 上报 mem-command generation ──
-        //   codex handler 的 lf 在 mem 命令块之前已构造 (line 366)，直接复用。
+        // ── Langfuse: report mem-command generation ──
+        //   lf for codex handler constructed prior to mem command block (line 366); reuse directly.
         langfuseReportGeneration({
           traceId: lf.traceId,
           name: "memory-proxy",
@@ -844,17 +842,17 @@ export async function handleCodexEndpoint(
       const { getInjectionPipeline } = await import("./injection/index.js");
       const pipeline = getInjectionPipeline(config);
 
-      // ── session_context 预填 ────────────────────────────────────────────────
-      // handleSessionInit 的 CB init 把 <session_context>（[Agent]+[Task] 描述）
-      // 塞进它内部持有的 messages[0]（我们传给它的临时数组），这份 messages
-      // 不会被返回给 codex handler；同时 initResult.systemAppend 只在 CC 分支
-      // 填充，CB 分支永远 undefined。结果 codex 侧只拿到 skill/memory/knowledge
-      // 段，**agent/task 描述完全没注入到最终 body 里**。
+      // ── session_context prefill ─────────────────────────────────────────────
+      // handleSessionInit CB init puts <session_context> ([Agent]+[Task] description)
+      // into its internally held messages[0] (temporary array we passed to it). This messages array
+      // will not be returned to codex handler; meanwhile initResult.systemAppend is only filled in CC branch,
+      // and is always undefined for CB branch. As a result, codex side only gets skill/memory/knowledge segments,
+      // **agent/task descriptions were completely omitted from the final body**.
       //
-      // 修法：直接用 buildSessionContextBlockWithToggles 从 handler 侧已经存好的
-      // agentDetail/taskDetail 构造同款 block，预填到合成 body 的 system
-      // message；下面 pipeline.process 会继续在同一 system message 后面 append
-      // 更多注入内容，最终 raw 模式一起抽出去 → developer 段包含 session_context。
+      // Fix: directly use buildSessionContextBlockWithToggles with agentDetail/taskDetail saved on the handler side
+      // to construct the same block and prefill into the synthetic body system message.
+      // Below pipeline.process will continue to append more injection content after the same system message,
+      // and raw mode will extract them all together → developer block includes session_context.
       const { buildSessionContextBlockWithToggles } = await import("./session/context-injector.js");
       const sessionContextBlock = buildSessionContextBlockWithToggles(
         cachedAgentDetail as any,
@@ -897,13 +895,12 @@ export async function handleCodexEndpoint(
       const injectedText = typeof sysMsg?.content === "string" ? sysMsg.content : "";
 
       if (injectedText.length > 0) {
-        // Pipeline 产出的 injectedText 已经是**成品 XML 文本**（含
-        // <skill_tools> / <available_skills> / <user_memory> /
-        // <tdai_profile_memory> / <memory-tools-guide> 等多组内部 tag)，
-        // 与 CC / CB 客户端在 system message 里看到的内容字节一致。
-        // 走 raw 模式原样嵌入 <tdai_injections> wrapper 内层——不再套
-        // 内层 <available_skills> tag，也不 escape 内容里的 XML tag，
-        // 否则模型看到的会是转义字符（`&lt;user_memory&gt;`）读不出结构。
+        // The injectedText produced by Pipeline is already the **final XML text** (containing
+        // multiple internal tags such as <skill_tools> / <available_skills> / <user_memory> /
+        // <tdai_profile_memory> / <memory-tools-guide>), matching exact byte output seen by CC / CB clients in system message.
+        // Embed directly inside <tdai_injections> wrapper using raw mode — do not wrap with inner
+        // <available_skills> tag, nor escape inner XML tags, otherwise model will see escaped entities
+        // (`&lt;user_memory&gt;`) and fail to parse structure.
         body = injectCodexAssets(body, { raw: injectedText });
       }
     } catch (err: unknown) {
@@ -914,9 +911,9 @@ export async function handleCodexEndpoint(
 
   // ── 10. Build archive ctx (skill + tdai L0), forward, tap for hooks ──────
   //
-  // 只在 main dialog + 已初始化 + 未 bypass 的稳态下建 ctx —— injectionSkipped
-  // 场景与 CC/CB 的"跳过 L0/skill"分支对齐(sessionInfo 缺 team/user/agent 三件套
-  // triggerSkillExtractIfReady 本身也会早退, 但提前判可以省一次 fanout)。
+  // Only create ctx under main dialog + initialized + non-bypassed steady state — injectionSkipped
+  // scenario aligns with CC/CB "skip L0/skill" branch (when sessionInfo lacks team/user/agent trio,
+  // triggerSkillExtractIfReady will exit early on its own, but checking beforehand saves a fanout).
   const archiveCtx = buildArchiveCtx({
     config,
     sessionInfo: sessionInfo as Record<string, unknown> | null | undefined,
@@ -937,11 +934,11 @@ export async function handleCodexEndpoint(
 // ── Archive context (skill/conversation/add + TDAI L0 write) ─────────────────
 
 /**
- * 归档触发上下文 —— 打包 hook 所需的所有输入, 从 handleCodexEndpoint 造好后
- * 一路透到 consumeCodexStream 的 completeStream 尾部触发 skill/L0 hooks。
+ * Archiving trigger context — packages all inputs needed by hooks, constructed in handleCodexEndpoint
+ * and passed all the way to the end of consumeCodexStream completeStream to trigger skill/L0 hooks.
  *
- * 只有 main 对话 + 已初始化 session + 未 bypass 才创建; 其它情况 archiveCtx=null,
- * forward 侧遇到 null 就跳过 hook (跟 CC/CB 的 isMainDialog 分支对齐)。
+ * Only created for main conversation + initialized session + non-bypassed state; in other cases archiveCtx=null,
+ * and forward side skips hook when null is encountered (aligned with CC/CB isMainDialog branch).
  */
 export interface CodexArchiveCtx {
   config: ProxyConfig;
@@ -950,13 +947,13 @@ export interface CodexArchiveCtx {
   sessionInfo: Record<string, unknown>;
   spaceId: string;
   /**
-   * 原始 codex `input[]` —— skill 归档时按 protocol="responses" 走
-   * normalize-conversation 内部 convertCodexInputItem 展开。
+   * Raw codex `input[]` — expanded inside normalize-conversation convertCodexInputItem
+   * according to protocol="responses" during skill archiving.
    */
   input: unknown[];
   tdaiClient: TdaiClient | null;
   tdaiIdentity: TdaiIdentity | null;
-  /** 从 `input[]` 抽出的最新用户提问 (extractLatestCodexUserMessage 提取)。 */
+  /** Latest user question extracted from `input[]` (extracted via extractLatestCodexUserMessage). */
   tdaiUserMessage: TdaiMessage | null;
   assetCapabilities?: import("./injection/types.js").AssetCapabilityFlags;
 }
@@ -1002,14 +999,14 @@ function buildArchiveCtx(args: {
 }
 
 /**
- * 流结束后触发 skill/conversation/add + TDAI L0 write, 对齐 CC/CB 的
- * anthropicHandler.ts:1867-1948 段。
+ * Triggers skill/conversation/add + TDAI L0 write after stream completion, aligned with CC/CB
+ * anthropicHandler.ts:1867-1948 section.
  *
- * 参数:
- *   assistantText: SSE accumulator 累积的 assistant 文本
- *   toolUseCount:  流里累积的 function_call 数 (round 边界判据)
+ * Parameters:
+ *   assistantText: accumulated assistant text from SSE accumulator
+ *   toolUseCount:  accumulated function_call count in stream (round boundary criterion)
  *
- * 失败静默(错误已 log), 绝不阻塞 upstream 响应链。
+ * Fails silently (errors logged), never blocks upstream response chain.
  */
 async function triggerCodexArchiveHooks(
   ctx: CodexArchiveCtx,
@@ -1017,10 +1014,10 @@ async function triggerCodexArchiveHooks(
   toolUseCount: number,
 ): Promise<void> {
   // ── TDAI L0 write ──
-  // 与 anthropicHandler stream 分支 (line 1867-1878) 对称:
-  //   - trackWrite 挂全局 in-flight set (index.ts flushPendingWrites 兜底 SIGTERM 丢包)
-  //   - withL0Retry 3 次退避挡 tdai kernel 瞬断
-  //   - stream 场景不 await, 让归档 hook 提前返回
+  // Symmetric with anthropicHandler stream branch (line 1867-1878):
+  //   - trackWrite attached to global in-flight set (index.ts flushPendingWrites handles SIGTERM packet loss fallback)
+  //   - withL0Retry 3-time backoff guards against tdai kernel transient disconnects
+  //   - non-await in stream scenario allows archiving hook to return early
   if (ctx.tdaiClient && ctx.tdaiIdentity && isExtractionAllowed(ctx.config, "tdai-memory")) {
     trackWrite(
       withL0Retry(() =>
@@ -1034,10 +1031,9 @@ async function triggerCodexArchiveHooks(
   }
 
   // ── Skill conversation/add trigger ──
-  // 与 anthropicHandler stream 分支 (line 1928-1948) 对称: 归档写完再返, 保证
-  // 跨节点下一轮读到最新 buffer 状态; assistantMessage 用 stream accumulator 的
-  // outputText 拼一份 codex message 形态 (type:"message", role:"assistant",
-  // content:[{type:"output_text", text}]), toolCallCountOverride 由 stream 计数。
+  // Symmetric with anthropicHandler stream branch (line 1928-1948): return after archiving write to ensure
+  // cross-node next turn reads latest buffer state; assistantMessage constructs codex message format using stream
+  // accumulator outputText (type:"message", role:"assistant", content:[{type:"output_text", text}]), with toolCallCountOverride counted by stream.
   if (isExtractionAllowed(ctx.config, "skill")) {
     const assistantMessage = assistantText
       ? {
@@ -1076,22 +1072,22 @@ async function forwardToUpstream(
   lf: LangfuseTurnContext | null,
   archiveCtx: CodexArchiveCtx | null = null,
 ): Promise<Response> {
-  // Per-agent upstream override (upstream.agents.codex.url) 优先于全局 url。
-  // 对齐 anthropicHandler.ts:1029 的解析姿势。codex 通常需要单独指向支持
-  // Responses API 的兼容层——部分 OpenAI 兼容上游只实现
-  // messages/chat_completions，不支持 /responses，此处允许按 agent 覆盖。
+  // Per-agent upstream override (upstream.agents.codex.url) takes precedence over global url.
+  // Aligned with resolution pattern in anthropicHandler.ts:1029. Codex typically requires pointing to a
+  // compatibility layer supporting Responses API — some OpenAI-compatible upstreams only implement
+  // messages/chat_completions and not /responses; per-agent override allowed here.
   const agentUpstreamEntry = config.upstream.agents?.["codex"];
   const upstreamBase = agentUpstreamEntry?.url || config.upstream.url;
   const upstreamUrl = joinUrl(upstreamBase, c.req.path);
   const upstreamHeaders = buildUpstreamHeaders(c, config);
   upstreamHeaders["content-type"] = "application/json";
-  // 覆盖 apiKey 与 per-agent 策略一致：agentUpstreamEntry.apiKey 优先，
-  // 否则透传客户端 Bearer。
+  // apiKey override aligned with per-agent strategy: agentUpstreamEntry.apiKey takes precedence,
+  // otherwise passthrough client Bearer token.
   if (agentUpstreamEntry) {
     if (agentUpstreamEntry.apiKey) {
       upstreamHeaders["authorization"] = `Bearer ${agentUpstreamEntry.apiKey}`;
     }
-    // else: 保留 c.req.header('authorization') 里的客户端 key 透传
+    // else: retain client key passthrough in c.req.header('authorization')
   }
 
   pipe.forwardStart(upstreamUrl);
@@ -1105,7 +1101,7 @@ async function forwardToUpstream(
     });
   } catch (err: unknown) {
     pipe.error("CODEX_FORWARD", err instanceof Error ? err : new Error(String(err)));
-    // 上报 langfuse 失败（转发异常 —— 上游未回响应体，只有本地 fetch 抛错）
+    // Report langfuse failure (forward error — upstream did not return response body, fetch threw locally)
     if (lf) {
       try {
         langfuseReportFailure({
@@ -1142,10 +1138,10 @@ async function forwardToUpstream(
     traceId,
   });
 
-  // ── 上游 4xx/5xx：拷贝一份 body 文本用于 langfuse 错误上报；成功则 tap ──
-  // codex Responses API 只有 SSE 流式响应，不区分 stream / non-stream 处理。
+  // ── Upstream 4xx/5xx: copy body text for langfuse error reporting; tap on success ──
+  // Codex Responses API only has SSE streaming responses, no stream vs non-stream separation.
   if (upstreamResp.status >= 400) {
-    // 4xx/5xx 通常返 JSON error（很小），完整读出来带进 langfuse 便于排查
+    // 4xx/5xx usually returns small JSON error; read in full for langfuse reporting
     const errText = await upstreamResp.text();
     if (lf) {
       try {
@@ -1170,9 +1166,9 @@ async function forwardToUpstream(
     });
   }
 
-  // 2xx: aux 场景 (lf=null && archiveCtx=null) 直接透传不 tap; 主对话场景 tap
-  // 一份用于 langfuse 上报 + skill/L0 归档 hook (P1-P2 gap 修复)。
-  // 只要有 lf 或 archiveCtx 任一非空就必须 tee 一份 tap 流。
+  // 2xx: aux scenario (lf=null && archiveCtx=null) directly passthrough without tap; main dialog tap
+  // copy for langfuse reporting + skill/L0 archiving hook (P1-P2 gap fix).
+  // As long as either lf or archiveCtx is non-null, teeing tap stream is required.
   const needTap = Boolean(lf) || Boolean(archiveCtx);
   if (!needTap || !upstreamResp.body) {
     return new Response(upstreamResp.body, {
@@ -1201,11 +1197,11 @@ async function forwardToUpstream(
 // ── Langfuse helpers ─────────────────────────────────────────────────────────
 
 /**
- * 从 codex `body.input[]` 里推导 turn 序号 —— 数 role=user 的 message 项数量。
+ * Derives turn sequence from codex `body.input[]` — counts message items with role=user.
  *
- * 与 turnSeq.ts::countHumanTurns(openai/anthropic) 对齐：同 turn 内工具循环
- * 请求（新增 function_call_output 项）不会增加人类 message，因此得到相同的
- * turnSeq，多个请求归并到同一个 langfuse trace。
+ * Aligned with turnSeq.ts::countHumanTurns(openai/anthropic): tool loop requests within the same turn
+ * (adding function_call_output items) do not increment human messages, producing the same
+ * turnSeq so multiple requests merge into a single langfuse trace.
  */
 export function countHumanTurnsCodex(input: unknown): number {
   if (!Array.isArray(input)) return 0;
@@ -1219,10 +1215,10 @@ export function countHumanTurnsCodex(input: unknown): number {
 }
 
 /**
- * 构造送 langfuse 的 input —— codex 的 input[] 已经是结构化的对话历史，
- * 直接原样透传即可（跟 anthropic 的 buildLangfuseInput 目的一致：让
- * langfuse UI 上能看清"这一次调用的输入是啥"）。instructions 段单独带上,
- * 补齐上下文（codex 的 system prompt 在 body.instructions 而非 input）。
+ * Builds input payload for langfuse — codex input[] is already structured conversation history
+ * and can be passed through directly (same purpose as anthropic buildLangfuseInput: allow langfuse UI
+ * to clearly display input for this invocation). instructions block attached separately to complete context
+ * (codex system prompt is in body.instructions rather than input).
  */
 function buildCodexLangfuseInput(body: Record<string, unknown>): unknown {
   const out: Record<string, unknown> = { input: body.input };
@@ -1234,8 +1230,8 @@ function buildCodexLangfuseInput(body: Record<string, unknown>): unknown {
 
 export interface CodexTapContext {
   /**
-   * langfuse trace context; null 表示 aux 场景不上报 langfuse 但可能仍需
-   * 归档 (理论上 aux 不会带 archiveCtx, 两者同时 null 时上游 tap 干脆不启动)。
+   * langfuse trace context; null indicates aux scenario without langfuse reporting, but archiving
+   * may still be needed (in theory aux won't carry archiveCtx; when both null, upstream tap doesn't start).
    */
   lf: LangfuseTurnContext | null;
   modelId: string;
@@ -1244,21 +1240,21 @@ export interface CodexTapContext {
   inputBody: Record<string, unknown>;
   pipe: ReturnType<typeof createPipeline>;
   /**
-   * skill 归档 + TDAI L0 write hook 上下文;
-   * null 表示当前请求不需要触发归档 (aux / session 未初始化 / bypass)。
+   * skill archiving + TDAI L0 write hook context;
+   * null indicates current request does not trigger archiving (aux / session uninitialized / bypass).
    */
   archiveCtx?: CodexArchiveCtx | null;
 }
 
 /**
- * 消费 codex Responses API SSE 流，提取 usage + assistant output，上报 langfuse。
+ * Consumes codex Responses API SSE stream, extracts usage + assistant output, and reports to langfuse.
  *
- * codex SSE 关键帧（见 docs/2026-08-05-codex-onboarding.md §7.5.2/3）：
- *   - response.output_text.delta:  {delta: "..."}                → 累积 assistant 文本
- *   - response.function_call_arguments.delta: {delta: "..."}     → 累计 tool_use 参数（观察用）
- *   - response.completed: {response: {usage, output, status, ...}} → 收尾，取 usage
+ * Codex SSE key frames (see docs/2026-08-05-codex-onboarding.md §7.5.2/3):
+ *   - response.output_text.delta:  {delta: "..."}                → accumulate assistant text
+ *   - response.function_call_arguments.delta: {delta: "..."}     → accumulate tool_use args (for observation)
+ *   - response.completed: {response: {usage, output, status, ...}} → completion, retrieve usage
  *
- * 失败静默——埋点绝不影响业务链路。
+ * Silent failure — telemetry never impacts business logic chain.
  */
 export function consumeCodexStream(stream: ReadableStream<Uint8Array>, ctx: CodexTapContext): void {
   const { lf, modelId, startTime, upstreamUrl, inputBody, pipe, archiveCtx } = ctx;
@@ -1271,7 +1267,7 @@ export function consumeCodexStream(stream: ReadableStream<Uint8Array>, ctx: Code
     let toolUseCount = 0;
     let stopReason: string | undefined;
     let streamCompleted = false;
-    // 5 分钟兜底：客户端断开可能让上游流卡住，这里超时也强制收尾一次。
+    // 5-minute timeout fallback: client disconnect may hang upstream stream, force completion upon timeout here.
     const timeoutHandle = setTimeout(() => {
       if (!streamCompleted) {
         pipe.error("STREAM_TIMEOUT", "Codex stream reading exceeded 5 minutes");
@@ -1324,10 +1320,10 @@ export function consumeCodexStream(stream: ReadableStream<Uint8Array>, ctx: Code
         }
       }
 
-      // ── Skill/conversation/add + TDAI L0 归档 hook ──
-      // 对齐 anthropicHandler.ts 的 stream 分支 (line 1867-1948): langfuse 上报后
-      // 触发 skill 归档 + L0 write。失败静默 (内部已 warn), 不阻塞客户端 SSE。
-      // archiveCtx=null (aux / 未初始化 session / bypass) 直接跳过。
+      // ── Skill/conversation/add + TDAI L0 archiving hook ──
+      // Aligned with stream branch of anthropicHandler.ts (line 1867-1948): trigger skill archiving + L0 write after langfuse report.
+      // Silent failure (warned internally), does not block client SSE.
+      // Skip directly if archiveCtx=null (aux / session uninitialized / bypass).
       if (archiveCtx) {
         try {
           await triggerCodexArchiveHooks(archiveCtx, outputText, toolUseCount);
@@ -1373,14 +1369,14 @@ export function consumeCodexStream(stream: ReadableStream<Uint8Array>, ctx: Code
               }
               stopReason = (resp?.status as string) ?? "completed";
             } else if (evtType === "response.incomplete") {
-              // max_output_tokens / 其它中断（Responses API 标准）
+              // max_output_tokens / other interruptions (Responses API standard)
               const resp = evt.response as Record<string, unknown> | undefined;
               const details = resp?.incomplete_details as Record<string, unknown> | undefined;
               stopReason = `incomplete:${details?.reason ?? "unknown"}`;
               if (resp?.usage) Object.assign(usage, resp.usage as Record<string, unknown>);
             }
           } catch {
-            // ignore malformed frames — 埋点级别的问题不阻塞
+            // ignore malformed frames — telemetry-level issues do not block
           }
         }
       }

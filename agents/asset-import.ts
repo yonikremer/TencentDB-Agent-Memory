@@ -10,11 +10,11 @@ import { createRequire } from 'node:module';
 
 
 let KIND = 'openclaw';
-// 以下为本文件内联的共享扫盘工具与导入引擎（原 MemoryPanel/scripts/asset-import/*）。
-// 仅依赖 Node 内置模块；与公共 CLI 行为保持一致。
-// ════════════════════════════════════════════════════════════════════════════
+// Below are shared scanning utilities and import engine inlined in this file (originally from MemoryPanel/scripts/asset-import/*).
+// Relies only on Node built-in modules; behavior consistent with the public CLI.
+// =============================================================================
 
-// ── 类型 ──
+// ── Types ──
 type AgentKind = string;
 interface ScannedSkill {
   name: string;
@@ -27,7 +27,7 @@ interface ScannedMemoryFile {
   sourceKey: string;
   origin: string;
 }
-/** 从 session 文本提取时间范围与项目路径（字段名自适应，找不到则留空）。 */
+/** Extract time range and project path from session text (field names are adaptive; leave empty if not found). */
 function extractSessionMeta(text: string): { timeRange: string; projectPath: string } {
   const ts: number[] = [];
   let cwd = '';
@@ -71,7 +71,7 @@ interface ScanOptions {
   workspace?: string;
 }
 
-// ── 跨源共享扫盘工具（原 scan-util.ts）──
+// ── Cross-source shared scanning utility (original scan-util.ts) ──
 export function workspaceRoot(opts?: ScanOptions): string | undefined {
   if (!opts?.workspace?.trim()) return undefined;
   const ws = resolve(opts.workspace.trim());
@@ -182,7 +182,7 @@ export function collectSubfiles(skillDir: string, rel: string, acc: { path: stri
 
 const DEFAULT_SKILL_SUBDIRS = ['scripts', 'references', 'assets', 'agents'];
 
-/** 一层 `<name>/SKILL.md` 目录（name 用目录名，不读 frontmatter）。 */
+/** Single-level `<name>/SKILL.md` directory (use directory name as name, do not read frontmatter). */
 export function collectSkillDirs(kind: AgentKind, roots: string[], subdirs = DEFAULT_SKILL_SUBDIRS): ScannedSkill[] {
   const out: ScannedSkill[] = [];
   const seenRoots = new Set<string>();
@@ -245,7 +245,7 @@ function argsToString(raw: unknown): string {
   }
 }
 
-/** 从 tool_result 的 content（string / block 数组 / 嵌套对象）抽出纯文本。 */
+/** Extract plain text from tool_result's content (string / block array / nested object). */
 function blockText(content: unknown): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) return content.map(blockText).filter(Boolean).join('\n');
@@ -272,7 +272,7 @@ interface ContentFrag {
   tool_name?: string;
 }
 
-/** 展开单个 content block；嵌套 content 数组会递归。 */
+/** Expand a single content block; nested content arrays are processed recursively. */
 function expandBlock(b: unknown): ContentFrag[] {
   if (typeof b === 'string') return [{ content: b }];
   if (b && typeof b === 'object') {
@@ -283,12 +283,13 @@ function expandBlock(b: unknown): ContentFrag[] {
       case 'toolCall':
         return [{ role: 'tool_call', tool_call_id: strVal(bb.id), tool_name: strVal(bb.name) || 'unknown', content: (argsToString(bb.arguments ?? bb.input) as string) ?? '' }];
       // anthropic / claude / codex / dsh / hermes 工具调用：{type:'tool_use', id, name, input}
+      // Anthropic / Claude / Codex / Dsh / Hermes tool call: {type:'tool_use', id, name, input}
       case 'tool_use':
         return [{ role: 'tool_call', tool_call_id: strVal(bb.id), tool_name: strVal(bb.name) || 'unknown', content: (argsToString(bb.input ?? bb.arguments) as string) ?? '' }];
-      // openai responses 工具调用：{type:'function_call', name, arguments(字符串), call_id?}
+      // OpenAI responses tool call: {type:'function_call', name, arguments(string), call_id?}
       case 'function_call':
         return [{ role: 'tool_call', tool_call_id: strVal(bb.call_id) || strVal(bb.id), tool_name: strVal(bb.name) || 'unknown', content: typeof bb.arguments === 'string' ? (bb.arguments as string) : ((argsToString(bb.arguments) as string) ?? '') }];
-      // openai 消息级 tool_calls 数组（也可能作为 block.type==='tool_calls' 出现）
+      // OpenAI message-level tool_calls array (may also appear as block.type='tool_calls')
       case 'tool_calls': {
         const arr: unknown[] = Array.isArray(bb.tool_calls)
           ? (bb.tool_calls as unknown[])
@@ -306,10 +307,10 @@ function expandBlock(b: unknown): ContentFrag[] {
           } as ContentFrag;
         });
       }
-      // anthropic tool_result（在 user content 内）/ openai tool 输出
+      // Anthropic tool_result (inside user content) / OpenAI tool output
       case 'tool_result':
         return [{ role: 'tool_result', tool_call_id: strVal(bb.tool_use_id) || strVal(bb.tool_call_id) || strVal(bb.id), tool_name: strVal(bb.toolName) || strVal(bb.name), content: blockText(bb.content) }];
-      // openclaw 顶层 toolResult 记录（content 即结果 block）
+      // OpenClaw top-level toolResult record (content is the result block)
       case 'toolResult':
         return [{ role: 'tool_result', tool_call_id: strVal(bb.id) || strVal(bb.callId) || strVal(bb.toolCallId), tool_name: strVal(bb.toolName) || strVal(bb.name), content: blockText(bb.content) }];
       default:
@@ -321,7 +322,7 @@ function expandBlock(b: unknown): ContentFrag[] {
   return [];
 }
 
-/** 把一段 content（string / block 数组 / 嵌套对象）展开为有序片段。 */
+/** Expand a segment of content (string / block array / nested object) into ordered fragments. */
 export function expandContent(content: unknown): ContentFrag[] {
   if (typeof content === 'string') return [{ content }];
   if (Array.isArray(content)) return content.flatMap(expandBlock);
@@ -332,7 +333,7 @@ export function expandContent(content: unknown): ContentFrag[] {
   return [];
 }
 
-/** memory 链路用的扁平文本（还原旧行为：工具以 [tool_call] / [tool_result] 文本并入对话流）。 */
+/** Flat text used for the memory link (reproduces legacy behavior: tool calls inserted as [tool_call] / [tool_result] text into the conversation flow). */
 function fragFlatText(f: ContentFrag): string {
   if (f.role === 'tool_call') {
     const one = f.content.replace(/\s+/g, ' ').trim();
@@ -347,12 +348,12 @@ function fragFlatText(f: ContentFrag): string {
   return f.content;
 }
 
-/** 兼容旧调用：返回整段扁平文本（工具以 [tool_call]/[tool_result] 形式并入）。 */
+/** Compatibility for legacy calls: return the entire flat text (tools inserted as [tool_call]/[tool_result] forms). */
 export function extractText(content: unknown): string {
   return expandContent(content).map(fragFlatText).filter(Boolean).join('\n');
 }
 
-/** 判断一条原始消息记录是否含 tool_use/tool_calls（与 proxy isFinalAnswer 反向判定：含则为中间态，非 final answer）。 */
+/** Determine whether an original message record contains tool_use/tool_calls (inverse of proxy isFinalAnswer: presence indicates intermediate state, not a final answer). */
 function recordHasToolUse(rec: Record<string, unknown>, nested?: Record<string, unknown>): boolean {
   for (const src of [rec, nested]) {
     if (!src) continue;
@@ -372,7 +373,7 @@ function recordHasToolUse(rec: Record<string, unknown>, nested?: Record<string, 
   return false;
 }
 
-/** 从记录对象中提取时间戳（毫秒）。兼容字符串与数字，识别常见字段名；秒级时间戳自动转毫秒。 */
+/** Extract timestamp (in milliseconds) from a record object. Supports strings and numbers, recognizes common field names; second-level timestamps are automatically converted to milliseconds. */
 function extractTimestamp(...cands: unknown[]): number | undefined {
   for (const c of cands) {
     if (!c || typeof c !== 'object') continue;
@@ -416,13 +417,13 @@ export function parseJsonlLines(text: string): ImportMessage[] {
             : rec.type === 'user' || rec.type === 'assistant'
               ? rec.type
               : '';
-      // toolResult / tool 视为 user 轮的一部分（与 claude/codex 中 tool_result 进 user 轮一致）。
-      // 其结构化形态由片段 role 表达（tool_result），这里只决定"对话流角色"。
+      // toolResult / tool is treated as part of the user turn (consistent with tool_result in Claude/Codex)
+      // Its structured form is expressed by fragment role (tool_result); here we decide the "conversation flow role".
       const outRole = role === 'toolResult' || role === 'tool' ? 'user' : role;
       if (outRole !== 'user' && outRole !== 'assistant') continue;
       const ts = extractTimestamp(rec, nested, obj);
       const frags = expandContent(rec.content ?? nested?.content);
-      // openai 消息级 tool_calls（content 为 null 时的工具调用，存于 message.tool_calls）
+      // OpenAI message-level tool_calls (tool calls with null content stored in message.tool_calls)
       const msgToolCalls = (rec.tool_calls ?? nested?.tool_calls) as unknown[] | undefined;
       if (Array.isArray(msgToolCalls)) {
         for (const tc of msgToolCalls) frags.push(expandBlock({ type: 'tool_calls', tool_calls: [tc] })[0]);
@@ -431,7 +432,7 @@ export function parseJsonlLines(text: string): ImportMessage[] {
       let pushedAny = false;
       for (const f of frags) {
         if (f.role === undefined) {
-          // 普通文本片段：按记录角色并入对话流
+          // Plain text fragment: merged into conversation flow according to record role
           if (f.content && !isHarnessNoise(outRole, f.content)) {
             msgs.push({
               role: outRole,
@@ -444,7 +445,7 @@ export function parseJsonlLines(text: string): ImportMessage[] {
             pushedAny = true;
           }
         } else {
-          // 工具片段：结构化保留（role=tool_call/tool_result，自带 tool_call_id 配对锚点）
+          // Tool fragment: keep structured (role=tool_call/tool_result, includes tool_call_id pairing anchor)
           msgs.push({
             role: f.role,
             content: f.content,
@@ -459,7 +460,7 @@ export function parseJsonlLines(text: string): ImportMessage[] {
       }
       if (pushedAny) recIdx++;
     } catch {
-      // 跳过非 JSON 行
+      // Skip non-JSON lines
     }
   }
   return msgs;
@@ -477,11 +478,11 @@ export function normalizeResponsesJson(path: string): ImportMessage[] {
     const role = typeof it.role === 'string' ? it.role : (typeof it.type === 'string' && it.type !== 'function_call' ? it.type : '');
     let frags: ContentFrag[] = [];
     if (it.type === 'function_call') {
-      frags = expandBlock(it); // openai responses 顶层工具调用
+      frags = expandBlock(it); // OpenAI Responses top-level tool invocation
     } else if (role === 'tool' || role === 'toolResult' || role === 'tool_result') {
-      // openai 原生 tool 角色消息：content 为字符串结果、带 tool_call_id，应作为 tool_result
-      // 保留结构化配对（而非退化为纯 user 文本），否则 skill 链路拿不到 tool_result、memory 链路不标 [tool_result]。
-      // 注意 expandBlock 返回数组，直接赋值（与 function_call 分支一致，勿再包一层 []）。
+      // OpenAI native tool role message: content is string result with tool_call_id, should be treated as tool_result
+      // Preserve structured pairing (rather than degrading to plain user text); otherwise skill link cannot get tool_result and memory link won't tag [tool_result].
+      // Note: expandBlock returns an array; assign directly (consistent with function_call branch, do not wrap in another []).
       frags = expandBlock({ type: 'tool_result', tool_use_id: it.tool_call_id ?? it.toolCallId, name: it.name ?? it.toolName, content: it.content });
     } else if (Array.isArray(it.content)) {
       frags = expandContent(it.content);
@@ -490,7 +491,7 @@ export function normalizeResponsesJson(path: string): ImportMessage[] {
     } else if (typeof it.text === 'string') {
       frags = [{ content: it.text }];
     }
-    // openai 消息级 tool_calls
+    // OpenAI message-level tool_calls
     if (Array.isArray(it.tool_calls)) {
       for (const tc of it.tool_calls) frags.push(expandBlock({ type: 'tool_calls', tool_calls: [tc] })[0]);
     }
@@ -538,7 +539,7 @@ export function extractCodexSessionId(full: string, text: string): string {
       const sid = payload?.session_id ?? payload?.id ?? obj.session_id;
       if (typeof sid === 'string' && sid.trim()) return sid.trim();
     } catch {
-      // 继续扫后续行
+      // Continue scanning subsequent lines
     }
   }
   const base = basename(full, '.jsonl');
@@ -546,7 +547,7 @@ export function extractCodexSessionId(full: string, text: string): string {
   return uuid ? uuid[0] : base;
 }
 
-/** `--sessions` 指向已存在目录/文件时的通用覆盖扫描（jsonl + Responses json）。 */
+/** Generic overwrite scan when `--sessions` points to an existing directory/file (jsonl + Responses json). */
 
 
 export function readJsonObject(p: string): Record<string, unknown> | null {
@@ -560,7 +561,7 @@ export function readJsonObject(p: string): Record<string, unknown> | null {
   }
 }
 
-// ── 导入引擎：配置与 HTTP 客户端 ──
+// ── Import engine: configuration and HTTP client ──
 interface PanelEnvelope<T = unknown> {
   code: number;
   message?: string;
@@ -577,7 +578,7 @@ interface ClientConfig {
   userKey: string;
 }
 
-/** 从环境变量读取配置；缺失即报错（不静默给默认值）。 */
+/** Read configuration from environment variables; missing values cause an error (no silent defaults). */
 export async function loadConfigFromEnv(interactive: boolean = true): Promise<ClientConfig> {
   const panelUrl = process.env.PANEL_URL?.trim();
   const serviceId = process.env.TDAI_SERVICE_ID?.trim();
@@ -587,10 +588,10 @@ export async function loadConfigFromEnv(interactive: boolean = true): Promise<Cl
   if (!serviceId) missing.push('TDAI_SERVICE_ID');
   if (!userKey) missing.push('TDAI_USER_KEY');
   if (missing.length > 0) {
-    // 三个环境变量都没设且在交互终端：逐个询问用户输入
+    // If none of the three environment variables are set and running interactively, prompt the user for each input
     if (missing.length === 3 && interactive && process.stdin.isTTY) {
       console.log('未检测到必需环境变量，请依次输入（留空将报错退出）：');
-      const inputPanel = (await question('PANEL_URL (面板地址, 如 http://127.0.0.1:8123): ')).trim();
+      const inputPanel = (await question('PANEL_URL (panel address, e.g., http://127.0.0.1:8123): ')).trim();
       const inputService = (await question('TDAI_SERVICE_ID (spaceId): ')).trim();
       const inputKey = (await question('TDAI_USER_KEY (sk-mem-...): ')).trim();
       process.env.PANEL_URL = inputPanel;
@@ -612,9 +613,9 @@ export class PanelClient {
     this.cfg = cfg;
   }
 
-  /** 唯一写库开关由调用方控制（dryRun 时不应调用 post）。 */
+  /** The unique write-to-database switch is controlled by the caller (post should not be called during dryRun). */
   async post<T = unknown>(path: string, body: unknown): Promise<PanelEnvelope<T>> {
-    // panel 路由统一挂在 /api/v1 下；调用方传的路径若未带前缀则自动补上。
+    // Panel routes are mounted under /api/v1; if the caller's path lacks the prefix, it is automatically added.
     const normPath = path.startsWith('/api/v1') ? path : `/api/v1${path.startsWith('/') ? '' : '/'}${path}`;
     const url = `${this.cfg.panelUrl.replace(/\/$/, '')}${normPath}`;
     const res = await fetch(url, {
@@ -636,17 +637,17 @@ export class PanelClient {
     if (typeof json.code !== 'number') {
       throw new Error(`响应缺少 code 字段 (${res.status}): ${text.slice(0, 200)}`);
     }
-    // 业务 envelope（含数字 code）一律返回给调用方判断，不在此抛错。
+    // Business envelope (including numeric code) is always returned for the caller to handle; no error is thrown here.
     return json;
   }
 
-  /** 暴露 serviceId，供 /skill/conversation/add 等需要 space_id 的接口使用。 */
+  /** Expose serviceId for APIs like /skill/conversation/add that require space_id. */
   get serviceId(): string {
     return this.cfg.serviceId;
   }
 }
 
-/** 读取可选的 --env-file（dotenv 风格）。 */
+/** Optionally read a `--env-file` (dotenv style). */
 export function loadEnvFile(path: string): void {
   try {
     const raw = readFileSync(path, 'utf-8');
@@ -664,7 +665,7 @@ export function loadEnvFile(path: string): void {
   }
 }
 
-// ── team / agent 解析（铁律：全程单一 userKey）──
+// ── Team / agent resolution (rule: single userKey throughout) ──
 interface AgentRef {
   agentId: string;
   ownerUserId: string;
@@ -677,7 +678,7 @@ interface PublicUser {
   user?: { user_id?: string; id?: string; username?: string };
 }
 
-/** 用 userKey 反查真实 user_id（auth/verify 豁免 user-key 校验，body 带 user_key）。 */
+/** Resolve the actual user_id using userKey (auth/verify bypasses user-key verification, body includes user_key). */
 async function resolveUserId(client: PanelClient, userKey: string): Promise<string> {
   const env = await client.post<PublicUser>('/meta/auth/verify', {
     user_key: userKey,
@@ -693,7 +694,7 @@ async function resolveUserId(client: PanelClient, userKey: string): Promise<stri
   return uid;
 }
 
-/** 解析目标 team：给定 id 则校验存在；给定 name 则查重；都没有则报错（不自动建）。 */
+/** Resolve target team: if an id is provided, verify its existence; if a name is provided, check for duplicates; if neither, error (no auto-creation). */
 async function resolveTeam(
   client: PanelClient,
   userId: string,
@@ -727,7 +728,7 @@ interface ResolveAgentOpts {
   agentName?: string;
 }
 
-/** 解析目标 agent：给定 id 校验存在+owner；给定 name 查重；都没有则报错。 */
+/** Resolve target agent: if an id is provided, verify existence and ownership; if a name is provided, check for duplicates; if neither, error. */
 async function resolveAgent(client: PanelClient, opts: ResolveAgentOpts): Promise<AgentRef> {
   const { userId, teamId } = opts;
   if (opts.agentId) {
@@ -766,20 +767,20 @@ interface AgentRaw {
   name: string;
 }
 
-// ── 消息分批 + checkpoint ──
+// ── Message batching + checkpoint ──
 const MAX_MESSAGES_PER_REQUEST = 100;
 const MAX_MESSAGE_CHARS = 8192;
 
 interface ImportMessage {
   role: string;
   content: string;
-  /** 原始来源标识，用于去重 */
+  /** Original source identifier, used for deduplication */
   sourceKey?: string;
-  /** 消息时间戳（毫秒）。可选，缺失时由后端按导入顺序兜底。 */
+  /** Message timestamp (milliseconds). Optional; if missing, backend defaults based on import order. */
   ts?: number;
-  /** 该 assistant 消息是否含 tool_use/tool_calls（中间态，非 final answer）。用于对齐 proxy 的 isFinalAnswer 切分。 */
+  /** Indicates whether this assistant message contains tool_use/tool_calls (intermediate state, not a final answer). Used to align proxy's isFinalAnswer segmentation. */
   hasToolUse?: boolean;
-  /** skill 链路结构化字段：core /v3/skill/conversation/add 要求 tool_call/tool_result 必须带 tool_call_id（配对锚点）。 */
+  /** Structured fields for skill link: core /v3/skill/conversation/add requires tool_call/tool_result to include tool_call_id (pairing anchor). */
   tool_call_id?: string;
   tool_name?: string;
   /** 来源记录序号，用于 memory 链路还原成"每条记录一条扁平消息"的旧行为。 */
@@ -845,7 +846,7 @@ function loadCheckpoint(path: string): Checkpoint {
     const obj = JSON.parse(readFileSync(path, 'utf-8'));
     if (Array.isArray(obj?.done)) return { done: obj.done };
   } catch {
-    // 损坏的 checkpoint 视为空，不静默忽略——告警后继续
+    // Corrupted checkpoint is treated as empty; do not silently ignore—log warning and continue
   }
   return { done: [] };
 }
@@ -877,7 +878,7 @@ function stableHash(s: string): string {
   return (h >>> 0).toString(16);
 }
 
-// ── skill / memory 写入与抽取 ──
+// ── Skill / memory write and extraction ──
 interface WriteCtx {
   teamId: string;
   agentId: string;
@@ -955,7 +956,7 @@ function toMemoryMessages(msgs: ImportMessage[]): ImportMessage[] {
   return out;
 }
 
-// 仅用于 toMemoryMessages 回填 sourceKey（memory 链路 body 不依赖它，但保持结构一致）
+// Used only for toMemoryMessages to refill sourceKey (memory link body does not depend on it but keeps structure consistent)
 function inputSourceKey(msgs: ImportMessage[]): string | undefined {
   return msgs[0]?.sourceKey;
 }
@@ -999,15 +1000,15 @@ function splitIntoRounds(msgs: ImportMessage[]): ImportMessage[][] {
   let current: ImportMessage[] = [];
   for (const m of msgs) {
     current.push(m);
-    // 仅遇到 final answer（assistant 且无 tool_use）时收尾一轮；中间 tool 态不收尾（与 proxy isFinalAnswer 等价）
+    // Only when encountering a final answer (assistant without tool_use) do we close a round; intermediate tool states do not close (equivalent to proxy isFinalAnswer).
     if (m.role === 'assistant' && !m.hasToolUse) {
       rounds.push(current);
       current = [];
     }
   }
-  // 末尾不以 final answer 结尾时，把残留作为一轮兜底送出（proxy 实时流不会触发，但离线导入要保证送出去）
+  // If the end does not conclude with a final answer, send the remaining as a fallback round (proxy live stream wouldn't trigger, but offline import must ensure delivery).
   if (current.length > 0) rounds.push(current);
-  // 保留含 assistant / 工具态（tool_call/tool_result）的 round；纯 user 噪声轮才丢弃
+  // Preserve rounds containing assistant/tool states (tool_call/tool_result); discard rounds that are pure user noise.
   return rounds.filter((r) => r.some((m) => m.role === 'assistant' || m.role === 'tool_call' || m.role === 'tool_result'));
 }
 
@@ -1021,7 +1022,7 @@ function splitIntoRounds(msgs: ImportMessage[]): ImportMessage[][] {
  *    （core 的 conversation-add buffer 不去重）。
  */
 async function uploadViaConversationAdd(client: PanelClient, ctx: WriteCtx, input: BatchInput): Promise<void> {
-  // Fix 2：导入前先强制归档该 session 已存在的 buffer（best-effort，失败不阻断导入）
+  // Fix 2: Before import, forcibly archive any existing buffer for the session (best-effort; failures do not block import).
   try {
     await client.post('/skill/conversation/force-archive', {
       space_id: client.serviceId,
@@ -1145,10 +1146,10 @@ interface SessionInput {
  */
 export async function uploadSession(client: PanelClient, ctx: WriteCtx, input: SessionInput): Promise<void> {
   const { session } = input;
-  // 不要在此处按 user/assistant 过滤：session.messages 来自 parseJsonlLines /
-  // normalizeResponsesJson，已含 tool_call/tool_result 角色（带 tool_call_id 配对锚点）。
-  // skill 链路会结构化发送（见 uploadViaConversationAdd），memory 链路会经 toMemoryMessages
-  // 压平为文本——二者都依赖工具消息原样保留到这里。故透传全部角色并补齐 tool 字段。
+  // Do not filter by user/assistant here: session.messages originate from parseJsonlLines /
+  // normalizeResponsesJson already includes tool_call/tool_result roles (with tool_call_id pairing anchors).
+  // Skill link sends structured data (see uploadViaConversationAdd), memory link passes through toMemoryMessages
+  // Flatten to text – both rely on tool messages being retained verbatim here. Hence forward all roles and supplement tool fields.
   const raw = session.messages as unknown as ImportMessage[];
   const msgs: ImportMessage[] = raw.map((m) => ({
     role: m.role,
@@ -1159,25 +1160,25 @@ export async function uploadSession(client: PanelClient, ctx: WriteCtx, input: S
     ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
     ...(m.tool_name ? { tool_name: m.tool_name } : {}),
     ...(m.recIdx !== undefined ? { recIdx: m.recIdx } : {}),
-    // memRole 是关键：memory 链路 toMemoryMessages 用 group[0].memRole || group[0].role 决定
-    // 发给 /chat-memory/import 的角色。若不透传，tool 消息会退回 tool_call/tool_result 原始角色，
-    // 而 core /v3/conversation/add 只接受 user/assistant/system → 400。skill 链路用 m.role 原样，
-    // 不受影响。
+    // memRole is key: memory link toMemoryMessages uses group[0].memRole || group[0].role to decide
+    // Role sent to /chat-memory/import. Without forwarding, tool messages would revert to original tool_call/tool_result roles,
+    // while core /v3/conversation/add only accepts user/assistant/system → 400. Skill link uses m.role as is,
+    // unaffected.
     ...(m.memRole ? { memRole: m.memRole } : {}),
   }));
   if (msgs.length === 0) return;
   const batchInput = { msgs, sourceKey: session.sourceKey, sessionId: session.sessionId };
-  // 1) memory 链路：整段导入触发 L1 抽取（extract !== 'skill' 时跑）
+  // 1) Memory link: full import triggers L1 extraction (runs when extract !== 'skill')
   if (input.extract !== 'skill') {
     await uploadBatches(client, ctx, batchInput);
   }
-  // 2) skill 链路：按 final-answer 切片增量触发 skill 抽取（extract !== 'memory' 时跑）
+  // 2) Skill link: incremental skill extraction triggered by final-answer slicing (runs when extract !== 'memory')
   if (input.extract !== 'memory') {
     await uploadViaConversationAdd(client, ctx, batchInput);
   }
 }
 
-// ── CLI 解析与主流程 ──
+// ── CLI parsing and main workflow ──
 interface CliOpts {
   command: 'import';
   agentId?: string;

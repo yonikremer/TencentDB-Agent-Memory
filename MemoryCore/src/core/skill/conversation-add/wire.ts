@@ -1,10 +1,10 @@
 /**
- * wire.ts — skill conversation-add 的 handler wiring 入口。
+ * wire.ts — handler wiring entry point for skill conversation-add.
  *
- * 2026-07-30 池化重构后:
- *   - 老 wireConversationAdd (per-instance handler + per-instance worker) 已删除。
- *   - gateway 每 instance 调 wireConversationAddHandler 只造 handler/trigger/sink/buffer,
- *     worker 由全进程唯一的 SkillWorkerPool 管理。
+ * After the 2026-07-30 pooling refactoring:
+ *   - The old wireConversationAdd (per-instance handler + per-instance worker) has been removed.
+ *   - The gateway calls wireConversationAddHandler per instance to only create the handler/trigger/sink/buffer;
+ *     the worker is managed by the single process-wide SkillWorkerPool.
  */
 
 import type { StorageAdapter } from "../../storage/adapter.js";
@@ -26,48 +26,49 @@ import { SkillCoreSink, type MetadataServiceLike } from "./skill-core-sink.js";
 
 export interface WireConversationAddDeps {
   storage: StorageAdapter;
-  /** 生产：ioredis client；测试：LocalSkillAgentTaskQueue 直接注入到 `queue` 覆盖 */
+  /** Production: ioredis client; Test: LocalSkillAgentTaskQueue injected directly into `queue` to override */
   redis?: AgentQueueRedisLike;
-  /** 测试注入的 queue；不传就基于 redis 构造 RedisSkillAgentTaskQueue */
+  /** Test injected queue; if omitted, constructs a RedisSkillAgentTaskQueue based on redis */
   queue?: ISkillAgentTaskQueue;
-  /** Redis key 前缀，默认 "skill" —— 与设计文档 §5 对齐 */
+  /** Redis key prefix, defaults to "skill" — aligns with design doc §5 */
   redisKeyPrefix?: string;
 
   /**
-   * sink 兜底登记 skill asset 需要的 metadata service（幂等）。
-   * 不传时 sink 是 no-op —— skill 已由 extractor 的 tool-call 落库，
-   * 只是前端管控页可能看不到（standalone 模式下无 onSkillCreated 钩子）。
+   * The metadata service needed by the sink for fallback skill asset registration (idempotent).
+   * When omitted, the sink is a no-op — the skill is already persisted by the extractor's tool-call,
+   * it just might not be visible on the frontend management page (no onSkillCreated hook in standalone mode).
    */
   metadataService?: MetadataServiceLike;
 
   /**
-   * 保留字段用于跟老签名兼容 (wireConversationAddHandler 内部不使用 extractor,
-   * 真正的抽取由 SkillWorkerPool 的 resolveExtractor 现取)。gateway 侧当前
-   * 塞了一个 noop 占位。
+   * Reserved field used for compatibility with the old signature (wireConversationAddHandler internally
+   * does not use the extractor; the actual extraction is resolved dynamically by SkillWorkerPool's resolveExtractor).
+   * The gateway side currently passes a noop placeholder.
    */
   extractor: ISkillExtractor;
 
   logger: ExtractorLogger;
 
-  /** Handler 阈值覆盖 */
+  /** Handler threshold overrides */
   thresholds?: Partial<HandlerThresholds>;
 
-  /** 单条 tool 消息头尾压缩规则覆盖 (对应 SkillConfig.compress)。 */
+  /** Single tool message head/tail compression rules override (corresponds to SkillConfig.compress). */
   compressOptions?: Partial<CompressOptions>;
 
-  /** 兜底切分参数覆盖 (对应 SkillConfig.extraction 派生的 chunkMaxBytes / headKeepBytes / tailKeepBytes)。 */
+  /** Fallback chunking parameters override (corresponds to chunkMaxBytes / headKeepBytes / tailKeepBytes derived from SkillConfig.extraction). */
   oversizeOptions?: Partial<OversizeOptions>;
 
-  /** COS 子路径（默认 "skill_buffer"） */
+  /** COS sub-path (defaults to "skill_buffer") */
   bufferSubPath?: string;
 }
 
 /**
- * 只造 handler 需要的 4 件套 (handler / trigger / sink / buffer) +
- * queue (如果没注入则按 redis/内存分派)。**不启 worker**。
+ * Only creates the 4 components needed by the handler (handler / trigger / sink / buffer) +
+ * queue (dispatched based on redis/memory if not injected). **Does not start the worker**.
  *
- * 全进程 worker 由 SkillWorkerPool 统一管理; gateway 每 instance 首次访问
- * 时调本函数拿到 handler bundle 塞入 in-flight cache, 后续复用。
+ * Process-wide workers are managed uniformly by SkillWorkerPool; the gateway calls this function
+ * on the first access per instance to get the handler bundle, inserts it into the in-flight cache,
+ * and reuses it subsequently.
  */
 export interface WiredConversationAddHandler {
   handler: SkillConversationAddHandler;
@@ -94,7 +95,7 @@ export function wireConversationAddHandler(
       keyPrefix: deps.redisKeyPrefix ?? "skill",
     });
   } else {
-    // 无 Redis 的降级：仅 standalone 单机场景可用
+    // Fallback without Redis: only available in standalone single-node scenarios
     queue = new LocalSkillAgentTaskQueue();
     deps.logger.warn(
       "[skill-conversation-add] no redis nor queue injected — falling back to in-memory queue (single-node only)",

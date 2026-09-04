@@ -1,26 +1,26 @@
 /**
- * IStateBackend — Pipeline 状态后端抽象层
+ * IStateBackend — Pipeline State Backend Abstraction Layer
  *
- * 架构文档 §5.1 / 需求 #7.1
+ * Architecture doc §5.1 / Requirement #7.1
  *
- * Core/Worker/Timer Scanner 面向此接口编程，通过配置切换后端：
- * - LocalStateBackend  (单机，零外部依赖)
- * - RemoteStateBackend (服务化部署)
+ * Core/Worker/Timer Scanner programs against this interface; backend is switched via config:
+ * - LocalStateBackend  (single-machine, zero external dependencies)
+ * - RemoteStateBackend (service-mode deployment)
  *
- * 接口从现有 MemoryPipelineManager 中提取：
+ * Interface extracted from the existing MemoryPipelineManager:
  * - Buffer    ← messageBuffers (Map<string, CapturedMessage[]>)
  * - State     ← sessionStates  (Map<string, PipelineSessionState>)
  * - Timer     ← ManagedTimer (l1Idle, l2Schedule)
  * - Queue     ← SerialQueue (l1Queue, l2Queue, l3Queue)
- * - Lock      ← l3Running / l3Pending 互斥
- * - Capture   ← notifyConversation 的 count+threshold+enqueue 原子操作
+ * - Lock      ← l3Running / l3Pending mutex
+ * - Capture   ← notifyConversation atomic count+threshold+enqueue operation
  */
 
 // ============================
 // Pipeline Session State
 // ============================
 
-/** 复用现有 checkpoint.ts 中的 PipelineSessionState 字段 */
+/** Reuses the PipelineSessionState fields from the existing checkpoint.ts */
 export interface PipelineSessionState {
   conversation_count: number;
   last_extraction_time: string;
@@ -62,9 +62,10 @@ export interface TaskPayload {
   instanceId: string;
   sessionId: string;
   /**
-   * 租户身份（可选）。v2 pipeline 用 (teamId, agentId) 决定锁粒度与
-   * Redis hash tag，避免 single-instance 大 key 热点；offload 子系统不依赖。
-   * 缺失时锁/key 退化到 instance 级（兼容旧调用方）。
+   * Tenant identity (optional). The v2 pipeline uses (teamId, agentId) to determine lock
+   * granularity and Redis hash tags, avoiding single-instance large-key hotspots.
+   * The offload subsystem does not depend on this.
+   * When absent, locks/keys fall back to instance-level (compatible with older callers).
    */
   teamId?: string;
   agentId?: string;
@@ -80,7 +81,7 @@ export interface TaskPayload {
 export interface CaptureAtomicParams {
   instanceId: string;
   sessionId: string;
-  /** 同 TaskPayload.teamId / agentId — 决定 buffer + state 的 hash slot 归属。 */
+  /** Same as TaskPayload.teamId / agentId — determines the hash slot for buffer + state. */
   teamId?: string;
   agentId?: string;
   /** Optional message payload for callers that still use StateBackend buffering. */
@@ -90,7 +91,7 @@ export interface CaptureAtomicParams {
   timerMember: string;
   taskPayload: TaskPayload;
   nowMs: number;
-  /** 本次增加的对话轮数（每个 role=user 的消息算一轮）。默认 1。 */
+  /** Number of conversation rounds added in this call (each role=user message counts as one round). Default 1. */
   rounds: number;
 }
 
@@ -105,8 +106,8 @@ export interface CaptureAtomicResult {
 
 export interface IStateBackend {
   // ═══ Buffer ═══
-  // teamId/agentId 为可选；缺失时 Redis backend hash tag 退化到 {p:inst}（旧布局）。
-  // 推荐 v2 pipeline 调用方一定传入，避免单 instance 集中到一个 hash slot 形成热 key。
+  // teamId/agentId are optional; when absent, the Redis backend hash tag falls back to {p:inst} (legacy layout).
+  // Recommended: v2 pipeline callers should always pass these to avoid concentrating a single instance into one hash slot (hot key).
   appendBuffer(instanceId: string, sessionId: string, message: string, teamId?: string, agentId?: string): Promise<void>;
   drainBuffer(instanceId: string, sessionId: string, teamId?: string, agentId?: string): Promise<string[]>;
   getBufferLength(instanceId: string, sessionId: string, teamId?: string, agentId?: string): Promise<number>;
@@ -116,8 +117,9 @@ export interface IStateBackend {
   updateSessionState(instanceId: string, sessionId: string, patch: Partial<PipelineSessionState>, teamId?: string, agentId?: string): Promise<void>;
   deleteSessionState(instanceId: string, sessionId: string, teamId?: string, agentId?: string): Promise<void>;
   /**
-   * 列出 instance 下所有 active session（用于 standalone 模式 persister 回放 checkpoint）。
-   * Cluster 模式下 hash tag 散开后此方法只能覆盖单节点，service 模式 persister 不设置故不会调用 —— 仅作 standalone 兼容存在。
+   * List all active sessions under an instance (used by standalone-mode persister to replay checkpoints).
+   * In cluster mode, hash tags scatter across nodes so this method only covers a single node;
+   * service-mode persisters do not set this so it will not be called — exists only for standalone compatibility.
    */
   listActiveSessions(instanceId: string): Promise<string[]>;
 
@@ -142,7 +144,7 @@ export interface IStateBackend {
    * full queue scans. Local backend (standalone) MUST implement.
    */
   listQueuedTasks?(): Promise<TaskPayload[]>;
-  /** 认领超时未 ACK 的 pending 消息 (XPENDING + XCLAIM) */
+  /** Claim pending messages that timed out without ACK (XPENDING + XCLAIM) */
   claimStaleTasks?(workerId: string, minIdleMs: number, count: number): Promise<TaskPayload[]>;
 
   // ═══ Lock ═══

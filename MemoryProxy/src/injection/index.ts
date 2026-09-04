@@ -196,17 +196,17 @@ export function tryActivateRedis(config: ProxyConfig): boolean {
 }
 
 /**
- * session binding 必须始终持久化，不存在纯内存运行模式。
+ * Session binding must always be persisted; there is no pure in-memory mode.
  *
- * 如果 storage 和 redis 都未激活（bindingRepo 仍为 undefined），
- * 用 fs 自动创建一个 KvBindingRepo 兜底。
+ * If neither storage nor redis is activated (bindingRepo is still undefined),
+ * automatically fallback to creating a KvBindingRepo using fs.
  *
- * 默认路径: ~/.memory-tencentdb/proxy-state/ （与 MemoryCore 的
- * ~/.memory-tencentdb/memory-tdai/ 同级，保持项目数据聚拢）。
- * 可通过 config.storage.fs.fsRoot 或环境变量 PROXY_DATA_DIR 覆盖。
+ * Default path: ~/.memory-tencentdb/proxy-state/ (siblings with MemoryCore's
+ * ~/.memory-tencentdb/memory-tdai/ to keep project data gathered).
+ * Can be overridden via config.storage.fs.fsRoot or the PROXY_DATA_DIR env var.
  *
- * 降级机制: fs 创建失败（权限不足、磁盘满等）→ 打 warn 回退到内存逻辑，
- * 不阻断 proxy 启动。用户可在线使用但 proxy 重启后需重新 session-init。
+ * Degradation: if fs creation fails (permissions, disk full, etc.) -> log warn and fallback to in-memory,
+ * without blocking proxy startup. Users can still use it online, but after proxy restart session-init is required.
  */
 export function ensureBindingRepoPersistent(config: ProxyConfig): void {
   const store = getSessionStore();
@@ -221,8 +221,8 @@ export function ensureBindingRepoPersistent(config: ProxyConfig): void {
     store.setBindingRepo(new KvBindingRepo(fsStorage));
     console.log(`[injection] bindingRepo fallback → fs (${fsRoot})`);
   } catch (err) {
-    // 降级: fs 不可用时回退到内存逻辑，不阻断启动。
-    // proxy 可正常运行，但重启后 binding 丢失 → 用户需重新 session-init。
+    // Degradation: if fs unavailable fallback to in-memory, do not block startup.
+    // Proxy runs fine, but bindings lost on restart -> user must session-init again.
     console.warn(
       `[injection] fs bindingRepo at ${fsRoot} failed: ${(err as Error).message}. ` +
       `Falling back to in-memory — session bindings will NOT persist across restarts.`,
@@ -254,14 +254,14 @@ function buildPipelineBundle(config: ProxyConfig): PipelineBundle {
   // (`coreSkill`, `tdai`, ...); there is no shared external endpoint anymore.
   const injectors = config.injection?.injectors ?? [];
 
-  // proxyBaseUrl 在 skill-tools-injector 和 tdai-tools-injector 之间共享。
+  // proxyBaseUrl is shared between skill-tools-injector and tdai-tools-injector.
   //
-  // ⚠️ 多节点部署必须显式配 `injection.externalGatewayUrl`（gateway 对外域名，
-  // 例如 https://gateway.example.com）—— 否则每个 pod 会把
-  // 自己的 host:port 嵌进 `<skill_tools>` / `<tdai_memory_tools>` 文本，
-  // pods 互相覆盖 hook cache，同时上游 KV cache 每次 miss。
+  // ⚠️ Multi-node deployments MUST explicitly configure `injection.externalGatewayUrl` (gateway domain,
+  // e.g. https://gateway.example.com) — otherwise each pod will embed
+  // its own host:port into `<skill_tools>` / `<tdai_memory_tools>` text,
+  // causing pods to overwrite each other's hook cache, and upstream KV cache missing every time.
   //
-  // 未配时 fallback 到本机 host:port（仅单节点 / 本地开发场景可用），启动时 warn 一次。
+  // When unconfigured, falls back to local host:port (only for single node / local dev), warns once on startup.
   let proxyBaseUrl: string | undefined;
   if (injectors.includes("skill") || (injectors.includes("tdai-memory") && config.tdai.enabled)) {
     const externalBase = config.injection?.externalGatewayUrl;
@@ -339,36 +339,36 @@ function buildPipelineBundle(config: ProxyConfig): PipelineBundle {
       l2Limit: config.tdai.memory.l2Limit,
       timeoutMs: config.tdai.memory.timeoutMs,
     };
-    // fixed-asset-agents（self + 借入≤2）通过内核 MetadataClient 获取；
-    // 内核不可达时 injector 自动降级为"只查当前 agent 的记忆"。
+    // fixed-asset-agents (self + borrowed <= 2) obtained via kernel MetadataClient;
+    // when kernel unreachable, injector degrades to "only query current agent's memory".
     if (config.tdai.memory.injectL2L3) {
       registry.register(new TdaiProfileMemoryInjector(tdaiBaseConfig, config.coreSkill));
     }
-    // 注意：L0/L1 不再每轮自动召回注入到 user prompt（会破坏 KV/prompt cache）。
-    // 改为只在 system prompt 暴露只读工具（见 TdaiToolsInjector），借助 system
-    // prompt cache 复用。L1 recall injector 已下线，recallL1 配置保留但不再注册。
-    // 配套 profile-memory-injector：L2 仅注入 path 索引；LLM 通过 Bash curl
-    // <proxy>/memory-bridge/v3/* 调用只读工具。proxy 自动注入身份。
-    // proxyBaseUrl 复用 skill-tools-injector 算出来的（同一 host:port）。
+    // Note: L0/L1 are no longer automatically recalled and injected into user prompt per turn (breaks KV/prompt cache).
+    // Instead, read-only tools are exposed in system prompt (see TdaiToolsInjector), leveraging system
+    // prompt cache. L1 recall injector is deprecated; recallL1 config kept but not registered.
+    // Paired with profile-memory-injector: L2 only injects path indices; LLM uses Bash curl
+    // <proxy>/memory-bridge/v3/* to call read-only tools. Proxy automatically injects identity.
+    // proxyBaseUrl reuses the one calculated for skill-tools-injector (same host:port).
     if (typeof proxyBaseUrl !== "undefined") {
       registry.register(new TdaiToolsInjector({ proxyBaseUrl }));
     }
   }
 
-  // ── Asset Reflection (内部效果评估) ─────────────────────────────────────
-  // 默认开启（markerOptIn=true）—— 未配置 assetReflection 的 pod 也 register
-  // 本 injector。register 只是加进 registry，marker 未命中时 execute() 直接
-  // 返回 []，正常请求 prompt 完全不变；只有请求 URL 带 `/analyse` marker
-  // 才真 emit 块。Tag 列表由本节点上"实际 register 了的资产 injector"派生，
-  // 避免让 LLM 反思一个本节点根本没接入的资产。
+  // ── Asset Reflection (Internal Evaluation) ─────────────────────────────────────
+  // Enabled by default (markerOptIn=true) — pods without assetReflection configured still register
+  // this injector. Registering just adds to registry; if marker misses, execute() returns
+  // [] directly, normal request prompts remain untouched; only if request URL has `/analyse` marker
+  // will it actually emit the block. Tag list is derived from "asset injectors actually registered"
+  // on this node, preventing LLM from reflecting on an asset not connected on this node.
   //
-  // 显式配 markerOptIn=false 时 injector 不 register，且 server.ts 顶部 gate
-  // 会把任何带 `/analyse/` 段的请求 404 拒。
+  // If explicitly markerOptIn=false, injector is not registered, and the server.ts gate at top
+  // will 404 any requests containing the `/analyse/` segment.
   if (config.injection?.assetReflection?.markerOptIn) {
     const registeredIds = new Set(registry.getAll().map((h) => h.id));
     const activeAssetTags: string[] = [];
-    // Skill 家族：SkillInjector 出 <available_skills>，SkillToolsInjector 出 <skill_tools>；
-    // 两个 injector 一起启用（见上文 `if (injectors.includes("skill"))`），任一存在都算 skill 资产命中。
+    // Skill family: SkillInjector emits <available_skills>, SkillToolsInjector emits <skill_tools>;
+    // Both injectors enabled together (see above `if (injectors.includes("skill"))`), any present counts as skill asset hit.
     if (registeredIds.has("skill-injector") || registeredIds.has("skill-tools-injector")) {
       activeAssetTags.push("skill_tools");
       activeAssetTags.push("available_skills");
@@ -383,7 +383,7 @@ function buildPipelineBundle(config: ProxyConfig): PipelineBundle {
       registry.register(new AssetReflectionInjector({ activeAssetTags }));
       console.log(`[injection] asset-reflection registered, tags=[${activeAssetTags.join(",")}]`);
     } else {
-      console.log(`[injection] asset-reflection markerOptIn=true 但本节点无资产 injector，跳过 register`);
+      console.log(`[injection] asset-reflection markerOptIn=true but no asset injectors on this node, skipping register`);
     }
   }
 
@@ -394,8 +394,8 @@ function buildPipelineBundle(config: ProxyConfig): PipelineBundle {
     tryActivateRedis(config);
   }
 
-  // session binding 必须始终持久化 — 不存在纯内存模式。
-  // 如果 storage 和 redis 都未激活，用 fs 作为 bindingRepo 兜底。
+  // Session binding must always be persisted — no pure in-memory mode.
+  // If neither storage nor redis is activated, use fs as the bindingRepo fallback.
   ensureBindingRepoPersistent(config);
 
   const hookCacheRepo = tryLoadHookCacheRepo();

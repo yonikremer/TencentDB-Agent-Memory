@@ -1,24 +1,24 @@
 /**
- * index-builder.ts — 维护 wiki/index.md（OKF §6 渐进式披露 / llm-wiki「先看目录再钻取」）。
+ * index-builder.ts — Maintains wiki/index.md (OKF §6 progressive disclosure / llm-wiki "browse index before drilling down").
  *
- * ingest 写盘后调用：扫描 wiki/ 下所有页的 frontmatter，按页类型分组，
- * 生成 `* [标题](relPath) - 描述` 列表，覆盖写入 wiki/index.md。
+ * Called after ingest disk write: scans frontmatter of all pages under wiki/, groups by page type,
+ * generates `* [Title](relPath) - Description` list, and overwrites wiki/index.md.
  *
- * 设计取舍：
- *   - index.md 是结构性文件（page/write/rm 禁改），但 ingest 可维护它（PRD §3.7-2）。
- *   - 用标准 markdown 链接（OKF 推荐 bundle-relative `/path`），不影响 [[wikilink]] 图谱。
- *   - 分组顺序固定（sources → entities → concepts → 其它 type），同组按标题排序，输出稳定。
- *   - 宽容：坏页/缺 frontmatter 跳过，不抛错。
+ * Design trade-offs:
+ *   - index.md is a structural file (forbidden to edit via page/write/rm), but ingest can maintain it (PRD §3.7-2).
+ *   - Uses standard markdown links (OKF recommended bundle-relative `/path`), without affecting [[wikilink]] graph.
+ *   - Grouping order fixed (sources → entities → concepts → other types), sorted by title within group for stable output.
+ *   - Tolerant: skips malformed pages / missing frontmatter without throwing.
  */
 
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { parseFrontmatter } from "./frontmatter.js";
 
-/** 结构性文件不列入 index。 */
+/** Structural files not listed in index. */
 const STRUCTURAL = new Set(["index.md", "schema.md", "purpose.md", "log.md", "overview.md"]);
 
-/** 分组展示顺序与中文小节标题。未知 type 归到「其它」。 */
+/** Group display order and section headings. Unknown types fall back to "Other". */
 const GROUP_ORDER: Array<{ type: string; heading: string }> = [
   { type: "source", heading: "Sources" },
   { type: "entity", heading: "Entities" },
@@ -29,12 +29,12 @@ const GROUP_ORDER: Array<{ type: string; heading: string }> = [
 
 interface IndexEntry {
   title: string;
-  relPath: string; // bundle-relative，以 / 开头（OKF 推荐）
+  relPath: string; // bundle-relative, starting with / (OKF recommended)
   description: string;
   type: string;
 }
 
-/** 扫描 wiki/ 收集所有非结构性页的索引条目。 */
+/** Scans wiki/ to collect index entries of all non-structural pages. */
 function collectEntries(wikiDir: string): IndexEntry[] {
   const out: IndexEntry[] = [];
   const walk = (dir: string) => {
@@ -80,8 +80,8 @@ function collectEntries(wikiDir: string): IndexEntry[] {
 }
 
 /**
- * 根据当前 wiki/ 内容渲染 index.md 文本（OKF 渐进式披露格式，无 frontmatter）。
- * 导出以便单测。
+ * Renders index.md text based on current wiki/ content (OKF progressive disclosure format, without frontmatter).
+ * Exported for unit testing.
  */
 export function renderIndex(entries: IndexEntry[]): string {
   const byType = new Map<string, IndexEntry[]>();
@@ -108,7 +108,7 @@ export function renderIndex(entries: IndexEntry[]): string {
 
   for (const { type, heading } of GROUP_ORDER) emitGroup(type, heading);
 
-  // 其它未列出的 type 归到「Other」，保证不漏页（OKF 容忍未知 type）。
+  // Other unlisted types are grouped under their capitalized name, ensuring no pages are missed (OKF tolerates unknown types).
   const otherTypes = [...byType.keys()].filter((t) => !emitted.has(t)).sort();
   for (const t of otherTypes) emitGroup(t, t.charAt(0).toUpperCase() + t.slice(1));
 
@@ -116,8 +116,8 @@ export function renderIndex(entries: IndexEntry[]): string {
 }
 
 /**
- * 重建并覆盖写入 wiki/index.md。
- * @returns 写入的条目数（用于日志）。
+ * Rebuilds and overwrites wiki/index.md.
+ * @returns Count of written entries (for logging).
  */
 export function rebuildIndexFile(projectPath: string): number {
   const wikiDir = join(projectPath, "wiki");

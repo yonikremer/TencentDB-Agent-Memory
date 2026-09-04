@@ -46,47 +46,48 @@ interface HttpToolDef {
 }
 
 /** Wiki tools (7) — read-only query tools for LLM agents. */
+/** Wiki tools (7) — read-only query tools for LLM agents. */
 const WIKI_TOOLS: HttpToolDef[] = [
   {
     name: "get_info",
-    description: "获取 wiki 元信息（名称、状态、页面数等）。",
+    description: "Get wiki metadata (name, status, page count, etc.).",
     params: {},
   },
   {
     name: "search",
-    description: "BM25 全文搜索 wiki 页面内容。用关键词查找相关文档。",
+    description: "BM25 full-text search across wiki pages. Use keywords to find relevant documents.",
     params: {
-      query: { type: "string", required: true, description: "搜索关键词" },
-      limit: { type: "integer", required: false, default: 20, description: "返回结果数上限" },
+      query: { type: "string", required: true, description: "Search keywords" },
+      limit: { type: "integer", required: false, default: 20, description: "Maximum number of results to return" },
     },
   },
   {
     name: "list_pages",
-    description: "列出所有页面引用（id + title + path）。",
+    description: "List all page references (id + title + path).",
     params: {},
   },
   {
     name: "read_page",
-    description: "读取指定页面完整内容。",
+    description: "Read full content of specified pages.",
     params: {
-      refs: { type: "array", required: true, description: "页面引用数组（id 或路径）" },
+      refs: { type: "array", required: true, description: "Array of page references (ID or path)" },
     },
   },
   {
     name: "get_graph",
-    description: "获取知识图谱结构（nodes, edges, communities）。",
+    description: "Get knowledge graph structure (nodes, edges, communities).",
     params: {},
   },
   {
     name: "list_raw",
-    description: "列出原始上传文件。",
+    description: "List raw uploaded files.",
     params: {},
   },
   {
     name: "read_raw",
-    description: "读取指定原始文件内容。",
+    description: "Read content of specified raw files.",
     params: {
-      filenames: { type: "array", required: true, description: "文件名数组" },
+      filenames: { type: "array", required: true, description: "Array of filenames" },
     },
   },
 ];
@@ -95,84 +96,84 @@ const WIKI_TOOLS: HttpToolDef[] = [
 const CODE_GRAPH_TOOLS: HttpToolDef[] = [
   {
     name: "get_info",
-    description: "获取 code-graph 元信息（仓库名、状态、统计等）。",
+    description: "Get code-graph metadata (repository name, status, statistics, etc.).",
     params: {},
   },
   {
     name: "search",
     description:
-      "按名称快速搜索符号，只返回位置（不含源码）。想直接拿到源码/理解某块代码，请改用 explore。",
+      "Quickly search symbols by name, returning locations only (no source code). To obtain source code directly or understand a piece of code, use explore instead.",
     params: {
-      query: { type: "string", required: true, description: "符号名或部分名称（如 \"auth\"、\"signIn\"、\"UserService\"）" },
+      query: { type: "string", required: true, description: "Symbol name or partial name (e.g. \"auth\", \"signIn\", \"UserService\")" },
       kind: {
         type: "string",
         required: false,
         enum: ["function", "method", "class", "interface", "type", "variable", "route", "component"],
-        description: "按节点类型过滤。省略则搜索全部类型（不要传 \"any\"/\"symbol\"/\"file\"，这些不是合法值，会导致零结果）。",
+        description: "Filter by node type. Omit to search all types (do not pass \"any\"/\"symbol\"/\"file\" as these are invalid).",
       },
-      limit: { type: "integer", required: false, default: 10, description: "返回结果数上限" },
+      limit: { type: "integer", required: false, default: 10, description: "Maximum number of results to return" },
     },
   },
   {
     name: "explore",
     description:
-      "【首选工具】几乎任何问题都先用它：X 怎么工作、架构、定位 bug、某处在哪。一次调用即按文件分组返回相关符号的完整源码（等价于 Read，返回的文件不要再重复读）。query 可以是自然语言问题，也可以是一组符号/文件名。通常一次就够，无需再 search/get_node/读文件。",
+      "【Primary Tool】Use first for almost any question: how X works, architecture, bug location, where something is defined. Returns complete source code grouped by file for relevant symbols (equivalent to Read; do not re-read returned files). Query can be a natural language question or a set of symbol/filenames.",
     params: {
       query: {
         type: "string",
         required: true,
-        description: "要探索的符号名、文件名或简短代码词（如 \"AuthService loginUser session-manager\"）。可先用 search 找到相关名称。",
+        description: "Symbol name, filename, or code terms to explore (e.g. \"AuthService loginUser session-manager\"). Search can be used first to find relevant names.",
       },
-      maxFiles: { type: "integer", required: false, default: 12, description: "最多返回源码的文件数（默认 12）" },
+      maxFiles: { type: "integer", required: false, default: 12, description: "Maximum number of files to return source code for (default 12)" },
     },
   },
   {
     name: "callers",
-    description: "列出调用 <symbol> 的函数。想看完整调用流程请用 explore。",
+    description: "List functions that call <symbol>. Use explore to view the complete execution flow.",
     params: {
-      symbol: { type: "string", required: true, description: "要查调用者的函数/方法/类名" },
-      limit: { type: "integer", required: false, default: 20, description: "返回结果数上限（默认 20）" },
+      symbol: { type: "string", required: true, description: "Function, method, or class name to check callers for" },
+      limit: { type: "integer", required: false, default: 20, description: "Maximum number of results to return (default 20)" },
     },
   },
   {
     name: "callees",
-    description: "列出 <symbol> 调用的函数。想看完整调用流程请用 explore。",
+    description: "List functions called by <symbol>. Use explore to view the complete execution flow.",
     params: {
-      symbol: { type: "string", required: true, description: "要查被调用者的函数/方法/类名" },
-      limit: { type: "integer", required: false, default: 20, description: "返回结果数上限（默认 20）" },
+      symbol: { type: "string", required: true, description: "Function, method, or class name to check callees for" },
+      limit: { type: "integer", required: false, default: 20, description: "Maximum number of results to return (default 20)" },
     },
   },
   {
     name: "impact",
-    description: "列出修改 <symbol> 会影响到的符号。重构前先用它评估影响面。",
+    description: "List symbols impacted by modifying <symbol>. Use to evaluate impact before refactoring.",
     params: {
-      symbol: { type: "string", required: true, description: "要做影响分析的符号名" },
-      depth: { type: "integer", required: false, default: 2, description: "依赖遍历层数（默认 2）" },
+      symbol: { type: "string", required: true, description: "Symbol name to perform impact analysis on" },
+      depth: { type: "integer", required: false, default: 2, description: "Dependency traversal depth (default 2)" },
     },
   },
   {
     name: "node",
     description:
-      "【explore 之后的次选】获取单个符号的完整信息：位置、签名、调用链、以及逐字源码（includeCode=true）。名称有重载/多定义时会一次返回全部匹配定义的完整 body；可用 file/line 精确定位某个重载。需要多个相关符号或完整流程时请用 explore。",
+      "【Secondary Tool after explore】Get complete information for a single symbol: location, signature, call chain, and verbatim source code (when includeCode=true). Returns all matching definitions when names are overloaded.",
     params: {
-      symbol: { type: "string", required: true, description: "要查详情的符号名" },
-      includeCode: { type: "boolean", required: false, default: false, description: "是否包含完整源码（默认 false 以节省上下文）" },
-      file: { type: "string", required: false, description: "可选：用文件路径/文件名消歧重载（如 \"harness.rs\"）" },
-      line: { type: "integer", required: false, description: "可选：用行号消歧到该位置附近的定义" },
+      symbol: { type: "string", required: true, description: "Symbol name to inspect" },
+      includeCode: { type: "boolean", required: false, default: false, description: "Include complete source code (default false to save context)" },
+      file: { type: "string", required: false, description: "Optional: file path or filename to disambiguate overloads (e.g. \"harness.rs\")" },
+      line: { type: "integer", required: false, description: "Optional: line number to disambiguate to nearby definition" },
     },
   },
   {
     name: "status",
-    description: "索引健康检查（文件/节点/边数量）。除非排查问题，一般不需要。",
+    description: "Index health check (file/node/edge counts). Generally not needed unless troubleshooting.",
     params: {},
   },
   {
     name: "files",
-    description: "索引到的文件树，含语言与符号数。查看项目结构比 Glob 更快。",
+    description: "Indexed file tree containing languages and symbol counts. Faster than Glob for viewing project structure.",
     params: {
-      path: { type: "string", required: false, description: "按目录前缀过滤（如 \"src/components\"），不传则返回全部" },
-      pattern: { type: "string", required: false, description: "按 glob 模式过滤（如 \"*.tsx\"、\"**/*.test.ts\"）" },
-      format: { type: "string", required: false, default: "tree", enum: ["tree", "flat", "grouped"], description: "输出格式：tree（层级，默认）、flat（平铺列表）、grouped（按语言分组）" },
+      path: { type: "string", required: false, description: "Filter by directory prefix (e.g. \"src/components\"); omit to return all" },
+      pattern: { type: "string", required: false, description: "Filter by glob pattern (e.g. \"*.tsx\", \"**/*.test.ts\")" },
+      format: { type: "string", required: false, default: "tree", enum: ["tree", "flat", "grouped"], description: "Output format: tree (default), flat (flat list), grouped (grouped by language)" },
     },
   },
 ];
@@ -378,17 +379,17 @@ async function executeWikiTool(
 // Reuse the query specs from code-graph routes
 
 /**
- * 对外暴露的 codegraph 查询工具名（不含 get_info，get_info 在调用方特殊处理）。
- * 单一真相源：tools.ts 的 CODE_GRAPH_TOOLS、code-graph.ts 的路由注册、
- * toCodeGraphToolName 的校验列表，全部从这里来。
+ * Externally exposed codegraph query tool names (excluding get_info, which is specially handled by caller).
+ * Single source of truth: CODE_GRAPH_TOOLS in tools.ts, route registration in code-graph.ts,
+ * and validation list in toCodeGraphToolName all derive from here.
  */
 export const CODEGRAPH_QUERY_TOOL_NAMES: readonly string[] = [
   "search", "explore", "callers", "callees", "impact", "node", "status", "files",
 ];
 
 /**
- * 把对外暴露的工具名映射为 executeTool 接受的内部工具名。
- * 对外统一用短名（node / status / files），内部统一加 codegraph_ 前缀。
+ * Maps externally exposed tool names to internal tool names accepted by executeTool.
+ * Externally uses short names (node / status / files), internally prepends codegraph_ prefix.
  */
 export function toCodeGraphToolName(externalName: string): string | undefined {
   return CODEGRAPH_QUERY_TOOL_NAMES.includes(externalName) ? `codegraph_${externalName}` : undefined;

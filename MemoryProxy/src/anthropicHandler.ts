@@ -63,7 +63,7 @@ const SKIP_REQUEST_HEADERS = new Set([
   "content-length",
   "transfer-encoding",
   "connection",
-  // 内部身份头只给 proxy/session-init 使用，不能透传给上游模型服务。
+  // Internal identity header is only used by proxy/session-init and must not be forwarded upstream.
   "x-tdai-user-key",
 ]);
 
@@ -386,21 +386,22 @@ async function forwardWithRetry(
   let forwardFailed = false;
 
   // ── Optional outbound body md5 debug log ───────────────────────────────
-  // 用于长稳观测：Anthropic KV cache 命中的必要条件是"从 body 头 → cache_control
-  // anchor 之前所有 bytes 完全一致"。所以要分开算三段 md5：
-  //   1. sysFullMd5    — md5(JSON.stringify(body.system))  全 system 序列化
-  //   2. sysStrMd5     — md5(body.system 拉平成字符串)    仅文本内容（对比用）
-  //   3. msgsPrefixMd5 — 找到 messages 里最后一个带 cache_control 的位置 N，
-  //                      md5(JSON.stringify(messages[0..N]))，即真正的 cache 前缀
-  //   4. msgsAnchorIdx — 上面那个 N（帮助定位命中长度）
+  // Used for long-term stability observation: Anthropic KV cache hit requires
+  // "all bytes from body header up to the cache_control anchor must be identical".
+  // Therefore, three MD5 segments are computed separately:
+  //   1. sysFullMd5    — md5(JSON.stringify(body.system))  Full system serialization
+  //   2. sysStrMd5     — md5(flattened system string)       Text content only (for comparison)
+  //   3. msgsPrefixMd5 — Find index N of the last message containing cache_control,
+  //                      md5(JSON.stringify(messages[0..N])), which is the actual cache prefix
+  //   4. msgsAnchorIdx — The index N above (helps locate the hit length)
   //
-  // 任何一个 md5 变了都意味着 Anthropic 会 cache miss。
+  // Any change in these MD5 values implies an Anthropic cache miss.
   //
-  // 开启：PROXY_DEBUG_DUMP_OUTBOUND_MD5=1 node ...
+  // Enable via: PROXY_DEBUG_DUMP_OUTBOUND_MD5=1 node ...
   if (process.env.PROXY_DEBUG_DUMP_OUTBOUND_MD5) {
     try {
       const sys = (upstreamBody as { system?: unknown }).system;
-      // Anthropic system 通常是字符串（CC）或 blocks 数组（少数 SDK）
+      // Anthropic system prompt is usually a string (CC) or an array of blocks (some SDKs)
       const sysFullStr = sys === undefined ? "" : JSON.stringify(sys);
       const sysTextStr = typeof sys === "string"
         ? sys
@@ -409,7 +410,7 @@ async function forwardWithRetry(
           : "";
 
       const msgs = (upstreamBody as { messages?: Array<Record<string, unknown>> }).messages ?? [];
-      // 找 messages 里最后一个"内容里带 cache_control"的位置
+      // Find the index of the last message containing "cache_control" in content
       let anchorIdx = -1;
       for (let i = msgs.length - 1; i >= 0; i--) {
         const content = msgs[i]?.content;
@@ -418,7 +419,7 @@ async function forwardWithRetry(
           if (hasCache) { anchorIdx = i; break; }
         }
       }
-      // cache 前缀 = 从 body 头 → anchor（含）之前所有 messages 序列化后
+      // cache prefix = serialization of all messages from body start up to anchor (inclusive)
       const prefixEnd = anchorIdx >= 0 ? anchorIdx + 1 : msgs.length;
       const msgsPrefixStr = JSON.stringify(msgs.slice(0, prefixEnd));
 
@@ -431,7 +432,7 @@ async function forwardWithRetry(
         `[outbound-md5] session=${sessionKeyForDebug ?? "?"} sysBytes=${sysFullStr.length} sysFullMd5=${sysFullMd5} sysTextMd5=${sysTextMd5} msgsCount=${msgs.length} msgsAnchorIdx=${anchorIdx} msgsPrefixBytes=${msgsPrefixStr.length} msgsPrefixMd5=${msgsPrefixMd5}`,
       );
     } catch (e) {
-      // best-effort；不应因 debug 崩流程
+      // Best-effort; debug logging should not crash the flow
       // eslint-disable-next-line no-console
       console.log(`[outbound-md5] session=${sessionKeyForDebug ?? "?"} <error: ${(e as Error).message}>`);
     }
@@ -553,12 +554,12 @@ export async function handleAnthropicMessages(
   }
 
   // ── CC request classification (feature-gated, per-agent) ─────────────────
-  // 通过 agentAdapter 分类请求 —— 每个客户端有自己的规则：
-  //   - claude-code: 按 cache_control marker + tools/thinking 三分
-  //   - codebuddy / unknown: 恒 main（未适配，等价现状）
+  // Classify request via agentAdapter — each client has its own rules:
+  //   - claude-code: Three-way split based on cache_control marker + tools/thinking
+  //   - codebuddy / unknown: Always main (unadapted, equivalent to current behavior)
   //
-  // 关闭 ccRequestRouting.enabled 时强制视为 main，走完全等价现状的老链路。
-  // 详见 docs/design/2026-07-30-cc-request-routing-plan.md
+  // When ccRequestRouting.enabled is off, force as main and follow legacy pipeline.
+  // See docs/design/2026-07-30-cc-request-routing-plan.md for details.
   const _pathPartsEarly = c.req.path.split("/").filter(Boolean);
   const _agentFromPathEarly = _pathPartsEarly[0]
     && !["v1", "proxy", "skill-bridge", "memory-bridge"].includes(_pathPartsEarly[0])
@@ -568,11 +569,12 @@ export async function handleAnthropicMessages(
   const requestKind: CcRequestKind = ccRoutingEnabled ? agentAdapter.classifyRequest(body) : "main";
 
   // ── Model gate: reject requests whose `model` is not a registered display name ──
-  // 价目表已配置时，客户端 `model` 必须匹配某条 entry 的 `modelName`（展示名，
-  // 大小写不敏感）。真实 model_id 是内部细节，不作为客户端入口。未匹配则直接
-  // 400，避免请求转发成功却因无定价而漏计费。价目表为空时跳过（向后兼容）。
+  // When pricing table is configured, client `model` must match the `modelName`
+  // (display name, case-insensitive) of an entry. Real model_id is an internal detail
+  // and not exposed to clients. Mismatches return 400 immediately to avoid unbilled
+  // requests. Skipped when pricing table is empty (backwards compatible).
   //
-  // 内部/外部用户一视同仁 —— internal callers must also request by
+  // Internal/external users are treated equally — internal callers must also request by
   // `modelName`, ensuring upstream ids and billing/observability keys align
   // across all traffic.
   const requestedModel = typeof body.model === "string" ? body.model : "unknown";
@@ -659,7 +661,7 @@ export async function handleAnthropicMessages(
     || "";
   if (userId) keyId = userId;
 
-  // sk-mem key（用于 TDAI ACL / MetadataClient 的 x-tdai-user-key）就是入口的 apiKey。
+  // sk-mem key (used as x-tdai-user-key for TDAI ACL / MetadataClient) is the incoming apiKey.
   const callerUserKey = apiKey || null;
 
   // Activate Redis storage early — must run BEFORE session init.
@@ -681,7 +683,7 @@ export async function handleAnthropicMessages(
         const compositeKey = `${agentSource}:${sessionKey}`;
         store.bind(compositeKey, { userId: userId || "anonymous", agentSource, sessionId: sessionKey, spaceId });
 
-        // ── 强制归档旧 agent 的 skill buffer（best-effort）──
+        // ── Force-archive skill buffer for old agent (best-effort) ──
         const oldState = store.get(compositeKey);
         if (oldState?.status === "initialized" && oldState.sessionInfo && config.coreSkill?.endpoint) {
           const si = oldState.sessionInfo as Record<string, string>;
@@ -725,9 +727,9 @@ export async function handleAnthropicMessages(
   let sessionJustRegistered = false;
   let _resetFlowResult: { agentName: string; agentIdShort: string; teamId: string; taskName?: string | null; bypassed?: boolean } | null = null;
   console.log(`[injection-debug] conversationId=${conversationId} sessionKey=${sessionKey} userId=${userId} agentSource=${agentSource} sessionInitEnabled=${config.sessionInit?.enabled} injectionEnabled=${config.injection?.enabled} injectors=${JSON.stringify(config.injection?.injectors)} injectedSkipped=${injectedSkipped}`);
-  // CC 分流：SIDEQUERY 完全跳过 session-init（独立小请求无对话概念）。
-  //          FORK 允许走 L2b recovery 复用 MAIN 已建的 session，但不进 form 交互路径
-  //          （借用 MAIN 的 sessionInfo，见下方的 kind === 'fork' 分支保护）。
+  // CC traffic split: SIDEQUERY completely skips session-init (isolated small request without session concept).
+  //                   FORK allows running L2b recovery to reuse MAIN's established session, but does not enter form interaction
+  //                   (borrows MAIN's sessionInfo, see kind === 'fork' branch protection below).
   const skipSessionInit = requestKind === "sidequery";
   if (config.sessionInit?.enabled && conversationId && !skipSessionInit) {
     try {
@@ -739,8 +741,8 @@ export async function handleAnthropicMessages(
 
       // ── Session Recovery: try L2b binding before falling into session-init form ──
       const compositeKey = `${agentSource}:${sessionKey}`;
-      // Identity for repo/binding writes. userId 缺失时 fallback 到 `anonymous`
-      // 复合键，保证 key path 分段合法（参见 §4.4 边界处理）。
+      // Identity for repo/binding writes. Fallback to `anonymous` composite key
+      // when userId is missing, ensuring valid key path segments (see §4.4 edge cases).
       const identity = {
         userId: userId || "anonymous",
         agentSource,
@@ -758,27 +760,27 @@ export async function handleAnthropicMessages(
       // (initialized or bypassed). Pending / mid-form states MUST fall through
       // to handleSessionInit so the state machine can advance to the next form.
       const isTerminalState = recovered?.status === "initialized";
-      // 记录本 turn 是否真的走了 handleSessionInit state machine —— 用来精确判定
-      // `sessionJustRegistered` 语义（"session init 状态机在本 turn 完成终态转换"）。
-      // 覆盖两种终态：
-      //   - 正常注册完成（justRegistered=true 由 completeRegistration 设置）
-      //   - bypass（用户选"否"、maxRetries、no-agent 等分支，也带 justRegistered=true）
-      // 这样 turn N 用户答 asset-confirm 时 mem-command 拦截块能通过 checkFirst
-      // 兜底扒 first user message，把最开始那条 mem: 命令识别出来（此时 sessionInfo=null
-      // → 走"未初始化"分支），而不是让它落到 LLM 透传里被幻觉回答。
-      // 保护措施：Case 3 (state 已经稳定 initialized+bypassed) 的常规返回**不带**
-      // justRegistered，所以后续 turn 不会重复扒第一条历史；L2b recovery 分支借用
-      // justRegistered=true 只是为了触发下游 prewarm，与状态机无关，那里
-      // wentThroughSessionInitStateMachine=false 会自然过滤掉。
+      // Tracks whether this turn executed the handleSessionInit state machine — used to precisely determine
+      // `sessionJustRegistered` semantics ("session init state machine reached terminal state transition in this turn").
+      // Covers two terminal states:
+      //   - Normal registration complete (justRegistered=true set by completeRegistration)
+      //   - Bypass (branches like user selecting "No", maxRetries, no-agent, also carry justRegistered=true)
+      // This allows the mem-command interceptor at turn N asset-confirm to inspect the first user message via checkFirst fallback,
+      // recognizing the initial mem: command (where sessionInfo=null → takes "uninitialized" fallback response),
+      // preventing it from being passed through to the LLM.
+      // Safeguard: Case 3 (stable initialized+bypassed state) regular returns do NOT carry justRegistered,
+      // so subsequent turns will not repeatedly check the first history item; L2b recovery branch borrowing
+      // justRegistered=true is only to trigger downstream prewarm, unrelated to state machine, where
+      // wentThroughSessionInitStateMachine=false naturally filters it out.
       let wentThroughSessionInitStateMachine = false;
-      // Recovery hit source 决定是否需要 prewarm（见 handler.ts 对称位置详注）。
+      // Recovery hit source determines whether prewarm is needed (see detailed note at symmetric location in handler.ts).
       const needsPrewarm =
         recovered?.__recoverySource === "l2b" ||
         recovered?.__recoverySource === "history-scan";
       if (recovered && isTerminalState) {
         // Recovery hit: keep original messages, only re-inject <session_context>
         // so this turn's system prompt carries agent/task context again.
-        // 用户对话永远保留原样，包括 session_init form 交互 — 不做任何删除。
+        // User conversation is always preserved as-is, including session_init form interactions — no deletions.
         // Anthropic protocol: system lives on body.system (not in messages),
         // so we hand systemAppend back through the initResult and let the
         // shared apply-block below merge it into body.system.
@@ -800,12 +802,12 @@ export async function handleAnthropicMessages(
           agentDetail: recovered.agentDetail,
           taskDetail: recovered.taskDetail,
           bypassed: recovered.bypassed,
-          justRegistered: needsPrewarm, // 只在 L2b / history-scan recovery 时触发 prewarm
+          justRegistered: needsPrewarm, // Trigger prewarm only on L2b / history-scan recovery
         };
       } else if (requestKind === "fork") {
-        // FORK 借用 MAIN 已建的 session。L2b 未命中说明 MAIN 尚未完成 init —— 罕见情况，
-        // 保守起见让 fork 请求走 no-op（不 intercept、不改 messages），让上游收到原样请求。
-        // 这样最坏结果 = MAIN 那次拿不到 sessionInfo（等效关掉 session-init），不会更糟。
+        // FORK borrows MAIN's established session. An L2b miss indicates MAIN hasn't completed init yet — rare case.
+        // Conservatively treat fork request as no-op (no intercept, no message modification), passing raw request to upstream.
+        // The worst outcome is MAIN missing sessionInfo (equivalent to disabling session-init), no worse.
         console.log(`[session-init:cc:fork] session=${compositeKey} L2b miss on fork request → passthrough`);
         initResult = { intercepted: false, messages: body.messages as Record<string, unknown>[] };
       } else {
@@ -830,17 +832,17 @@ export async function handleAnthropicMessages(
       }
 
       console.log(`[injection-debug] initResult session=${sessionKey} intercepted=${initResult.intercepted} bypassed=${initResult.bypassed} justRegistered=${initResult.justRegistered} resetFlow=${initResult.resetFlow} hasSessionInfo=${!!initResult.sessionInfo} hasAgentDetail=${!!initResult.agentDetail}`);
-      // sessionJustRegistered 用于 mem-command 的 checkFirst fallback（session init 最后
-      // 一步"pending_task_select → initialized"那一 turn，把用户最开始的 mem: 命令补执行）。
-      // **关键**：只在真正走 handleSessionInit state machine 的分支才继承 justRegistered；
-      // L2b recovery 分支的 justRegistered=true 只是下游 prewarm 的重建信号，不是 session
-      // init 过程，此时不设 sessionJustRegistered——否则 mem-command 会永久扒对话历史
-      // 第一条 user，把用户最开始的 mem:help 当"未消化的命令"每 turn 重复执行。
+      // sessionJustRegistered is used by mem-command checkFirst fallback (in the turn of the last session init
+      // step "pending_task_select → initialized", executing the user's original mem: command).
+      // **CRITICAL**: Only branches executing the handleSessionInit state machine inherit justRegistered;
+      // L2b recovery branch's justRegistered=true is merely a rebuild signal for downstream prewarm, not session init,
+      // so sessionJustRegistered is not set here — otherwise mem-command would inspect the first history user message
+      // every turn, executing the initial mem:help repeatedly.
       if (wentThroughSessionInitStateMachine && initResult.justRegistered) sessionJustRegistered = true;
       if (initResult.bypassed) {
         injectedSkipped = true;
         console.log(`[session-init] session=${sessionKey} bypassed → skipping all injection`);
-        // reset 流程中用户选了"跳过" → 也需要返回确认文案，不转发 LLM
+        // User chose "skip" in reset flow → also return confirmation message instead of forwarding to LLM
         if (initResult.resetFlow) {
           _resetFlowResult = { agentName: "", agentIdShort: "", teamId: "", bypassed: true };
         }
@@ -864,9 +866,9 @@ export async function handleAnthropicMessages(
         }
       }
 
-      // Prewarm 前置短路：mem-command 命中的 turn 不 forward 上游、也不消费
-      // hook-cache，若照常 prewarm 会白白多花 2-3s + 3 次网络请求。见 handler.ts
-      // 对称位置详注。fork/sidequery 不做短路（requestKind === "main" 才生效）。
+      // Prewarm early short-circuit: Turns matching mem-command do not forward upstream nor consume
+      // hook-cache; prewarming as usual would waste 2-3s + 3 network requests. See detailed note at symmetric location in handler.ts.
+      // fork/sidequery are not short-circuited (only effective when requestKind === "main").
       let memCommandPending = false;
       if (config.memCommand?.enabled && requestKind === "main") {
         try {
@@ -901,11 +903,10 @@ export async function handleAnthropicMessages(
       ) {
         try {
           const mod = await import("./injection/index.js");
-          // resetFlow=true 时必须 clearBefore:session-reset 切了 agent,
-          // 旧 agent 的 skill/wiki/knowledge 缓存要先清掉再写新的,
-          // 否则残留旧 agent 的注入内容。
-          // 始终 clearBefore:首次 init 缓存为空 clear 是 no-op;
-          // reset-flow 时清旧 agent 缓存是必要的。统一语义更安全。
+          // When resetFlow=true, agent is switched during clearBefore:session-reset;
+          // old agent's skill/wiki/knowledge cache must be cleared before writing new cache to avoid stale injections.
+          // Always clearBefore: initial init cache is empty so clearing is a no-op;
+          // clearing old agent cache during reset-flow is essential. Unified semantics are safer.
           await mod.prewarmFromConfig(config, {
             keyId: sessionKey,
             userId: userId || "anonymous",
@@ -915,7 +916,7 @@ export async function handleAnthropicMessages(
             agentDetail: initResult.agentDetail ?? null,
             taskDetail: initResult.taskDetail ?? null,
             assetCapabilities,
-            // 透传 caller 的 sk-mem key，用于 prewarm 阶段 TDAI ACL 校验（x-tdai-user-key）
+            // Pass through caller's sk-mem key for TDAI ACL verification during prewarm (x-tdai-user-key)
             callerUserKey: callerUserKey ?? undefined,
           }, { clearBefore: true });
         } catch (err) {
@@ -951,10 +952,10 @@ export async function handleAnthropicMessages(
         sessionInfo.space_id = spaceId;
       }
 
-      // 记录 resetFlow 到外层供块外返回确认响应
+      // Record resetFlow to outer scope for returning confirmation response
       if (initResult.resetFlow && initResult.justRegistered && !initResult.bypassed) {
         _resetFlowResult = {
-          agentName: initResult.agentDetail?.name ?? "未知",
+          agentName: initResult.agentDetail?.name ?? "Unknown",
           agentIdShort: (initResult.sessionInfo as Record<string, unknown>)?.agent_id
             ? String((initResult.sessionInfo as Record<string, unknown>).agent_id).slice(-8) : "",
           teamId: (initResult.sessionInfo as Record<string, unknown>)?.team_id
@@ -969,11 +970,11 @@ export async function handleAnthropicMessages(
     }
   }
 
-  // ── mem:session-reset 完成确认 ─────────────────────────────────────────────
-  // session-reset 的交互流程：pre-hook 改 state → form 弹出 → 用户答完 form →
-  // completeRegistration → prewarm → 到这里。此时用户的原始消息 "mem:session-reset"
-  // 还在 body.messages 里,如果不拦截会被转发到 LLM,产生不可控输出。
-  // 命令执行已经完成（新 agent 已绑定、缓存已刷新）→ 返回确认文案,不走 LLM。
+  // ── mem:session-reset completion confirmation ─────────────────────────────
+  // session-reset interaction flow: pre-hook changes state → form pops up → user submits form →
+  // completeRegistration → prewarm → reached here. The user's original message "mem:session-reset"
+  // is still in body.messages; if not intercepted, it would be forwarded to LLM causing uncontrolled output.
+  // Command execution is complete (new agent bound, cache refreshed) → return confirmation text without hitting LLM.
   if (_resetFlowResult) {
     const { agentName, agentIdShort, teamId, taskName, bypassed } = _resetFlowResult;
     const lines = bypassed
@@ -1001,38 +1002,38 @@ export async function handleAnthropicMessages(
   }
 
   // ── mem: command intercept ────────────────────────────────────────────────
-  // 在 session init 完成后、injection pipeline 之前检测。
-  // 命中时：执行命令 → 写 L0 → 触发 skill extract → 伪造响应返回。
-  // 跳过注入（不破坏 KV cache）和上游转发（零 token 消耗）。
-  // 配置开关 memCommand.enabled 关闭时此段完全不执行，走原有链路。
+  // Intercept after session init completes and before injection pipeline.
+  // On hit: execute command → write L0 → trigger skill extract → return synthetic response.
+  // Skips injection (preserves KV cache) and upstream forwarding (zero token cost).
+  // When memCommand.enabled is false, this section is skipped entirely, taking the normal path.
   //
-  // parseMemCommand 内部通过 agentAdapter.extractUserText 按客户端规则提取用户输入：
-  //   - claude-code: 取最后一个 text block（跳过 <system-reminder> 前缀元数据）
-  //   - codebuddy / unknown: 走保守的"拼接所有 text"逻辑
+  // parseMemCommand uses agentAdapter.extractUserText to extract user input according to client rules:
+  //   - claude-code: takes the last text block (skipping <system-reminder> prefix metadata)
+  //   - codebuddy / unknown: falls back to conservative "concatenate all text" logic
   //
-  // CC 分流：FORK/SIDEQUERY 是 CC 客户端内部构造的请求，last_user 不会以 `mem:` 开头，
-  //          且伪造响应会破坏 fork 请求依赖 MAIN 的 cache 假设。跳过拦截。
+  // CC split: FORK/SIDEQUERY are internally constructed requests by CC client; last_user won't start with `mem:`,
+  //           and synthetic responses would break fork requests' cache assumptions depending on MAIN. Skip interception.
   if (config.memCommand?.enabled && requestKind === "main") {
     const { parseMemCommand, isMemCommandAllowed, executeMemCommand, buildMemResponse, extractSimpleMessages, truncateArgs } = await import("./mem-command/index.js");
-    // 常规检测：最后一条 user message
+    // Normal check: last user message
     let memCmd = parseMemCommand(body as Record<string, unknown>, agentSource);
-    // session init 状态机在本 turn 完成终态（初始化 or bypass）时，最后一条
-    // user message 是 init 交互回答（比如"否"），额外检查第一条 user message
-    // —— 用户最初的原始意图。bypass 场景下 sessionInfo=null 会走"未初始化"
-    // 分支返回文案，避免让首条 mem: 命令被吞进历史后落到 LLM 透传里。
+    // When session init state machine reaches terminal state (initialized or bypass) in this turn,
+    // the last user message is the form response (e.g. "No"). Check first user message additionally
+    // — the user's initial intent. In bypass scenarios, sessionInfo=null takes the "uninitialized"
+    // fallback response, preventing the initial mem: command from being swallowed into history and passed to LLM.
     if (!memCmd && sessionJustRegistered) {
       memCmd = parseMemCommand(body as Record<string, unknown>, agentSource, { checkFirst: true });
     }
-    // session-reset 已经在 pre-hook 处理过 (state 改成 uninitialized 后走 session-init 弹 form
-    // → 用户答完 form → completeRegistration 触发 _resetFlowResult return 确认响应)。
-    // checkFirst=true 会匹配到历史里的原始 "mem:session-reset"，若不跳过就会走 executeMemCommand
-    // 再执行一次 reset，把刚完成的绑定又打回 uninitialized，形成"reset → form → reset → form"死循环。
+    // session-reset was already handled in pre-hook (state set to uninitialized → session-init form pops up
+    // → user submits form → completeRegistration triggers _resetFlowResult return confirmation).
+    // checkFirst=true matches original "mem:session-reset" in history; if not skipped, executeMemCommand
+    // would execute reset again, resetting state back to uninitialized and causing an infinite "reset → form → reset → form" loop.
     if (memCmd?.command === "session-reset") memCmd = null;
     if (memCmd && isMemCommandAllowed(config.memCommand, memCmd.command)) {
-      // bypass 优化：会话未初始化时，命令不可用
+      // bypass optimization: when session is not initialized, commands are unavailable
       if (!sessionInfo || injectedSkipped) {
         const thinkingEnabled = !!(body as Record<string, unknown>).thinking;
-        const errText = `⚠️ 会话未初始化，命令不可用。请先完成 session 初始化（选择 Team/Agent）后重试。`;
+        const errText = `⚠️ Session not initialized. Commands unavailable. Please complete session initialization (select Team/Agent) and try again.`;
         const errResponse = buildMemResponse(errText, {
           protocol: "anthropic",
           stream: isStream,
@@ -1042,7 +1043,7 @@ export async function handleAnthropicMessages(
         console.log(`[mem-command] cmd=${memCmd.command} args="${truncateArgs(memCmd.args)}" session=${sessionKey} blocked: session not initialized`);
         return errResponse;
       }
-      // 检测请求是否开启了 extended thinking（Anthropic 协议）
+      // Check whether request enables extended thinking (Anthropic protocol)
       const thinkingEnabled = !!(body as Record<string, unknown>).thinking;
       const memResult = await executeMemCommand(memCmd, {
         sessionKey,
@@ -1056,15 +1057,15 @@ export async function handleAnthropicMessages(
         stream: isStream,
         args: memCmd.args,
         thinking: thinkingEnabled,
-        // task 命令族用最近对话生成草稿。Anthropic 消息 content 可能是数组，
-        // extractSimpleMessages 会合并所有 text 段落。
+        // task command family uses recent conversation to generate drafts. Anthropic message content may be an array,
+        // extractSimpleMessages concatenates all text segments.
         bodyMessages: extractSimpleMessages((body as Record<string, unknown>).messages),
       });
 
-      // Step 20: L0 写入 — 保证对话时间线完整。
-      //   同步 await 保证 L0 落盘再返回，避免响应先返回后进程未 flush 就退出丢失。
-      //   注意：只有 mem 命令时全网只有这一次落盘，跟主对话路径不同（那边有 SIGTERM
-      //   trackWrite 兜底 + withL0Retry），这里必须显式等。
+      // Step 20: L0 write — ensure complete conversation timeline.
+      //   Synchronous await ensures L0 is persisted before returning, avoiding loss if process exits before flush.
+      //   Note: For mem commands, this is the only persistence opportunity, unlike main conversation path
+      //   (which has SIGTERM trackWrite fallback + withL0Retry); explicit wait is required here.
       const tdaiClientForMem = createTdaiClient(config, spaceId);
       const tdaiIdentityForMem = deriveTdaiIdentity({
         sessionInfo: sessionInfo as Record<string, unknown> | null | undefined,
@@ -1081,13 +1082,13 @@ export async function handleAnthropicMessages(
         }
       }
 
-      // Step 19: skill extract — 对话轮次计数正常累积
-      //   Bug: 之前用 `config.extraction?.skill?.enabled` 访问路径错误
-      //        (extraction 结构是 { enabled, extractors: [...] }, 没有 .skill),
-      //        导致 mem 命令**从来**没写过 skill buffer。改用 isExtractionAllowed
-      //        与主对话链路对齐。
-      //   Bug: fire-and-forget 没 await 导致响应先返回、写入被中断。改成同步 await
-      //        保证 buffer 落盘再返回响应。
+      // Step 19: skill extract — accumulate turn counter normally
+      //   Bug: Previously used wrong access path `config.extraction?.skill?.enabled`
+      //        (extraction structure is { enabled, extractors: [...] }, without .skill),
+      //        causing mem commands to **never** write to skill buffer. Switched to isExtractionAllowed
+      //        to align with main conversation pipeline.
+      //   Bug: Fire-and-forget without await caused response to return early and write interrupted. Changed to synchronous await
+      //        to guarantee buffer persistence before returning response.
       if (isExtractionAllowed(config, "skill")) {
         try {
           const assistantMsg = { role: "assistant", content: [{ type: "text", text: memResult.messageText }] };
@@ -1109,9 +1110,9 @@ export async function handleAnthropicMessages(
       // Step 18: observability
       console.log(`[mem-command] cmd=${memCmd.command} args="${truncateArgs(memCmd.args)}" session=${sessionKey} success=${memResult.success}`);
 
-      // Step 17: Langfuse — 上报 mem-command 为一个 generation observation。
-      //   mem 命令拦截在 Langfuse context 构造之前 (lf 在 L1088 才声明), 这里
-      //   inline 计算 turnSeq → traceId, 保证该 turn 在 Langfuse 有完整 trace。
+      // Step 17: Langfuse — report mem-command as a generation observation.
+      //   mem command interception happens before Langfuse context construction; here we
+      //   compute turnSeq → traceId inline to ensure complete trace in Langfuse for this turn.
       const memTurnSeq = countHumanTurns(messages, "anthropic");
       const memTraceId = langfuseTurnTraceId(sessionKey, memTurnSeq);
       langfuseReportGeneration({
@@ -1153,10 +1154,10 @@ export async function handleAnthropicMessages(
   const tdaiUserMessage = extractLatestUserMessage(messages);
 
   // ── Context injection (before cost guard) ────────────────────────────────
-  // CC 分流：
-  //   - SIDEQUERY: 完全跳过 injection（自带短 prompt，不共享 cache）
-  //   - FORK: 走 pipeline 但 readOnly=true（miss 时不 self-heal 写 cache，避免破坏主对话 cache）
-  //   - MAIN: 走完整 pipeline（含 self-heal）
+  // CC split:
+  //   - SIDEQUERY: Completely skip injection (self-contained short prompt, no cache sharing)
+  //   - FORK: Run pipeline with readOnly=true (do not self-heal write cache on miss to avoid invalidating main cache)
+  //   - MAIN: Run full pipeline (including self-heal)
   const skipInjection = requestKind === "sidequery";
   if (!injectedSkipped && !skipInjection && config.injection?.enabled && config.injection.injectors.length > 0) {
     try {
@@ -1175,8 +1176,8 @@ export async function handleAnthropicMessages(
         spaceId,
         sessionKey,
         turnSeq: injectionTurnSeq,
-        // 透传原始请求路径 —— AssetReflectionInjector 用它判断 `/analyse` marker。
-        // 其它 injector 不依赖此字段。
+        // Pass through original request path — AssetReflectionInjector uses it to identify `/analyse` marker.
+        // Other injectors do not depend on this field.
         requestPath: c.req.path,
         custom: sessionInfo ? { session: sessionInfo, userKey: callerUserKey ?? undefined, assetCapabilities } : undefined,
         readOnly: requestKind === "fork",
@@ -1241,9 +1242,9 @@ export async function handleAnthropicMessages(
 
 
   // ── Trace-level tags ──
-  // agent_source 标明客户端族群（codebuddy / claude-code / codex / …），供
-  // Langfuse 上按客户端筛选 trace；protocol 只区分 wire 协议，同一 wire
-  // 可对应多个客户端。
+  // agent_source specifies client family (codebuddy / claude-code / codex / …) for
+  // filtering traces in Langfuse by client; protocol only distinguishes wire format,
+  // where one wire format may map to multiple clients.
   const traceTags: string[] = [
     `agent_source:${agentSource}`,
     "protocol:anthropic",
@@ -1282,8 +1283,8 @@ export async function handleAnthropicMessages(
   }
 
   // ── Langfuse debug metadata (only when config.langfuse.debug=true) ────────
-  // 抓 CB / CC 客户端指纹用；关闭时恒返回 {}，不污染线上 metadata。
-  // 详见 common/langfuse-debug.ts。
+  // Used for capturing CB / CC client fingerprints; returns {} when disabled to avoid polluting production metadata.
+  // See common/langfuse-debug.ts for details.
   const langfuseDebug = config.langfuse.debug === true;
   const debugMetadata = buildRequestDebugMetadata({
     debug: langfuseDebug,
@@ -1319,7 +1320,7 @@ export async function handleAnthropicMessages(
 
   // ── Build upstream request ───────────────────────────────────────────────
   // Per-agent apiKey resolution — three cases:
-  //   (a) no entry in agents map           → global upstream.apiKey (兜底)
+  //   (a) no entry in agents map           → global upstream.apiKey (fallback)
   //   (b) entry present, apiKey empty      → "" (passthrough, keep client key)
   //   (c) entry present, apiKey non-empty  → agent.apiKey (server-side key)
   // The presence of an entry (case b/c) is what cuts the global fallback —
@@ -1589,7 +1590,7 @@ export async function handleAnthropicMessages(
         pipe,
       );
 
-      // 内部使用埋点：非流式响应 tool_use 块逐个记 model_intent。
+      // Internal telemetry: record model_intent individually for each tool_use block in non-streaming responses.
       try {
         const intents = (content as Record<string, unknown>[])
           .filter((b) => b?.type === "tool_use")
@@ -1602,7 +1603,7 @@ export async function handleAnthropicMessages(
           .filter((i) => i.name);
         if (intents.length > 0) {
           emitModelIntentTelemetry({
-            // 与 session_init_logs 对齐 compositeKey 形态
+            // Align compositeKey format with session_init_logs
             sessionKey: `${agentSource}:${sessionKey}`,
             turnSeq: lf.turnSeq,
             spaceId,
@@ -1612,7 +1613,7 @@ export async function handleAnthropicMessages(
           });
         }
       } catch {
-        // 埋点绝不阻塞业务
+        // Telemetry must never block business logic
       }
     }
   } catch {
@@ -1669,8 +1670,8 @@ export async function handleAnthropicMessages(
     });
 
     // Langfuse: report this LLM call as a generation under the turn trace
-    // debug=true 时 output 用 assistantMessage 原生数组（含 tool_use / thinking /
-    // 原生 stop_reason），非 debug 走原有 text 拼接节省存储。
+    // When debug=true, output uses raw assistantMessage array (including tool_use / thinking /
+    // raw stop_reason); when false, falls back to text concatenation to save storage.
     const langfuseOutput = langfuseDebug && assistantMessage
       ? assistantMessage
       : outputContent
@@ -1711,12 +1712,12 @@ export async function handleAnthropicMessages(
 
   pipe.responseDone(usage);
 
-  // CC 分流：FORK/SIDEQUERY 是 CC 客户端后台自发调用，不是用户真实对话轮，
-  //          跳过 skill/L0 副作用。Credit 仍上报（token 消耗真实）。
+  // CC split: FORK/SIDEQUERY are background auto-invocations by CC client, not real user turns;
+  //           skip skill/L0 side effects. Credit is still reported (real token consumption).
   const isMainDialog = requestKind === "main";
 
   // Skill extract trigger — count tool_use blocks + buffer conversation.
-  // 同步 await：直到 store 落盘再继续，保证下一轮跨节点读到最新数据。
+  // Synchronous await: continue only after store persistence to ensure cross-node data consistency in next turn.
   if (isMainDialog && isExtractionAllowed(config, "skill")) {
     await triggerSkillExtractIfReady({
       config,
@@ -1736,10 +1737,10 @@ export async function handleAnthropicMessages(
 
   // TDAI L0 write (non-streaming).
   //
-  // 与 stream 分支 (1476-1481) 对称：把 user_query + assistant 回复写入 L0
-  // 短期记忆。**此前仅 stream=true 会写**，non-stream 请求（如工具/测试脚本
-  // 常用的 stream:false）沉默丢失。缺失该调用意味着 CC non-stream 场景
-  // 完全没有 L0 记忆写入。
+  // Symmetric with stream branch (1476-1481): write user_query + assistant response to L0
+  // short-term memory. **Previously only stream=true was writing**, non-stream requests (like tool/test scripts
+  // using stream:false) silently dropped writes. Missing this call meant CC non-stream scenarios
+  // had zero L0 memory writes.
   if (isMainDialog && tdaiClient && isExtractionAllowed(config, "tdai-memory")) {
     recordTdaiTurn(tdaiClient, tdaiIdentity, tdaiUserMessage, outputContent)
       .catch((err: unknown) => pipe.error("TDAI_L0", err));
@@ -1910,7 +1911,7 @@ interface AnthropicTapContext {
   pipe: ReturnType<typeof createPipeline>;
   /** For skill extract trigger. */
   sessionKeyForSkill: string;
-  /** Client type (URL path 第一段) — 透传给 extract trigger 作为三段隔离键之一。 */
+  /** Client type (first URL path segment) — passed through to extract trigger as one of three isolation keys. */
   agentSource: string;
   sessionInfo: Record<string, unknown> | null | undefined;
   /** Tdai L0 write. */
@@ -1924,11 +1925,11 @@ interface AnthropicTapContext {
   spaceId?: string;
   /** Upstream response header `x-request-id` (empty when not returned). */
   upstreamRequestId?: string;
-  /** CC 请求分流类别，决定 stream 完成后是否触发 skill/L0 副作用。 */
+  /** CC request split kind, determines whether to trigger skill/L0 side effects after stream completes. */
   requestKind: CcRequestKind;
-  /** `config.langfuse.debug === true` 的求值结果，透传避免流内重复读 config。 */
+  /** Evaluated config.langfuse.debug === true result, passed through to avoid reading config repeatedly inside stream. */
   langfuseDebug: boolean;
-  /** buildRequestDebugMetadata 求值结果；debug=false 时为 {}。 */
+  /** Evaluated result of buildRequestDebugMetadata; {} when debug=false. */
   debugMetadata: Record<string, unknown>;
   /** Opaque counters from the request-preparation stage; null when it didn't run. */
   preparedStats: Record<string, unknown> | null;
@@ -1947,18 +1948,18 @@ function consumeAnthropicStream(stream: ReadableStream<Uint8Array>, ctx: Anthrop
     let outputText = "";
     let toolUseCount = 0;
     let streamCompleted = false;
-    // 内部使用埋点用：按 index 累积每个 tool_use 块。
-    // Anthropic SSE 协议：
-    //   1. content_block_start(type=tool_use)  → 拿到 index + name（此时 input 是空 {}）
-    //   2. content_block_delta(type=input_json_delta) → 累积 partial_json 字符串
-    //   3. content_block_stop → 该块结束
-    // 之前的实现只读了 (1) 里的 input（永远空）—— 现在按 index 累加 (2) 里的 partial_json。
+    // Internal telemetry: accumulate each tool_use block by index.
+    // Anthropic SSE protocol:
+    //   1. content_block_start(type=tool_use)  → receive index + name (input is empty {} at this point)
+    //   2. content_block_delta(type=input_json_delta) → accumulate partial_json string
+    //   3. content_block_stop → block ends
+    // Previous implementation only read input in (1) (always empty) — now accumulating partial_json in (2) by index.
     const toolUseAcc = new Map<number, { id: string; name: string; inputJson: string }>();
 
     const timeoutHandle = setTimeout(() => {
       if (!streamCompleted) {
         pipe.error("STREAM_TIMEOUT", "Anthropic stream reading exceeded 5 minutes");
-        // completeStream 是 async；这里 fire-and-forget（timeout 里已经无法 await）
+        // completeStream is async; fire-and-forget here (cannot await inside timeout)
         void completeStream().catch((err) => pipe.error("STREAM_TIMEOUT_COMPLETE", err));
       }
     }, 5 * 60 * 1000);
@@ -2026,8 +2027,8 @@ function consumeAnthropicStream(stream: ReadableStream<Uint8Array>, ctx: Anthrop
         }
 
         // Langfuse: report this LLM call as a generation under the turn trace
-        // 流式无完整原生 assistant content 数组可用（tool_use 块在 SSE 里是分片
-        // 增量事件），debug 时把 tool_use_count 与 stop_reason 塞进 metadata 兜底。
+        // Streaming lacks complete raw assistant content array (tool_use blocks are chunked
+        // incremental events in SSE); in debug mode, pass tool_use_count and stop_reason into metadata as fallback.
         try {
           const streamDebugExtra = ctx.langfuseDebug
             ? {
@@ -2064,15 +2065,15 @@ function consumeAnthropicStream(stream: ReadableStream<Uint8Array>, ctx: Anthrop
         }
       }
 
-      // CC 分流：FORK/SIDEQUERY 不是真实对话轮，跳过 L0/skill。Credit 仍上报。
+      // CC split: FORK/SIDEQUERY are not real conversation turns; skip L0/skill. Credit is still reported.
       const isMainDialog = ctx.requestKind === "main";
 
       // Tdai L0 write
       if (isMainDialog && ctx.tdaiClient && isExtractionAllowed(ctx.config, "tdai-memory")) {
-        // Streaming 不 await（会拖慢 SSE 关流），trackWrite + withL0Retry 应对两条丢包线：
-        //   - trackWrite 注册 in-flight promise 到全局 set；SIGTERM 时 index.ts 会
-        //     flushPendingWrites 兜底，避免 pod rolling 时 event loop 未 flush 就退出丢 L0。
-        //   - withL0Retry 3 次退避重试（~3.5s），挡 tdai kernel 瞬断 / 5xx / 网络抖动。
+        // Streaming does not await (avoids slowing down SSE closure); trackWrite + withL0Retry handle two packet loss vectors:
+        //   - trackWrite registers in-flight promise to global set; on SIGTERM index.ts runs
+        //     flushPendingWrites fallback to prevent pod rolling exit before event loop flushes L0.
+        //   - withL0Retry performs 3 backoff retries (~3.5s) against tdai kernel glitches / 5xx / network jitter.
         trackWrite(
           withL0Retry(() => recordTdaiTurn(
             ctx.tdaiClient!, ctx.tdaiIdentity, ctx.tdaiUserMessage,
@@ -2106,12 +2107,12 @@ function consumeAnthropicStream(stream: ReadableStream<Uint8Array>, ctx: Anthrop
         pipe,
       );
 
-      // 内部使用埋点：SSE 流累积的 tool_use 各出一条 model_intent。
-      // 详见 docs/design/2026-08-03-internal-usage-telemetry-plan.md §7.2 F。
-      // session_key 必须与 session_init_logs 用同一份 compositeKey (agentSource:sessionKey)，
-      // 否则 §4.1 CTE 里的 `session_key IN (init_sessions)` 会对不上。
+      // Internal telemetry: emit one model_intent per accumulated tool_use in SSE stream.
+      // See docs/design/2026-08-03-internal-usage-telemetry-plan.md §7.2 F for details.
+      // session_key must use the same compositeKey (agentSource:sessionKey) as session_init_logs,
+      // otherwise `session_key IN (init_sessions)` in §4.1 CTE will not match.
       if (toolUseAcc.size > 0) {
-        // 按 index 排序输出（还原模型生成顺序）；inputJson 是流式累积的 partial_json
+        // Output sorted by index (restores model generation order); inputJson is stream-accumulated partial_json
         const intents = Array.from(toolUseAcc.entries())
           .sort(([a], [b]) => a - b)
           .filter(([, v]) => v.name)
@@ -2129,7 +2130,7 @@ function consumeAnthropicStream(stream: ReadableStream<Uint8Array>, ctx: Anthrop
       }
 
       // Skill extract trigger — after stream finalization.
-      // 同步 await：直到 store 落盘再继续，保证下一轮跨节点读到最新数据。
+      // Synchronous await: continue only after store persistence to ensure cross-node data consistency in next turn.
       if (isMainDialog && isExtractionAllowed(ctx.config, "skill")) {
         await triggerSkillExtractIfReady({
           config: ctx.config,
@@ -2229,7 +2230,7 @@ function consumeAnthropicStream(stream: ReadableStream<Uint8Array>, ctx: Anthrop
               if (delta?.type === "text_delta" && typeof delta.text === "string") {
                 outputText += delta.text;
               } else if (delta?.type === "input_json_delta" && typeof delta.partial_json === "string") {
-                // 累积到对应 tool_use 块（按 index）
+                // Accumulate into corresponding tool_use block (by index)
                 try {
                   const idx = evt.index as number | undefined;
                   if (typeof idx === "number") {
@@ -2237,7 +2238,7 @@ function consumeAnthropicStream(stream: ReadableStream<Uint8Array>, ctx: Anthrop
                     if (acc) acc.inputJson += delta.partial_json;
                   }
                 } catch {
-                  // ignore — 埋点级别的问题不阻塞主链路
+                  // ignore — telemetry issues do not block main pipeline
                 }
               }
             } else if (evtType === "content_block_start") {
@@ -2251,7 +2252,7 @@ function consumeAnthropicStream(stream: ReadableStream<Uint8Array>, ctx: Anthrop
                     toolUseAcc.set(idx, { id: (block.id as string) ?? "", name, inputJson: "" });
                   }
                 } catch {
-                  // ignore — 累积失败不影响主链路
+                  // ignore — accumulation failures do not affect main pipeline
                 }
               }
             }

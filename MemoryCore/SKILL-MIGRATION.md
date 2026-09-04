@@ -1,50 +1,50 @@
 ---
 name: openclaw-memory-tencentdb-migration
-description: 帮助存量用户将 OpenClaw 记忆插件从旧包 @tdai/memory-tdai 迁移到新包 @tencentdb-agent-memory/memory-tencentdb。当用户提到"插件迁移""更换记忆插件包名""memory-tdai 升级""包名变更"或出现旧包相关安装报错时应触发。
+description: Helps existing users migrate OpenClaw memory plugin from legacy package @tdai/memory-tdai to new package @tencentdb-agent-memory/memory-tencentdb. Triggered when users mention "plugin migration", "change memory plugin package name", "memory-tdai upgrade", "package name change", or encounter errors related to legacy package installation.
 version: 1.0.0
 ---
 
-## 目的
+## Purpose
 
-帮助已安装 `@tdai/memory-tdai`（旧包名）的存量用户，平滑迁移到 `@tencentdb-agent-memory/memory-tencentdb`（新包名），确保已有记忆数据不丢失、配置完整还原。
+Help existing users with `@tdai/memory-tdai` (legacy package name) installed smoothly migrate to `@tencentdb-agent-memory/memory-tencentdb` (new package name), ensuring existing memory data is not lost and configuration is fully restored.
 
-## 背景
+## Background
 
-- **旧包名**：`@tdai/memory-tdai`（插件 ID：`memory-tdai`）
-- **新包名**：`@tencentdb-agent-memory/memory-tencentdb`（插件 ID：`memory-tencentdb`）
-- 新旧插件共用相同的数据目录（`~/.openclaw/memory-tdai/`），卸载旧插件**不会删除数据目录**，已有记忆数据不受影响
-- 卸载旧插件**会删除** `openclaw.json` 中该插件的配置段，需提前备份
+- **Legacy package name**: `@tdai/memory-tdai` (Plugin ID: `memory-tdai`)
+- **New package name**: `@tencentdb-agent-memory/memory-tencentdb` (Plugin ID: `memory-tencentdb`)
+- Legacy and new plugins share the same data directory (`~/.openclaw/memory-tdai/`); uninstalling the legacy plugin **does not delete the data directory**, so existing memory data remains unaffected.
+- Uninstalling the legacy plugin **deletes** its configuration block from `openclaw.json`, so backup is required beforehand.
 
-## 适用场景
+## Applicable Scenarios
 
-- 用户已安装 `@tdai/memory-tdai`，需迁移到新包名
-- 用户执行 `openclaw plugins install @tdai/memory-tdai` 报 404 / not found
-- 用户被告知旧包已废弃，需要迁移
+- User has `@tdai/memory-tdai` installed and needs to migrate to the new package name.
+- User executes `openclaw plugins install @tdai/memory-tdai` and encounters 404 / not found error.
+- User is notified that the legacy package is deprecated and needs to migrate.
 
-## 不适用场景
+## Non-Applicable Scenarios
 
-- 用户从未安装过记忆插件（应使用 `openclaw-memory-tencentdb-setup` skill）
-- 用户使用的是其他记忆插件（如 `openclaw-mem0`）
+- User has never installed a memory plugin (should use `openclaw-memory-tencentdb-setup` skill instead).
+- User is using a different memory plugin (e.g. `openclaw-mem0`).
 
-## 标准工作流
+## Standard Workflow
 
-### 1) 确认当前状态
+### 1) Confirm Current State
 
-确认旧插件是否已安装：
+Confirm whether legacy plugin is installed:
 
 ```bash
 openclaw plugins list | grep -i memory
 ```
 
-预期看到 `memory-tdai` 或 `@tdai/memory-tdai` 处于 loaded 状态。
+Expected output shows `memory-tdai` or `@tdai/memory-tdai` in `loaded` state.
 
-如果未看到旧插件，跳过迁移流程，直接使用 `openclaw-memory-tencentdb-setup` skill 进行全新安装。
+If the legacy plugin is not found, skip the migration workflow and use `openclaw-memory-tencentdb-setup` skill directly for fresh installation.
 
-### 2) 备份现有配置（关键步骤）
+### 2) Backup Existing Configuration (Critical Step)
 
-卸载旧插件会删除 `openclaw.json` 中的配置段。**必须先备份**。
+Uninstalling the legacy plugin deletes its configuration section in `openclaw.json`. **Must backup first**.
 
-执行以下命令提取旧插件配置：
+Run the following command to extract legacy plugin configuration:
 
 ```bash
 cat ~/.openclaw/openclaw.json | python3 -c "
@@ -56,95 +56,95 @@ if old_cfg:
     print(json.dumps(old_cfg, indent=2, ensure_ascii=False))
     with open('/tmp/memory-tdai-config-backup.json', 'w') as f:
         json.dump(old_cfg, f, indent=2, ensure_ascii=False)
-    print('\n✅ 配置已备份到 /tmp/memory-tdai-config-backup.json')
+    print('\n✅ Config backed up to /tmp/memory-tdai-config-backup.json')
 else:
-    print('⚠️ 未找到 memory-tdai 配置段（可能使用默认配置）')
+    print('⚠️ memory-tdai config section not found (possibly using default config)')
 "
 ```
 
-**特别关注以下配置是否存在（如有则必须记录）**：
+**Pay special attention to whether the following configurations exist (must record if present)**:
 
-- `embedding` 配置（`provider`、`baseUrl`、`apiKey`、`model`、`dimensions`、`proxyUrl`）
-- `extraction.model`（提取使用的模型）
-- `persona.model`（画像使用的模型）
-- `capture.excludeAgents`（排除的 agent 列表）
-- `capture.l0l1RetentionDays`（数据保留天数）
+- `embedding` configuration (`provider`, `baseUrl`, `apiKey`, `model`, `dimensions`, `proxyUrl`)
+- `extraction.model` (model used for extraction)
+- `persona.model` (model used for persona)
+- `capture.excludeAgents` (excluded agent list)
+- `capture.l0l1RetentionDays` (data retention days)
 
-### 3) 确认数据目录存在
+### 3) Confirm Data Directory Exists
 
 ```bash
 ls -la ~/.openclaw/memory-tdai/
 ```
 
-预期看到：`conversations/`、`records/`、`scene_blocks/`、`vectors.db`、`persona.md` 等文件。
+Expected files: `conversations/`, `records/`, `scene_blocks/`, `vectors.db`, `persona.md`, etc.
 
-记录当前数据量作为迁移后验证依据：
+Record current data volume as baseline for post-migration verification:
 
 ```bash
-echo "=== 迁移前数据统计 ==="
-wc -l ~/.openclaw/memory-tdai/conversations/*.jsonl 2>/dev/null || echo "无对话数据"
-wc -l ~/.openclaw/memory-tdai/records/*.jsonl 2>/dev/null || echo "无记录数据"
-ls ~/.openclaw/memory-tdai/scene_blocks/*.md 2>/dev/null | wc -l | xargs -I{} echo "场景块: {} 个"
-wc -c ~/.openclaw/memory-tdai/persona.md 2>/dev/null || echo "无 persona"
+echo "=== Pre-migration Data Stats ==="
+wc -l ~/.openclaw/memory-tdai/conversations/*.jsonl 2>/dev/null || echo "No conversation data"
+wc -l ~/.openclaw/memory-tdai/records/*.jsonl 2>/dev/null || echo "No record data"
+ls ~/.openclaw/memory-tdai/scene_blocks/*.md 2>/dev/null | wc -l | xargs -I{} echo "Scene blocks: {}"
+wc -c ~/.openclaw/memory-tdai/persona.md 2>/dev/null || echo "No persona"
 ```
 
-### 4) 卸载旧插件
+### 4) Uninstall Legacy Plugin
 
 ```bash
 openclaw plugins uninstall memory-tdai
 ```
 
-执行后确认：
+After execution, confirm:
 
-- `openclaw.json` 中 `memory-tdai` 配置段已被删除（预期行为）
-- `~/.openclaw/memory-tdai/` 数据目录**仍然存在**（不会被删除）
+- `memory-tdai` configuration section removed from `openclaw.json` (expected behavior)
+- `~/.openclaw/memory-tdai/` data directory **still exists** (will not be deleted)
 
 ```bash
-# 验证数据目录仍在
-ls ~/.openclaw/memory-tdai/ && echo "✅ 数据目录完好" || echo "❌ 数据目录丢失！"
+# Verify data directory remains
+ls ~/.openclaw/memory-tdai/ && echo "✅ Data directory intact" || echo "❌ Data directory lost!"
 ```
 
-### 5) 安装新插件
+### 5) Install New Plugin
 
 ```bash
 openclaw plugins install @tencentdb-agent-memory/memory-tencentdb
 ```
 
-### 6) 还原配置
+### 6) Restore Configuration
 
-将步骤 2 备份的配置写回 `openclaw.json`，注意新插件的配置 key 是 `memory-tencentdb`：
+Write the configuration backed up in Step 2 back into `openclaw.json`, noting that the new plugin's configuration key is `memory-tencentdb`:
 
 ```bash
 python3 -c "
 import json, os
 
-# 读取备份配置
+# Read backup configuration
 backup_path = '/tmp/memory-tdai-config-backup.json'
 if os.path.exists(backup_path):
     with open(backup_path) as f:
         old_cfg = json.load(f)
-    print('📋 备份配置内容：')
+    print('📋 Backup config content:')
     print(json.dumps(old_cfg, indent=2, ensure_ascii=False))
 else:
     old_cfg = {'enabled': True}
-    print('⚠️ 未找到备份，使用最小配置')
+    print('⚠️ Backup not found, using minimal config')
 
-# 读取当前 openclaw.json
+# Read current openclaw.json
 config_path = os.path.expanduser('~/.openclaw/openclaw.json')
 with open(config_path) as f:
     cfg = json.load(f)
 
-# 写入新插件配置
+# Write new plugin configuration
 cfg.setdefault('plugins', {}).setdefault('entries', {})['memory-tencentdb'] = old_cfg
 
 with open(config_path, 'w') as f:
     json.dump(cfg, f, indent=2, ensure_ascii=False)
 
-print('\n✅ 配置已写入 memory-tencentdb')
+print('\n✅ Config written to memory-tencentdb')
 "
 ```
 
-如果备份丢失或用户需要手动恢复，至少确保写入最小配置：
+If backup is lost or manual restoration is required, ensure at least minimal configuration is written:
 
 ```json
 {
@@ -154,86 +154,86 @@ print('\n✅ 配置已写入 memory-tencentdb')
 }
 ```
 
-### 7) 重启 Gateway 并验证
+### 7) Restart Gateway and Verify
 
 ```bash
 openclaw gateway restart
 ```
 
-检查项：
+Verification items:
 
-- Gateway 日志中出现 `[memory-tdai]` 前缀（注：日志标签仍为 memory-tdai，这是正常的）
-- 数据目录内容未变化
+- Gateway log displays `[memory-tdai]` prefix (Note: log tag remains `memory-tdai`, which is normal)
+- Data directory content unchanged
 
 ```bash
-echo "=== 迁移后验证 ==="
-# 确认新插件已加载
+echo "=== Post-migration Verification ==="
+# Confirm new plugin loaded
 openclaw plugins list | grep -i memory
 
-# 确认数据量与迁移前一致
+# Confirm data volume matches pre-migration stats
 wc -l ~/.openclaw/memory-tdai/conversations/*.jsonl 2>/dev/null
 wc -l ~/.openclaw/memory-tdai/records/*.jsonl 2>/dev/null
 ```
 
-### 8) 功能冒烟验证
+### 8) Functional Smoke Test
 
-执行一次对话确认记忆链路正常：
+Execute a conversation to confirm memory pipeline functionality:
 
-1. 发送一条包含个人信息的消息（如偏好、习惯）
-2. 确认日志中有 `[before_prompt_build]` 和 `[agent_end]` 相关输出
-3. 如有 embedding 配置，确认向量检索正常（日志无 embedding 报错）
+1. Send a message containing personal information (such as preferences, habits)
+2. Confirm logs contain `[before_prompt_build]` and `[agent_end]` related outputs
+3. If embedding configuration exists, confirm vector search works normally (no embedding errors in log)
 
-## 回滚方案
+## Rollback Plan
 
-如迁移后出现问题，可快速回滚：
+If issues arise post-migration, quick rollback can be performed:
 
 ```bash
-# 1. 卸载新插件
+# 1. Uninstall new plugin
 openclaw plugins uninstall memory-tencentdb
 
-# 2. 重新安装旧插件（如 npm 源仍可用）
+# 2. Reinstall legacy plugin (if npm registry remains accessible)
 openclaw plugins install @tdai/memory-tdai
 
-# 3. 手动还原配置（从备份）
-# 将 /tmp/memory-tdai-config-backup.json 内容写回 openclaw.json 的 memory-tdai 段
+# 3. Manually restore configuration (from backup)
+# Write /tmp/memory-tdai-config-backup.json content back to openclaw.json memory-tdai section
 
-# 4. 重启
+# 4. Restart
 openclaw gateway restart
 ```
 
-## 故障排查
+## Troubleshooting
 
-| 现象 | 可能原因 | 解决方案 |
-|------|----------|----------|
-| 新插件无日志输出 | 配置中 `enabled` 未设为 `true` | 检查 `openclaw.json` 中 `memory-tencentdb.enabled` |
-| 安装新插件报错 | npm 源不可用 | 检查网络 / npm registry 配置 |
-| 迁移后无历史记忆 | 配置还原不完整 | 对比 `/tmp/memory-tdai-config-backup.json` 与当前配置 |
-| embedding 报错 | `apiKey` 等配置丢失 | 从备份中还原 `embedding` 配置段 |
-| 数据目录为空 | 卸载时异常删除（极少见） | 检查 `~/.openclaw/memory-tdai/` 是否存在 |
+| Symptom | Possible Cause | Solution |
+|---------|----------------|----------|
+| New plugin yields no log output | `enabled` not set to `true` in config | Check `memory-tencentdb.enabled` in `openclaw.json` |
+| Error installing new plugin | npm registry unavailable | Check network / npm registry configuration |
+| Missing history memory after migration | Incomplete configuration restoration | Compare `/tmp/memory-tdai-config-backup.json` with current config |
+| Embedding error | `apiKey` or other config missing | Restore `embedding` config section from backup |
+| Empty data directory | Unexpected deletion during uninstall (extremely rare) | Check whether `~/.openclaw/memory-tdai/` exists |
 
-## 安全与合规约束
+## Security & Compliance Constraints
 
-- 备份文件 `/tmp/memory-tdai-config-backup.json` 可能包含 `apiKey`，迁移完成后建议删除：`rm /tmp/memory-tdai-config-backup.json`
-- 不在聊天、日志中明文展示 `apiKey`
-- 仅修改 `memory-tencentdb` 配置段，不影响用户其它插件
+- Backup file `/tmp/memory-tdai-config-backup.json` may contain `apiKey`; recommended to delete after migration completes: `rm /tmp/memory-tdai-config-backup.json`
+- Do not display `apiKey` in plain text in chat or logs
+- Only modify `memory-tencentdb` configuration block, leaving other user plugins unaffected
 
-## 完成定义（Definition of Done）
+## Definition of Done
 
-迁移完成需同时满足：
+Migration completion requires satisfying all of the following:
 
-- [x] 旧插件 `@tdai/memory-tdai` 已卸载
-- [x] 新插件 `@tencentdb-agent-memory/memory-tencentdb` 已安装并加载
-- [x] `openclaw.json` 中存在完整的 `memory-tencentdb` 配置（含用户自定义的 embedding 等配置）
-- [x] Gateway 已重启
-- [x] 日志中出现 `[memory-tdai]` 前缀
-- [x] 数据目录完好，数据量与迁移前一致
-- [x] 至少 1 次对话验证记忆链路正常
-- [x] 已清理备份文件中的敏感信息
+- [x] Legacy plugin `@tdai/memory-tdai` uninstalled
+- [x] New plugin `@tencentdb-agent-memory/memory-tencentdb` installed and loaded
+- [x] Complete `memory-tencentdb` configuration present in `openclaw.json` (including user custom embedding settings)
+- [x] Gateway restarted
+- [x] Log displays `[memory-tdai]` prefix
+- [x] Data directory intact and data volume matches pre-migration stats
+- [x] At least 1 conversation verified for normal memory pipeline behavior
+- [x] Sensitive information in backup files cleaned up
 
-## 交付话术模板
+## Delivery Response Template
 
-> 已完成记忆插件迁移：
-> - 旧插件 `@tdai/memory-tdai` → 新插件 `@tencentdb-agent-memory/memory-tencentdb`
-> - 已有记忆数据完整保留（对话/记录/场景块/向量库均未受影响）
-> - 配置已从旧插件完整还原（含 embedding / extraction / persona 等自定义配置）
-> - Gateway 已重启，记忆链路验证正常
+> Memory plugin migration completed:
+> - Legacy plugin `@tdai/memory-tdai` → New plugin `@tencentdb-agent-memory/memory-tencentdb`
+> - Existing memory data fully retained (conversations/records/scene blocks/vector database unaffected)
+> - Configuration fully restored from legacy plugin (including custom embedding / extraction / persona settings)
+> - Gateway restarted, memory pipeline verified normally

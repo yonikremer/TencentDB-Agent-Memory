@@ -1,23 +1,23 @@
 /**
- * Asset Reflection Injector — 内部效果评估用，在 system prompt 末尾追加
- * `<asset_reflection>` 块，指导 agent 在最终回答里点评「本轮调用过哪些云端
- * 资产工具、各自起没起到作用」。
+ * Asset Reflection Injector — for internal evaluation, appends the
+ * `<asset_reflection>` block to the end of the system prompt, instructing the agent to evaluate
+ * in its final answer "which cloud asset tools were called this turn, and whether they helped".
  *
- * ## 门控
- * 完全对齐 `costGuard.markerOptIn` 的双闸门模式：
- *   1. `injection.assetReflection.markerOptIn=true` → factory 才 register 本 hook
- *      （否则线上 pod 上 getAll() 里根本没这个 hook，零性能开销）；
- *   2. 请求 URL 带 `/analyse` marker → execute 才真 emit 块（否则返回 []，
- *      对无 marker 的请求 prompt 零改动）。
+ * ## Gating
+ * Fully aligned with `costGuard.markerOptIn` dual gate mode:
+ *   1. `injection.assetReflection.markerOptIn=true` -> factory registers this hook
+ *      (otherwise the hook isn't in getAll() on prod pods, zero performance overhead);
+ *   2. Request URL contains `/analyse` marker -> execute actually emits the block (otherwise returns [],
+ *      zero prompt modification for requests without marker).
  *
- * ## Tag 集合
- * 由构造函数传入的 `activeAssetTags` 决定——由 factory 根据本节点上实际
- * register 了哪些资产 injector 计算好静态列表：
- *   - skill-*         → `<skill_tools>` + `<available_skills>`
- *   - tdai-*          → `<tdai_memory_tools>`
- *   - knowledge-*     → `<knowledge_tools>`
+ * ## Tag Set
+ * Determined by `activeAssetTags` passed in constructor — statically calculated by factory based on
+ * which asset injectors are actually registered on this node:
+ *   - skill-*         -> `<skill_tools>` + `<available_skills>`
+ *   - tdai-*          -> `<tdai_memory_tools>`
+ *   - knowledge-*     -> `<knowledge_tools>`
  *
- * 一个都没注册（activeAssetTags 空） → hook 恒不 emit。
+ * None registered (activeAssetTags empty) -> hook never emits.
  */
 
 import type {
@@ -31,44 +31,44 @@ import { HOOK_PRIORITY } from "../types.js";
 import { hasAnalyseMarker } from "../../routes/whitelist.js";
 
 export interface AssetReflectionInjectorConfig {
-  /** 本节点实际启用的资产 tag 名列表（无尖括号），如 `["skill_tools", "tdai_memory_tools"]`。 */
+  /** List of asset tag names actually enabled on this node (without angle brackets), e.g. `["skill_tools", "tdai_memory_tools"]`. */
   activeAssetTags: string[];
 }
 
 const TAG = "[asset-reflection-injector]";
 
-/** 纯函数：渲染 `<asset_reflection>` 段。空 tag 列表返回空串，便于调用方早退。 */
+/** Pure function: render the `<asset_reflection>` block. Returns empty string for empty tags to short-circuit. */
 export function renderAssetReflectionBlock(tags: string[]): string {
   if (tags.length === 0) return "";
   const tagList = tags.map((t) => `<${t}>`).join(" / ");
   return [
     "<asset_reflection>",
-    "**内部效果评估模式** —— 本次系统提示词中包含以下云端资产工具块：",
+    "**Internal Evaluation Mode** —— The system prompt for this session contains the following cloud asset tool blocks:",
     `  ${tagList}`,
     "",
-    "如果本轮对话你**真的调用过**其中任一工具（无论走 Bash curl 还是 MCP 调用），",
-    "请在最终回答的**末尾**追加一段简短复盘，格式固定如下：",
+    "If you **actually called** any of these tools this turn (whether via Bash curl or MCP),",
+    "please append a brief review at the **end** of your final answer, formatted exactly as follows:",
     "",
-    "【资产反思】",
-    "- <tag>::<tool_name>：一句话说明这次调用**是否起到作用**（拿到什么关键信息 / 帮你少走什么弯路 / 或为什么没命中）",
-    "- ...（每调用过一个工具占一行；同一工具多次调用可合并成一行说清整体作用）",
+    "[Asset Reflection]",
+    "- <tag>::<tool_name>: One sentence stating whether this call **was helpful** (what key info you got / what detours it saved / or why it missed)",
+    "- ... (One line per tool called; multiple calls to the same tool can be summarized in one line)",
     "",
-    "规则：",
-    "- **只对本轮真的调用过的工具作复盘**；没调过的一律不列，别猜、别自补。",
-    "- 若本轮完全没调用任何上述资产工具，仍需输出：",
-    "  【资产反思】本轮未使用任何云端资产工具。",
-    "- 复盘务必简短诚实——工具没帮上忙也直接说，用来做接入效果评估，不是要正面评价。",
-    "- 此段仅供内部评估，不构成正式结论；请与主回答用清晰分隔（如空行 + 「---」）。",
+    "Rules:",
+    "- **Only reflect on tools you actually called this turn**; do not list ones you didn't, don't guess, don't fabricate.",
+    "- If you didn't call any of the above cloud asset tools this turn, you must still output:",
+    "  [Asset Reflection] No cloud asset tools were used this turn.",
+    "- Keep the review brief and honest —— if the tool didn't help, say so directly. This is for integration evaluation, not to solicit positive feedback.",
+    "- This section is for internal evaluation only and does not constitute a formal conclusion; please separate clearly from your main answer (e.g. empty line + '---').",
     "</asset_reflection>",
   ].join("\n");
 }
 
 /**
- * AssetReflectionInjector —— 见文件头。
+ * AssetReflectionInjector —— See file header.
  *
- * point: `system.suffix`（贴在系统提示词最末，符合内部评估语义：先看正文，再看反思要求）
- * priority: `HOOK_PRIORITY.CUSTOM`（1000，最后跑，避免影响任何资产 injector）
- * cacheStrategy: `none`（依赖运行时 URL marker，不能预热）
+ * point: `system.suffix` (appended to the very end of the system prompt, fits the internal evaluation semantics: read body first, then reflection requirements)
+ * priority: `HOOK_PRIORITY.CUSTOM` (1000, runs last, avoids affecting any asset injectors)
+ * cacheStrategy: `none` (depends on runtime URL marker, cannot be prewarmed)
  */
 export class AssetReflectionInjector implements InjectionHook {
   id = "asset-reflection-injector";
@@ -81,12 +81,12 @@ export class AssetReflectionInjector implements InjectionHook {
 
   execute(ctx: AgentContext): ContextBlock[] {
     if (this.config.activeAssetTags.length === 0) {
-      // Factory 已经保证不会 register 空 tag 的 injector；这里是防御性早退。
+      // Factory guarantees it won't register an injector with empty tags; defensive early return.
       return [];
     }
     const requestPath = ctx.metadata.requestPath ?? "";
     if (!hasAnalyseMarker(requestPath)) {
-      // 没带 marker —— 对普通请求 prompt 零改动，保证 KV cache 前缀不受影响。
+      // No marker —— zero modification to normal request prompts, ensuring KV cache prefixes are unaffected.
       return [];
     }
     const content = renderAssetReflectionBlock(this.config.activeAssetTags);
@@ -99,7 +99,7 @@ export class AssetReflectionInjector implements InjectionHook {
       content,
       metadata: {
         source: this.id,
-        // cache-strategy=none，但仍给一个稳定 cacheKey 便于 observer 去重。
+        // cache-strategy=none, but still provide a stable cacheKey for observer deduplication.
         cacheKey: `asset-reflection-injector:${this.config.activeAssetTags.join(",")}`,
       },
     }];

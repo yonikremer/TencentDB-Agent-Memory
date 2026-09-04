@@ -1,21 +1,22 @@
 /**
- * SkillWorkerPool —— 进程内单例的 skill 抽取 worker 池。
+ * SkillWorkerPool —— In-process singleton skill extraction worker pool.
  *
- * 对齐 memory PipelineWorker：一次性起 N 条无状态 consumeLoop，
- * 从全局共享的 SkillAgentTaskQueue 拿 agent tuple。tuple 5 段自带
- * instance_id, worker 出队后按 instance_id 通过 resolver 现取对应
- * instance 的 buffer / extractor / sink, 干活时委托给
- * SkillConversationExtractWorker.consumeAgent（原封复用 8 步流程）。
+ * Aligns with memory PipelineWorker: spawns N stateless consumeLoops at once,
+ * which dequeue agent tuples from the globally shared SkillAgentTaskQueue.
+ * The 5-segment tuple includes instance_id; after dequeuing, the worker uses
+ * resolvers to dynamically fetch the corresponding instance's buffer / extractor / sink
+ * based on the instance_id, and delegates the work to SkillConversationExtractWorker.consumeAgent
+ * (reusing the 8-step process identically).
  *
- * 语义与老"per-instance worker"完全一致：
- *   - agent-level extract-lock 保证同一 (instance, agent) 只有一条 loop 抽取
- *   - tasks-mutex 保护 _tasks.json 读改写
- *   - transient / permanent 错误分级 + DLQ
- *   - 幽灵 task 静默回收
+ * Semantics are entirely identical to the old "per-instance worker":
+ *   - agent-level extract-lock ensures only one loop extracts for the same (instance, agent)
+ *   - tasks-mutex protects _tasks.json read-modify-write
+ *   - transient / permanent error classification + DLQ
+ *   - silent ghost task collection
  *
- * 差别只在拓扑：worker 数不再随 instance 数线性膨胀, 用 concurrency
- * 一个参数统一控制全进程 in-flight 上限。详见
- * docs/design/2026-07-30-skill-worker-instance-decoupling.md。
+ * The only difference is topology: worker count no longer scales linearly with instance count,
+ * using a single concurrency parameter to uniformly control the process-wide in-flight limit.
+ * See docs/design/2026-07-30-skill-worker-instance-decoupling.md for details.
  */
 
 import {
@@ -35,8 +36,8 @@ import {
 } from "./extract-worker.js";
 
 /**
- * 由 gateway 侧闭包捕获的 per-instance 资源解析函数。走进程级 cache,
- * 首次 <10ms, 后续 <1ms (Map.get)。
+ * Per-instance resource resolution functions captured by closures on the gateway side.
+ * Uses process-level cache, <10ms first time, <1ms (Map.get) subsequently.
  */
 export interface SkillWorkerResolvers {
   resolveBuffer(instanceId: string): Promise<SkillBufferStorage>;
@@ -45,15 +46,15 @@ export interface SkillWorkerResolvers {
 }
 
 export interface SkillWorkerPoolOptions extends SkillWorkerResolvers {
-  /** 池里 worker 数, 全进程并发上限。>=1。 */
+  /** Number of workers in the pool, process-wide concurrency limit. >=1. */
   concurrency: number;
-  /** 全进程共享的 skill agent 队列。 */
+  /** Process-wide shared skill agent queue. */
   queue: ISkillAgentTaskQueue;
   logger: ExtractorLogger;
-  /** 池 id 前缀, worker id 会拼上 index; 默认 `skill-pool-${pid}`。 */
+  /** Pool id prefix, worker id will append index; defaults to `skill-pool-${pid}`. */
   poolId?: string;
 
-  // ── 透传给底层 SkillConversationExtractWorker 的参数 ──
+  // ── Parameters passed through to underlying SkillConversationExtractWorker ──
   brpopBlockMs?: number;
   extractLockTtlMs?: number;
   extractLockRenewIntervalMs?: number;
@@ -68,19 +69,19 @@ export interface SkillWorkerPoolOptions extends SkillWorkerResolvers {
   now?: () => number;
 
   /**
-   * 2026-08-03 crash-recovery §4.4: 本 loop 处理某个 agent 失败后 (抢锁失败 /
-   * resolver 抛错 / consumeAgent 抛错), 短时间内 dequeue 到同 agent 直接跳过,
-   * 避免 pool 在 peek 语义下热循环。默认 200ms。
+   * 2026-08-03 crash-recovery §4.4: After the loop fails to process an agent (lock contention /
+   * resolver throws / consumeAgent throws), dequeuing the same agent within a short time is skipped
+   * to avoid hot-looping the pool under peek semantics. Default 200ms.
    *
-   * 抑制表存在本 loop 进程内 (per-workerLoop Map, 不跨 loop 共享 —— 不同 loop 的
-   * 独立抑制状态是天然错峰)。
+   * The suppression table is kept within the loop process (per-workerLoop Map, not shared across loops —
+   * independent suppression state naturally scatters contention across loops).
    */
   suppressAgentTtlMs?: number;
 
   /**
-   * 2026-08-03 crash-recovery §4.5: 降级路径下周期性自愈扫描的间隔 ms。
-   * 只在 queue.getPeekStrategy() === "rpop_lpush_downgrade" 时启用。默认 60_000。
-   * 非降级路径下 start() 只跑一次冷启动扫描, 不启动定时器。
+   * 2026-08-03 crash-recovery §4.5: Periodic self-healing scan interval (ms) on the degraded path.
+   * Only enabled when queue.getPeekStrategy() === "rpop_lpush_downgrade". Default 60_000.
+   * On the non-degraded path, start() only runs a cold start scan once, without starting the timer.
    */
   selfHealIntervalMs?: number;
 }
@@ -114,10 +115,10 @@ export class SkillWorkerPool {
         `extractLockTtlMs=${this.opts.extractLockTtlMs ?? 600_000}`,
     );
 
-    // 2026-08-03 crash-recovery §4.5: 冷启动跑一次 selfHealScan, 清历史遗留的
-    // "Set 有 / List 无" 幽灵 + legacy 4 段。放在拉起 workerLoop 之前跑, 避免竞态。
-    // 用 fire-and-forget 的 IIFE 而不是 await —— pool.start() 保持同步 API,
-    // 扫描慢的话让 loop 并行跑, self-heal 补上任何漏的即可。
+    // 2026-08-03 crash-recovery §4.5: Cold start runs one selfHealScan, clearing historically
+    // abandoned "Set has / List lacks" ghosts + legacy 4-segments. Runs before starting workerLoops to avoid race conditions.
+    // Uses a fire-and-forget IIFE instead of await — pool.start() keeps its synchronous API,
+    // if the scan is slow, loops run in parallel, and self-heal will patch any leaks.
     void (async () => {
       try {
         const result = await this.selfHealScan();
@@ -140,7 +141,7 @@ export class SkillWorkerPool {
       }
     })();
 
-    // 降级路径下额外起周期定时器。原子路径无此需要 (peek 已保证 List 状态一致)。
+    // Extra periodic timer required on the degraded path. Not needed on the atomic path (peek already guarantees List state consistency).
     const strategy =
       typeof this.opts.queue.getPeekStrategy === "function"
         ? this.opts.queue.getPeekStrategy()
@@ -173,10 +174,10 @@ export class SkillWorkerPool {
       }, interval);
     }
 
-    // 拉起 N 条 workerLoop。跟 memory PipelineWorker.start 同 pattern:
-    // 不 await, 全部并发常驻; stop() 里再一起等。每条 loop 放到 OTel
-    // ROOT_CONTEXT 里跑 (跟老 SkillConversationExtractWorker 对齐), 防止
-    // 无限循环继承"启动那一刻"的 active span 污染 LLM trace。
+    // Spin up N workerLoops. Follows the same pattern as memory PipelineWorker.start:
+    // No await, all run concurrently and persistently; wait together inside stop(). Each loop runs
+    // inside the OTel ROOT_CONTEXT (aligns with the old SkillConversationExtractWorker) to prevent
+    // infinite loops inheriting the active span from "moment of startup", which would pollute LLM traces.
     for (let i = 0; i < n; i++) {
       const p = runInRootContext(() => this.workerLoop(i));
       p.catch(() => { /* logged inside */ });
@@ -197,16 +198,16 @@ export class SkillWorkerPool {
   }
 
   /**
-   * 一次性扫描 pending-agents-set, 修 List 侧缺失 + 清 legacy 4 段残留。
-   * 详见 docs/design/2026-07-21-skill-worker-crash-recovery.md §4.5。
+   * One-time scan of the pending-agents-set, repairs missing items on the List side + clears legacy 4-segment residuals.
+   * See docs/design/2026-07-21-skill-worker-crash-recovery.md §4.5.
    *
-   * 语义:
-   *   - 5 段 legit tuple 且 List 无 → LPUSH 补回, repushed++
-   *   - 4 段 legacy 残留            → SREM + LREM 清, legacyPurged++
-   *   - 5 段 legit tuple 且 List 有 → 不动
+   * Semantics:
+   *   - 5-segment legit tuple && List lacks → LPUSH to repush, repushed++
+   *   - 4-segment legacy residual          → SREM + LREM to purge, legacyPurged++
+   *   - 5-segment legit tuple && List has  → do nothing
    *
-   * 冷启动时 pool.start() 会 fire-and-forget 调用一次; 降级路径下额外周期性调用。
-   * 也 export 出来给测试 + 排障用。
+   * Cold start calls this once as fire-and-forget; degraded path calls it periodically.
+   * Also exported for testing and troubleshooting.
    */
   async selfHealScan(): Promise<{
     scanned: number;
@@ -216,7 +217,7 @@ export class SkillWorkerPool {
   }> {
     const q = this.opts.queue;
     if (typeof q.scanAgentSet !== "function") {
-      // 老 queue 实现没升级, 直接返回空结果, 不 crash pool。
+      // Old queue implementation not upgraded, just return empty result, don't crash the pool.
       return { scanned: 0, repushed: 0, legacyPurged: 0, dur_ms: 0 };
     }
     const t0 = Date.now();
@@ -228,8 +229,8 @@ export class SkillWorkerPool {
       scanned++;
       const parsed = parseAgentTuple(raw);
       if (!parsed || parsed.instance_id === LEGACY_INSTANCE_ID) {
-        // legacy 4 段 (parse 出来 instance_id === LEGACY) 或损坏 (parse null) → 清。
-        // 损坏残留跟 legacy 一起处理: 反正 pool 处理不了它。
+        // legacy 4-segment (parse yielded instance_id === LEGACY) or corrupted (parse null) → clear.
+        // Corrupted residuals are handled alongside legacy: the pool can't handle it anyway.
         await q.purgeRawAgent(raw);
         legacyPurged++;
         continue;
@@ -244,17 +245,17 @@ export class SkillWorkerPool {
   }
 
   /**
-   * 单条 worker loop。设计上无状态：每次拿到 agent 就 resolver 现取资源,
-   * 构造一次性 SkillConversationExtractWorker 委托 consumeAgent。
+   * Single worker loop. Designed to be stateless: every time an agent is received, resources are resolved on the fly,
+   * constructing a one-shot SkillConversationExtractWorker to delegate to consumeAgent.
    */
   private async workerLoop(index: number): Promise<void> {
     const workerId = `${this.poolId}#${index}`;
     const blockMs = this.opts.brpopBlockMs ?? 5000;
     const suppressTtl = this.opts.suppressAgentTtlMs ?? 200;
 
-    // 2026-08-03 crash-recovery §4.4: per-workerLoop 短抑制表, 防 peek 语义下的
-    // hot-loop (抢锁失败 / resolver 抛错时 agent 仍在队头, 本 loop 200ms 内不再抢它)。
-    // 别的 loop 有独立抑制状态, 天然错峰。
+    // 2026-08-03 crash-recovery §4.4: per-workerLoop short suppression table, prevents hot-looping
+    // under peek semantics (when lock contention / resolver throws, agent stays at head; this loop won't grab it again for 200ms).
+    // Other loops have independent suppression states and naturally stagger.
     const suppress = new Map<string, number>();
     const now = () => this.opts.now?.() ?? Date.now();
     const isSuppressed = (a: AgentTuple): boolean => {
@@ -267,7 +268,7 @@ export class SkillWorkerPool {
     const suppressAgent = (a: AgentTuple): void => {
       const key = `${a.instance_id}|${a.space_id}|${a.user_id}|${a.team_id}|${a.agent_id}`;
       suppress.set(key, now() + suppressTtl);
-      // 惰性清理: 每 100 条清一次过期
+      // Lazy cleanup: clear expired every 100 entries
       if (suppress.size > 100) {
         const t = now();
         for (const [k, v] of suppress) if (v <= t) suppress.delete(k);
@@ -277,9 +278,9 @@ export class SkillWorkerPool {
     while (!this.closed) {
       let agent: AgentTuple | null = null;
       try {
-        // 2026-08-03 crash-recovery §4.1: 用原子 peekAgent (LMOVE 语义), 保证
-        // agent 在 loop 崩溃时仍留在 List, 下一轮 peek 能重新拿到。见
-        // docs/design/2026-07-21-skill-worker-crash-recovery.md §4。
+        // 2026-08-03 crash-recovery §4.1: Use atomic peekAgent (LMOVE semantics) to guarantee
+        // agent stays in List when the loop crashes, ensuring next peek can retrieve it. See
+        // docs/design/2026-07-21-skill-worker-crash-recovery.md §4.
         agent = await this.opts.queue.peekAgent(blockMs);
       } catch (err) {
         if (this.closed) break;
@@ -289,26 +290,26 @@ export class SkillWorkerPool {
       }
       if (!agent) continue;
 
-      // 短抑制: 本 loop 刚失败过这个 agent, 短时间内跳过。别的 loop 抑制状态独立,
-      // 会拿到别的 agent, 天然让位。
+      // Short suppression: this loop just failed this agent, skip it for a short time. Other loops have independent
+      // suppression states, will grab other agents, yielding naturally.
       if (isSuppressed(agent)) {
         obsLogger.info("skill.worker.suppressed_skip", {
           worker_id: workerId,
           instance_id: agent.instance_id,
           agent_id: agent.agent_id,
         });
-        // 短睡防止本 loop 空转紧跟着又 peek 到自己刚抑制的 agent
+        // Short sleep to prevent this loop from spinning empty and immediately peeking the agent it just suppressed
         await sleep(Math.min(20, suppressTtl));
         continue;
       }
 
-      // Legacy 4 段兜底: instance_id === "__legacy__". 升级过渡期偶尔会有,
-      // 见到直接丢弃 + error log, 不尝试消费 (说明版本错乱)。
+      // Legacy 4-segment fallback: instance_id === "__legacy__". Occasionally occurs during upgrade transitions,
+      // discard immediately on sight + error log, do not attempt to consume (indicates version mismatch).
       //
-      // 2026-08-03 crash-recovery: peekAgent 用 LMOVE 语义, legacy 4 段 raw 已被
-      // 搬到队头 —— 如果只 continue 会导致 pool 在同一条 legacy raw 上无限 peek 循环 (OOM)。
-      // 必须按 4 段拼回原始 raw 字符串, purgeRawAgent 直接 SREM+LREM 清干净。
-      // 5 段 serialize 命中不到这条 raw, 所以走 purgeRawAgent 而不是 removeAgent。
+      // 2026-08-03 crash-recovery: peekAgent uses LMOVE semantics, legacy 4-segment raw is moved
+      // to the head — just doing continue would cause the pool to infinitely peek loop on the same legacy raw (OOM).
+      // Must reconstruct original raw string via 4 segments, and purgeRawAgent directly via SREM+LREM to clear it out.
+      // 5-segment serialize won't match this raw, so we use purgeRawAgent instead of removeAgent.
       if (agent.instance_id === LEGACY_INSTANCE_ID) {
         const legacyRaw = `${agent.space_id}|${agent.user_id}|${agent.team_id}|${agent.agent_id}`;
         this.logger.error(
@@ -333,26 +334,26 @@ export class SkillWorkerPool {
 
       try {
         const result = await this.consumeAgent(agent, workerId);
-        // consumeAgent 只抛未处理错误, lock contention 是 result.lockContended=true。
-        // 抢锁失败也进抑制, 让别的 loop 拿别的 agent。
+        // consumeAgent only throws unhandled errors, lock contention is result.lockContended=true.
+        // Lock contention failure also enters suppression, letting other loops grab other agents.
         if (result?.lockContended) suppressAgent(agent);
       } catch (err) {
         this.logger.error(
           `[skill-worker-pool] ${workerId} consumeAgent error: ${(err as Error).message}`,
         );
-        // consumeAgent 抛出 (通常是 resolver 抛错) → 抑制该 agent 一段时间,
-        // 让本 loop 拿别的 agent。抑制过期后如果问题没解决还会再试。
+        // consumeAgent throws (usually resolver error) → suppress this agent for a while,
+        // letting this loop grab other agents. When suppression expires, if unresolved, it will try again.
         suppressAgent(agent);
       }
     }
   }
 
   /**
-   * 拿到 agent 后按 instance_id resolver 现取 3 份 per-instance 资源,
-   * 构造一次性 SkillConversationExtractWorker 委托 consumeAgent 走 8 步流程。
+   * After grabbing the agent, dynamically retrieves 3 per-instance resources using resolvers based on instance_id,
+   * constructs a one-shot SkillConversationExtractWorker and delegates to consumeAgent to run the 8-step process.
    *
-   * 这里不缓存 worker 实例 —— 每次都 new 是 O(1) 分配 + 常量字段拷贝,
-   * 相对 20-90 秒的 LLM 抽取可忽略, 换来的是 worker pool 本身完全无状态。
+   * Worker instances are not cached here — `new` every time is O(1) allocation + constant field copies,
+   * negligible compared to 20-90 seconds of LLM extraction, achieving a completely stateless worker pool.
    */
   private async consumeAgent(
     agent: AgentTuple,
@@ -386,9 +387,8 @@ export class SkillWorkerPool {
       now: this.opts.now,
     };
     const oneShot = new SkillConversationExtractWorker(extractWorkerOpts);
-    // 直接调 consumeAgent —— 走同一份 8 步流程 (extract-lock / renewTimer /
-    // tasks-mutex / transient-permanent / DLQ / 幽灵检测)。返回 lockContended 供
-    // 上游短抑制表使用。
+    // Directly call consumeAgent — follows the identical 8-step process (extract-lock / renewTimer /
+    // tasks-mutex / transient-permanent / DLQ / ghost detection). Returns lockContended for upstream short suppression table usage.
     const result = await oneShot.consumeAgent(agent);
     return { lockContended: result.lockContended };
   }

@@ -12,7 +12,7 @@ describe("isDshRuntimeContextSnapshot", () => {
   });
 
   it("does not match a real user question that only mentions the phrase", () => {
-    expect(isDshRuntimeContextSnapshot("请解释 Current runtime context. 是什么")).toBe(false);
+    expect(isDshRuntimeContextSnapshot("Please explain what Current runtime context. is")).toBe(false);
   });
 });
 
@@ -31,7 +31,7 @@ describe("extractUserQueryText", () => {
   });
 
   it("keeps a real user question", () => {
-    expect(extractUserQueryText("请检查这个项目并修复问题")).toBe("请检查这个项目并修复问题");
+    expect(extractUserQueryText("Please check this project and fix issues")).toBe("Please check this project and fix issues");
   });
 
   it("still extracts an explicit user_query block", () => {
@@ -42,11 +42,11 @@ describe("extractUserQueryText", () => {
 describe("extractLatestUserMessage", () => {
   it("skips DSH metadata and returns the real user prompt", () => {
     const got = extractLatestUserMessage([
-      { role: "user", content: "请检查这个项目并修复问题" },
+      { role: "user", content: "Please check this project and fix issues" },
       { role: "user", content: "Current runtime context. cwd=/workspace ..." },
       { role: "user", content: "<system-reminder>internal metadata</system-reminder>" },
     ]);
-    expect(got).toEqual({ role: "user", content: "请检查这个项目并修复问题" });
+    expect(got).toEqual({ role: "user", content: "Please check this project and fix issues" });
   });
 
   it("returns null when every user message is harness noise", () => {

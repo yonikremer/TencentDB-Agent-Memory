@@ -1,14 +1,14 @@
 /**
  * Claude Code Session Init Form — `AskUserQuestion` tool_use.
  *
- * Claude Code 原生交互 form：
+ * Claude Code native interactive form:
  *   - Tool name: `AskUserQuestion`
- *   - Options: `{ label, description }` 结构体，2-4 个硬限制
- *   - Protocol: 仅 Anthropic SSE
+ *   - Options: `{ label, description }` structure, 2-4 hard limit
+ *   - Protocol: Anthropic SSE only
  *   - ID prefix: `toolu_cc_session_init_`
- *   - 分页: 每页 3 个 agent + 1 个"更多→"/SKIP 槽位
+ *   - Pagination: 3 agents per page + 1 "More →"/SKIP slot
  *
- * 不含任何 CodeBuddy 逻辑。
+ * Contains no CodeBuddy logic.
  */
 
 import type { TeamOption } from "../types.js";
@@ -31,14 +31,14 @@ export const ASSET_CONFIRM_NO = "No, do not associate this time";
 export const ASSET_CONFIRM_FORM_TITLE = "Session Initialization — Associate Team Assets?";
 
 /**
- * 附在每步 question 文末的通用备注：告诉用户"选择跳过 = 本次 session init 跳过、不注入任何团队资产"。
- * Claude Code 的 AskUserQuestion 会给用户一个 "Other" 输入框，回复"跳过 / skip /
- * 不关联" 就走 SKIP_RE bypass；没识别到的自由文本会 unrecognized → 同样 bypass。
- * 文案与 workbuddy/codex/codebuddy/dsh 五端统一，避免多客户端表述漂移。
+ * General note appended to the end of each question step: informs the user that "Selecting skip = skip session init this time, inject no team assets".
+ * Claude Code's AskUserQuestion provides the user with an "Other" input box, replying "skip / skip /
+ * do not associate" will take the SKIP_RE bypass; unrecognized free text will be unrecognized → also bypass.
+ * The copy is unified with the five endpoints of workbuddy/codex/codebuddy/dsh to avoid presentation drift across clients.
  */
 const SKIP_HINT = ' (Selecting "skip" will bypass session init and inject no team assets)';
 
-// 分页布局统一走 pagination.ts；此处仅用其常量。
+// Pagination layout is centralized in pagination.ts; only its constants are used here.
 const CC_MAX_OPTIONS = CC_MAX_OPTIONS_SHARED;
 
 /** Returns true if the given string contains any CC form title marker. */
@@ -64,7 +64,7 @@ export interface FormData {
   teams: TeamOption[];
   stage: FormStage;
   selectedTeamId?: string;
-  /** Claude Code 分页：当前 agent 页码 (0-based) */
+  /** Claude Code Pagination: current agent page index (0-based) */
   pageIndex?: number;
   retry?: boolean;
   stream?: boolean;
@@ -99,15 +99,15 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
   }
 
   if (stage === "team") {
-    // Team options: 只列真实 team。主动"跳过"入口只在 asset_confirm 阶段，后续
-    // 阶段"异常/未识别"由 init.ts 兜底 bypass。
+    // Team options: Only lists real teams. The active "skip" entry is only in the asset_confirm stage, subsequent
+    // stages "abnormal/unrecognized" are bypassed by the init.ts fallback.
     //
-    // 调用方（init.ts）保证 teams.length ≥ 2 — 单 team 会被 auto-select 跳过，
-    // 根本不会走到 team form。form builder 不再兜底占位。
-    // description 留空 —— label 已含 team 名 + id 后缀，重复一遍 "Team: name"
-    // 只是噪音。
-    // Team 阶段目前不分页 —— 最多渲染 CC_MAX_OPTIONS 个 team（超过的静默截断，
-    // 属于 pre-existing 限制，本次未处理）。
+    // The caller (init.ts) guarantees teams.length ≥ 2 — a single team will be auto-selected and skipped,
+    // and will never reach the team form. The form builder no longer provides a fallback placeholder.
+    // description is left empty —— label already contains the team name + id suffix, repeating "Team: name"
+    // is just noise.
+    // The Team stage is currently not paginated —— renders up to CC_MAX_OPTIONS teams (silently truncates the rest,
+    // which is a pre-existing limit, not addressed this time).
     const teamOpts = teams.slice(0, CC_MAX_OPTIONS).map((t) => ({
       label: `${t.team_name} (${t.team_id.slice(-8)})`,
       description: "",
@@ -119,7 +119,7 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
       );
     }
     questions.push({
-      question: titlePrefix + "请选择本次会话所属的 Team：" + SKIP_HINT,
+      question: titlePrefix + "Please select the Team for this session:" + SKIP_HINT,
       header: "Team",
       options: teamOpts.slice(0, CC_MAX_OPTIONS),
       multiSelect: false,
@@ -136,10 +136,10 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
     const page = computePagination(team.agents.length, pageIndex);
     const slice = team.agents.slice(page.start, page.end);
 
-    // 只保留 agent 自身描述（有信息量），删掉 "(选完 agent 后可选 N 个任务)" /
-    // "(无任务)" 的尾巴 —— 用户此时正在选 agent，任务数量提示既不影响决策
-    // 也占屏。agent 若无自定义描述则 description 留空，不再回退到 "Agent: 名"
-    // （label 已经有名字）。
+    // Only retain the agent's own description (which contains information), remove the "(After selecting an agent, N tasks are optional)" /
+    // "(No tasks)" tail —— the user is currently selecting an agent, the task count prompt neither affects the decision
+    // nor does it occupy the screen. If the agent has no custom description, the description is left empty, instead of falling back to "Agent: name"
+    // (label already has the name).
     const combinedOptions: Array<{ label: string; description: string }> = slice.map((a) => ({
       label: `${a.agent_name} (${a.agent_id.slice(-8)})`,
       description: a.description ?? "",
@@ -147,13 +147,13 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
 
     if (!page.isLastPage) {
       const remaining = page.total - page.end;
-      combinedOptions.push({ label: MORE_LABEL, description: `查看下一批（还剩 ${remaining} 个 Agent）` });
+      combinedOptions.push({ label: MORE_LABEL, description: `View next batch (${remaining} Agent(s) remaining)` });
     }
-    // 末页不再追加 SKIP：主动跳过只在 asset_confirm 提供；后续阶段"异常/未识别"
-    // 由 init.ts 兜底 bypass。
+    // Do not append SKIP on the last page: active skip is only provided in asset_confirm; subsequent stages "abnormal/unrecognized"
+    // are bypassed by the init.ts fallback.
     //
-    // pagination.ts 保证每页真实项数 ≥ 2（total > 4 时；total ≤ 4 时单页含全部
-    // 4 个 slot 铺满，无 MORE）；此处不该再收到 <2 的 combinedOptions。
+    // pagination.ts guarantees real item count ≥ 2 per page (when total > 4; when total ≤ 4, a single page contains all
+    // 4 slots filled, no MORE); combinedOptions < 2 should no longer be received here.
     if (combinedOptions.length < 2) {
       throw new Error(
         `[cc form] agent page ${pageIndex} has ${combinedOptions.length} option(s); ` +
@@ -161,9 +161,9 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
       );
     }
 
-    const pageSuffix = page.totalPages > 1 ? `（第 ${pageIndex + 1}/${page.totalPages} 页）` : "";
+    const pageSuffix = page.totalPages > 1 ? ` (Page ${pageIndex + 1}/${page.totalPages})` : "";
     questions.push({
-      question: titlePrefix + `请选择「${team.team_name}」下要使用的 Agent${pageSuffix}：` + SKIP_HINT,
+      question: titlePrefix + `Please select the Agent to use under "${team.team_name}"${pageSuffix}:` + SKIP_HINT,
       header: page.totalPages > 1 ? `Agent ${pageIndex + 1}/${page.totalPages}`.slice(0, 12) : "Agent",
       options: combinedOptions.slice(0, CC_MAX_OPTIONS),
       multiSelect: false,
@@ -179,8 +179,8 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
     const page = computePagination(team.tasks.length, taskPageIndex);
     const taskSlice = team.tasks.slice(page.start, page.end);
 
-    // description 留空 —— label 已含 task 名 + id 后缀，"Task: name" 只是噪音。
-    // 虚拟兜底条目（isDefault）不拼 id 后缀，反正只有一个不会重名歧义。
+    // description is left empty —— label already contains the task name + id suffix, "Task: name" is just noise.
+    // The virtual fallback entry (isDefault) does not append the id suffix, there is only one anyway so no naming ambiguity.
     const taskOpts: Array<{ label: string; description: string }> = taskSlice.map((t) => ({
       label: t.isDefault
         ? t.task_name
@@ -192,11 +192,11 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
       const remaining = page.total - page.end;
       taskOpts.push({
         label: MORE_LABEL,
-        description: `查看下一批（还剩 ${remaining} 个任务）`,
+        description: `View next batch (${remaining} task(s) remaining)`,
       });
     }
 
-    // 同 agent 阶段：pagination.ts 保证 count ≥ 2，此处 <2 说明分页器有 bug。
+    // Same as agent stage: pagination.ts guarantees count ≥ 2, if <2 here it indicates a paginator bug.
     if (taskOpts.length < 2) {
       throw new Error(
         `[cc form] task page ${taskPageIndex} has ${taskOpts.length} option(s); ` +
@@ -204,9 +204,9 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
       );
     }
 
-    const taskPageSuffix = page.totalPages > 1 ? `（第 ${taskPageIndex + 1}/${page.totalPages} 页）` : "";
+    const taskPageSuffix = page.totalPages > 1 ? ` (Page ${taskPageIndex + 1}/${page.totalPages})` : "";
     questions.push({
-      question: titlePrefix + `请选择「${team.team_name}」下要关联的任务${taskPageSuffix}：` + SKIP_HINT,
+      question: titlePrefix + `Please select the Task to associate under "${team.team_name}"${taskPageSuffix}:` + SKIP_HINT,
       header: page.totalPages > 1 ? `Task ${taskPageIndex + 1}/${page.totalPages}`.slice(0, 12) : "Task",
       options: taskOpts.slice(0, CC_MAX_OPTIONS),
       multiSelect: false,

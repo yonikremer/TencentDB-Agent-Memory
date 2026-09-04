@@ -1,5 +1,5 @@
 /**
- * 记忆内核 v3 元数据 HTTP fetch（Panel 专用）。
+ * Memory core v3 metadata HTTP fetch (Panel-specific).
  */
 import { randomUUID } from 'node:crypto';
 import type { Logger } from '../infra/logger.js';
@@ -69,7 +69,7 @@ function serializeForLog(value: unknown): string {
   }
 }
 
-/** 内核 HTTP 调用失败（网络/超时/无效信封）。 */
+/** Kernel HTTP call failed (network/timeout/invalid envelope). */
 export class KernelFetchError extends Error {
   constructor(
     readonly code: number,
@@ -91,7 +91,7 @@ export interface MetaFetchConfig {
   userKey?: string;
   timeoutMs?: number;
   logger?: Logger;
-  /** 透传为 x-request-id；缺省则生成 UUID。 */
+  /** Transparent transmission is x-request-id; by default, UUID is generated. */
   requestId?: string;
 }
 
@@ -118,9 +118,9 @@ function logRemoteMeta(
 }
 
 /**
- * POST 记忆内核元数据路径，返回完整信封。
- * - mode=envelope：业务 code≠0 不抛错（透明代理用）
- * - mode=data：code≠0 抛 KernelFetchError
+ * POST remembers the kernel metadata path and returns the complete envelope.
+ * - mode=envelope: business code≠0 does not throw an error (for transparent proxy)
+ * - mode=data: code≠0 throws KernelFetchError
  */
 export async function executeMetaFetch<T>(
   cfg: MetaFetchConfig,

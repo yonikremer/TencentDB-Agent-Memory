@@ -1,8 +1,8 @@
 /**
- * IMetadataStore 契约测试套件 —— 与后端无关。
+ * IMetadataStore contract test suite — backend agnostic.
  *
- * 对应实施计划「存储切换测试」：同一套用例分别跑在 SQLite / MongoDB 上，
- * 保证不同后端行为一致。SQLite/MongoDB 各自的 *.test.ts 调用 runMetadataStoreContract。
+ * Corresponds to implementation plan "Storage switching test": the same test cases run on SQLite / MongoDB respectively,
+ * ensuring consistent behavior across different backends. *.test.ts files for SQLite/MongoDB call runMetadataStoreContract.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { DuplicateUserKeyError, type IMetadataStore } from "./interface.js";
@@ -33,9 +33,9 @@ function newAssetId(assetType: "skill" | "llm_wiki" | "code_graph" | "chat_memor
 }
 
 /**
- * @param name 后端名称（用于 describe 标题）
- * @param makeStore 每个用例前构造一个干净 store
- * @param teardown 用例后清理
+ * @param name Backend name (used for describe title)
+ * @param makeStore Constructs a clean store before each test case
+ * @param teardown Cleans up after test case
  */
 export function runMetadataStoreContract(
   name: string,
@@ -56,7 +56,7 @@ export function runMetadataStoreContract(
 
     // ── User ──
     describe("User", () => {
-      it("createUser 自动生成 user_id / 默认 key 并可按 id/key 查回", async () => {
+      it("createUser automatically generates user_id / default key and allows lookup by id/key", async () => {
         const u = await store.createUser(uniqueUserInput());
         expect(u.user_id).toMatch(/^usr-/);
         const defaultKey = await store.getDefaultUserKey(u.user_id);
@@ -65,37 +65,37 @@ export function runMetadataStoreContract(
         expect(await store.getUserByKey(defaultKey!.key_value)).toMatchObject({ user_id: u.user_id });
       });
 
-      it("createUser 写入 meta_user_keys 默认行", async () => {
+      it("createUser writes default row in meta_user_keys", async () => {
         const u = await store.createUser(uniqueUserInput());
         const keys = (await store.listUserKeys(u.user_id, P)).items;
         const defaultKey = await store.getDefaultUserKey(u.user_id);
         expect(keys.some((k) => k.is_default && k.key_value === defaultKey?.key_value)).toBe(true);
       });
 
-      it("getUserByUsername 命中", async () => {
+      it("getUserByUsername hits", async () => {
         const u = await store.createUser(uniqueUserInput({ username: "alice", auth_provider: "local" }));
         const found = await store.getUserByUsername("local", "alice");
         expect(found?.user_id).toBe(u.user_id);
       });
 
-      it("updateUser 局部更新", async () => {
+      it("updateUser partial update", async () => {
         const u = await store.createUser(uniqueUserInput());
         const updated = await store.updateUser(u.user_id, { display_name: "New Name" });
         expect(updated?.display_name).toBe("New Name");
       });
 
-      it("getUserById 不存在返回 null", async () => {
+      it("getUserById returns null if not found", async () => {
         expect(await store.getUserById("usr-nope0000")).toBeNull();
       });
 
-      it("deleteUsers 批量删除", async () => {
+      it("deleteUsers batch delete", async () => {
         const u = await store.createUser(uniqueUserInput());
         const res = await store.deleteUsers([u.user_id, "usr-missing0"]);
         expect(res.deleted_ids).toContain(u.user_id);
         expect(await store.getUserById(u.user_id)).toBeNull();
       });
 
-      it("createUser 指定 default_key_value：以该值写库并可按 key 反查", async () => {
+      it("createUser with specified default_key_value: writes to database with that value and allows lookup by key", async () => {
         const key = `sk-mem-explicit-${Math.random().toString(36).slice(2)}`;
         const u = await store.createUser(uniqueUserInput({ default_key_value: key }));
         const defaultKey = await store.getDefaultUserKey(u.user_id);
@@ -103,19 +103,19 @@ export function runMetadataStoreContract(
         expect(await store.getUserByKey(key)).toMatchObject({ user_id: u.user_id });
       });
 
-      it("createUser 同 default_key_value 二次调用抛 DuplicateUserKeyError（key_value UNIQUE 兜底并发）", async () => {
+      it("createUser second invocation with same default_key_value throws DuplicateUserKeyError (key_value UNIQUE fallback for concurrency)", async () => {
         const key = `sk-mem-dup-${Math.random().toString(36).slice(2)}`;
         await store.createUser(uniqueUserInput({ default_key_value: key }));
-        // sqlite adapter 是同步方法：包一层 async fn 让同步抛的错也走 rejects matcher。
+        // sqlite adapter method is sync: wrap in async fn so sync throws also go through rejects matcher.
         await expect(
           (async () => store.createUser(uniqueUserInput({ default_key_value: key })))(),
         ).rejects.toBeInstanceOf(DuplicateUserKeyError);
       });
     });
 
-    // ── Team（自动 admin 成员）──
+    // ── Team (auto admin member) ──
     describe("Team", () => {
-      it("createTeam 自动把 owner 加为 admin 成员（原子）", async () => {
+      it("createTeam automatically adds owner as admin member (atomic)", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(owner.user_id));
         expect(team.team_id).toMatch(/^team-/);
@@ -129,7 +129,7 @@ export function runMetadataStoreContract(
         });
       });
 
-      it("listTeamsByUser 返回用户所属 team", async () => {
+      it("listTeamsByUser returns teams belonging to user", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const t1 = await store.createTeam(teamInput(owner.user_id, { name: "T1" }));
         const t2 = await store.createTeam(teamInput(owner.user_id, { name: "T2" }));
@@ -202,7 +202,7 @@ export function runMetadataStoreContract(
         expect((await store.listAgentsByOwner(owner.user_id, P)).items.map((a) => a.agent_id)).toContain(agent.agent_id);
       });
 
-      it("listAgentsByTeam 支持 status 过滤", async () => {
+      it("listAgentsByTeam supports status filtering", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(owner.user_id));
         const a1 = await store.createAgent({ team_id: team.team_id, owner_user_id: owner.user_id, name: "A1" });
@@ -211,26 +211,26 @@ export function runMetadataStoreContract(
         expect(active.map((a) => a.agent_id)).toEqual([a1.agent_id]);
       });
 
-      it("listAgentsByTeam 支持 owner_user_id 过滤（组合 team_id）", async () => {
+      it("listAgentsByTeam supports owner_user_id filtering (combined with team_id)", async () => {
         const u1 = await store.createUser(uniqueUserInput());
         const u2 = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(u1.user_id));
         const a1 = await store.createAgent({ team_id: team.team_id, owner_user_id: u1.user_id, name: "A1" });
         const a2 = await store.createAgent({ team_id: team.team_id, owner_user_id: u2.user_id, name: "A2" });
 
-        // team 全量
+        // full team
         const all = (await store.listAgentsByTeam(team.team_id, P)).items;
         expect(all.map((a) => a.agent_id).sort()).toEqual([a1.agent_id, a2.agent_id].sort());
 
-        // team + owner=u1 → 只返 u1 的
+        // team + owner=u1 → returns u1 only
         const mine = (await store.listAgentsByTeam(team.team_id, P, { owner_user_id: u1.user_id })).items;
         expect(mine.map((a) => a.agent_id)).toEqual([a1.agent_id]);
 
-        // team + owner=u2 → 只返 u2 的
+        // team + owner=u2 → returns u2 only
         const theirs = (await store.listAgentsByTeam(team.team_id, P, { owner_user_id: u2.user_id })).items;
         expect(theirs.map((a) => a.agent_id)).toEqual([a2.agent_id]);
 
-        // team + owner + status 组合
+        // team + owner + status combination
         await store.createAgent({ team_id: team.team_id, owner_user_id: u1.user_id, name: "A1-inactive", status: "inactive" });
         const activeMine = (
           await store.listAgentsByTeam(team.team_id, P, { owner_user_id: u1.user_id, status: "active" })
@@ -239,9 +239,9 @@ export function runMetadataStoreContract(
       });
     });
 
-    // ── Task（含 linkAgents 原子）──
+    // ── Task (including linkAgents atomic write) ──
     describe("Task", () => {
-      it("createTask 含 linked_agents 原子写入 task + task_agents", async () => {
+      it("createTask with linked_agents atomic write into task + task_agents", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(owner.user_id));
         const agent = await store.createAgent({ team_id: team.team_id, owner_user_id: owner.user_id, name: "A" });
@@ -270,7 +270,7 @@ export function runMetadataStoreContract(
         expect((await store.listTaskAgents(task.task_id, P)).items).toHaveLength(0);
       });
 
-      it("listTasksByTeam 支持 status 过滤", async () => {
+      it("listTasksByTeam supports status filtering", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(owner.user_id));
         const t1 = await store.createTask({ team_id: team.team_id, creator_user_id: owner.user_id, title: "Run" });
@@ -279,7 +279,7 @@ export function runMetadataStoreContract(
         expect(running.map((t) => t.task_id)).toEqual([t1.task_id]);
       });
 
-      it("listTasks 按 creator_user_id 跨 team 查询", async () => {
+      it("listTasks queries across teams by creator_user_id", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const other = await store.createUser(uniqueUserInput());
         const team1 = await store.createTeam(teamInput(owner.user_id));
@@ -307,7 +307,7 @@ export function runMetadataStoreContract(
         return { owner, team, agent, task };
       }
 
-      it("PL-C1 append 写入；字段完整", async () => {
+      it("PL-C1 append write; complete fields", async () => {
         const { owner, team, agent, task } = await seedParticipationFixture();
         const log = await store.appendParticipationLog({
           team_id: team.team_id,
@@ -331,7 +331,7 @@ export function runMetadataStoreContract(
         expect(log.id).toBeTruthy();
       });
 
-      it("PL-C2 list 按 team_id；created_at DESC", async () => {
+      it("PL-C2 list by team_id; created_at DESC", async () => {
         const { owner, team, agent, task } = await seedParticipationFixture();
         await store.appendParticipationLog({
           team_id: team.team_id,
@@ -355,7 +355,7 @@ export function runMetadataStoreContract(
         ]);
       });
 
-      it("PL-C3 list 叠加 task_id / agent_id / user_id 过滤", async () => {
+      it("PL-C3 list with combined task_id / agent_id / user_id filters", async () => {
         const { owner, team, agent, task } = await seedParticipationFixture();
         const other = await store.createUser(uniqueUserInput());
         await store.addTeamMember({ team_id: team.team_id, user_id: other.user_id });
@@ -403,7 +403,7 @@ export function runMetadataStoreContract(
         expect(page.items[0].created_at).toBe("2026-07-15T00:00:00.000Z");
       });
 
-      it("PL-C5 list dedupe=true：同 user 多条 → 仅返回最新一条", async () => {
+      it("PL-C5 list dedupe=true: multiple rows for same user → returns latest row only", async () => {
         const { owner, team, agent, task } = await seedParticipationFixture();
         const older = await store.appendParticipationLog({
           team_id: team.team_id, task_id: task.task_id, agent_id: agent.agent_id, user_id: owner.user_id,
@@ -419,7 +419,7 @@ export function runMetadataStoreContract(
         expect(page.items[0].id).not.toBe(older.id);
       });
 
-      it("PL-C6 list dedupe=true 的 total = 去重用户数", async () => {
+      it("PL-C6 list dedupe=true total = count of unique users", async () => {
         const { owner, team, agent, task } = await seedParticipationFixture();
         const other = await store.createUser(uniqueUserInput());
         await store.addTeamMember({ team_id: team.team_id, user_id: other.user_id });
@@ -457,7 +457,7 @@ export function runMetadataStoreContract(
         return { owner, team, asset };
       }
 
-      it("createAsset 默认值 + get", async () => {
+      it("createAsset default values + get", async () => {
         const { asset } = await seedAsset();
         expect(asset.asset_id).toMatch(/^skl-/);
         expect(asset.version).toBe(1);
@@ -466,7 +466,7 @@ export function runMetadataStoreContract(
         expect(await store.getAssetById(asset.asset_id)).toMatchObject({ asset_id: asset.asset_id });
       });
 
-      it("touchAssetUsage 累加 usage_count 并更新 last_used_at", async () => {
+      it("touchAssetUsage increments usage_count and updates last_used_at", async () => {
         const { asset } = await seedAsset();
         await store.touchAssetUsage(asset.asset_id);
         await store.touchAssetUsage(asset.asset_id);
@@ -475,7 +475,7 @@ export function runMetadataStoreContract(
         expect(got?.last_used_at).toBeTruthy();
       });
 
-      it("listAssetsByTeam 支持 asset_type / status 过滤", async () => {
+      it("listAssetsByTeam supports asset_type / status filtering", async () => {
         const { team, owner } = await seedAsset();
         await store.createAsset({ asset_id: newAssetId("llm_wiki"), team_id: team.team_id, asset_type: "llm_wiki", name: "Wiki", owner_user_id: owner.user_id, source_type: "manual" });
         const skills = (await store.listAssetsByTeam(team.team_id, P, { asset_type: "skill" })).items;
@@ -483,21 +483,21 @@ export function runMetadataStoreContract(
         expect(skills).toHaveLength(1);
       });
 
-      it("deleteAssets 物理删除（行消失）+ 幂等", async () => {
+      it("deleteAssets physical delete (row disappears) + idempotent", async () => {
         const { asset } = await seedAsset();
         const res = await store.deleteAssets([asset.asset_id]);
         expect(res.deleted_ids).toContain(asset.asset_id);
         expect(await store.getAssetById(asset.asset_id)).toBeNull();
-        // 二次删除：已不存在视为成功
+        // Second deletion: already non-existent treated as success
         const again = await store.deleteAssets([asset.asset_id]);
         expect(again.deleted_ids).toContain(asset.asset_id);
         expect(again.failed).toEqual([]);
       });
     });
 
-    // ── AgentFixedAsset（全量替换）──
+    // ── AgentFixedAsset (full replacement) ──
     describe("AgentFixedAsset", () => {
-      it("setAgentFixedAssets 全量替换 + list", async () => {
+      it("setAgentFixedAssets full replacement + list", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(owner.user_id));
         const agent = await store.createAgent({ team_id: team.team_id, owner_user_id: owner.user_id, name: "A" });
@@ -510,7 +510,7 @@ export function runMetadataStoreContract(
         ]);
         expect((await store.listAgentFixedAssets(agent.agent_id, P)).items).toHaveLength(2);
 
-        // 全量替换为只有 a1
+        // Full replacement to only a1
         await store.setAgentFixedAssets(agent.agent_id, [
           { asset_id: a1.asset_id, asset_type: "skill", priority: 10, created_by: owner.user_id },
         ]);
@@ -519,7 +519,7 @@ export function runMetadataStoreContract(
         expect(after[0]).toMatchObject({ asset_id: a1.asset_id, priority: 10 });
       });
 
-      it("setAgentFixedAssets 传空数组清空绑定", async () => {
+      it("setAgentFixedAssets with empty array clears bindings", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(owner.user_id));
         const agent = await store.createAgent({ team_id: team.team_id, owner_user_id: owner.user_id, name: "A" });
@@ -529,7 +529,7 @@ export function runMetadataStoreContract(
         expect((await store.listAgentFixedAssets(agent.agent_id, P)).items).toHaveLength(0);
       });
 
-      it("summarizeAgentFixedAssetsByAgents 按 type 聚合 + asset_id 过滤", async () => {
+      it("summarizeAgentFixedAssetsByAgents aggregates by type + asset_id filter", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(owner.user_id));
         const a1 = await store.createAgent({ team_id: team.team_id, owner_user_id: owner.user_id, name: "A1" });
@@ -592,7 +592,7 @@ export function runMetadataStoreContract(
 
     // ── Delete Cascade (N1) ──
     describe("Delete Cascade", () => {
-      it("deleteUsers 级联清理 team_members + ACL", async () => {
+      it("deleteUsers cascade clears team_members + ACL", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(owner.user_id));
         const asset = await store.createAsset({ asset_id: newAssetId(), team_id: team.team_id, asset_type: "skill", name: "S", owner_user_id: owner.user_id, source_type: "manual" });
@@ -606,7 +606,7 @@ export function runMetadataStoreContract(
         expect((await store.listAclBySubject("user", owner.user_id, P)).items).toHaveLength(0);
       });
 
-      it("deleteAgents 级联清理 task_agents + fixed_assets", async () => {
+      it("deleteAgents cascade clears task_agents + fixed_assets", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(owner.user_id));
         const agent = await store.createAgent({ team_id: team.team_id, owner_user_id: owner.user_id, name: "A" });
@@ -620,7 +620,7 @@ export function runMetadataStoreContract(
         expect((await store.listAgentFixedAssets(agent.agent_id, P)).items).toHaveLength(0);
       });
 
-      it("deleteAgents 归档自身 chat_memory 并清理其它 agent 的借入绑定", async () => {
+      it("deleteAgents archives own chat_memory and cleans borrowed bindings from other agents", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(owner.user_id));
         const agentA = await store.createAgent({ team_id: team.team_id, owner_user_id: owner.user_id, name: "A" });
@@ -662,7 +662,7 @@ export function runMetadataStoreContract(
         expect(rows).toEqual([{ agent_id: agentB.agent_id, asset_type: "chat_memory", cnt: 1 }]);
       });
 
-      it("deleteTasks 级联清理 task_agents", async () => {
+      it("deleteTasks cascade clears task_agents", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(owner.user_id));
         const agent = await store.createAgent({ team_id: team.team_id, owner_user_id: owner.user_id, name: "A" });
@@ -674,9 +674,9 @@ export function runMetadataStoreContract(
       });
     });
 
-    // ── v3.1：username / external_id 无唯一约束 ──
+    // ── v3.1: username / external_id without unique constraint ──
     describe("User uniqueness (v3.1)", () => {
-      it("相同 username 可重复创建", async () => {
+      it("duplicate username creation allowed", async () => {
         const username = `dup_${Math.random()}`;
         const a = await Promise.resolve(store.createUser(uniqueUserInput({ username })));
         const b = await Promise.resolve(
@@ -695,7 +695,7 @@ export function runMetadataStoreContract(
           module: "quota",
           param_name: "max_users_per_instance",
           param_value: "500",
-          description: "实例用户上限",
+          description: "Max users per instance",
         });
         expect(entity.id).toBeGreaterThan(0);
         expect(entity.scope).toBe("global");
@@ -716,7 +716,7 @@ export function runMetadataStoreContract(
           module: "quota",
           param_name: "max_teams_per_instance",
           param_value: "100",
-          description: "实例团队上限",
+          description: "Max teams per instance",
         });
         const updated = await store.upsertConfigParam({
           scope: "global",
@@ -724,10 +724,10 @@ export function runMetadataStoreContract(
           module: "quota",
           param_name: "max_teams_per_instance",
           param_value: "200",
-          description: "实例团队上限（已调整）",
+          description: "Max teams per instance (adjusted)",
         });
         expect(updated.param_value).toBe("200");
-        expect(updated.description).toBe("实例团队上限（已调整）");
+        expect(updated.description).toBe("Max teams per instance (adjusted)");
       });
 
       it("upsertConfigParam inserts user-level param", async () => {
@@ -738,7 +738,7 @@ export function runMetadataStoreContract(
           module: "asset_type",
           param_name: "skill.enabled",
           param_value: "0",
-          description: "Skill 开关",
+          description: "Skill toggle",
         });
         expect(entity.scope).toBe("user");
         expect(entity.user_id).toBe(user.user_id);
@@ -757,7 +757,7 @@ export function runMetadataStoreContract(
           module: "asset_type",
           param_name: "skill.enabled",
           param_value: "0",
-          description: "Skill 开关",
+          description: "Skill toggle",
         });
         const updated = await store.upsertConfigParam({
           scope: "user",
@@ -765,7 +765,7 @@ export function runMetadataStoreContract(
           module: "asset_type",
           param_name: "skill.enabled",
           param_value: "1",
-          description: "Skill 开关",
+          description: "Skill toggle",
         });
         expect(updated.param_value).toBe("1");
       });

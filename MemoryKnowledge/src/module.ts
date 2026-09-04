@@ -31,7 +31,7 @@ import { AutoSyncScheduler, resolveAutoSyncConfig, type AutoSyncConfig } from ".
 
 const log = createLogger("knowledge-module");
 
-/** 进程级全局 LLM 并发信号量（跨所有 wiki 的 extract + merge）。 */
+/** Process-level global LLM concurrency semaphore (across extract + merge of all wikis). */
 export const globalLlmLimit = pLimit(getGlobalLlmConcurrency());
 
 // ───────────────────────── Module Config ─────────────────────────
@@ -64,9 +64,9 @@ export interface KnowledgeModule {
   instancePool: CodeGraphInstancePool;
   /** Per-instance LLM routing binding (proxy/byo), keyed by service_id. */
   llmBindingStore: ILlmBindingStore;
-  /** 定时自动同步调度器（需显式 start/stop）。 */
+  /** Scheduled auto-sync scheduler (requires explicit start/stop). */
   autoSyncScheduler: AutoSyncScheduler;
-  /** 定时自动同步的解析后配置（挂载 admin 路由时透出）。 */
+  /** Parsed configuration for scheduled auto-sync (exposed when mounting admin routes). */
   autoSyncConfig: AutoSyncConfig;
 }
 
@@ -177,7 +177,7 @@ export function createKnowledgeModule(config: KnowledgeModuleConfig): KnowledgeM
 
     // Per-instance LLM routing (proxy/byo/global fallback), keyed by service_id.
     const effectiveLlm = resolveLlm(serviceId);
-    // 进度只推 Panel（Panel 内存 store + wiki/get 聚合）；KS 不落进度态
+    // Progress reported to Panel only (Panel in-memory store + wiki/get aggregation); KS does not persist progress state
     const onProgress = config.tmcCallbackUrl
       ? buildProgressFn(config.tmcCallbackUrl, wikiId, serviceId, teamId, ingestRunId)
       : undefined;
@@ -223,7 +223,7 @@ export function createKnowledgeModule(config: KnowledgeModuleConfig): KnowledgeM
     queue: sharedQueue,
     logger: { info: log.info.bind(log), warn: log.warn.bind(log), error: log.error.bind(log) },
     callbackConfig,
-    // 释放 code-graph 内存资源（008 delete 清理）：从 pool 移除并关闭索引句柄。幂等。
+    // Release code-graph memory resources (008 delete cleanup): remove from pool and close index handle. Idempotent.
     releaseInstance: (codeGraphId: string) => {
       const inst = instancePool.get(codeGraphId);
       if (inst) closeIndex(inst);
@@ -286,7 +286,7 @@ export function createKnowledgeModule(config: KnowledgeModuleConfig): KnowledgeM
     }
   })();
 
-  // ── AutoSync Scheduler: 定时拉取 git 仓库并更新 codegraph 索引 ──
+  // ── AutoSync Scheduler: Periodically pulls git repositories and updates codegraph index ──
   const autoSyncConfig = resolveAutoSyncConfig();
   const autoSyncScheduler = new AutoSyncScheduler({
     store, cgService, config: autoSyncConfig,

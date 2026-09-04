@@ -1,15 +1,15 @@
 /**
- * WikiService — wiki 资产的异步编排（与 CodeGraphService 对称）。
+ * WikiService — Asynchronous orchestration for wiki assets (symmetric with CodeGraphService).
  *
- * IKnowledgeStore（元数据/状态）+ BuildQueue（后台串行）+ 可注入 worker
- * （实际 ingest / 建索引）。状态机：pending → processing(scanning/ingesting)
- * → ready / failed(+sync_error)。memory + team 隔离、幂等（同 memory+team+name 返回已存在）、
- * 软删 + 清目录。物理目录 {dataRoot}/{service_id}/{team_id}/{wiki_id}/（001 多租户）。
+ * IKnowledgeStore (metadata/status) + BuildQueue (background serialization) + injectable worker
+ * (actual ingest / index building). State machine: pending → processing(scanning/ingesting)
+ * → ready / failed(+sync_error). memory + team isolation, idempotency (returns existing row for identical memory+team+name),
+ * soft delete + directory cleanup. Physical directory: {dataRoot}/{service_id}/{team_id}/{wiki_id}/ (001 multi-tenancy).
  *
- * 文件层（11 文档定稿）：raw / page 各一套 ls/read/write/rm，对齐 L2 Scenario。
- * - raw/* 仅操作 raw/sources/，不触发 ingest。
- * - page/* 操作 wiki/，写入自动注入 frontmatter `locked: true`，删除调
- *   lib 层 cascadeDeleteWikiPagesWithRefs 做引用级联。
+ * File layer (doc 11 spec): raw / page each has a set of ls/read/write/rm, aligned with L2 Scenario.
+ * - raw/* operates only on raw/sources/ and does not trigger ingest.
+ * - page/* operates on wiki/; writes automatically inject frontmatter `locked: true`, and deletes invoke
+ *   lib layer cascadeDeleteWikiPagesWithRefs for reference cascading.
  */
 
 import { join, resolve, normalize } from "node:path";
@@ -51,7 +51,7 @@ export interface WikiBuildContext {
   name: string;
   dir: string;
   setInternalStatus: (s: string) => void;
-  /** 单次 ingest 代际；进度/终态 callback 共用，防 Panel 迟到包 */
+  /** Single ingest run ID generation; shared by progress/final callbacks to prevent out-of-order Panel packets */
   ingestRunId: string;
 }
 
@@ -62,10 +62,10 @@ export interface WikiBuildResult {
 export type WikiWorker = (ctx: WikiBuildContext) => Promise<WikiBuildResult | void>;
 
 /**
- * ingest 结果（判别联合）：
- *   - ok       已入队重建；
- *   - not_found memory/team/id 不匹配；
- *   - busy     正在 pending/processing（并发拒绝，对应 HTTP 409），step 为内部阶段（可 null）。
+ * ingest result (discriminated union):
+ *   - ok        Enqueued for rebuild;
+ *   - not_found memory/team/id mismatch;
+ *   - busy      Currently pending/processing (concurrency rejection, corresponds to HTTP 409), step is internal phase (nullable).
  */
 export type IngestResult =
   | { kind: "ok"; row: WikiRow }
@@ -106,22 +106,22 @@ export interface CreateWikiParams {
   service_url?: string;
 }
 
-// ── 文件层 result 类型（对齐 yaml schema） ──
+// ── File layer result types (aligned with OpenAPI YAML schema) ──
 
 export interface RawFileEntry {
   filename: string;
   size: number;
-  /** 源文件生命周期状态（uploaded/ingested/failed，设计 003）。 */
+  /** Source file lifecycle status (uploaded/ingested/failed, design 003). */
   status: SourceStatus;
-  /** 首次上传时间（此后不变）。 */
+  /** Initial upload timestamp (immutable thereafter). */
   created_at: string;
-  /** 最近一次内容变更时间。 */
+  /** Most recent content modification timestamp. */
   updated_at: string;
-  /** 最后变更人 user_id（无历史流水）。 */
+  /** Last modified by user_id (no historical audit stream). */
   last_modified_by: string | null;
-  /** 最近成功抽取时间（未抽为 null）。 */
+  /** Most recent successful extraction timestamp (null if not extracted). */
   ingested_at: string | null;
-  /** @deprecated 兼容旧字段，等于 created_at。 */
+  /** @deprecated Backward compatible field, equal to created_at. */
   uploaded_at: string;
 }
 
@@ -169,13 +169,13 @@ export interface PageRmResult {
 }
 
 /**
- * 写操作的返回封装：
- * - `null`：wiki 不存在或不属于 memory/team
- * - `"processing"`：wiki 当前处于 processing 状态，拒绝写
- * - `"invalid_path"`：路径穿越校验失败
- * - `"forbidden_path"`：写入了结构性文件等禁止路径
- * - `"too_large"`：超过容量限制
- * - 否则：实际结果对象
+ * Return wrapper for write operations:
+ * - `null`: wiki does not exist or does not belong to memory/team
+ * - `"processing"`: wiki is currently in processing state, rejecting write
+ * - `"invalid_path"`: path traversal check failed
+ * - `"forbidden_path"`: writing to forbidden paths such as structural files
+ * - `"too_large"`: exceeds size limit
+ * - Otherwise: actual result object
  */
 export type WriteOutcome<T> =
   | T
@@ -194,7 +194,7 @@ const RAW_WRITE_MAX = 50;
 const PAGE_READ_MAX = 20;
 const PAGE_WRITE_MAX = 20;
 
-/** wiki/ 下不允许 page/write 与 page/rm 触碰的结构性文件（去掉 .md 也算）。 */
+/** Structural files under wiki/ that page/write and page/rm are forbidden to touch (including with .md stripped). */
 const PAGE_FORBIDDEN_REFS = new Set([
   "index",
   "schema",
@@ -215,9 +215,9 @@ export class WikiService {
     resolveLlm: (serviceId: string) => import("../config.js").LlmConfig;
   };
   /**
-   * In-flight delete 标记：delete 命中一个正在排队/执行的 wiki 时置位，
-   * worker 在检查点读取以决定中止。仅内存态（同 id 由 SerialQueue 串行 +
-   * Node 单线程，读写无并发）。清理收尾后移除。
+   * In-flight delete flag: set when delete hits a wiki that is queued or executing,
+   * read by worker at checkpoints to decide aborting. In-memory state only (same id serialized by SerialQueue +
+   * Node single thread, read/write has no concurrency). Removed after cleanup finishes.
    */
   private readonly cancelled = new Set<string>();
 
@@ -235,15 +235,15 @@ export class WikiService {
   }
 
   /**
-   * 创建 wiki 元数据 + 目录壳。**不自动 ingest**。
-   * 幂等：同 (service_id, team_id, name) 返回已有行。
+   * Creates wiki metadata + directory shell. **Does NOT automatically ingest**.
+   * Idempotent: returns existing row for identical (service_id, team_id, name).
    */
   create(params: CreateWikiParams): { row: WikiRow; existed: boolean } {
     const { row, existed } = this.store.createWiki(params);
     if (!existed) {
       const dir = this.dirFor(row.service_id, row.team_id, row.wiki_id);
       mkdirSync(join(dir, "raw", "sources"), { recursive: true });
-      // 显式建 index.db（4 表，含 source）——此后 rawWrite/rawLs 直接读写 source 表（设计 006/003）。
+      // Explicitly create index.db (4 tables including source) — rawWrite/rawLs directly read/write source table thereafter (design 006/003).
       try {
         initIndexDb(dir);
       } catch (err) {
@@ -266,13 +266,13 @@ export class WikiService {
   }
 
   /**
-   * 显式触发 ingest（LLM 加工 raw → page + 建索引）。
-   * 立即返回，后台异步执行。memory/team 不匹配返回 not_found；pending/processing 返回 busy。
+   * Explicitly triggers ingest (LLM processing raw → page + building index).
+   * Returns immediately, executes asynchronously in background. Returns not_found on memory/team mismatch; returns busy on pending/processing.
    */
   ingest(serviceId: string, teamId: string, wikiId: string, requesterUserId?: string): IngestResult {
     const row = this.store.getWiki(serviceId, teamId, wikiId);
     if (!row) return { kind: "not_found" };
-    // 并发拒绝：正在排队/执行中直接拒绝，不覆盖状态、不重复入队、不写 audit。
+    // Concurrency rejection: rejects directly if queued/executing without overwriting status, re-enqueuing, or writing audit.
     if (row.status === "pending" || row.status === "processing") {
       return { kind: "busy", status: row.status, step: row.internal_status };
     }
@@ -289,7 +289,7 @@ export class WikiService {
     return fresh ? { kind: "ok", row: fresh } : { kind: "not_found" };
   }
 
-  /** sync 语义 = 重跑 ingest（管控显式触发）。 */
+  /** sync semantics = re-running ingest (control plane explicit trigger). */
   sync(serviceId: string, teamId: string, wikiId: string, requesterUserId?: string): IngestResult {
     return this.ingest(serviceId, teamId, wikiId, requesterUserId);
   }
@@ -298,7 +298,7 @@ export class WikiService {
     return this.store.getWiki(serviceId, teamId, wikiId);
   }
 
-  /** 按全局唯一 wiki_id 查询（仍按 service_id 收敛防跨租户）。spec id-only 端点专用。 */
+  /** Queries by globally unique wiki_id (still scoped by service_id to prevent cross-tenant access). Dedicated for spec id-only endpoints. */
   getById(serviceId: string, wikiId: string): WikiRow | null {
     return this.store.getWikiById(serviceId, wikiId);
   }
@@ -312,12 +312,12 @@ export class WikiService {
   }
 
   /**
-   * 删除 wiki（008 / 007 §5.5）。任何状态均可删（含 pending/processing）。
-   * memory/team 不匹配返回 false；否则硬删 + 四类资源清理，返回 true。
+   * Deletes wiki (008 / 007 §5.5). Deletable under any status (including pending/processing).
+   * Returns false on memory/team mismatch; otherwise hard deletes + four resource cleanups, returning true.
    *
-   * 若资源正在排队/执行，先置 cancelled 标记通知 worker 在检查点中止，随后立即
-   * 硬删 + 清理（不等 worker）。worker 结束前重查发现已删则跳过 ready/回调并再做
-   * 一次幂等清理，无残留。
+   * If resource is currently queued/executing, sets cancelled flag first to notify worker to abort at checkpoint; then immediately
+   * hard deletes + cleans up (does not wait for worker). If worker re-checks before ending and finds deleted state, it skips ready/callback and performs
+   * idempotent cleanup once more with no leftovers.
    */
   delete(serviceId: string, teamId: string, wikiId: string): boolean {
     const row = this.store.getWiki(serviceId, teamId, wikiId);
@@ -329,17 +329,17 @@ export class WikiService {
 
     this.audit(row, "delete", null);
     this.cleanupResources(serviceId, teamId, wikiId);
-    // 不在此删 cancelled 标记（覆盖 delete 先于 worker 检查点的窗口）；
-    // worker 结束时由 finishCancelled 移除。cleanup 幂等，重复无害。
+    // Do not delete cancelled flag here (covers window where delete is prior to worker checkpoint);
+    // removed by finishCancelled when worker ends. Cleanup is idempotent, repeated calls are harmless.
     return true;
   }
 
   /**
-   * 四类资源幂等清理（顺序：先释放连接，再删盘）。每步独立 try/catch，异常安全。
-   *   1. index.db 读连接池：evictWikiDb（幂等；worker 的 withWriteDb finally 本就 close 写连接）
-   *   2. 元数据行：硬删（命中 0 行也安全，支持 worker + delete 双重清理）
-   *   3. 磁盘目录（wiki/ raw/ index.db 及 -wal/-shm）：rmSync recursive+force（幂等）
-   * BuildQueue 排队任务由 runBuild 入口检查 cancelled/行存在性跳过，无需在此处理。
+   * Four resource types idempotent cleanup (order: release connections first, then delete disk). Each step has independent try/catch for exception safety.
+   *   1. index.db read pool: evictWikiDb (idempotent; worker withWriteDb finally already closes write connections)
+   *   2. Metadata row: Hard delete (safe even matching 0 rows, supports worker + delete dual cleanup)
+   *   3. Disk directory (wiki/ raw/ index.db and -wal/-shm): rmSync recursive+force (idempotent)
+   * Queued tasks in BuildQueue are skipped by runBuild entry checking cancelled/row existence, no handling needed here.
    */
   private cleanupResources(serviceId: string, teamId: string, wikiId: string): void {
     try {
@@ -360,16 +360,16 @@ export class WikiService {
   }
 
   /**
-   * worker 检查点：wiki 是否已被删除（cancelled 标记命中，或行已不在库）。
-   * 双判据覆盖 delete-during-run 与 delete-already-done 两种时序。
+   * Worker checkpoint: whether wiki has been deleted (cancelled flag hit, or row no longer in DB).
+   * Covered by dual criteria to handle both delete-during-run and delete-already-done orderings.
    */
   private isDeleted(serviceId: string, wikiId: string): boolean {
     return this.cancelled.has(wikiId) || this.store.getWikiById(serviceId, wikiId) === null;
   }
 
   /**
-   * worker 检查点判定“已删”后的收尾：幂等清理 worker 可能刚写下的盘/连接，
-   * 并移除 cancelled 标记。
+   * Finalization after worker checkpoint determines "deleted": idempotently cleans up disk/connections worker may have just written,
+   * and removes cancelled flag.
    */
   private finishCancelled(serviceId: string, teamId: string, wikiId: string): void {
     this.cleanupResources(serviceId, teamId, wikiId);
@@ -377,7 +377,7 @@ export class WikiService {
     this.logger?.info?.(`[wiki] ${wikiId} build aborted (deleted during processing)`);
   }
 
-  /** 写一条 wiki 审计记录。失败不阻断主流程。 */
+  /** Writes a wiki audit record. Failure does not block main flow. */
   private audit(row: WikiRow, action: AuditAction, detail: string | null, requesterUserId?: string): void {
     try {
       this.store.appendWikiAudit({
@@ -385,7 +385,7 @@ export class WikiService {
         asset_id: row.wiki_id,
         version: row.version,
         action,
-        // 优先记录触发者（ingest/create 的发起人），回退到行上的创建者。
+        // Prefer recording trigger user (initiator of ingest/create), falling back to creator on row.
         user_id: requesterUserId ?? row.user_id,
         agent_id: row.agent_id,
         detail,
@@ -396,10 +396,10 @@ export class WikiService {
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  // 文件层 — raw/* （raw/sources/ 下的素材）
+  // File layer — raw/* (sources under raw/sources/)
   // ═══════════════════════════════════════════════════════════════════
 
-  /** 列出 raw/sources/ 下的素材文件（改查 source 表，设计 003 §3.5）。wiki 不存在返回 null。 */
+  /** Lists source files under raw/sources/ (queries source table, design 003 §3.5). Returns null if wiki does not exist. */
   rawLs(serviceId: string, teamId: string, wikiId: string): RawFileEntry[] | null {
     const row = this.store.getWiki(serviceId, teamId, wikiId);
     if (!row) return null;
@@ -414,15 +414,15 @@ export class WikiService {
         updated_at: s.updated_at,
         last_modified_by: s.last_modified_by,
         ingested_at: s.ingested_at,
-        uploaded_at: s.created_at, // 兼容旧字段
+        uploaded_at: s.created_at, // Backward compatible field
       }));
     } catch {
-      // index.db 尚未创建（老 wiki / 从未 rawWrite）→ 无 source 登记。
+      // index.db not created yet (legacy wiki / never rawWrite) → no source registration.
       return [];
     }
   }
 
-  /** 读单个 raw 文件原文。文件不存在返回 null（含 wiki 不存在）。 */
+  /** Reads content of a single raw file. Returns null if file does not exist (including wiki not found). */
   rawRead(serviceId: string, teamId: string, wikiId: string, filename: string): string | null {
     const row = this.store.getWiki(serviceId, teamId, wikiId);
     if (!row) return null;
@@ -437,11 +437,11 @@ export class WikiService {
   }
 
   /**
-   * 批量读 raw 文件。
-   * - wiki 不存在 → null
-   * - 任一 filename 路径穿越 → "invalid_path"
-   * - 超 RAW_READ_MAX → 抛错（router 转 400）
-   * 单个文件不存在不报错，对应 item 标 not_found:true（spec：整体仍 200）。
+   * Batch reads raw files.
+   * - wiki does not exist → null
+   * - Any filename path traversal → "invalid_path"
+   * - Exceeding RAW_READ_MAX → Throws error (router converts to 400)
+   * Missing individual files do not trigger errors; corresponding item is marked not_found:true (spec: overall still 200).
    */
   rawReadMany(
     serviceId: string,
@@ -455,7 +455,7 @@ export class WikiService {
       throw new Error(`filenames exceeds max ${RAW_READ_MAX}`);
     }
     const sourcesDir = join(this.dirFor(serviceId, teamId, wikiId), "raw", "sources");
-    // 先全部校验路径合法性（任一不合法整批 400）
+    // Validate path legality for all items first (any invalid item fails entire batch with 400)
     const safePaths: string[] = [];
     for (const fn of filenames) {
       const safe = this.resolveRawPath(sourcesDir, fn);
@@ -476,11 +476,11 @@ export class WikiService {
   }
 
   /**
-   * 写入/覆盖单个 raw 文件（upsert）+ 登记 source 表（设计 003 §3.4）。
-   * - wiki 不存在 → null
-   * - processing 中 → "processing"
-   * - 路径穿越 → "invalid_path"
-   * - 超 5MB → "too_large"
+   * Writes/overwrites a single raw file (upsert) + registers in source table (design 003 §3.4).
+   * - wiki does not exist → null
+   * - In processing state → "processing"
+   * - Path traversal → "invalid_path"
+   * - Exceeds 5MB → "too_large"
    */
   rawWrite(
     serviceId: string,
@@ -508,11 +508,10 @@ export class WikiService {
   }
 
   /**
-   * 批量写入 raw 文件（整批原子）。
-   * - 先全部校验：路径穿越 → "invalid_path"；任一项超 5MB → "too_large"
-   * - 全部通过后逐文件落盘；任一落盘失败回滚之前已写文件（删原有的不在请求里
-   *   的文件），保证整批要么都成功要么都没生效。
-   * 错误码同 rawWrite。
+   * Batch writes raw files (atomic batch).
+   * - Validate all items first: path traversal → "invalid_path"; any item exceeding 5MB → "too_large"
+   * - After all checks pass, write file by file to disk; if any write fails, rollback previously written files (removing newly created ones not originally present), ensuring all-or-nothing atomicity.
+   * Error codes match rawWrite.
    */
   rawWriteMany(
     serviceId: string,
@@ -534,7 +533,7 @@ export class WikiService {
       safePath: string;
       content: string;
       size: number;
-      preExistingContent: string | null; // 落盘前已有则记下来，回滚要还原
+      preExistingContent: string | null; // Record pre-existing content before writing for rollback restoration
     };
     const plans: Plan[] = [];
     for (const { filename, content } of files) {
@@ -560,7 +559,7 @@ export class WikiService {
         written.push(p);
       }
     } catch (err) {
-      // 回滚：恢复每个已写文件的旧内容（不存在则删）
+      // Rollback: restore previous content of each written file (delete if didn't exist originally)
       for (const p of written) {
         try {
           if (p.preExistingContent === null) {
@@ -569,13 +568,13 @@ export class WikiService {
             writeFileSync(p.safePath, p.preExistingContent, "utf-8");
           }
         } catch {
-          // 回滚也失败的话，只能记录由调用方重新跑 ingest 兜底
+          // If rollback also fails, log and rely on caller re-running ingest as fallback
         }
       }
       throw err;
     }
 
-    // 全部落盘成功后登记 source 表（先查再更新，sha 未变幂等）。
+    // Register source table after all writes succeed (queries first then updates; idempotent if sha unchanged).
     this.registerSources(
       serviceId,
       teamId,
@@ -587,12 +586,12 @@ export class WikiService {
   }
 
   /**
-   * 批量删除 raw 文件 + 级联清理下游 page。
-   * 调用 lib 层 deleteSourceFiles，由其内部决定 page 命运。
-   * - wiki 不存在 → null
+   * Batch deletes raw files + cascade cleans up downstream pages.
+   * Invokes lib layer deleteSourceFiles, which determines page fate internally.
+   * - wiki does not exist → null
    * - processing → "processing"
-   * - filenames 含路径穿越 → "invalid_path"
-   * - 超 50 → 抛错（由 router 转 400）
+   * - filenames contain path traversal → "invalid_path"
+   * - Exceeding 50 → Throws error (router converts to 400)
    */
   async rawRm(
     serviceId: string,
@@ -616,7 +615,7 @@ export class WikiService {
       fullPaths.push(safe);
     }
 
-    // 自研级联删除：删 raw 源并清理引用它的 page（frontmatter sources 驱动）。
+    // Cascade delete: deletes raw source and cleans up pages referencing it (driven by frontmatter sources).
     const { deleteSourceFiles } = await import(
       "../engines/wiki/ingest-v2/cascade.js"
     );
@@ -624,7 +623,7 @@ export class WikiService {
       logReason: "wiki/raw/rm",
     });
 
-    // 删除对应 source 行（与文件级联删除对应，设计 003 §5）。
+    // Delete corresponding source rows (corresponds to file cascade delete, design 003 §5).
     try {
       initIndexDb(projectPath);
       withWriteDb(projectPath, (db) => deleteSources(db, filenames));
@@ -642,12 +641,12 @@ export class WikiService {
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  // 文件层 — page/* （wiki/ 下的 processed page）
+  // File layer — page/* (processed pages under wiki/)
   // ═══════════════════════════════════════════════════════════════════
 
   /**
-   * 列出 wiki/ 下的 page 文件（recursive 扫描 .md 取 frontmatter）。
-   * status≠ready 时返回空数组。
+   * Lists page files under wiki/ (recursively scans .md to extract frontmatter).
+   * Returns empty array when status !== "ready".
    */
   pageLs(serviceId: string, teamId: string, wikiId: string): { id: string; title: string; type: string; path: string; description?: string; locked?: boolean }[] | null {
     const row = this.store.getWiki(serviceId, teamId, wikiId);
@@ -663,7 +662,7 @@ export class WikiService {
     return items;
   }
 
-  /** 读单个 page 原文。ref 可以是 page id 或 relPath。 */
+  /** Reads raw content of a single page. ref can be page id or relPath. */
   pageRead(serviceId: string, teamId: string, wikiId: string, ref: string): string | null {
     const row = this.store.getWiki(serviceId, teamId, wikiId);
     if (!row) return null;
@@ -679,11 +678,11 @@ export class WikiService {
   }
 
   /**
-   * 批量读 page 原文。
-   * - wiki 不存在 → null
-   * - 任一 ref 路径穿越 → "invalid_path"
-   * - 超 PAGE_READ_MAX → 抛错
-   * 单个 ref 不存在不报错，对应 item 标 not_found:true（spec：整体仍 200）。
+   * Batch reads page raw content.
+   * - wiki does not exist → null
+   * - Any ref path traversal → "invalid_path"
+   * - Exceeding PAGE_READ_MAX → Throws error
+   * Missing individual refs do not trigger errors; corresponding item is marked not_found:true (spec: overall still 200).
    */
   pageReadMany(
     serviceId: string,
@@ -699,8 +698,8 @@ export class WikiService {
     const projectPath = this.dirFor(serviceId, teamId, wikiId);
     const safePaths: string[] = [];
     for (const r of refs) {
-      // 读用 allowMissing 不行——not_found 也得是合法路径，所以这里
-      // 区分"路径合法但文件不存在（not_found）"与"路径非法（invalid_path）"
+      // Using allowMissing for read is insufficient — not_found must also be a legal path, so here we
+      // distinguish "path legal but file does not exist (not_found)" from "path illegal (invalid_path)"
       const safe = this.resolvePageRef(projectPath, r, { allowMissing: true });
       if (!safe) return "invalid_path";
       safePaths.push(safe);
@@ -719,12 +718,12 @@ export class WikiService {
   }
 
   /**
-   * 写入/覆盖单个 page（upsert）。自动在 frontmatter 注入 `locked: true`。
-   * - wiki 不存在 → null
+   * Writes/overwrites a single page (upsert). Automatically injects `locked: true` in frontmatter.
+   * - wiki does not exist → null
    * - processing → "processing"
-   * - 路径穿越 → "invalid_path"
-   * - 结构性文件 → "forbidden_path"
-   * - 超 512KB → "too_large"
+   * - Path traversal → "invalid_path"
+   * - Structural file → "forbidden_path"
+   * - Exceeds 512KB → "too_large"
    */
   pageWrite(
     serviceId: string,
@@ -754,10 +753,10 @@ export class WikiService {
   }
 
   /**
-   * 批量写 page（整批原子）。每项自动注入 frontmatter `locked: true`。
-   * - 先全部校验：处理中 → "processing"；路径穿越 → "invalid_path"；
-   *   结构性文件 → "forbidden_path"；超 512KB → "too_large"
-   * - 全部通过后逐文件落盘；任一失败回滚已写文件。
+   * Batch writes pages (atomic batch). Automatically injects `locked: true` in frontmatter for each item.
+   * - Validate all first: processing → "processing"; path traversal → "invalid_path";
+   *   structural file → "forbidden_path"; exceeds 512KB → "too_large"
+   * - After all checks pass, write file by file to disk; if any fails, rollback written files.
    */
   pageWriteMany(
     serviceId: string,
@@ -814,7 +813,7 @@ export class WikiService {
             writeFileSync(p.safePath, p.preExistingContent, "utf-8");
           }
         } catch {
-          // best-effort 回滚
+          // best-effort rollback
         }
       }
       throw err;
@@ -824,12 +823,12 @@ export class WikiService {
   }
 
   /**
-   * 批量删除 page + 级联清理引用。调用 lib 层 cascadeDeleteWikiPagesWithRefs。
-   * - wiki 不存在 → null
+   * Batch deletes pages + cascade cleans up references. Invokes lib layer cascadeDeleteWikiPagesWithRefs.
+   * - wiki does not exist → null
    * - processing → "processing"
-   * - 含路径穿越 → "invalid_path"
-   * - 含结构性文件 → "forbidden_path"
-   * - 超 20 → 抛错
+   * - Contains path traversal → "invalid_path"
+   * - Contains structural file → "forbidden_path"
+   * - Exceeds 20 → Throws error
    */
   async pageRm(
     serviceId: string,
@@ -867,14 +866,14 @@ export class WikiService {
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  // 内部 helper
+  // Internal helpers
   // ═══════════════════════════════════════════════════════════════════
 
   /**
-   * 登记一批源文件到 source 表（rawWrite/rawWriteMany 用）。
-   * 保证 index.db 存在（幂等 initIndexDb），在一个写事务里对每个文件 upsertSource
-   * （先查再更新：新建 uploaded / sha 变则重置 uploaded / sha 未变幂等）。
-   * 登记失败不阻断写盘主流程（文件已落盘）——记 warn，交由后续 ingest/rawLs 兜底。
+   * Registers a batch of source files in source table (used by rawWrite/rawWriteMany).
+   * Ensures index.db exists (idempotent initIndexDb), calls upsertSource for each file in a write transaction
+   * (queries first then updates: new file set to uploaded / sha changed resets to uploaded / sha unchanged is idempotent).
+   * Registration failure does not block main disk write flow (file already on disk) — logs warn and relies on subsequent ingest/rawLs fallback.
    */
   private registerSources(
     serviceId: string,
@@ -905,8 +904,8 @@ export class WikiService {
     if (!filename || filename.includes("..") || filename.startsWith("/")) return null;
     const normalized = normalize(filename);
     if (normalized.startsWith("..") || normalized.startsWith("/")) return null;
-    // resolve(sourcesDir) 转成绝对路径，避免 sourcesDir 是相对路径时
-    // （如 KNOWLEDGE_DATA_DIR=./data）与 resolve 出来的绝对路径比较失败。
+    // Convert resolve(sourcesDir) to absolute path to avoid comparison failure when sourcesDir is relative
+    // (such as KNOWLEDGE_DATA_DIR=./data).
     const base = resolve(sourcesDir);
     const safe = resolve(base, normalized);
     const dirWithSep = base.endsWith("/") ? base : base + "/";
@@ -915,9 +914,9 @@ export class WikiService {
   }
 
   /**
-   * 解析 page ref（id 或 relPath）→ 绝对路径。要求落在 wiki/ 子树下。
-   * - allowMissing=true 用于 write，路径不存在仍允许
-   * - allowMissing=false 用于 read/rm，要求文件已存在
+   * Resolves page ref (id or relPath) → absolute path. Must reside under wiki/ subtree.
+   * - allowMissing=true used for write, allows path not existing yet
+   * - allowMissing=false used for read/rm, requires file to already exist
    */
   private resolvePageRef(
     projectPath: string,
@@ -928,23 +927,23 @@ export class WikiService {
     const cleanRef = ref.replace(/^wiki\//, "");
     if (cleanRef.includes("..")) return null;
 
-    // resolve 成绝对路径，避免 projectPath 是相对路径时比较失败。
+    // Resolve into absolute path to prevent comparison failure when projectPath is relative.
     const wikiDir = resolve(projectPath, "wiki");
     const wikiDirSep = wikiDir.endsWith("/") ? wikiDir : wikiDir + "/";
 
-    // 先按原样尝试，再尝试补 .md 扩展。
+    // Try original name first, then try appending .md extension.
     const candidates = cleanRef.endsWith(".md") ? [cleanRef] : [cleanRef + ".md", cleanRef];
     for (const c of candidates) {
       const safe = resolve(wikiDir, c);
       if (safe !== wikiDir && !safe.startsWith(wikiDirSep)) continue;
       if (opts.allowMissing) {
-        // write 路径补 .md：允许任何其中一个
+        // write path append .md: allow either candidate
         return c.endsWith(".md") ? safe : null;
       }
       if (existsSync(safe)) return safe;
     }
     if (opts.allowMissing) {
-      // 没匹配 .md 候选时，强制补 .md
+      // When no .md candidate matches, force appending .md
       const safe = resolve(wikiDir, cleanRef.endsWith(".md") ? cleanRef : cleanRef + ".md");
       if (safe === wikiDir || !safe.startsWith(wikiDirSep)) return null;
       return safe;
@@ -952,7 +951,7 @@ export class WikiService {
     return null;
   }
 
-  /** 把 wiki/.../page.md 绝对路径转换回 ref（如 "concepts/redis"）。 */
+  /** Converts wiki/.../page.md absolute path back to ref (e.g. "concepts/redis"). */
   private absToPageRef(projectPath: string, abs: string): string {
     const wikiDir = resolve(projectPath, "wiki");
     const prefix = wikiDir.endsWith("/") ? wikiDir : wikiDir + "/";
@@ -1012,7 +1011,7 @@ export class WikiService {
   }
 
   private async runBuild(serviceId: string, wikiId: string, teamId: string, name: string): Promise<void> {
-    // 入口检查点：pending 期间被删 → 跳过，不置 processing、不 ingest。
+    // Entry checkpoint: deleted during pending → skips, does not set processing or ingest.
     if (this.isDeleted(serviceId, wikiId)) {
       this.finishCancelled(serviceId, teamId, wikiId);
       return;
@@ -1022,7 +1021,7 @@ export class WikiService {
       internal_status: "scanning",
       sync_error: null,
     });
-    // 进度/终态 callback 共用同一代际，Panel 可拒绝 clear 后的迟到 progress
+    // Progress/final callbacks share same run ID generation, Panel can reject late progress packets after clear
     const ingestRunId = randomUUID();
     try {
       const result = await this.worker({
@@ -1035,7 +1034,7 @@ export class WikiService {
           this.store.updateWikiStatus(serviceId, wikiId, { status: "processing", internal_status: s }),
         ingestRunId,
       });
-      // 结束前检查点：processing 期间被删 → 跳过 ready/audit/回调，幂等收尾清理。
+      // Completion checkpoint: deleted during processing → skips ready/audit/callback, performs idempotent cleanup.
       if (this.isDeleted(serviceId, wikiId)) {
         this.finishCancelled(serviceId, teamId, wikiId);
         return;
@@ -1057,7 +1056,7 @@ export class WikiService {
       await this.onBuildComplete(synced, "ready", null, ingestRunId);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      // worker 抛错，但若期间已被删，视为取消而非失败：跳过 failed 状态/回调，做清理。
+      // Worker threw error, but if deleted in the interim, treat as cancellation rather than failure: skip failed status/callback, perform cleanup.
       if (this.isDeleted(serviceId, wikiId)) {
         this.finishCancelled(serviceId, teamId, wikiId);
         return;
@@ -1091,7 +1090,7 @@ export class WikiService {
     let summary: string | null = null;
 
     if (status === "ready") {
-      // Generate summary via LLM (即使部分源失败也尝试生成——只要有页面就生成)
+      // Generate summary via LLM (attempt generation even if some sources fail — as long as pages exist)
       try {
         const pages = this.pageLs(row.service_id, row.team_id, row.wiki_id) ?? [];
         this.logger?.info?.(`[wiki] summary generation start (wikiId=${row.wiki_id}, pages=${pages.length}, status=${status})`);
@@ -1133,16 +1132,16 @@ export class WikiService {
   }
 }
 
-// ─── 模块级 helper（不依赖 class state，便于单测） ───
+// ─── Module-level helpers (independent of class state, convenient for unit tests) ───
 
-/** 极简 frontmatter 解析（取 title/type/description/locked），与 manager 一致风格。 */
+/** Minimal frontmatter parser (extracts title/type/description/locked), consistent style with manager. */
 function parseFrontmatterMin(content: string): { title: string; type: string; description: string; locked: boolean } {
   const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
   const fm = fmMatch ? fmMatch[1] : "";
   const titleMatch = fm.match(/^title:\s*["']?(.+?)["']?\s*$/m);
   const typeMatch = fm.match(/^type:\s*["']?(.+?)["']?\s*$/m);
-  // description 由 ingest-v2 写入（见 engines/wiki/ingest-v2/frontmatter.ts），
-  // 是页面的一句话概述——比标题更能说明内容，用于生成 wiki summary。
+  // description is written by ingest-v2 (see engines/wiki/ingest-v2/frontmatter.ts),
+  // a one-sentence summary of the page — describes content better than title, used for generating wiki summary.
   const descMatch = fm.match(/^description:\s*["']?(.+?)["']?\s*$/m);
   const lockedMatch = fm.match(/^locked:\s*(true|false)\s*$/m);
   return {
@@ -1154,12 +1153,12 @@ function parseFrontmatterMin(content: string): { title: string; type: string; de
 }
 
 /**
- * 在 frontmatter 中注入 `locked: true`：
- * - 有 frontmatter：若已有 locked: 字段，强制改 true；否则在 frontmatter 末尾追加一行
- * - 无 frontmatter：在文件最前面包一段 frontmatter（仅含 locked: true）
+ * Injects `locked: true` into frontmatter:
+ * - Has frontmatter: if locked: field exists, force update to true; otherwise append line at end of frontmatter
+ * - No frontmatter: wrap a frontmatter block (containing only locked: true) at top of file
  *
- * 返回 { content, lockedInjected }；lockedInjected 表示**本次**是否真正补/改了 locked
- * 字段（已是 true 也算 lockedInjected=false，因为没有改动）。
+ * Returns { content, lockedInjected }; lockedInjected indicates whether locked field was actually added/modified
+ * this time (if already true, lockedInjected=false because no change occurred).
  */
 function injectLockedTrue(content: string): { content: string; lockedInjected: boolean } {
   const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n?/);

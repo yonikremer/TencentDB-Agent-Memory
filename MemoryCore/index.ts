@@ -111,7 +111,7 @@ const pendingRecallCache = new Map<string, {
  */
 const pendingRecallEndTimestamps = new Map<string, number>();
 
-// 进程级单例，避免同一进程重复启动清理器导致并发清理竞态
+// Process-level singleton to avoid launching multiple cleaners in the same process causing concurrent cleanup races
 let sharedMemoryCleaner: LocalMemoryCleaner | undefined;
 
 /**

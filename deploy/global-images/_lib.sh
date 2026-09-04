@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 通用工具函数：加载 .env、校验必填参数、等待容器 health、清理旧容器。
-# 由 start-*.sh 通过 `source _lib.sh` 引入，不单独执行。
+# Common utility functions: load .env, validate required parameters, wait for container health, and clean up old containers.
+# Sourced by start-*.sh via `source _lib.sh`; not intended to be executed directly.
 
 set -euo pipefail
 
@@ -339,7 +339,7 @@ interactive_llm_setup() {
     done
   fi
 
-  info "写回 LLM 配置 → $ENV_FILE"
+  info "Writing LLM configuration to → $ENV_FILE"
   set_env_value MEMORY_LLM_BASE_URL "$MEMORY_LLM_BASE_URL" "$ENV_FILE"
   set_env_value MEMORY_LLM_API_KEY "$MEMORY_LLM_API_KEY" "$ENV_FILE"
   set_env_value MEMORY_LLM_MODEL "$MEMORY_LLM_MODEL" "$ENV_FILE"
@@ -347,15 +347,15 @@ interactive_llm_setup() {
   set_env_value PROXY_UPSTREAM_URL "$PROXY_UPSTREAM_URL" "$ENV_FILE"
   set_env_value PROXY_UPSTREAM_API_KEY "$PROXY_UPSTREAM_API_KEY" "$ENV_FILE"
   set_env_value PROXY_UPSTREAM_MODEL "$PROXY_UPSTREAM_MODEL" "$ENV_FILE"
-  ok "LLM 配置已保存到 $ENV_FILE"
+  ok "LLM configuration saved to $ENV_FILE"
 }
 
 # ═══════════════════════════════════════════════════════════════
-# 端口预检
+# Port Pre-check
 # ═══════════════════════════════════════════════════════════════
 
 # port_in_use <port>
-#   检测宿主机某端口是否处于 LISTEN 状态。返回 0=被占 / 1=空闲。
+#   Detects if a specific port on the host is in the LISTEN state. Returns 0=in-use / 1=idle.
 port_in_use() {
   local port="$1"
   if command -v lsof >/dev/null 2>&1; then
@@ -363,13 +363,13 @@ port_in_use() {
   elif command -v ss >/dev/null 2>&1; then
     ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE ":${port}$"
   else
-    return 1  # 无检测工具时当作空闲，不阻塞启动
+    return 1  # Treat as idle if detection tools are missing, avoiding blocking startup
   fi
 }
 
 # tdai_self_ports
-#   输出当前 running 的 tdai 三件套容器映射到宿主机的端口（空格分隔）。
-#   这些端口是「自己人」占用，会在启动时被 rm_container_if_exists 重建，不算冲突。
+#   Outputs ports (space-separated) mapped to the host by the currently running tdai container trio.
+#   These ports are occupied by 'our own' services and will be rebuilt by rm_container_if_exists during startup, not considered a conflict.
 tdai_self_ports() {
   local c p ports=""
   for c in tdai-proxy tdai-memory-hub tdai-memory-core; do
@@ -382,25 +382,25 @@ tdai_self_ports() {
 }
 
 # check_ports
-#   一次性检查 4 个目标端口是否被占用；被「外部进程」占用则报错退出。
-#   会排除 tdai 自己容器占用的端口（那些会在启动时被重建）。
+#   Checks if the 4 target ports are in use; exits with error if occupied by an "external process".
+#   Excludes ports occupied by our own tdai containers (which will be rebuilt on startup).
 check_ports() {
   local self_ports port_var port conflict=0
   self_ports=" $(tdai_self_ports) "
-  info "═══ 端口预检 ══════════════════════════════════════════"
+  info "═══ Port Pre-check ══════════════════════════════════════════"
   for port_var in MEMORY_CORE_PORT PANEL_PORT KNOWLEDGE_PORT PROXY_PORT; do
     port="${!port_var:-}"
     if [[ -z "$port" ]]; then continue; fi
     if [[ "$self_ports" == *" $port "* ]]; then
-      info "端口 $port ($port_var) 由 tdai 旧容器占用（启动时会重建），跳过"
+      info "Port $port ($port_var) is occupied by old tdai container (will be rebuilt on startup), skipping"
       continue
     fi
     if port_in_use "$port"; then
-      echo "${C_RED}[error]${C_RST} 端口 $port ($port_var) 已被占用，请释放该端口或在 .env 改端口。" >&2
+      echo "${C_RED}[error]${C_RST} Port $port ($port_var) is already in use. Please free this port or change it in .env." >&2
       conflict=1
     else
-      ok "端口 $port ($port_var) 空闲"
+      ok "Port $port ($port_var) is free"
     fi
   done
-  (( conflict == 0 )) || die "存在端口冲突，请先释放端口后重试。"
+  (( conflict == 0 )) || die "Port conflict detected, please free the ports and try again."
 }

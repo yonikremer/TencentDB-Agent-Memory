@@ -1,12 +1,12 @@
 /**
- * TcvdbSkillStore — Skill 存储层的 TCVDB (Service 模式) 实现
+ * TcvdbSkillStore — TCVDB (Service mode) implementation for Skill storage layer
  *
- * 实现 ISkillStore 接口，提供技能元数据/内容的 VDB 持久化。
- * 对标 SqliteSkillStore 的 12 个方法，参考 TcvdbMemoryStore 的
- * Collection 创建 / upsert / query / search / hybridSearch 模式。
+ * Implements ISkillStore interface, providing VDB persistence for skill metadata/content.
+ * Mirrors the 12 methods of SqliteSkillStore, refers to TcvdbMemoryStore's
+ * Collection creation / upsert / query / search / hybridSearch modes.
  *
- * Schema: 详见 docs/design/2026-06-29-skill-vdb-schema.md
- * 接口:   src/core/skill/skill-store.interface.ts
+ * Schema: See docs/design/2026-06-29-skill-vdb-schema.md
+ * Interface: src/core/skill/skill-store.interface.ts
  */
 
 import { randomBase62 } from "../../utils/short-id.js";
@@ -33,26 +33,26 @@ import { SkillStoreError } from "../skill/skill-store.js";
 // ─── Config ─────────────────────────────────────────────────────────────
 
 export interface TcvdbSkillStoreConfig {
-  /** VDB 实例 URL */
+  /** VDB Instance URL */
   url: string;
-  /** 账户名 (默认 "root") */
+  /** Account name (default "root") */
   username: string;
   /** API Key */
   apiKey: string;
-  /** Database 名称 */
+  /** Database name */
   database: string;
-  /** Embedding 模型名 (与 L1 共用 "bge-large-zh") */
+  /** Embedding model name (shared with L1 "bge-large-zh") */
   embeddingModel: string;
-  /** 请求超时 ms */
+  /** Request timeout ms */
   timeout: number;
-  /** CA 证书路径 */
+  /** CA certificate path */
   caPemPath?: string;
   logger?: StoreLogger;
-  /** BM25 编码器 (shared instance) */
+  /** BM25 Encoder (shared instance) */
   bm25Encoder?: BM25LocalEncoder;
-  /** 注入 ulid 工厂 */
+  /** Injected ulid factory */
   ulid?: () => string;
-  /** 注入 now */
+  /** Injected now */
   now?: () => number;
 }
 
@@ -61,7 +61,7 @@ export interface TcvdbSkillStoreConfig {
 const TAG = "[tcvdb-skill-store]";
 const SKILLS_COLLECTION_SUFFIX = "_skills";
 
-/** VDB 密集向量索引 (DISK_FLAT, HNSW fallback) */
+/** VDB dense vector index (DISK_FLAT, HNSW fallback) */
 const VECTOR_INDEX_DISK_FLAT: Record<string, unknown> = {
   fieldName: "vector",
   fieldType: "vector",
@@ -79,7 +79,7 @@ const VECTOR_INDEX_HNSW: Record<string, unknown> = {
   params: { M: 16, efConstruction: 200 },
 };
 
-/** 查询时返回的字段 (全部, vector/sparse_vector 除外) */
+/** Fields returned when querying (All, except vector/sparse_vector) */
 const SKILL_OUTPUT_FIELDS: string[] = [
   "id", "skill_id", "version", "is_head",
   "team_id", "owner_agent_id", "user_id", "task_id",
@@ -88,15 +88,15 @@ const SKILL_OUTPUT_FIELDS: string[] = [
   "created_at_ms", "updated_at_ms",
 ];
 
-/** 向量字段名 (VDB 内部名) */
+/** Vector field name (VDB internal name) */
 const DENSE_VECTOR_FIELD = "vector";
 const SPARSE_VECTOR_FIELD = "sparse_vector";
 
 // ─── Ulid helpers ───────────────────────────────────────────────────────
 
-// row_id 生成器 —— VDB doc 的物理主键 (`id` primaryKey field)。
-// 与 skill_id 分离：skill_id 在版本间共享，row_id 每一行唯一。
-// base62 12 字符（~71 bit CSPRNG 真熵）。
+// row_id generator —— physical primary key of VDB doc (`id` primaryKey field).
+// Separated from skill_id: skill_id is shared across versions, row_id is unique per row.
+// base62 12 characters (~71 bit CSPRNG true entropy).
 function defaultUlid(): string {
   return randomBase62(12);
 }
@@ -142,7 +142,7 @@ export class TcvdbSkillStore implements ISkillStore {
     this.now = config.now ?? (() => Date.now());
   }
 
-  // ── ISkillStore: 生命周期 ─────────────────────────────────────────────
+  // ── ISkillStore: Lifecycle ─────────────────────────────────────────────
 
   init(): void {
     if (this.initialized) return;
@@ -179,26 +179,26 @@ export class TcvdbSkillStore implements ISkillStore {
     const tid = input.team_id ?? "default";
     const sid = input.skill_id;
 
-    // 1. 查旧 head
+    // 1. Query old head
     const head = await this._getHeadAsync(sid, tid);
 
-    // 2. Name 唯一性校验 (无 head → 新 skill, 检查重名)
+    // 2. Name uniqueness validation (no head -> new skill, check for duplicate name)
     if (!head) {
       await this._assertNameUnique(input.name, tid, input.owner_agent_id ?? "default", sid);
     } else {
-      // 已有 history → name 不可变
+      // History exists -> name is immutable
       if (head.name !== input.name) {
         throw new SkillStoreError("SKILL_NAME_DUPLICATE", "name change is not allowed across versions");
       }
     }
 
-    // 3. 版本唯一性校验
+    // 3. Version uniqueness validation
     const newVersion = head ? head.version + 1 : 1;
     const existing = await this._queryOneAsync(
       `skill_id="${this._escape(sid)}" and version=${newVersion} and team_id="${this._escape(tid)}"`,
     );
     if (existing) {
-      // 同一版本已存在 → 幂等返回
+      // Same version already exists -> idempotent return
       return existing;
     }
 
@@ -208,7 +208,7 @@ export class TcvdbSkillStore implements ISkillStore {
     const rowId = this.ulid();
     const storageDir = `skills/${sid}/v${newVersion}`;
 
-    // 4. 构建新行文档
+    // 4. Build new row document
     const doc: Record<string, unknown> = {
       id: rowId,
       skill_id: sid,
@@ -230,7 +230,7 @@ export class TcvdbSkillStore implements ISkillStore {
       updated_at_ms: ts,
     };
 
-    // 5. BM25 稀疏向量编码
+    // 5. BM25 sparse vector encoding
     if (this.bm25Encoder) {
       const sparse = this.bm25Encoder.encodeTexts([input.content]);
       if (sparse.length > 0 && sparse[0] && sparse[0].length > 0) {
@@ -238,16 +238,16 @@ export class TcvdbSkillStore implements ISkillStore {
       }
     }
 
-    // 6. 先 INSERT 新行 (补偿 VDB 无事务：新行先落，旧行后翻)
+    // 6. INSERT new row first (compensates for VDB lack of transaction: new row written first, old row flipped after)
     await this.client.upsert(this.skillsCollection, [doc]);
 
-    // 7. 再翻旧 head
+    // 7. Then flip old head
     if (head) {
       try {
         await this._updateDocAsync(head.row_id, { is_head: 0 } as Record<string, unknown>);
       } catch (err) {
         this.logger?.warn(`${TAG} Failed to flip old head is_head for ${sid} v${head.version}: ${err instanceof Error ? err.message : String(err)}`);
-        // 不抛 — 新行已写入，双 head 可通过 version DESC 取最新解决
+        // Do not throw - new row already written, double head can be resolved by version DESC taking latest
       }
     }
 
@@ -262,9 +262,9 @@ export class TcvdbSkillStore implements ISkillStore {
   }
 
   /**
-   * 内部使用：获取当前 head 但不过滤 status。archived head 也会返回。
-   * 与 `SqliteSkillStore.getHeadIncludingArchived` 语义一致。
-   * 供 `SkillCore.delete` 幂等回读、asset 补偿任务、管控台使用。
+   * Internal use: gets current head but doesn't filter status. Archived head will also be returned.
+   * Consistent semantics with `SqliteSkillStore.getHeadIncludingArchived`.
+   * Used for `SkillCore.delete` idempotent reread, asset compensation tasks, console.
    */
   async getHeadIncludingArchived(skillId: string, teamId?: string): Promise<Skill | null> {
     await this._ensureInit();
@@ -303,7 +303,7 @@ export class TcvdbSkillStore implements ISkillStore {
     }
   }
 
-  // ── ISkillStore: 查询 ─────────────────────────────────────────────────
+  // ── ISkillStore: Queries ─────────────────────────────────────────────────
 
   async listSkills(opts: ListSkillsOptions): Promise<{ items: Skill[]; total: number }> {
     await this._ensureInit();
@@ -319,8 +319,8 @@ export class TcvdbSkillStore implements ISkillStore {
     if (statuses.length === 1) {
       conditions.push(`status="${this._escape(statuses[0])}"`);
     } else {
-      // VDB 不支持 `IN (...)` 语法，只支持 `OR`；用 `(status="a" or status="b")` 展开。
-      // 之前用 IN 会静默失败（VDB 返回 code=14000），导致 status=["active","archived"] 空结果。
+      // VDB does not support `IN (...)` syntax, only supports `OR`; expand using `(status="a" or status="b")`.
+      // Previously using IN would fail silently (VDB returned code=14000), causing empty results for status=["active","archived"].
       conditions.push(
         `(${statuses.map((s) => `status="${this._escape(s)}"`).join(" or ")})`,
       );
@@ -330,9 +330,9 @@ export class TcvdbSkillStore implements ISkillStore {
     const limit = Math.min(Math.max(opts.limit ?? 50, 1), 1000);
     const offset = Math.max(opts.offset ?? 0, 0);
 
-    // name_prefix: VDB filter 语法不支持 LIKE / 字符串前缀匹配，
-    // 改为拉取符合其余条件的 head 行后在内存里做前缀过滤再分页。
-    // (head 行数量级小，一次性拉取上限 1000 可接受)
+    // name_prefix: VDB filter syntax does not support LIKE / string prefix matching,
+    // Change to fetching head rows matching other conditions, then filtering prefix in memory before pagination.
+    // (Head rows are small in number, pulling up to 1000 at once is acceptable)
     if (opts.name_prefix) {
       const prefix = opts.name_prefix;
       try {
@@ -455,8 +455,8 @@ export class TcvdbSkillStore implements ISkillStore {
         filter: `is_head=0 and status="active" and created_at_ms<${cutoffMs}`,
         limit: 10000,
         outputFields: ["skill_id", "version", "is_head", "status", "storage_dir", "created_at_ms"],
-        // VDB 要求 sort 字段为 uint64；skill_id 是 string 不可排序（code 15143）。
-        // 用 created_at_ms 升序（先清最老的），符合 TTL 清理语义。
+        // VDB requires sort field to be uint64; skill_id is string and cannot be sorted (code 15143).
+        // Use created_at_ms ascending (oldest first), matching TTL cleanup semantics.
         sort: [{ fieldName: "created_at_ms", direction: "asc" }],
       });
       return (resp.documents ?? []).map((d) => ({
@@ -488,8 +488,8 @@ export class TcvdbSkillStore implements ISkillStore {
   }
 
   /**
-   * 物理删除同 skill_id 下的所有版本行。`SkillCore.delete` 走此路径。
-   * 权限校验由调用方 SkillCore 负责；本方法只按 (skill_id, team_id) 一次 deleteDoc。
+   * Physically delete all version rows under the same skill_id. `SkillCore.delete` uses this path.
+   * Permission validation is handled by the caller SkillCore; this method only calls deleteDoc once by (skill_id, team_id).
    */
   async deleteAllVersions(skillId: string, teamId?: string): Promise<number> {
     await this._ensureInit();
@@ -530,7 +530,7 @@ export class TcvdbSkillStore implements ISkillStore {
         collection: this.skillsCollection,
         shardNum: 1,
         replicaNum: 2,
-        description: "Skill 技能存储",
+        description: "Skill storage",
         embedding: {
           status: "enabled",
           field: "content",
@@ -588,8 +588,8 @@ export class TcvdbSkillStore implements ISkillStore {
   // ─── Private: Query helpers ───────────────────────────────────────────
 
   /**
-   * 查 head 行。默认强制 `status="active"`；`includeArchived=true` 时不加 status 过滤，
-   * 供 `getHeadIncludingArchived` 使用（archived head 的幂等回读 / 补偿任务）。
+   * Query head row. Defaults to enforcing `status="active"`; when `includeArchived=true`, no status filter is added,
+   * used for `getHeadIncludingArchived` (idempotent reread / compensation tasks for archived head).
    */
   private async _getHeadAsync(
     skillId: string,
@@ -604,7 +604,7 @@ export class TcvdbSkillStore implements ISkillStore {
     return this._queryOneAsync(filter);
   }
 
-  /** 按 filter 取一条 */
+  /** Fetch one by filter */
   private async _queryOneAsync(filter: string): Promise<Skill | null> {
     try {
       const resp = await this.client.query(this.skillsCollection, {
@@ -623,10 +623,10 @@ export class TcvdbSkillStore implements ISkillStore {
 
   // ─── Private: Write helpers ───────────────────────────────────────────
 
-  /** Upsert 更新文档的部分字段 (保留未传字段) */
+  /** Upsert updates some fields of a document (preserving unpassed fields) */
   private async _updateDocAsync(rowId: string, partial: Record<string, unknown>): Promise<void> {
-    // VDB upsert 需要完整文档或至少 id + 变更字段
-    // 先读取现有文档，合并后 upsert
+    // VDB upsert requires full document or at least id + changed fields
+    // First read existing document, merge, then upsert
     const existing = await this._queryByIdAsync(rowId);
     if (!existing) return;
 
@@ -636,10 +636,10 @@ export class TcvdbSkillStore implements ISkillStore {
   }
 
   /**
-   * 按主键 (id / row_id) 取一条。
-   * 注意：id 是 primaryKey 而非 filter 索引，不能用 `filter: id="..."` 查询
-   * （VDB 会报 Field Not Found:id 被 catch 成 null）。必须走 documentIds 主键查找，
-   * 对齐 memory 生产实现 (tcvdb.ts "Primary key lookup: use documentIds")。
+   * Fetch one by primary key (id / row_id).
+   * Note: id is primaryKey, not a filter index, cannot use `filter: id="..."` to query
+   * (VDB will report Field Not Found:id which is caught as null). Must query by documentIds primary key,
+   * aligning with memory production implementation (tcvdb.ts "Primary key lookup: use documentIds").
    */
   private async _queryByIdAsync(rowId: string): Promise<Skill | null> {
     try {
@@ -658,7 +658,7 @@ export class TcvdbSkillStore implements ISkillStore {
     }
   }
 
-  /** Name 唯一性校验 (同 team + agent + name 且 is_head=1 且 status=active) */
+  /** Name uniqueness validation (same team + agent + name and is_head=1 and status=active) */
   private async _assertNameUnique(
     name: string,
     teamId: string,
@@ -699,10 +699,10 @@ export class TcvdbSkillStore implements ISkillStore {
   }
 
   /**
-   * bm25 模式：TCVDB 无纯稀疏检索通道（/document/search 只做 dense；
-   * hybridSearch 的 ann 为必填）。skill collection 的服务端 embedding 恒开启，
-   * 故 bm25 模式在 Service 模式下降级为 hybrid（dense + sparse），
-   * 语义等价且检索质量不弱于纯 BM25。standalone(SQLite) 才是真正的纯 BM25。
+   * bm25 mode: TCVDB does not have a pure sparse retrieval channel (/document/search is dense-only;
+   * ann is required for hybridSearch). The skill collection's server-side embedding is always enabled,
+   * so bm25 mode degrades to hybrid (dense + sparse) in Service mode,
+   * which is semantically equivalent and retrieval quality is not inferior to pure BM25. standalone(SQLite) is true pure BM25.
    */
   private async _searchBm25Async(
     queryText: string,
@@ -716,9 +716,9 @@ export class TcvdbSkillStore implements ISkillStore {
   }
 
   /**
-   * embedding 模式：dense-only。走 /document/search + embeddingItems，
-   * 由 VDB 服务端对 query 文本做 embedding（collection.embedding.field=content）。
-   * 注意：/document/search 不接受 ann/match，服务端 embedding 用 embeddingItems 传原始文本。
+   * embedding mode: dense-only. Uses /document/search + embeddingItems,
+   * VDB server-side performs embedding on the query text (collection.embedding.field=content).
+   * Note: /document/search does not accept ann/match, server-side embedding uses embeddingItems to pass original text.
    */
   private async _searchEmbeddingAsync(
     queryText: string,
@@ -737,13 +737,14 @@ export class TcvdbSkillStore implements ISkillStore {
   }
 
   /**
-   * hybrid 模式：dense(服务端 embedding) + sparse(BM25) + RRF 融合。
-   * 对齐 memory 生产实现 (tcvdb.ts searchL1HybridAsync)：
-   *   - ann / match 均为数组
-   *   - ann.fieldName = 服务端 embedding 源字段 "content"，data 传原始 query 文本
-   *   - query 侧稀疏向量用 encodeQueries（IDF 权重），与写入侧 encodeTexts（TF）区分
+   * hybrid mode: dense(server-side embedding) + sparse(BM25) + RRF fusion.
+   * Aligns with memory production implementation (tcvdb.ts searchL1HybridAsync):
+   *   - ann / match are both arrays
+   *   - ann.fieldName = server-side embedding source field "content", data passes original query text
+   *   - sparse vector on query side uses encodeQueries (IDF weight), distinct from encodeTexts (TF) on write side
    *   - rerank: { method: "rrf", k: 60 }
-   * 无 BM25 编码器时退化为 dense-only（embedding）。
+   *
+   * Degrades to dense-only (embedding) if no BM25 encoder is present.
    */
   private async _searchHybridAsync(
     queryText: string,
@@ -755,7 +756,7 @@ export class TcvdbSkillStore implements ISkillStore {
       sparse.length > 0 && sparse[0] && sparse[0].length > 0 ? sparse[0] : undefined;
 
     if (!sparseVec) {
-      // 无稀疏信号 → dense-only
+      // No sparse signal -> dense-only
       return this._searchEmbeddingAsync(queryText, topK, filter);
     }
 
@@ -839,7 +840,7 @@ export class TcvdbSkillStore implements ISkillStore {
     };
   }
 
-  /** Skill → VDB doc (用于 update 时重写) */
+  /** Skill -> VDB doc (used for rewrite during update) */
   private _skillToDoc(skill: Skill): Record<string, unknown> {
     return {
       id: skill.row_id,
