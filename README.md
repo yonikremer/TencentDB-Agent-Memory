@@ -14,7 +14,7 @@
 [![Hermes](https://img.shields.io/badge/Hermes-Gateway-7B61FF)](https://hermes-agent.nousresearch.com/docs/)
 [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/dJQM6mKMF)
 
-[Installation](#installation) · [Supported Agents](#all-agents-share-the-same-memory-server) · [What is it?](#what-is-tencentdb-agent-memory) · [Team Play](#one-play-style-build-a-growing-agent-team-for-a-one-person-company) · [Technical Implementation](#technical-implementation) · [Benchmark](#benchmark) · [Roadmap](#roadmap)
+[Fork](#about-this-fork) · [Installation](#installation) · [Supported Agents](#all-agents-share-the-same-memory-server) · [What is it?](#what-is-tencentdb-agent-memory) · [Team Play](#one-play-style-build-a-growing-agent-team-for-a-one-person-company) · [Technical Implementation](#technical-implementation) · [Benchmark](#benchmark) · [Roadmap](#roadmap)
 
 [**English**](./README.md) · [Simplified Chinese](./README_CN.md)
 
@@ -27,6 +27,16 @@
 <td>
    <video src="https://github.com/user-attachments/assets/efb1a808-1f86-4cfe-802c-f7453f7ca938" width="100%" controls autoplay loop muted playsinline></video>
 </td>
+
+## About this fork
+
+This repo is a fork of [Tencent/TencentDB-Agent-Memory](https://github.com/Tencent/TencentDB-Agent-Memory), maintained at [yonikremer/TencentDB-Agent-Memory](https://github.com/yonikremer/TencentDB-Agent-Memory). Upstream stays the source of truth for releases; this fork layers on:
+
+| Area | Upstream | This fork |
+| :--- | :--- | :--- |
+| **Wiki ingestion** | Extraction sees only a one-line metadata listing of existing pages, so docs that assume earlier knowledge lose cross-document facts | **Memory-enabled (retrieval-augmented) ingest, on by default** — each source chunk queries the existing Wiki (same BM25 FTS5 `searchInternal` + `readPage` path as `/v3/search`) and injects the top pages into the extraction prompt. Per-chunk retrieval, degrades gracefully on first ingest or any failure. Tune with `KNOWLEDGE_WIKI_RETRIEVAL_ENABLED` (default `true`), `KNOWLEDGE_WIKI_RETRIEVAL_TOP_K` (`3`), `KNOWLEDGE_WIKI_RETRIEVAL_MAX_CHARS` (`12000`), `KNOWLEDGE_WIKI_RETRIEVAL_QUERY_TERMS` (`24`) |
+| **Language** | Mixed Chinese/English across UI, prompts, CLI, docs | **Fully English** — web UI (`MemoryPanel/web`), API docs, prompt corpus, CLI/shell output, comments, and configs translated; `INSTALL.md` / `CHANGELOG.md` in English (Chinese originals kept as `*_CN.md`). Reusable tooling lives in `scripts/zh-en/`. Chinese matcher examples in `ZH_EN_TRANSLATION_PLAN.md` are intentional test fixtures, not leftovers |
+| **Web UI theme** | Light only | **Dark mode** — header + login toggle, follows system default, persisted across sessions |
 
 # Installation
 
