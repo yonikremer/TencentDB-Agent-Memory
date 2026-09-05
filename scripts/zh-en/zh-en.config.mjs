@@ -58,6 +58,9 @@ export const protectedGlobs = [
   'MemoryCore/src/core/prompts/scene-extraction.ts',
   'MemoryCore/src/core/prompts/l1-extraction.ts',
   'MemoryCore/src/core/prompts/persona-generation.ts',
+  // agents/asset-import.ts: large tool-description file whose template-literal regions are
+  // corrupted by every line-based translation pass - needs a careful whole-file pass (like prompts).
+  'agents/asset-import.ts',
 ];
 
 // Committed scratch from earlier passes. `git rm` each and it stops showing here.

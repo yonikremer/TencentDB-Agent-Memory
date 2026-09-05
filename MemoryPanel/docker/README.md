@@ -1,65 +1,65 @@
-# Docker 部署说明
+# Docker Deployment Instructions
 
-本目录包含 **team-memory-control**（Control 面板后端）的容器化构建文件。
+This directory contains the containerized build files for **team-memory-control** (Control panel backend).
 
-## 目录结构
+## Table of Contents
 
 ```
 docker/
-├── README.md                          # 本文件
+├── README.md                          # This file
 └── local/
-    ├── Dockerfile.local               # Control 单镜像（多阶段构建）
-    └── Dockerfile.local.dockerignore  # 构建上下文忽略规则
+    ├── Dockerfile.local               # Control single image (multi-stage build)
+    └── Dockerfile.local.dockerignore  # Build context ignore rules
 ```
 
-## 镜像一览
+## Overview of Images
 
-| 镜像名（示例） | Dockerfile | 构建上下文 | 说明 |
+| Image Name (Example) | Dockerfile | Build Context | Description |
 |----------------|------------|------------|------|
-| `team-memory-control:local` | `docker/local/Dockerfile.local` | **仓库根目录** `.` | Control HTTP 服务，默认 `:8123` |
+| `team-memory-control:local` | `docker/local/Dockerfile.local` | **Repository root** `.` | Control HTTP service, default `:8123` |
 
 ---
 
 ## `docker/local/Dockerfile.local`
 
-### 用途
+Usage
 
-构建 **Control 面板** 单体镜像：后端用 `tsx` 直跑 `src/index.ts`（stateless panel，入口 `src/panel/`），`web/` 前端在独立 stage 编译后以静态资源托管。
+Build the **Control panel** monolithic image: run `src/index.ts` directly with `tsx` on the backend (stateless panel, entry `src/panel/`), and compile the `web/` frontend in a separate stage and serve it as static assets.
 
-### 多阶段结构
+Multi-stage structure
 
-| Stage | 作用 |
+| Stage | Function |
 |-------|------|
-| `base` | `node:22-slim` + 原生编译工具链（`better-sqlite3` 需要 `python3`/`make`/`g++`） |
-| `ui-builder` | 编译 `web/`：`npm install` + `npm run build` → `dist/` |
-| `runtime` | 拷贝全仓源码、`npm install`、嵌入 UI 产物，启动 Control |
+| `base` | `node:22-slim` + native build toolchain (`better-sqlite3` requires `python3`/`make`/`g++`) |
+| `ui-builder` | Build `web/`: `npm install` + `npm run build` → `dist/` |
+| `runtime` | Copy full repo source, `npm install`, embed UI artifacts, start Control |
 
-### 构建参数
+Build Parameters
 
-| 参数 | 默认值 | 说明 |
+| Parameter | Default Value | Description |
 |------|--------|------|
-| `PANEL_UI` | `web` | 前端工程目录（当前活跃面板为 `web/`；`frontend/` 为历史目录，已不维护） |
-| `WEB_UI` | `1` | `1` 正常构建面板 UI；`0` 跳过 UI 构建、生成占位 `index.html`（见下文「禁用面板 UI 构建」） |
+| `PANEL_UI` | `web` | Frontend project directory (the currently active panel is `web/`; `frontend/` is a historical directory and is no longer maintained) |
+| `WEB_UI` | `1` | `1` builds the panel UI normally; `0` skips UI building and generates a placeholder `index.html` (see "Disable Panel UI Building" below) |
 
-运行时通过 `METADATA_INSTANCES_CONFIG` 指定实例表，`UI_DIST_DIR=./web/dist` 托管前端。
+Specify the instance table via `METADATA_INSTANCES_CONFIG` at runtime, and `UI_DIST_DIR=./web/dist` hosts the frontend.
 
-### 暴露端口与健康检查
+Expose Ports and Health Checks
 
-- 端口：`8123`
-- 健康检查：`GET http://127.0.0.1:8123/health`
+- Port: `8123`
+- Health check: `GET http://127.0.0.1:8123/health`
 
 ---
 
-## 构建与运行
+## Build and Run
 
-### 前置条件
+### Prerequisites
 
-- Docker（建议启用 BuildKit）
-- Node 引擎要求与仓库一致：`>=22`（见根 `package.json`）
-- 在 **仓库根目录** 执行构建（上下文为整个仓库）
+- Docker (BuildKit is recommended to be enabled)
+- Node engine requirement matches the repository: `>=22` (see root `package.json`)
+- Execute the build in the **repository root directory** (context is the entire repository)
 
 ```bash
-# 在仓库根目录
+# In the repository root directory
 docker build \
   --build-arg PANEL_UI=web \
   -t team-memory-control:local \
@@ -76,13 +76,13 @@ docker run -d --name tmc-control \
   team-memory-control:local
 ```
 
-登录：浏览器打开 `http://localhost:8123/`，选择实例 ID，填入 Gateway 的 **user_key**。实例表字段见 [`config/metadata-instances.README.md`](../config/metadata-instances.README.md)。
+Login: Open `http://localhost:8123/` in the browser, select the instance ID, and enter the Gateway's **user_key**. The fields of the instance table are in [`config/metadata-instances.README.md`](../config/metadata-instances.README.md).
 
-若 Gateway 跑在宿主机，挂载的 `metadata-instances.json` 里 `gateway_endpoint` 须用容器可访问的地址（如 `http://host.docker.internal:8420`），不要用 `127.0.0.1`。
+If the Gateway runs on the host, the `gateway_endpoint` in the mounted `metadata-instances.json` must use an address accessible to the container (e.g., `http://host.docker.internal:8420`), and not `127.0.0.1`.
 
-### 禁用面板 UI 构建（`WEB_UI=0`）
+Disable panel UI construction (`WEB_UI=0`)
 
-面板 UI 依赖 `@tencent/*` 等内部包，公共 npm 镜像不提供。若构建环境**无法访问内部 npm 源**（如离线机、外部 CI），`npm install` 会失败。此时用 `WEB_UI=0` 跳过 UI 构建：
+The panel UI depends on internal packages such as `@tencent/*`, which are not provided by the public npm mirror. If the build environment **cannot access the internal npm source** (such as offline machines, external CI), `npm install` will fail. In this case, skip the UI build by using `WEB_UI=0`:
 
 ```bash
 docker build \
@@ -92,54 +92,54 @@ docker build \
   -f docker/local/Dockerfile.local .
 ```
 
-镜像会生成占位 `dist/index.html`，**Control 后端与 `/health`、`/api/*` 完全可用**，仅静态面板页面不可访问（前端路由返回占位提示）。需要面板 UI 时请用默认 `WEB_UI=1` 并确保能拉到内部依赖。
+The mirror will generate a placeholder `dist/index.html`, **the Control backend and `/health`, `/api/*` are fully available**, but only the static panel pages are inaccessible (frontend routes return placeholder prompts). When you need the panel UI, please use the default `WEB_UI=1` and ensure you can fetch the internal dependencies.
 
-### 常用环境变量
+Common Environment Variables
 
-| 变量 | 默认 | 说明 |
+| Variable | Default | Description |
 |------|------|------|
-| `UI_DIST_DIR` | `./web/dist` | 静态前端目录（Dockerfile 通过 `ENV` 设为 `./${PANEL_UI}/dist`） |
-| `METADATA_INSTANCES_CONFIG` | `./config/metadata-instances.json` | 实例注册表路径 |
-| `METADATA_REMOTE_TIMEOUT_MS` | `15000` | 转发 Gateway 超时 |
-| `KNOWLEDGE_SERVICE_URL` | `http://127.0.0.1:8421` | Knowledge Service（KS）地址，容器内须指向容器可访问的 KS |
-| `KNOWLEDGE_AUTH_TOKEN` | — | 调 KS 的 bearer token，按部署填充 |
-| `KNOWLEDGE_TIMEOUT_MS` | `15000` | 调 KS 超时 |
-| `KNOWLEDGE_LLM_BINDING_SYNC` | `true` | 启动时为每个实例确保 KS 的 LLM 绑定（走 proxy 记账）；`false` 跳过 |
-| `KNOWLEDGE_LLM_PROXY_BASE_URL` | `http://127.0.0.1:8096` | LLM 记账 proxy 地址（容器内须可达） |
-| `LOG_LEVEL` / `LOG_FORMAT` | `info` / `json` | 本地可设 `LOG_FORMAT=pretty` |
+| `UI_DIST_DIR` | `./web/dist` | Static frontend directory (Dockerfile sets it to `./${PANEL_UI}/dist` via `ENV`) |
+| `METADATA_INSTANCES_CONFIG` | `./config/metadata-instances.json` | Instance registry path |
+| `METADATA_REMOTE_TIMEOUT_MS` | `15000` | Forward Gateway timeout |
+| `KNOWLEDGE_SERVICE_URL` | `http://127.0.0.1:8421` | Knowledge Service (KS) address; must point to a KS accessible within the container |
+| `KNOWLEDGE_AUTH_TOKEN` | — | Bearer token for calling KS, filled in according to deployment |
+| `KNOWLEDGE_TIMEOUT_MS` | `15000` | Timeout for calling KS |
+| `KNOWLEDGE_LLM_BINDING_SYNC` | `true` | Ensure the KS LLM binding for each instance at startup (via proxy accounting); `false` to skip |
+| `KNOWLEDGE_LLM_PROXY_BASE_URL` | `http://127.0.0.1:8096` | LLM accounting proxy address (must be reachable inside the container) |
+| `LOG_LEVEL` / `LOG_FORMAT` | `info` / `json` | Locally set `LOG_FORMAT=pretty` |
 
-> 注：`LLM_MODEL`（wiki ingest 模型）不在 Panel 配置，统一由 KS 侧 `LLM_MODEL` 决定（默认 `Memory-Model`）。
+> Note: `LLM_MODEL` (wiki ingest model) is not configured in Panel; it is uniformly determined by the `LLM_MODEL` on the KS side (default `Memory-Model`).
 
 ---
 
 ## `docker/local/Dockerfile.local.dockerignore`
 
-BuildKit 会优先使用 `<dockerfile>.dockerignore`（而非仓库根 `.dockerignore`）。
+BuildKit will prioritize `<dockerfile>.dockerignore` (rather than the root `.dockerignore`).
 
-主要排除：
+Mainly excluding:
 
-- `**/node_modules`、`**/dist` — 避免宿主机平台编译的 `better-sqlite3` 或旧产物进入镜像
-- `.env`、`data/`、`*.db` — 禁止把密钥与本地数据打进镜像
-- `docs/`、测试报告等 — 缩小构建上下文
+- `**/node_modules`, `**/dist` — avoid host-platform-compiled `better-sqlite3` or old artifacts entering the image
+- `.env`, `data/`, `*.db` — prohibit including keys and local data in the image
+- `docs/`, test reports, etc. — reduce the build context
 
-**安全提示**：`config/metadata-instances.json` **会**随 `COPY . .` 进入镜像。若含真实 `api_key`，生产镜像应改为运行时挂载，或在 dockerignore 中排除该文件并强制 `-v` 挂载。
+**Security Notice**: `config/metadata-instances.json` **will** be included in the image with `COPY . .`. If it contains real `api_key`, the production image should be changed to mount it at runtime, or exclude the file in `dockerignore` and enforce `-v` mounting.
 
 ---
 
-## 本地开发对照
+## Local Development Comparison
 
-| 方式 | 命令 |
+| Method | Command |
 |------|------|
-| 源码开发 | `pnpm dev` |
-| Docker 单镜像 | 见上文 `docker build` / `docker run` |
+| Source Code Development | `pnpm dev` |
+| Docker Single Image | See above `docker build` / `docker run` |
 
 ---
 
-## 故障排查
+## Troubleshooting
 
-| 现象 | 可能原因 |
+| Phenomenon | Possible causes |
 |------|----------|
-| `GET /` 404 | `UI_DIST_DIR` 未设为 `./web/dist`，或前端 stage `npm run build` 失败 |
-| 登录后 API 401 / 无 team | `metadata-instances.json` 中 `gateway_endpoint` 不可达，或 `api_key` 与 Gateway 不一致 |
-| 知识资产加载失败 / 500 | `KNOWLEDGE_SERVICE_URL` 容器内不可达，或 `KNOWLEDGE_AUTH_TOKEN` 不匹配 |
-| 启动卡在「ensure LLM binding」 | `KNOWLEDGE_LLM_PROXY_BASE_URL` 容器内不可达；可设 `KNOWLEDGE_LLM_BINDING_SYNC=false` 临时跳过 |
+| `GET /` 404 | `UI_DIST_DIR` is not set to `./web/dist`, or the frontend stage `npm run build` fails |
+| Login API 401 / No team after login | `gateway_endpoint` in `metadata-instances.json` is unreachable, or `api_key` does not match the Gateway |
+| Knowledge asset loading fails / 500 | `KNOWLEDGE_SERVICE_URL` is unreachable inside the container, or `KNOWLEDGE_AUTH_TOKEN` does not match |
+| Stuck at "ensure LLM binding" | `KNOWLEDGE_LLM_PROXY_BASE_URL` is unreachable inside the container; you can set `KNOWLEDGE_LLM_BINDING_SYNC=false` to temporarily skip |

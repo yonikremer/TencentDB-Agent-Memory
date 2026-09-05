@@ -1,57 +1,57 @@
 # Team Memory Control
 
-Team Memory Control 是一个无状态的团队记忆管理控制台，用于管理团队、用户、Agent、任务及其关联的 Skill、Wiki、Code Graph 和 Chat Memory 资产。
+Team Memory Control is a stateless team memory management console for managing teams, users, Agents, tasks, and their associated assets such as Skills, Wiki, Code Graph, and Chat Memory.
 
-## 项目定位
+## Project Positioning
 
-Control 负责：
+Responsible for:
 
-- 提供 Web 管理界面和公开的 Control API；
-- 校验调用方凭证并转发授权请求；
-- 聚合元数据、记忆资产和知识资产；
-- 管理资产分配、绑定和展示。
+- Provide a Web management interface and a public Control API;
+- Validate the caller's credentials and forward authorization requests;
+- Aggregate metadata, memory assets, and knowledge assets;
+- Manage asset allocation, binding, and display.
 
-Control 不保存服务端登录会话，也不维护本地用户数据库。业务数据由部署时配置的外部服务负责持久化。
+Control does not save the server-side login session nor maintain a local user database. Business data is persisted by external services configured at deployment time.
 
-## 技术栈
+## Tech Stack
 
-- 后端：Node.js 22+、TypeScript、Hono、tsx
-- 前端：React 18、Vite、TypeScript、Tailwind CSS、Zustand
-- 测试：Vitest
-- 包管理：pnpm（后端）和 npm（前端）
+- Backend: Node.js 22+, TypeScript, Hono, tsx
+- Frontend: React 18, Vite, TypeScript, Tailwind CSS, Zustand
+- Testing: Vitest
+- Package Management: pnpm (backend) and npm (frontend)
 
-## 目录结构
+## Table of Contents
 
 ```text
 src/
-├── index.ts                  # 服务入口
+├── index.ts                  # Service entry
 └── panel/
-    ├── config/               # 配置与实例注册表
-    ├── domain/               # 领域规则
-    ├── http/                 # 中间件和公开路由
-    ├── infra/                # 日志等基础设施
-    ├── kernel/               # 外部服务适配器
-    └── startup/              # 启动任务
+    ├── config/               # Configuration and Instance Registry
+    ├── domain/               # Domain Rules
+    ├── http/                 # Middleware and Public Routes
+    ├── infra/                # Logging and Other Infrastructure
+    ├── kernel/               # External Service Adapters
+    └── startup/              # Startup Tasks
 
-web/                          # React 管理界面
-config/                       # 实例注册表示例与说明
-docker/                       # 容器构建文件
-docs/api/                     # 对外 API 契约
-scripts/                      # 生成、测试和安全检查脚本
-tests/                        # 单元测试与 E2E 测试
+web/                          # React admin interface
+config/                       # Example and description of instance registration
+docker/                       # Container build files
+docs/api/                     # External API contract
+scripts/                      # Scripts for generation, testing, and security checks
+tests/                        # Unit tests and E2E tests
 ```
 
-## 本地开发
+## Local Development
 
-### 前置条件
+### Prerequisites
 
-- Node.js 22 或更高版本
+- Node.js 22 or higher
 - pnpm
 - npm
-- 可访问的 Memory Gateway
-- 使用 Wiki 或 Code Graph 时，需要可访问的 Knowledge Service
+- Accessible Memory Gateway
+- When using Wiki or Code Graph, an accessible Knowledge Service is required
 
-### 1. 安装依赖
+### 1. Install dependencies
 
 ```bash
 pnpm install
@@ -60,81 +60,81 @@ npm install
 cd ..
 ```
 
-### 2. 准备配置
+### 2. Prepare Configuration
 
 ```bash
 cp .env.example .env
 cp config/metadata-instances.example.json config/metadata-instances.json
 ```
 
-编辑 `config/metadata-instances.json`，使用部署环境提供的实例 ID、Gateway 地址和 API Key。该文件包含凭证，已被 Git 忽略，不得提交。
+Edit `config/metadata-instances.json` using the instance ID, Gateway address, and API Key provided by the deployment environment. This file contains credentials and is ignored by Git, so it must not be committed.
 
-环境变量说明见 `.env.example`，实例注册表字段说明见 `config/metadata-instances.README.md`。
+Environment variable descriptions are in `.env.example`, and instance registry field descriptions are in `config/metadata-instances.README.md`.
 
-### 3. 启动后端
+### 3. Start the backend
 
 ```bash
 pnpm dev
 ```
 
-默认监听 `http://127.0.0.1:8123`，健康检查为 `GET /health`。
+Listen on `http://127.0.0.1:8123` by default, with health check as `GET /health`.
 
-### 4. 启动前端
+### 4. Start the frontend
 
 ```bash
 cd web
 npm run dev
 ```
 
-浏览器访问 `http://127.0.0.1:5173`。开发服务器默认将 `/api/v1` 和 `/health` 转发到本地 Control。
+Access the browser to `http://127.0.0.1:5173`. The development server forwards `/api/v1` and `/health` to the local Control by default.
 
-## 常用命令
+Common Commands
 
-| 命令 | 说明 |
+| Command | Description |
 |------|------|
-| `pnpm dev` | 启动后端开发服务器 |
-| `pnpm build` | 编译后端到 `dist/` |
-| `pnpm typecheck` | 执行 TypeScript 类型检查 |
-| `pnpm test` | 运行单元测试 |
-| `pnpm generate:meta-openapi` | 生成 Meta OpenAPI 文档 |
-| `pnpm test:panel:e2e` | 运行 Panel Meta E2E |
-| `pnpm test:knowledge:e2e` | 运行 Knowledge E2E |
-| `cd web && npm run dev` | 启动前端开发服务器 |
-| `cd web && npm run build` | 构建前端到 `web/dist/` |
-| `bash scripts/secret-leak-check.sh` | 检查敏感信息泄漏 |
+| `pnpm dev` | Start backend dev server |
+| `pnpm build` | Build backend to `dist/` |
+| `pnpm typecheck` | Run TypeScript type check |
+| `pnpm test` | Run unit tests |
+| `pnpm generate:meta-openapi` | Generate Meta OpenAPI docs |
+| `pnpm test:panel:e2e` | Run Panel Meta E2E |
+| `pnpm test:knowledge:e2e` | Run Knowledge E2E |
+| `cd web && npm run dev` | Start frontend dev server |
+| `cd web && npm run build` | Build frontend to `web/dist/` |
+| `bash scripts/secret-leak-check.sh` | Check for sensitive info leakage |
 
-## 公开 API
+## Public API
 
-Control 的公开入口统一位于 `/api/v1`：
+The public entry point for Control is uniformly located at `/api/v1`:
 
-- `/api/v1/meta/*`：实例、身份和元数据管理
-- `/api/v1/skill/*`：Skill 管理
-- `/api/v1/chat-memory/*`：Chat Memory 管理
-- `/api/v1/knowledge/*`：Wiki 和 Code Graph 管理
-- `/api/v1/agent-overview/*`：Agent 资产聚合
-- `/api/v1/agent/*`：Agent 生命周期操作
+- `/api/v1/meta/*`: Instance, identity, and metadata management
+- `/api/v1/skill/*`: Skill management
+- `/api/v1/chat-memory/*`: Chat Memory management
+- `/api/v1/knowledge/*`: Wiki and Code Graph management
+- `/api/v1/agent-overview/*`: Agent asset aggregation
+- `/api/v1/agent/*`: Agent lifecycle operations
 
-对接时以 `docs/api/` 下的公开契约和源码中的路由注册为准。未列入公开契约的外部服务接口不属于 Control 的兼容性承诺。
+When interfacing, the public contracts under `docs/api/` and the route registrations in the source code shall prevail. External service interfaces not listed in the public contracts do not fall under Control's compatibility commitments.
 
-## 容器部署
+Container Deployment
 
-本仓库提供 Control 单服务镜像，默认端口为 `8123`。构建和运行方式见 `docker/README.md`。
+This repository provides the Control single-service image, with the default port being `8123`. The build and run instructions are in `docker/README.md`.
 
-部署时必须通过只读挂载提供 `metadata-instances.json`，不得把真实 API Key 写入镜像、示例文件或版本库。
+When deploying, `metadata-instances.json` must be provided via a read-only mount, and real API Keys must not be written into the image, example files, or version control.
 
-## 安全要求
+## Security Requirements
 
-- `user_key` 是用户凭证，只能通过请求 Header 传递，不得写入日志、文档或前端静态资源。
-- 实例注册表中的 `api_key` 仅供服务端调用外部服务，不得返回浏览器。
-- `.env`、真实实例注册表、Smoke 环境文件、日志和测试报告不得提交。
-- 文档和示例只能使用 `example.com`、回环地址及明显的占位符。
-- 提交前运行 `bash scripts/secret-leak-check.sh --strict`。
+- `user_key` is the user credential, which can only be passed via the request Header and must not be written to logs, documentation, or frontend static assets.
+- The `api_key` in the instance registry is only for server-side calls to external services and must not be returned to the browser.
+- `.env`, the real instance registry, Smoke environment files, logs, and test reports must not be committed.
+- Documentation and examples may only use `example.com`, loopback addresses, and obvious placeholders.
+- Run `bash scripts/secret-leak-check.sh --strict` before committing.
 
-如果凭证曾进入 Git 历史，应立即轮换凭证，并在发布仓库前清理历史记录。
+If credentials have ever entered the Git history, they should be rotated immediately and the history should be cleaned before publishing the repository.
 
-## 文档
+## Document
 
-- 前端开发：`web/README.md`
+- Frontend development: `web/README.md`
 - Meta API：`docs/api/meta-api.openapi.yaml`
 - Knowledge API：`docs/api/knowledge-panel-api.md`
 - Chat Memory API：`docs/api/chat-memory.md`

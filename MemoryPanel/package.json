@@ -1,7 +1,7 @@
 {
   "name": "team-memory-control",
   "version": "0.1.0",
-  "description": "团队记忆管控平台 - 管理 team/user/agent/task 与四类资产",
+  "description": "Team Memory Management Platform - Manage team/user/agent/task and four types of assets",
   "type": "module",
   "engines": {
     "node": ">=22"
