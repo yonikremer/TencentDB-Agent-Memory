@@ -1,9 +1,9 @@
 /**
- * wiki-sources-panel.css —— Wiki 资产页样式。
+ * wiki-sources-panel.css — Wiki asset page styles.
  *
- * 列表页的页面外层 / 统计条 / 工具栏 / 骨架屏 / 卡片网格等公共结构已收敛到
- * ResourcePage/components/asset-card.css（与 Code 页共用），此处仅保留
- * Wiki 详情页（_wiki-detail-*）特有样式与差异化覆盖。
+ * The common structures of the list page, such as the page outer layer, statistics bar, toolbar, skeleton screen, and card grid, have been consolidated into
+ * ResourcePage/components/asset-card.css (shared with the Code page), and only the styles and differentiated overrides specific to the
+ * Wiki detail page (_wiki-detail-*) are retained here.
  */
 
 ._wiki-detail-tab-label,
@@ -126,9 +126,9 @@
   color: var(--tea-color-text-error-default);
 }
 
-/* 对齐 Mock Wiki 详情的 card-outline Tab：Tea 实际的单项容器是
- * `.tea-tabs__tabitem`（而非 `.tea-tabs__tab`），此前只给内部链接加边框，
- * 导致外层仍保留默认的文字 Tab 间距，看起来不像等宽描边卡片。 */
+/* Align the card-outline Tab of the Mock Wiki details: Tea's actual single item container is
+ * `.tea-tabs__tabitem` (rather than `.tea-tabs__tab`), and previously only borders were added to internal links,
+ * causing the outer layer to still retain the default text Tab spacing, making it look like it is not an equal-width outlined card. */
 ._wiki-detail-tabs .tea-tabs__tabbar {
   margin-bottom: 16px;
 }
@@ -137,8 +137,8 @@
   border-bottom-color: var(--tea-color-border-primary-default);
 }
 
-/* Tea 2.8 即使传入 disableTabScrolling，窄容器下仍可能保留内置翻页箭头。
- * 本页四个固定 Tab 不使用该交互，强制隐藏两个滚动控制。 */
+/* Tea 2.8 Even if disableTabScrolling is passed, built-in page turning arrows may still be retained in narrow containers.
+ * This page's four fixed Tabs do not use this interaction, and forcibly hides the two scroll controls. */
 ._wiki-detail-tabs .tea-tabs__backward,
 ._wiki-detail-tabs .tea-tabs__forward {
   display: none !important;
@@ -621,7 +621,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  /* 多选上传大量文档时，列表在容器内滚动，避免撑高整个对话框/页面 */
+  /* When uploading a large number of documents in multi-select mode, scroll the list within the container to avoid expanding the entire dialog/page */
   max-height: 240px;
   overflow-y: auto;
 }

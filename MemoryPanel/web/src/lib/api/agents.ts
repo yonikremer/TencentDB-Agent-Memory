@@ -1,33 +1,33 @@
 /**
- * api/agents.ts — Agent 管理（meta/agent/* + meta/agent-fixed-asset/*）。
+ * api/agents.ts — Agent management (meta/agent/* + meta/agent-fixed-asset/*).
  */
 import { getPanelSession } from '../panelSession';
 import { metaPost, metaListAll, getCurrentUser, request, ApiError } from './base';
 import type { MetaEnvelope, Agent, AssetType, AssetStatus, FixedAssetBinding } from './types';
 
-// ========================= 默认 Agent 模板 =========================
+// ========================= Default Agent Template =========================
 
 export interface AgentTemplateAssetIds {
-  /** 团队 skill ID（skl-xxx） */
+  /** Team skill ID (skl-xxx) */
   skills?: string[];
-  /** 团队 code graph ID（code-xxx） */
+  /** Team code graph ID (code-xxx) */
   code_graphs?: string[];
-  /** 团队 wiki ID（wiki-xxx） */
+  /** Team wiki ID (wiki-xxx) */
   wikis?: string[];
 }
 
 /**
- * 默认 Agent 模板配置（agent/get-default-template / set-default-template 的 template 结构）。
- * 注意：
- *   - asset_ids 为团队资产 ID 快照，只允许选 visibility=team 的公共资产；
- *   - 覆盖式写入：set 时需一次回传完整 template；
- *   - metadata_json 为 JSON 字符串，ui.role_prompt / ui.rules_prompt 存拆分 prompt。
+ * Default Agent template configuration (the template structure for agent/get-default-template / set-default-template).
+ * Note:
+ *   - asset_ids is a snapshot of team asset IDs; only public assets with visibility=team are allowed to be selected;
+ *   - Overwrite write: when setting, the complete template must be returned in a single response;
+ *   - metadata_json is a JSON string, and ui.role_prompt / ui.rules_prompt store the split prompts.
  */
 export interface AgentTemplateConfig {
   name: string;
   description?: string | null;
   prompt?: string | null;
-  /** 'private' | 'team'(默认) | 'restricted' */
+  /** 'private' | 'team'(default) | 'restricted' */
   visibility?: string;
   metadata_json?: string;
   asset_ids?: AgentTemplateAssetIds;
@@ -35,12 +35,12 @@ export interface AgentTemplateConfig {
 
 export const agentsApi = {
   /**
-   * 列出 team 下的 agents。
+   * List the agents under team.
    *
    * @param teamId team ID
-   * @param params.owner_user_id 可选：只返该 user owner 的 agent（"agent 私有可见性"场景，
-   *   如 Skill 面板固定资产 tab）；不传则返 team 全量。`agent/list` 支持
-   *   `team_id + owner_user_id` 组合过滤。
+   * @param params.owner_user_id Optional: only return agents of this user owner ("agent private visibility" scenario,
+   *    such as the Skill panel fixed assets tab); if not passed, return all team-wide. `agent/list` supports
+   *   `team_id + owner_user_id` combined filtering.
    */
   list: (teamId: string, params?: { owner_user_id?: string }) =>
     metaListAll<Agent>('agent/list', {
@@ -49,10 +49,10 @@ export const agentsApi = {
       owner_user_id: params?.owner_user_id,
     }),
 
-  /** agent 详情 */
+  /** agent details */
   get: (agentId: string) => metaPost<Agent>('agent/get', { agent_id: agentId }),
 
-  /** 创建 agent */
+  /** Create agent */
   create: async (
     teamId: string,
     data: { name: string; description?: string; prompt?: string; visibility?: string }
@@ -69,10 +69,10 @@ export const agentsApi = {
   },
 
   /**
-   * 更新 agent。
+   * Update agent.
    *
-   * `metadata_json` 是给前端自定义关系的兜底通道：后端 schema 未落地的展示字段
-   * （如 icon / accent / 关联 user 等 UI-only 字段）可以序列化进这里的自定义 namespace。
+   * `metadata_json` is the fallback channel for frontend custom relationships: display fields where the backend schema is not implemented
+   * (such as UI-only fields like icon / accent / related user, etc.) can be serialized into this custom namespace.
    */
   update: (
     agentId: string,
@@ -87,12 +87,12 @@ export const agentsApi = {
   ) => metaPost<Agent>('agent/update', { agent_id: agentId, ...data }),
 
   /**
-   * 删除 agent：走业务路由 /api/v1/agent/delete-cascade。
+   * Delete agent: go through business routing /api/v1/agent/delete-cascade.
    *
-   * 该路由会先把 owner_agent_id = 当前 agent 的所有 active skill 走 skill/delete，
-   * 全部成功后才调 meta/agent/archive；任一 skill 删失败即中断，agent 不会被 archive，
-   * 抛出 SKILL_DELETE_FAILED 让调用方给用户展示（错误 data 里带上已删的 skill_ids
-   * 和失败的 skill_id）。归档时后端会顺手清 chat_memory asset。
+   * This route first processes all active skills of the current agent with owner_agent_id via skill/delete,
+   * Only after all are successfully deleted does it call meta/agent/archive; if any skill deletion fails, the process is interrupted, and the agent is not archived,
+   * It throws SKILL_DELETE_FAILED so the caller can display it to the user (with the deleted skill_ids and failed skill_id included in the error data),
+   * When archiving, the backend also cleans up the chat_memory asset.
    */
   delete: async (agentId: string) => {
     const session = getPanelSession();
@@ -117,12 +117,12 @@ export const agentsApi = {
     }
   },
 
-  /** 获取 agent 的资产聚合视图（binding + asset 详情）。
-   *  用 metaListAll 翻页拉全量（list-with-detail 默认 limit 20，绑定资产一多会被截断）。
+  /** Get the aggregated asset view of the agent (binding + asset details).
+   *  Fetch the full list using metaListAll with pagination (list-with-detail defaults to a limit of 20, so it can be truncated when there are many bound assets).
    *
-   *  applyVisibilityFilter：默认 true（屏蔽已私密的绑定，用于普通展示）。
-   *  owner 视角管理自己的资产时应传 false —— 否则自己 owner 的 private skill
-   *  会被接口过滤掉，导致 fixed tab 拿不到它的 visibility、共享/私密切换按钮消失。 */
+   *  applyVisibilityFilter: defaults to true (hides private bindings for normal display).
+   *  When managing your own assets from the owner's perspective, pass false — otherwise your owner's private skills
+   *   will be filtered out by the interface, causing the fixed tab to miss their visibility, and the share/private toggle button to disappear. */
   getAssets: async (agentId: string, applyVisibilityFilter = true) => {
     const items = await metaListAll<{
       asset_id: string;
@@ -152,7 +152,7 @@ export const agentsApi = {
     }));
   },
 
-  /** 获取 agent 固定资产 binding（仅 binding 字段） */
+  /** Get agent fixed asset binding (only binding field) */
   getFixedAssets: async (agentId: string) => {
     const rows = await metaListAll<{
       asset_id: string;
@@ -168,7 +168,7 @@ export const agentsApi = {
     }));
   },
 
-  /** 全量设置 agent 固定资产 */
+  /** Set all agent fixed assets */
   setFixedAssets: async (agentId: string, bindings: FixedAssetBinding[]) => {
     const me = await getCurrentUser();
     await metaPost<{ ok: boolean }>('agent-fixed-asset/set', {
@@ -184,15 +184,15 @@ export const agentsApi = {
   },
 
   /**
-   * 读取当前 team 的默认 Agent 模板（按 实例 × 团队 隔离，无权限校验）。
-   * 未配置时后端返回 `{}`，调用方以 `data.name` 是否存在判断「未配置」。
+   * Read the current team's default Agent template (isolated by instance × team, no permission checks).
+   * When not configured, the backend returns `{}`, and the caller determines "not configured" by checking whether `data.name` exists.
    */
   getDefaultTemplate: (teamId: string) =>
     metaPost<AgentTemplateConfig>('agent/get-default-template', { team_id: teamId }),
 
   /**
-   * 配置/覆盖当前 team 的默认 Agent 模板（仅 system_admin，否则 403 permission_denied）。
-   * 覆盖式写入：必须一次回传完整 template。
+   * Configure/override the current team's default Agent template (system_admin only, otherwise 403 permission_denied).
+   * Overwrite write: must return the complete template in a single response.
    */
   setDefaultTemplate: (teamId: string, template: AgentTemplateConfig) =>
     metaPost<{ ok: boolean }>('agent/set-default-template', { team_id: teamId, template }),

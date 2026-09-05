@@ -22,7 +22,7 @@ import {
 
 const { RangePicker } = DatePicker;
 
-/** L0 角色 → 展示分组：user 右侧、system 通栏、其余（assistant/tool/...）左侧。 */
+/** L0 Role → Display Grouping: user on the right, system full-width, others (assistant/tool/...) on the left. */
 type L0Tone = 'user' | 'assistant' | 'system' | 'tool';
 function toneOfRole(role: string): L0Tone {
   if (role === 'user') return 'user';
@@ -31,9 +31,9 @@ function toneOfRole(role: string): L0Tone {
   return 'assistant';
 }
 
-/** 单条原子记忆的标题行：层级徽章 + 标题 + 时间 + 操作菜单（三点）+ 可选 chevron。
- *  L1 / L2 / L3 共用。L2 通过 expandable=true 额外渲染 chevron 并把整行做成可点击展开区。
- *  head 始终展示真实内容（不因加载态变骨架），加载正文时只有下方正文区显示骨架。 */
+/** Title line of a single atomic memory: hierarchy badge + title + time + action menu (three dots) + optional chevron.
+ *  Shared by L1 / L2 / L3. L2 additionally renders a chevron via expandable=true and makes the entire line a clickable expandable area.
+ *  head always displays the real content (not skeleton due to loading state); only the body area below shows skeleton when loading content. */
 function AtomicHead({
   layer,
   tone,
@@ -56,9 +56,9 @@ function AtomicHead({
   canCopyItem: boolean;
   onEdit?: (item: AtomicItem) => void;
   onCopy: () => void;
-  /** L2 为 true：渲染 chevron 展开箭头、整行可点击展开/折叠 */
+  /** L2 is true: render the chevron expand arrow, and the entire row is clickable to expand/collapse */
   expandable: boolean;
-  /** 是否已展开（L2：hasBody） */
+  /** Whether it has been expanded (L2: hasBody) */
   expanded: boolean;
   loading: boolean;
   onToggle?: () => void;
@@ -81,8 +81,8 @@ function AtomicHead({
             {time}
           </span>
         )}
-        {/* 操作菜单（三个点）置于时间右侧。三个点点击展开，支持编辑 / 复制。
-            L2 的 head 是可点击展开区域，需阻止冒泡避免误触发折叠。 */}
+        {/* The action menu (three dots) is placed to the right of the time. Clicking the three dots expands it, supporting editing / copying.
+            The head of L2 is the clickable expandable area, and it needs to prevent bubbling to avoid accidental triggering of folding. */}
         {hasActions && (
           <span
             className="_memory-detail-atomic-actions"
@@ -120,7 +120,7 @@ function AtomicHead({
         {expandable && (
           <span className="_memory-detail-atomic-chevron-btn" aria-hidden={loading}>
             {loading ? (
-              /* 展开加载中：chevron 位置显示 spinner，表示正在下载正文 */
+              /* Expanding loading: show spinner at chevron position, indicating that the main content is being downloaded */
               <span className="_memory-chat-more-spinner _memory-detail-atomic-spinner" />
             ) : (
               <span
@@ -128,8 +128,8 @@ function AtomicHead({
                 tabIndex={0}
                 aria-label={t('memory.detail.moreActions')}
                 onClick={(e) => {
-                  // chevron 独立可点：阻止冒泡后自行触发展开/折叠，
-                  // 避免落到相邻三点下拉的 stopPropagation 区域而“没反应”。
+                  // chevron is independently clickable: prevent bubbling to trigger its own expand/collapse,
+                  // to avoid falling into the stopPropagation area of the adjacent three-dot dropdown and "not responding".
                   e.stopPropagation();
                   onToggle?.();
                 }}
@@ -156,9 +156,9 @@ function AtomicHead({
   );
 
   if (expandable) {
-    // 用 div[role=button] 而非 <button>：head 内含 tea Button（真 button），
-    // button 嵌 button 是非法 HTML。loading 时禁用点击。
-    // 未展开（无正文且非加载中）不加 --with-body，故无底部横线；展开或加载中才加。
+    // Use div[role=button] instead of <button>: head contains tea Button (a real button),
+    // nesting button inside button is invalid HTML. Disable clicks while loading.
+    // Do not add --with-body (hence no bottom line) when not expanded (no content and not loading); add it when expanded or loading.
     return (
       <div
         role="button"
@@ -188,7 +188,7 @@ function AtomicHead({
   );
 }
 
-/** L1 / L3 原子记忆列表：正文直接展示（无折叠展开）。 */
+/** L1 / L3 Atomic memory list: displayed directly in the body (no collapse/expand). */
 function AtomicList({
   layer,
   items,
@@ -200,11 +200,11 @@ function AtomicList({
   layer: MemoryLayer;
   items: AtomicItem[];
   loadingItemId?: string | null;
-  /** 当前层是否受时间筛选影响（仅 L1）：影响空态文案的语境 */
+  /** Whether the current layer is affected by time filtering (L1 only): affects the context of empty state copy */
   timeFiltered?: boolean;
-  /** 是否显示每条的编辑入口（仅资产 Owner） */
+  /** Whether to show the edit entry for each item (Asset Owner only) */
   canEdit?: boolean;
-  /** 点击编辑单条 */
+  /** Click to edit a single item */
   onEdit?: (item: AtomicItem) => void;
 }) {
   const { t } = useTranslation();
@@ -293,7 +293,7 @@ function AtomicList({
   );
 }
 
-/** L2 场景记忆列表：正文按需加载、点击标题/chevron 折叠展开（带逐渐展开动画）。 */
+/** L2 Scene Memory List: Body loaded on demand, click title/chevron to collapse/expand (with gradual expand animation). */
 function L2AtomicList({
   items,
   onLoadItem,
@@ -304,9 +304,9 @@ function L2AtomicList({
   items: AtomicItem[];
   onLoadItem?: (itemId: string) => void;
   loadingItemId?: string | null;
-  /** 是否显示每条的编辑入口（仅资产 Owner） */
+  /** Whether to show the edit entry for each item (Asset Owner only) */
   canEdit?: boolean;
-  /** 点击编辑单条 */
+  /** Click to edit a single item */
   onEdit?: (item: AtomicItem) => void;
 }) {
   const { t } = useTranslation();
@@ -325,12 +325,12 @@ function L2AtomicList({
         const hasBody = it.body.trim().length > 0;
         const loading = loadingItemId === it.id;
         const time = formatDisplayTime(it.created_at);
-        // 编辑入口（仅 Owner）。L2 需先展开加载正文后才可编辑，避免用空正文覆盖文件。
+        // Edit entry (Owner only). L2 must expand and load the main content before editing to avoid overwriting the file with empty content.
         const canEditItem = !!(canEdit && onEdit && hasBody);
-        // 复制入口：L2 有正文才可复制（未展开时无正文）。
+        // Copy entry: L2 can only be copied when there is body text (no body text when not expanded).
         const canCopyItem = hasBody;
         async function handleCopy() {
-          // L2 正文带 META 头，复制时去掉，只给纯正文，与编辑框展示保持一致。
+          // L2 body with META header, remove when copying, only provide pure body, consistent with editor display.
           const ok = await copyToClipboard(stripScenarioMeta(it.body));
           if (ok) {
             tea.notify.success(t('memory.notify.copied'));
@@ -354,9 +354,9 @@ function L2AtomicList({
               loading={loading}
               onToggle={() => onLoadItem?.(it.id)}
             />
-            {/* L2 正文按需加载、可折叠：外层用 grid 0fr↔1fr 过渡实现逐渐展开/收起动画。
-                容器常驻 DOM，展开时高度从 0 平滑展开，避免条件渲染导致的瞬时跳变。
-                加载中同样展开（--open），显示多行骨架条，贴合正文展开后的真实形态。 */}
+            {/* L2 Body lazy-loaded and collapsible: the outer grid uses a 0fr↔1fr transition to achieve a gradual expand/collapse animation.
+                The container remains in the DOM, and its height smoothly expands from 0 when opened, avoiding instantaneous jumps caused by conditional rendering.
+                It is also expanded during loading (--open) to display a multi-line skeleton, matching the real form after the body is expanded. */}
             <div
               className={`_memory-detail-atomic-expand${
                 hasBody || loading ? ' _memory-detail-atomic-expand--open' : ''
@@ -425,51 +425,51 @@ export function BlockDetail({
   agentLabel: (id?: string) => string;
   layerPage: number;
   layerPageSize: number;
-  /** 当前层「当前时间窗口内」的总条数（带时间筛选时后端返回的窗口内 total，用于分页） */
+  /** Total count for the current layer within the current time window (the window total returned by the backend when time filtering is applied, used for pagination) */
   layerTotal: number;
   layerLoading: boolean;
   onLayerPageChange: (page: number) => void;
   onLayerItemLoad?: (itemId: string) => void;
   layerItemLoadingId?: string | null;
-  /** L0 加载更多（追加更早的对话）；未传则不展示加载入口 */
+  /** L0 Load more (append earlier conversations); do not show the load entry if not passed */
   onL0LoadMore?: () => void;
   l0MoreLoading?: boolean;
-  /** 详情页时间筛选器（仅 L0 / L1 生效）。start / end 为 ISO8601 字符串 */
+  /** Detail page time filter (only effective for L0 / L1). start / end are ISO8601 strings */
   timeRange?: { start: string; end: string };
   onTimeRangeChange?: (range: { start: string; end: string }) => void;
-  /** 后端探测到筛选范围过大（VDB 无法支撑）时为 true */
+  /** True when the backend detects that the filter range is too large (VDB cannot support it) */
   rangeTooLarge?: boolean;
-  /** 是否显示编辑入口（仅资产 Owner 可编辑） */
+  /** Whether to show the edit entry (only Asset Owner can edit) */
   canEdit?: boolean;
-  /** 保存单层内容（L1/L2/L3）；未传则不显示编辑入口 */
+  /** Save single-layer content (L1/L2/L3); no edit entry shown if not passed */
   onSaveLayerItem?: (
     l: 'L1' | 'L2' | 'L3',
     id: string,
     content: string,
   ) => Promise<void>;
-  /** 分层语义搜索（L0 = 对话消息，L1 = 原子记忆）；未传则不显示搜索框 */
+  /** Layered Semantic Search (L0 = Conversation Messages, L1 = Atomic Memory); no search box is displayed if not passed */
   onSearchLayer?: (l: 'L0' | 'L1', query: string) => Promise<ChatMemorySearchHit[]>;
 }) {
   const { t } = useTranslation();
   const LAYERS = useLayers();
-  // 分页只针对「当前时间窗口内」的条目：layerTotal 是窗口内总数（父级从 BFF 的
-  // res.total 取），列表数据也是窗口内的，两者一致才不会有「全量总页数翻到空页」。
-  // layerCounts 里的全量总数只用于层徽章计数，不参与分页。
+  // Pagination only applies to entries within the "current time window": layerTotal is the total count within the window (taken from BFF's
+  // res.total for the parent level), and the list data is also within the window, so they are consistent to avoid "full total page count flipping to an empty page".
+  // The full total count in layerCounts is only used for layer badge counts and does not participate in pagination.
   const total = layerTotal ?? getLayerCount(block, layer);
   const pageCount = Math.max(1, Math.ceil(total / layerPageSize));
-  // L0 改为「下拉加载更多」交互；L1 / L2 / L3 使用翻页器
+  // L0 Change to "Load More" interaction; L1 / L2 / L3 use a paginator
   const showPager = layer !== 'L0' && total > layerPageSize;
   const safePage = Math.min(layerPage, pageCount - 1);
-  // 时间筛选仅对按时间存储的 L0 / L1 生效
+  // Time filtering only applies to L0 / L1 stored by time
   const showTimeFilter = (layer === 'L0' || layer === 'L1') && !!timeRange && !!onTimeRangeChange;
   const rangeValue: [Moment, Moment] | undefined =
     timeRange && timeRange.start && timeRange.end
       ? [moment(timeRange.start), moment(timeRange.end)]
       : undefined;
-  // 上传者展示名（回退 user_id）
+  // Uploader display name (fallback to user_id)
   const uploaderName = useUserDisplayName(block.uploaded_by_user_id);
 
-  // ── 编辑（L1/L2/L3）──
+  // ── Edit (L1/L2/L3) ─
   const [editing, setEditing] = useState<{
     layer: 'L1' | 'L2' | 'L3';
     id: string;
@@ -480,7 +480,7 @@ export function BlockDetail({
 
   function openEdit(item: AtomicItem) {
     if (layer === 'L0') return;
-    // L2 正文带 META 头，编辑框只展示纯正文（写回时后端会用现有 META 重建）。
+    // L2 body with META header, the editor only displays the pure body (the backend will rebuild using the existing META when writing back).
     const draft = layer === 'L2' ? stripScenarioMeta(item.body) : item.body;
     setEditing({ layer: layer as 'L1' | 'L2' | 'L3', id: item.id, title: item.title });
     setEditContent(draft);
@@ -490,8 +490,8 @@ export function BlockDetail({
     setSaving(true);
     try {
       await onSaveLayerItem(editing.layer, editing.id, editContent);
-      // 搜索结果态：hook 的乐观更新只作用于分页列表，这里同步更新搜索结果条目，
-      // 否则搜索视图里刚编辑的那条正文不会刷新。
+      // Search result state: the optimistic update of the hook only applies to the paginated list, here we synchronously update the search result entries,
+      // otherwise the just-edited body text in the search view will not refresh.
       setSearchResults((prev) =>
         prev
           ? prev.map((it) =>
@@ -507,22 +507,22 @@ export function BlockDetail({
     }
   }
 
-  // ── 浏览 / 搜索 模式切换（仅 L0 / L1）──
-  // 浏览：按时间范围翻看记忆（时间倒序，分页 / L0 聊天流）。
-  // 搜索：按内容语义定位记忆（相关度排序）。二者意图不同，用显式模式切换互斥呈现，
-  // 避免「时间筛选器和搜索框并列却互不联动」造成的心智割裂。
+  // ── Browse / Search Mode Toggle (L0 / L1 Only) ──
+  // Browse: View memories by time range (reverse chronological order, paginated / L0 chat flow).
+  // Search: Locate memories by content semantics (sorted by relevance). The two have different intents, so use an explicit mode toggle to mutually present them,
+  // to avoid the mental fragmentation caused by "the time filter and search box being side-by-side yet not linked to each other."
   type DetailMode = 'browse' | 'search';
   const [mode, setMode] = useState<DetailMode>('browse');
 
-  // ── 分层搜索（L0 对话 / L1 原子记忆，跨 session 语义召回）──
+  // ── Layered Search (L0 Dialogue / L1 Atomic Memory, Cross-session Semantic Recall) ──
   const [searchInput, setSearchInput] = useState('');
   const [searchResults, setSearchResults] = useState<ChatMemorySearchHit[] | null>(null);
   const [searching, setSearching] = useState(false);
   const searchable = layer === 'L0' || layer === 'L1';
-  // 仅「搜索模式 + 已产生结果」才进入搜索结果视图；浏览模式始终走分页 / 聊天流。
+  // Only enter the search results view when in "search mode + results have been generated"; browsing mode always goes through pagination / chat flow.
   const isSearching = searchable && mode === 'search' && searchResults !== null;
 
-  // 切块 / 切层时清空搜索态并回到浏览模式，避免把上一个上下文的结果 / 模式带过来
+  // Clear the search state and return to browse mode when chunking / layering, to avoid carrying over the previous context's results / mode
   useEffect(() => {
     setSearchResults(null);
     setSearchInput('');
@@ -547,13 +547,13 @@ export function BlockDetail({
     setSearchInput('');
   }
 
-  // ── L0 滚动容器与锚点 ──
-  // l0HasMore：已加载条数 < 后端总数。初次进入/切换块时滚到底部（最新消息）；
-  // 加载更多（旧消息插入顶部）后保持视口位置不跳动。
+  // ── L0 Scroll Container and Anchor ──
+  // l0HasMore: The number of loaded items is less than the total count from the backend. Scroll to the bottom (latest messages) when entering initially or switching blocks;
+  // After loading more (inserting old messages at the top), keep the viewport position stable to avoid jumping.
   const l0Total = getLayerCount(block, 'L0');
-  // 终止条件以「加载更早是否返回新增数据」为准（l0Ended），而非仅比较
-  // 已加载条数 vs 全量总数 —— 时间筛选下全量总数永远大于窗口内条数，
-  // 单靠长度比较会导致按钮一直显示且点击无反应。
+  // The termination condition is based on whether "loading earlier returns new data" (l0Ended), not merely by comparing
+  // the number of loaded items vs. the total count —— under time filtering, the total count is always greater than the number of items in the window,
+  // relying solely on length comparison will cause the button to remain displayed and clicking it will have no effect.
   const l0HasMore = !block.l0Ended && block.layers.L0.length < l0Total;
   const l0ScrollRef = useRef<HTMLDivElement>(null);
   const l0AnchorRef = useRef<'bottom' | number | null>(null);
@@ -563,8 +563,8 @@ export function BlockDetail({
   const l0Key = `${block.id}|${layer}`;
   if (l0KeyRef.current !== l0Key) {
     l0KeyRef.current = l0Key;
-    // 进入 L0 时设锚点滚到底部（最新消息）；离开 L0 也要更新 ref，
-    // 这样从 L1 切回 L0 时 key 不同才会重新触发滚到底部。
+    // Set the anchor to scroll to the bottom (latest message) when entering L0; also update ref when leaving L0,
+    // so that the key changes when switching back from L1 to L0 and triggers scrolling to the bottom again.
     if (layer === 'L0') {
       l0AnchorRef.current = 'bottom';
     }
@@ -590,9 +590,9 @@ export function BlockDetail({
     onL0LoadMore?.();
   }
 
-  // 滚到顶部自动触发「加载更早」——避免用户每次都得点按钮。
-  // 用 ref 记录上一次 scrollTop 位置，跨过 atTop 阈值才触发（atTop -> atTop 不重复），
-  // 避免锚点修正引发的链式自动加载。
+  // Automatically trigger "Load Earlier" when scrolling to the top — avoiding the need for users to click the button each time.
+  // Use a ref to record the previous scrollTop position, and only trigger after crossing the atTop threshold (atTop -> atTop does not repeat),
+  // to avoid chain automatic loading caused by anchor correction.
   function handleL0Scroll() {
     const el = l0ScrollRef.current;
     if (!el) return;
@@ -609,7 +609,7 @@ export function BlockDetail({
         <div className="_memory-detail-header-info">
           <div className="_memory-detail-title">
             <span className="_memory-detail-title-name">{block.title}</span>
-            {/* name + id 组合：id 弱化附在名字旁，便于用户识别 ID 化命名的资产 */}
+            {/* name + id combination: the id is weakened and attached to the name, making it easier for users to identify assets with ID-based naming */}
             <span className="_memory-detail-title-id" title={block.id}>
               {block.id}
             </span>
@@ -642,8 +642,8 @@ export function BlockDetail({
           </div>
         </div>
 
-        {/* 浏览 / 搜索 模式切换 + 模式对应控件（仅 L0 / L1）。
-            浏览：时间范围筛选器；搜索：搜索框。二者互斥，消除「控件在但没用」的误导。 */}
+        {/* Browse / Search mode toggle + corresponding controls (L0 / L1 only).
+            Browse: time range filter; Search: search box. The two are mutually exclusive, eliminating the misleading "control present but unused". */}
         {searchable && (showTimeFilter || onSearchLayer) && (
           <div className="_memory-detail-mode">
             <div className="_memory-detail-mode-switch" role="tablist">
@@ -668,7 +668,7 @@ export function BlockDetail({
               </button>
             </div>
 
-            {/* 浏览模式：时间范围筛选器（仅 L0 / L1 生效） */}
+            {/* Browsing mode: time range filter (only effective for L0 / L1) */}
             {mode === 'browse' && showTimeFilter && (
               <div className="_memory-detail-timefilter">
                 <RangePicker
@@ -718,7 +718,7 @@ export function BlockDetail({
         })}
       </div>
 
-      {/* 分层语义搜索：L0 对话 / L1 原子记忆（仅搜索模式显示） */}
+      {/* Layered Semantic Search: L0 Conversation / L1 Atomic Memory (Displayed only in Search Mode) */}
       {searchable && onSearchLayer && mode === 'search' && (
         <div className="_memory-detail-search">
           <Input
@@ -751,12 +751,12 @@ export function BlockDetail({
 
       <div className="_memory-detail-body">
         {layerLoading ? (
-          /* 进入某层时的加载态：按当前 layer 的真实形态给出对应骨架，
-             避免一刀切的灰条切换让用户对接下来会出现什么感到突兀。
-             L0 = IM 聊天气泡；L1/L2/L3 = 原子记忆条目（含展开行）。 */
+          /* Loading state when entering a layer: provide the corresponding skeleton based on the actual form of the current layer,
+             avoiding a one-size-fits-all gray bar transition that makes users feel abrupt about what will appear next.
+             L0 = IM chat bubble; L1/L2/L3 = atomic memory entries (including expanded rows). */
           <div className={`_memory-detail-skeleton _memory-detail-skeleton--${layer}`}>
             {layer === 'L0' ? (
-              /* L0 聊天流：交替显示 user（右侧）/assistant（左侧）气泡骨架 */
+              /* L0 Chat flow: alternately display user (right) / assistant (left) bubble skeletons */
               <>
                 {[0, 1, 2, 3, 4].map((i) => {
                   const isUser = i % 2 === 0;
@@ -783,7 +783,7 @@ export function BlockDetail({
                 })}
               </>
             ) : layer === 'L3' ? (
-              /* L3 核心记忆：单条占满，正文多行骨架，贴合 MarkdownView 富文本 */
+              /* L3 Core Memory: Single entry fills, multi-line body skeleton, aligned with MarkdownView rich text */
               <>
                 <div className="_memory-detail-skel-atomic">
                   <div className="_memory-detail-skel-atomic-head">
@@ -804,9 +804,9 @@ export function BlockDetail({
                 </div>
               </>
             ) : layer === 'L2' ? (
-              /* 进入 L2：L2 正文按需加载（点 chevron 才下载），未展开时没有正文。
-                 加载态只画标题行 head（徽章 / 标题 / 时间 / 三点 / chevron），
-                 下方不渲染正文骨架，避免误导用户以为马上就有内容。 */
+              /* Enter L2: L2 body is loaded on demand (download only when chevron is clicked); no body is present when not expanded.
+                 The loading state only renders the title row head (badge / title / time / three-dots / chevron),
+                 and does not render the body skeleton below, to avoid misleading users into thinking content will appear immediately. */
               <div className="_memory-detail-skel-atomic _memory-detail-skel-atomic--l2 _memory-detail-skel-atomic--headonly">
                 <div className="_memory-detail-skel-atomic-head">
                   <div className="_memory-detail-skel-block _memory-detail-skel-block--layer _memory-detail-skel-block--success" />
@@ -817,7 +817,7 @@ export function BlockDetail({
                 </div>
               </div>
             ) : (
-              /* L1 原子记忆：多条卡片骨架，每条 = 标题头 + 正文 1-2 行 */
+              /* L1 Atomic Memory: multiple card skeletons, each = title header + body 1-2 lines */
               <>
                 {[0, 1, 2, 3].map((i) => (
                   <div
@@ -840,8 +840,8 @@ export function BlockDetail({
             )}
           </div>
         ) : searchable && mode === 'search' && searchResults === null ? (
-          /* 搜索模式但尚未执行搜索：给出引导，不落到浏览列表（否则模式切换后内容不变会误导）。
-             置于 rangeTooLarge 之前——搜索不受时间范围限制，不应被「范围过大」遮挡。 */
+          /* Search mode but search not yet executed: provide guidance, do not fall into the browse list (otherwise, after mode switching, the unchanged content will mislead).
+             Place before rangeTooLarge — search is not limited by time range and should not be obstructed by "range too large". */
           <div className="_memory-detail-empty">{t('memory.detail.searchPrompt')}</div>
         ) : !isSearching && rangeTooLarge ? (
           <div className="_memory-detail-empty _memory-detail-empty--warn">
@@ -852,7 +852,7 @@ export function BlockDetail({
             searchResults!.length === 0 ? (
               <div className="_memory-detail-empty">{t('memory.detail.searchEmpty')}</div>
             ) : (
-              /* L0 搜索结果：对话消息样式（角色 + 气泡 + 相关度） */
+              /* L0 Search Results: Dialog Message Styles (Role + Bubble + Relevance) */
               <div className="_memory-chat-scroll">
                 <div className="_memory-chat-list">
                   {searchResults!.map((msg, idx) => {
@@ -891,8 +891,8 @@ export function BlockDetail({
             )
           ) : block.layers.L0.length > 0 ? (
             <div className="_memory-chat-scroll" ref={l0ScrollRef} onScroll={handleL0Scroll}>
-              {/* 顶部：加载更早的对话（滚动到顶部自动触发，也可点击）。
-                  加载中 / 还有更多 / 已到底（l0Ended）/ 超过一页 时都保留顶部提示区 */}
+              {/* Top: Load earlier conversations (automatically triggered when scrolling to the top, or clickable).
+                  The top hint area stays visible during loading / has-more / reached-end (l0Ended) / spans-more-than-one-page states */}
               {(l0HasMore ||
                 l0MoreLoading ||
                 block.l0Ended ||
@@ -917,14 +917,14 @@ export function BlockDetail({
                 </div>
               )}
               <div className="_memory-chat-list">
-                {/* 后端按最新对话从上到下返回，聊天视图需要反转为「旧在上、新在下」 */}
+                {/* Backend returns from the latest conversation top to bottom, and the chat view needs to reverse it to "old on top, new on bottom" */}
                 {[...block.layers.L0].reverse().map((msg, idx) => {
                   const role = extractRole(msg.role || msg.title || '');
                   const cleanBody = stripAtMention(msg.body);
                   const tone = toneOfRole(role);
                   const time = formatDisplayTime(msg.created_at);
 
-                  // system：居中通栏胶囊提示，不走头像+气泡布局
+                  // system: Centered full-width capsule prompt, not avatar + bubble layout
                   if (tone === 'system') {
                     return (
                       <div key={msg.id || idx} className="_memory-chat-system">
@@ -967,7 +967,7 @@ export function BlockDetail({
           searchResults!.length === 0 ? (
             <div className="_memory-detail-empty">{t('memory.detail.searchEmpty')}</div>
           ) : (
-            /* L1 搜索结果：原子记忆样式（L0 搜索已在 L0 分支渲染聊天样式） */
+            /* L1 Search Results: Atomic Memory Styles (L0 Search has already rendered Chat Styles in the L0 branch) */
             <AtomicList
               layer={layer}
               items={searchResults!}
@@ -978,7 +978,7 @@ export function BlockDetail({
             />
           )
         ) : layer === 'L2' ? (
-          /* L2 场景记忆：独立组件，正文按需加载 + 折叠展开动画 */
+          /* L2 Scene Memory: Standalone component, body loaded on demand + collapse/expand animation */
           <L2AtomicList
             items={block.layers.L2}
             onLoadItem={onLayerItemLoad}
@@ -1011,7 +1011,7 @@ export function BlockDetail({
         )}
       </div>
 
-      {/* 编辑 Modal（L1/L2/L3 通用）：正文用多行输入覆盖写 */}
+      {/* Edit Modal (L1/L2/L3 general): body uses multi-line input to overwrite */}
       {editing && (
         <Modal
         visible

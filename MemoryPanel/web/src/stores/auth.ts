@@ -1,18 +1,18 @@
 /**
  * Auth Store (zustand)
  *
- * 对接新面板 Control（无 Cookie、无状态代理，见 09 设计文档 §3.3）。
- * 登录凭证（instance_id + user_key）缓存在 localStorage（lib/panelSession.ts），
- * "退出登录"/"会话失效"都只是清本地缓存，Control 无登出 API、无服务端会话表。
+ * Connect to new panel Control (no Cookie, no stateful proxy, see 09 design doc §3.3).
+ * Login credentials (instance_id + user_key) are cached in localStorage (lib/panelSession.ts),
+ * "Log out"/"Session expired" both only clear the local cache; Control has no logout API and no server-side session table.
  *
- * 多 tab 同步：通过 storage 事件监听 localStorage 变化。
- *   - 其他 tab 登录 → 本 tab 自动恢复登录态（checkSession）
- *   - 其他 tab 登出 / 401 → 本 tab 自动退出到 LoginGate
+ * Multi-tab sync: listen to localStorage changes via storage events.
+ *   - Other tabs log in → this tab automatically restores login state (checkSession)
+ *   - Other tabs log out / 401 → this tab automatically exits to LoginGate
  *
- * auth 三态：
- *   - null      检测登录态中（App 启动时调 checkSession 读取 localStorage 缓存）
- *   - undefined 确认未登录 → 渲染 LoginGate
- *   - AuthState 已登录 → 渲染主界面
+ * auth three states:
+ *   - null       Detect logged-in state (call checkSession at App startup to read localStorage cache)
+ *   - undefined Confirm not logged in → render LoginGate
+ *   - AuthState logged in → render main interface
  */
 import { create } from 'zustand';
 import { readAuth, clearAuth, resumeSession, type AuthState } from '@/components/LoginGate';
@@ -23,11 +23,11 @@ const PANEL_SESSION_KEY = 'tdai-panel.session';
 
 interface AuthStore {
   auth: AuthState | null | undefined;
-  /** 登录成功后写入（LoginGate 的 onLoggedIn 回调） */
+  /** Login success write (LoginGate's onLoggedIn callback) */
   setAuth: (auth: AuthState) => void;
-  /** 退出登录：清本地 localStorage 会话，回到 LoginGate（无后端调用） */
+  /** Logout: clear local localStorage session and return to LoginGate (no backend call) */
   logout: () => Promise<void>;
-  /** App 启动时读取 localStorage 缓存；不管结果如何都会把 auth 从 null 推进到确定态 */
+  /** Read localStorage cache when App starts; regardless of the result, advance auth from null to a determined state */
   checkSession: () => Promise<void>;
 }
 
@@ -39,13 +39,13 @@ export const useAuthStore = create<AuthStore>((set) => ({
   },
 
   logout: async () => {
-    // 新面板无服务端会话，登出即清本地缓存，无需（也没有）后端登出接口。
-    // 清模块级后端缓存（teams/agents/tasks），避免新用户登录后短暂看到上一个用户的列表。
-    // 用 clearBackendCache 而非 invalidateBackendCache：后者会广播事件触发已挂载页面的
-    // refetch listener，此时还在用旧 session Header 发请求，会把旧数据重新拉回来；
-    // 这里只清缓存，让新用户登录挂载组件时自然走首次拉取。
+    // The new panel has no server-side session, so clearing the local cache on logout is sufficient; there is no (and no need for) backend logout endpoint.
+    // Clear the module-level backend cache (teams/agents/tasks) to avoid new users briefly seeing the previous user's list after login.
+    // Use clearBackendCache instead of invalidateBackendCache: the latter broadcasts an event that triggers refetch listeners on mounted pages,
+    // causing requests to be sent with the old session Header and re-fetching old data;
+    // here we only clear the cache, allowing the newly logged-in user's mounted component to naturally perform the first fetch.
     clearBackendCache();
-    // activeTeamId 可能指向旧用户才有权限的 team，清掉避免新用户登录后选了一个没权限的 team。
+    // activeTeamId may point to a team that only old users have access to, clear it to avoid new users selecting a team without permissions after login.
     writeActiveTeamId(null);
     clearAuth();
     set({ auth: undefined });
@@ -63,35 +63,35 @@ export const useAuthStore = create<AuthStore>((set) => ({
 }));
 
 /**
- * 跨 tab 同步：监听 localStorage 的 storage 事件。
+ * Cross-tab sync: listen to the storage event of localStorage.
  *
- * storage 事件只在"其他 tab"修改 localStorage 时触发（本 tab 的写入不会触发），
- * 非常适合做跨 tab 状态同步。
+ * The `storage` event is only triggered when `localStorage` is modified in "other tabs" (writes in this tab do not trigger it),
+ * It is very suitable for cross-tab state synchronization.
  *
- *   - 其他 tab 登录（写入 tdai-panel.session）→ 本 tab 恢复登录态
- *   - 其他 tab 登出 / 401（删除 tdai-panel.session）→ 本 tab 退出到 LoginGate
+ *   - Other tab login (write tdai-panel.session) → restore login state in this tab
+ *   - Other tab logout / 401 (delete tdai-panel.session) → exit this tab to LoginGate
  */
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (e) => {
     if (e.key !== PANEL_SESSION_KEY) return;
 
     if (e.newValue === null) {
-      // 其他 tab 登出了 → 本 tab 同步退出
+      // Other tabs logged out → This tab exits synchronously
       clearBackendCache();
       writeActiveTeamId(null);
       clearAuth();
       useAuthStore.setState({ auth: undefined });
     } else {
-      // 其他 tab 登录了 → 本 tab 恢复登录态
+      // Other tab logged in → This tab restores login state
       void useAuthStore.getState().checkSession();
     }
   });
 }
 
-// 任意 meta 请求返回 HTTP 401 时（如 Control 校验错误落在该码），全局清会话回到登录页。
-// 新面板下这不是主要的登出触发路径（主动登出走 logout()），仅作兜底。
-// 与 logout() 一样清缓存，否则 401 重登后仍会短暂看到上个用户的列表。
-// 只需在 store 模块加载时注册一次。
+// When any meta request returns HTTP 401 (such as a Control validation error falling under this code), clear the global session and return to the login page.
+// Under the new panel, this is not the primary logout trigger path (active logout goes through logout()), it is only a fallback.
+// Clear the cache just like logout(), otherwise after re-logging in due to 401, you will still briefly see the previous user's list.
+// Just register it once when the store module is loaded.
 onUnauthorized(() => {
   clearBackendCache();
   writeActiveTeamId(null);

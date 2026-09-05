@@ -1,7 +1,7 @@
 /**
- * WorkbenchPage — 任务看板页面
+ * WorkbenchPage — Task Kanban Page
  *
- * ConsoleLayout 已提供 Content + Content.Body 包裹，页面只需渲染内容。
+ * ConsoleLayout provides Content + Content.Body wrapping, so the page only needs to render the content.
  */
 import { useMemo } from 'react';
 import { useAuthStore } from '@/stores/auth';

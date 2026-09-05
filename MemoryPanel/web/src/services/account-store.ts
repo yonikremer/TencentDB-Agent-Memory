@@ -1,14 +1,14 @@
 /**
- * account-store.ts — 演示阶段的本地账号表（本地 localStorage）。
+ * account-store.ts — Demo-stage local account table (local localStorage).
  *
- * 从原 demoStore.ts 中抽出。
+ * Extracted from the original demoStore.ts.
  *
- * email → { username, password, isAdmin } 的本地账号体系，供旧版
- * 用户名密码登录使用。链路 A（新面板 Control）已切换到 user_key 鉴权，
- * 这套账号体系仅作历史兼容保留（`addTeamMember` 的 requireAccount 校验
- * 仍会用到 findAccountByUsername）。
+ * email → { username, password, isAdmin } local account system, for the old version
+ * Username and password login in use. Link A (new panel Control) has switched to user_key authentication,
+ * This account system is retained only for historical compatibility (the `addTeamMember` `requireAccount` validation
+ Still uses findAccountByUsername).
  *
- * 后端上线后替换成真正的用户中心 API 即可。
+ * Replace with the actual user center API after the backend goes live.
  */
 
 import i18n from '@/i18n';
@@ -16,8 +16,8 @@ import i18n from '@/i18n';
 const ACCOUNTS_KEY = 'tdai-memory.accounts.v1';
 
 /**
- * 生成 12 位随机密码，用作 mock 创建账号时的 fallback（用户未显式填时使用）。
- * 只是 demo 用途，不承载真实凭证 —— 但避免硬编码 `123123` 弱口令入 bundle。
+ * Generate a 12-digit random password to be used as a fallback when creating mock accounts (used when the user does not explicitly fill it in).
+ * This is for demo purposes only and does not carry real credentials — but avoid hardcoding the weak password `123123` into the bundle.
  */
 function genRandomPassword(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
@@ -37,11 +37,11 @@ export interface MockAccount {
 }
 
 function getDefaultAccounts(): MockAccount[] {
-  // 空种子：不再硬编码任何真实用户名/密码。
-  // 历史上这里列过 6 个内部员工英文名 + 弱口令 `123123`（会 bundle 进前端 JS，
-  // 客户拿到镜像开 devtools 就能看到 → 员工身份泄漏）。remote 上一版改成
-  // alice/bob 等通用假名但仍保留 `123123`，本版继续彻底空 —— 用户按需自建。
-  // 链路 A 已切 user_key 鉴权，本 mock 只服务 `addTeamMember` 的 findAccountByUsername。
+  // Empty seed: no real usernames/passwords are hardcoded anymore.
+  // Historically, this listed 6 internal employee English names + weak password `123123` (which would be bundled into frontend JS,
+  // so customers could see it when opening devtools on the image → employee identity leakage). The remote version changed it to
+  // generic pseudonyms like alice/bob but still kept `123123`; this version continues to be completely empty — users build their own as needed.
+  // Link A has switched to user_key authentication, and this mock only serves `addTeamMember`'s findAccountByUsername.
   return [];
 }
 
@@ -57,7 +57,7 @@ function readAccounts(): MockAccount[] {
   try {
     const raw = localStorage.getItem(ACCOUNTS_KEY);
     if (!raw) {
-      // 首次使用：把硬编码的种子账号写入 localStorage
+      // First use: write the hardcoded seed account to localStorage
       const seeds = getDefaultAccounts();
       writeAccountsRaw(seeds);
       return seeds;
@@ -78,18 +78,18 @@ function readAccounts(): MockAccount[] {
   }
 }
 
-/** 用邮箱查账号（不区分大小写） */
+/** Find account by email (case insensitive) */
 export function findAccountByEmail(email: string): MockAccount | null {
   const e = email.trim().toLowerCase();
   return readAccounts().find((a) => a.email.toLowerCase() === e) ?? null;
 }
 
-/** 用 username 查账号 */
+/** Query account with username */
 export function findAccountByUsername(username: string): MockAccount | null {
   return readAccounts().find((a) => a.username === username) ?? null;
 }
 
-/** 校验邮箱 + 密码登录 */
+/** Validate email + password login */
 export function verifyAccountCredentials(email: string, password: string): MockAccount {
   const e = email.trim().toLowerCase();
   if (!e) throw new Error(i18n.t('account.error.emailRequired'));
@@ -100,8 +100,8 @@ export function verifyAccountCredentials(email: string, password: string): MockA
   return account;
 }
 
-/** 创建单个账号（admin 专有权限，权限校验在 UI 层）。
- *  用户名允许重复，邮箱全局唯一。 */
+/** Create a single account (admin exclusive permission, permission validation is at the UI layer).
+ *   Username allows duplicates, email is globally unique. */
 export function createAccount(input: { email: string; username: string; password?: string; isAdmin?: boolean; description?: string }): MockAccount {
   const e = input.email.trim().toLowerCase();
   if (!e) throw new Error(i18n.t('account.error.emailEmpty'));
@@ -113,7 +113,7 @@ export function createAccount(input: { email: string; username: string; password
   const account: MockAccount = {
     email: input.email.trim(),
     username: input.username.trim(),
-    // fallback 随机密码 —— 避免硬编码弱口令；未来切真用户中心可去掉
+    // fallback random password - avoid hardcoded weak passwords; can be removed when switching to real user center
     password: input.password || genRandomPassword(),
     isAdmin: input.isAdmin ?? false,
     description: input.description?.trim() || undefined,
@@ -122,7 +122,7 @@ export function createAccount(input: { email: string; username: string; password
   return account;
 }
 
-/** 批量创建账号 */
+/** Batch create accounts */
 export function batchCreateAccounts(
   entries: Array<{ email: string; username: string; description?: string }>
 ): { created: MockAccount[]; errors: Array<{ email: string; error: string }> } {
@@ -160,7 +160,7 @@ export function batchCreateAccounts(
   return { created, errors };
 }
 
-/** 修改密码 */
+/** Change Password */
 export function changePassword(username: string, oldPassword: string, newPassword: string): void {
   if (!oldPassword) throw new Error(i18n.t('account.error.currentPasswordRequired'));
   if (!newPassword) throw new Error(i18n.t('account.error.newPasswordRequired'));
@@ -174,8 +174,8 @@ export function changePassword(username: string, oldPassword: string, newPasswor
 }
 
 /**
- * Admin 直接设置任意用户的密码（不需要旧密码）。
- * 权限校验在 UI 层（仅 admin 可调用）。
+ * Admin directly sets any user's password (no old password required).
+ * Permission verification is at the UI layer (only admin can call it).
  */
 export function setAccountPassword(username: string, newPassword: string): void {
   if (!newPassword) throw new Error(i18n.t('account.error.newPasswordRequired'));
@@ -188,7 +188,7 @@ export function setAccountPassword(username: string, newPassword: string): void 
   writeAccountsRaw(accounts);
 }
 
-/** 修改用户邮箱（admin 专有权限，权限校验在 UI 层） */
+/** Modify user email (admin exclusive permission, permission check is at the UI layer) */
 export function updateAccountEmail(username: string, newEmail: string): void {
   const e = newEmail.trim().toLowerCase();
   if (!e) throw new Error(i18n.t('account.error.emailEmpty'));
@@ -196,14 +196,14 @@ export function updateAccountEmail(username: string, newEmail: string): void {
   const accounts = readAccounts();
   const account = accounts.find((a) => a.username === username);
   if (!account) throw new Error(i18n.t('account.error.accountNotFoundByUsername', { username }));
-  // 检查邮箱是否已被其他人使用
+  // Check if the email has already been used by someone else
   const conflict = accounts.find((a) => a.email.toLowerCase() === e && a.username !== username);
   if (conflict) throw new Error(i18n.t('account.error.emailUsedByOther', { email: newEmail.trim() }));
   account.email = newEmail.trim();
   writeAccountsRaw(accounts);
 }
 
-/** 获取所有账号列表（admin 可见全部，普通用户只能看自己） */
+/** Get all account list (admin can see all, regular users can only see themselves) */
 export function getAllAccounts(): MockAccount[] {
   return readAccounts();
 }

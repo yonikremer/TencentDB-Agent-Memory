@@ -7,11 +7,11 @@ export default {
     extend: {
       colors: {
         /*
-         * 语义色 — 全部桥接到 Tea Design Token（--tea-color-*），
-         * 不再使用 shadcn 的 HSL 三元组体系。
-         * 具体别名映射见 src/index.css 中的 :root 定义。
-         * 注：Tailwind v3.4+ 的透明度修饰符（如 bg-primary/50）通过 color-mix()
-         * 实现，对任意合法 CSS 颜色值（包含 var() 引用）均生效，无需 <alpha-value> 占位符。
+         * Semantic colors — fully bridged to Tea Design Token (--tea-color-*),
+         * no longer using shadcn's HSL triple system.
+         * For specific alias mappings, refer to the :root definition in src/index.css.
+         * Note: Tailwind v3.4+ opacity modifiers (e.g., bg-primary/50) are implemented via color-mix()
+         * and work for any valid CSS color value (including var() references), without requiring the <alpha-value> placeholder.
          */
         background: {
           DEFAULT: 'var(--background)',
@@ -63,7 +63,7 @@ export default {
         ring: 'var(--ring)'
       },
       borderRadius: {
-        /* 对齐 Tea Design 圆角阶梯：2/4/6/8/12/16/20/30/9999px */
+        /* Align Tea Design rounded corners: 2/4/6/8/12/16/20/30/9999px */
         sm: '2px',
         DEFAULT: '4px',
         md: '4px',
@@ -74,21 +74,21 @@ export default {
         full: '9999px'
       },
       fontSize: {
-        /** 模板对齐：正文 14px/1.6，小字 12-13px */
+        /** Template alignment: body 14px/1.6, small text 12-13px */
         'body': ['14px', { lineHeight: '1.6', letterSpacing: '-0.01em' }],
         'body-sm': ['13px', { lineHeight: '1.5', letterSpacing: '-0.006em' }],
         'caption': ['12px', { lineHeight: '1.4' }],
         'label': ['11px', { lineHeight: '1.3' }],
       },
       spacing: {
-        /** 模板对齐的常用间隔 */
+        /** Common intervals for template alignment */
         '4.5': '1.125rem',
         '5.5': '1.375rem',
         '13': '3.25rem',
         '15': '3.75rem',
       },
       boxShadow: {
-        /* 直接引用 Tea 官方阴影 Token（--tea-shadow-*），不再手写 hsl() 阴影 */
+        /* Directly reference Tea official shadow Token (--tea-shadow-*), no longer manually write hsl() shadow */
         'card': 'var(--tea-shadow-xs)',
         'card-hover': 'var(--tea-shadow-md)',
       },

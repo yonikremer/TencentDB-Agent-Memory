@@ -1,11 +1,11 @@
 /**
- * services/index.ts — 领域服务门面
+ * services/index.ts — Domain Service Facade
  *
- * 组件统一从 @/services 导入。
- * Team / Agent / Task 已切换到后端链路 A（services/backendStore.ts，
- * 内部调用 @/lib/teamApi 的 meta 接口）；
- * 其余（accounts / user profile / api key / asset scope / user asset / agent template）
- * 后端暂无对应能力，仍走本地 localStorage 演示层（按职责拆分到独立文件），后续逐个替换。
+ * Components are uniformly imported from @/services.
+ * Team / Agent / Task have been switched to backend pipeline A (services/backendStore.ts,
+ * internally calling the meta interface of @/lib/teamApi);
+ * The rest (accounts / user profile / api key / asset scope / user asset / agent template)
+ * have no corresponding backend capabilities for now, and still use the local localStorage demo layer (split into separate files according to responsibilities), to be replaced one by one later.
  */
 
 // ===== Types =====
@@ -22,7 +22,7 @@ export type { AssetKind, AssetConfigScope, AssetScopeRecord } from './asset-scop
 export type { UserAssetKind, UserAsset } from './user-asset-store';
 export type { MockAccount } from './account-store';
 
-// ===== Team / Agent / Task service（链路 A，后端持久化）=====
+// ===== Team / Agent / Task service (Chain A, Backend Persistence) =====
 export {
   readActiveTeamId,
   writeActiveTeamId,
@@ -72,7 +72,7 @@ export {
   seedDisplayNameCache,
 } from './user-profile-store';
 
-// ===== API Key service（链路 A 辅助 REST，见 @/lib/teamApi 的 userKeysApi，ApiKeyPanel 直接调用）=====
+// ===== API Key service (Link A auxiliary REST, see @/lib/teamApi's userKeysApi, ApiKeyPanel calls directly)=====
 
 // ===== Asset scope service =====
 export {
@@ -91,7 +91,7 @@ export {
   getTeamVisibleAssets,
 } from './user-asset-store';
 
-// ===== Permission helpers（全局 admin 判断，纯前端 auth state 实现，无后端概念）=====
+// ===== Permission helpers (global admin check, pure frontend auth state implementation, no backend concept) =====
 export { isGlobalAdmin } from './permissions';
 
 // ===== Role hook =====

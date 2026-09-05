@@ -1,11 +1,11 @@
 /**
- * SkillsPanel 样式。
+ * SkillsPanel styles.
  *
- * 列表容器 / 分栏布局 / 骨架屏 / 列表项 4 行结构已由通用 AssetListPanel
- * （asset-list-panel.css）提供，此处仅保留 Skills 页的差异化覆盖：
- *   1. 页面外层 flex 布局
- *   2. 列表项删除按钮（hover / 选中时显示）
- *   3. 用户名徽章与时间戳的统一字号覆盖
+ * List container / column layout / skeleton screen / list item 4-row structure is provided by the generic AssetListPanel
+ * （asset-list-panel.css）, and here only the differentiated overrides for the Skills page are retained:
+ *   1. Outer flex layout of the page
+ *   2. List item delete button (shown on hover / when selected)
+ *   3. Unified font size override for the username badge and timestamp
  */
 ._memory-skills-body {
   display: flex;
@@ -13,9 +13,9 @@
   gap: 16px;
 }
 
-/* ===== 删除按钮：hover/selected 时显示。
-   列表项容器已重构为通用 _alp-item（见 AssetListPanel），
-   旧选择器 _memory-skill-item:hover 已失效导致按钮永远隐藏，改为挂到 _alp-item 上。 */
+/* ===== Delete button: shown on hover/selected.
+   The list item container has been refactored into a generic _alp-item (see AssetListPanel),
+   the old selector _memory-skill-item:hover has become invalid causing the button to always be hidden, so it is now attached to _alp-item. */
 ._memory-skill-item-delete {
   visibility: hidden;
   opacity: 0;
@@ -31,13 +31,13 @@
   opacity: 1;
 }
 
-/* ===== 通用 AssetListPanel 列表项在 Skills 页的字体统一覆盖 ===== */
-/* 用户名徽章：与时间戳统一字号（覆盖通用 ._alp-badge 的 11px） */
+/* ===== Universal AssetListPanel list item font unified override on Skills page ===== */
+/* Username badge: unify font size with timestamp (override the 11px of the general ._alp-badge) */
 ._memory-skills-body ._alp-item-badges ._alp-badge {
   font-size: 12px;
 }
 
-/* 时间戳：与用户名统一（通用 ._alp-item-time 已声明 12px，这里再兜底颜色一致） */
+/* Timestamp: Unified with username (general ._alp-item-time is declared as 12px, with a fallback for consistent color here) */
 ._memory-skills-body ._alp-item-badges ._alp-item-time {
   font-size: 12px;
   color: var(--tea-color-text-secondary);

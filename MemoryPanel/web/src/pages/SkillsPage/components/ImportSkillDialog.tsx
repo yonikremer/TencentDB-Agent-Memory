@@ -1,26 +1,26 @@
 /**
- * ImportSkillDialog — 导入 Skill 弹窗。仅支持两种导入方式：
+ * ImportSkillDialog — Import Skill dialog. Supports only two import methods:
  *
- *   1. 目录导入（directory）
- *      用户选一个本地目录，前端把里面的 File 拆成「主文件」（SKILL.md，
- *      必须在根目录或 <skill-name>/ 下）和「资源文件」（其他文件，保留
- *      相对路径）。走 v3 create 一次性落库（含资源，新建即 v1）。
- *      浏览器目录选择无 Tea 组件等价物，保留原生 <input type="file"
- *      webkitdirectory>，隐藏后由 Tea Button 触发。
+ *   1. Directory import (directory)
+ *       User selects a local directory, the frontend splits the files inside into "main file" (SKILL.md,
+ *       (must be in the root directory or <skill-name>/) and "resource files" (other files, keep
+ *       relative path). Run v3 create to persist to database at once (including resources, new ones are v1).
+ *       Browser directory selection has no Tea component equivalent, preserving native <input type="file"
+ *      webkitdirectory>, hidden and triggered by Tea Button.
  *
- *   2. 对话导入（session）
- *      用户粘贴一段与该 agent 的对话（skill/extract 接口入参 JSON，
- *      含 messages 数组）。前端只做 JSON 校验 + 用当前上下文 ID 覆盖
- *      身份字段，然后调 extractSkills。服务端 LLM 从对话里自动归纳
- *      skill 的 name / description / content，通过工具调用直接落库
- *      （走 SkillCore.create/update 同一条链路），不经过审核。
- *      支持 sync（直接返回结果）和 async（返回 task_id 即视为已受理，
- *      提示用户预计出结果时间后关闭弹窗，不在前端阻塞轮询 —— 结果会异步
- *      沉淀到该 agent 的 skill 列表，用户后续手动刷新即可看到）。
+ *   2. Conversational Introduction (session)
+ *       User pastes a conversation with the agent (the JSON input parameter for the skill/extract interface,
+ *       containing a messages array). The frontend only performs JSON validation + overwrites the identity field
+ *       with the current context ID, then calls extractSkills. The server-side LLM automatically summarizes
+ *       the skill's name / description / content from the conversation, and directly persists to the database
+ *       through tool calls (following the same chain as SkillCore.create/update), without going through review.
+ *       Support sync (directly return the result) and async (return a task_id, which is considered accepted,
+ *       prompt the user with the estimated result time before closing the popup, and do not block the frontend with polling -- the result will be
+ *       asynchronously accumulated into that agent's skill list, and the user can see it manually on the next refresh).
  *
- * 移除说明：原有的「粘贴 SKILL.md 文本」模式已下线 —— 目录导入已覆盖
- * 该场景，且用户手写 frontmatter 极易踩坑（name/description 缺失、
- * YAML 语法错），改由目录导入引导用户放好 SKILL.md 更稳。
+ * Remove note: The original "paste SKILL.md text" mode is now offline — directory import has replaced it
+ * This scenario, and users handwriting frontmatter are very prone to pitfalls (missing name/description,
+ * YAML syntax error), it is more stable to guide users to place SKILL.md properly via directory import.
  */
 
 import { useMemo, useRef, useState } from 'react';
@@ -127,7 +127,7 @@ function partitionFiles(files: File[]): {
 export default function ImportSkillDialog(props: {
   onClose: () => void;
   onImported: () => void;
-  /** 当前激活 team（skill 归属，create 必填） */
+  /** Currently active team (skill attribution, required for create) */
   teamId: string;
   /** Import target: 'team' = team pool (default), 'fixed' = agent fixed assets. */
   target?: 'team' | 'fixed';
@@ -135,13 +135,13 @@ export default function ImportSkillDialog(props: {
   agents?: Array<{ id: string; name: string }>;
   /** Pre-selected agent id (when target='fixed'). */
   agentId?: string;
-  /** 当前用户 ID（v3 API 必传） */
+  /** Current user ID (required for v3 API) */
   userId: string;
 }) {
   const [mode, setMode] = useState<Mode>('directory');
   const [pickedFiles, setPickedFiles] = useState<File[]>([]);
-  // session-import：用户粘贴 skill/extract 接口入参（含 messages 数组）。
-  // 服务端 LLM 从 messages 自行归纳 skill 的 name / description / content。
+  // session-import: User pastes the input parameters of the skill/extract interface (including the messages array).
+  // The server-side LLM independently summarizes the skill's name / description / content from messages.
   const [sessionPayload, setSessionPayload] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -166,7 +166,7 @@ export default function ImportSkillDialog(props: {
       }
       if (!props.teamId) throw new Error(t('importSkill.error.noTeam'));
 
-      // ==== 对话导入：直接调 skill/extract ====
+      // ==== Dialogue Import: Directly Call skill/extract ====
       if (mode === 'session') {
         const raw = sessionPayload.trim();
         if (!raw) throw new Error(t('importSkill.error.noPayload'));
@@ -183,18 +183,18 @@ export default function ImportSkillDialog(props: {
         if (msgs.length === 0) {
           throw new Error(t('importSkill.error.emptyMessages'));
         }
-        // 后端 extract 接口限制 messages 最多 500 条（见 iWiki §3.13），
+        // Backend extract interface limits messages to a maximum of 500 (see iWiki §3.13),
         if (msgs.length > 500) {
           throw new Error(t('importSkill.error.tooManyMessages', { count: msgs.length }));
         }
 
-        // 组装 extract 入参。身份字段（user_id/team_id/agent_id）强制用当前 UI
-        // 上下文覆盖，避免用户粘错 team / 伪造他人身份 —— 参见 <security_rules> §3。
-        // space_id 不需要显式传：跟其他 skill 接口一致, 后端从 X-Tdai-Service-Id
-        // header (= panelSession.instanceId) 取。session_id / task_id 也不传,
-        // 让后端生成 —— 避免前端硬编码 "default" / "import-${Date.now()}" 污染归档路径。
-        // extract 接口本身不接受 name/description 字段（skill 名和描述由 LLM
-        // 从 messages 中自行归纳），JSON 中即便带了这两个字段也不会透传给服务端。
+        // Assemble extract input parameters. The identity fields (user_id/team_id/agent_id) are forcibly overridden by the current UI context
+        // to prevent users from mistakenly sticking wrong teams or forging identities — see <security_rules> §3.
+        // space_id does not need to be explicitly passed: consistent with other skill interfaces, the backend retrieves it from the X-Tdai-Service-Id
+        // header (= panelSession.instanceId). session_id / task_id are also not passed,
+        // letting the backend generate them — to avoid frontend hardcoding "default" / "import-${Date.now()}" polluting archive paths.
+        // The extract interface itself does not accept name/description fields (skill name and description are provided by the LLM
+        // Independently summarized from messages), even if these two fields are included in the JSON, they will not be passed to the server.
         const extractParams: ExtractParams = {
           user_id: props.userId,
           team_id: props.teamId,
@@ -215,22 +215,22 @@ export default function ImportSkillDialog(props: {
               : undefined,
         };
 
-        // 后端 extract 恒走 archive → agent 队列 → worker 异步链路,
-        // 永远返回 task_id (没有 sync candidates 分支了)。前端拿到 task_id 即
-        // 视为"已受理"，提示预计出结果时间后关闭弹窗；结果由 SkillCoreSink 异步
-        // 写入 skill 表，用户回列表刷新即可看到。
+        // The backend extract always goes through the archive → agent queue → worker async chain,
+        // it always returns task_id (there is no sync candidates branch anymore). The frontend
+        // treats a received task_id as "accepted", prompts the estimated result time, and then closes the popup;
+        // the result is asynchronously written to the skill table by SkillCoreSink, and the user can refresh the list to see it.
         //
-        // 前端软超时兜底（5s）：archive 链路涉及 COS 顺序读写（读 _tasks.json →
-        // 写 data-xxx.jsonl → 写 _tasks.json），当 COS 慢时整体耗时容易超过
-        // Panel 后端 15s 硬超时（KERNEL_TIMEOUT/504），从而在 UI 上误报失败。
-        // 实际上请求已经在服务端排入队列，后端会继续跑完 archive。因此这里
-        // 5s 内后端有响应就按真结果走；5s 到点还没回就直接展示"已受理"文案，
-        // 不再阻塞用户 —— 后端调用在浏览器 fetch 层继续跑（不 abort），最坏
-        // 情况是 15s 后 Panel 回 504，我们的 catch 静默吞掉（用户已经看到成功了）。
+        // Frontend soft timeout fallback (5s): the archive pipeline involves sequential COS reads/writes (read _tasks.json →
+        // write data-xxx.jsonl → write _tasks.json), so when COS is slow, the overall duration easily exceeds
+        // the Panel backend 15s hard timeout (KERNEL_TIMEOUT/504), which falsely reports failure in the UI.
+        // In reality, the request has already been queued on the server, and the backend will continue to complete archive. Therefore,
+        // if the backend responds within 5s, proceed with the real result; if no response is received by the 5s mark, directly display the "Accepted" text,
+        // and no longer block the user -- the backend call continues running in the browser fetch layer (not abort), worst case
+        // The situation is that after 15s, the Panel returns 504, and our catch silently swallows it (the user has already seen success).
         const TIMEOUT_MS = 5000;
         let softTimedOut = false;
         const extractPromise = extractSkills(extractParams).catch((e) => {
-          // 如果已经软超时展示了成功文案，这里就静默吞掉后续错误（504 等）。
+          // If the success message has already been shown with a soft timeout, silently swallow subsequent errors (such as 504).
           if (softTimedOut) return null;
           throw e;
         });
@@ -244,15 +244,15 @@ export default function ImportSkillDialog(props: {
         } else if (raced) {
           setResult(t('importSkill.result.session', { taskId: raced.task_id }));
         } else {
-          // extractPromise 被软超时后 catch 成 null 的分支（正常不会走到这里，
-          // 因为软超时已经先设过 result 了），兜底保持一致文案。
+          // the branch where extractPromise is caught as null after soft timeout (normally won't be reached here,
+          // because result is set first by the soft timeout), keep the fallback copy consistent.
           setResult(t('importSkill.result.session.accepted'));
         }
         setTimeout(() => props.onImported(), 1500);
         return;
       }
 
-      // ==== 目录导入：走 v3 create + files/write ====
+      // ==== Directory import: use v3 create + files/write ====
       if (!partition?.mainFile) {
         throw new Error(partition?.warning ?? t('importSkill.error.noMainFile'));
       }
@@ -267,13 +267,13 @@ export default function ImportSkillDialog(props: {
         ({ path, file }) => ({ path, file, isBinary: !looksLikeText(file) }),
       );
 
-      // 确保 content 以 `---\n` 开头（v3 frontmatter 格式要求）。
+      // Ensure content starts with `---\n` (v3 frontmatter format requirement).
       const safeContent = content.trimStart().startsWith('---') ? content : `---\nname: ${name}\n---\n\n${content}`;
 
-      // 资源文件随 create 一次性落库（单版本 v1）。
-      // 修复：原实现是 create(resources=[] → v1) + files/write(→ v2) 两步，
-      // 导致任何带资源的导入 skill 一落库就是 v2（version 语义错乱）。
-      // v3 create 本身支持 resources 数组，合并为一次调用即可保证新建 skill = v1。
+      // Resource files are persisted to the database in one go with create (single version v1).
+      // Fix: the original implementation was create(resources=[] → v1) + files/write(→ v2) in two steps,
+      // which caused any imported skill with resources to be stored as v2 upon persistence (version semantics messed up).
+      // v3 create itself supports the resources array, so merging it into a single call ensures that a newly created skill = v1.
       const resources: SkillResourcePayload[] = resourceFiles.length > 0
         ? await Promise.all(
             resourceFiles.map(async ({ path, file, isBinary }) =>
@@ -287,7 +287,7 @@ export default function ImportSkillDialog(props: {
       await createSkill({
         user_id: props.userId,
         team_id: props.teamId,
-        agent_id: agentId || props.userId, // v3 要求 agent_id，固定模式用选中的，否则用 userId 兜底
+        agent_id: agentId || props.userId, // v3 requires agent_id, fixed pattern uses the selected one, otherwise uses userId as fallback
         name,
         content: safeContent,
         resources: resources.length ? resources : undefined,
@@ -302,18 +302,18 @@ export default function ImportSkillDialog(props: {
     }
   }
 
-  // 是否需要在弹窗内显示「归属 Agent」选择器：
-  //   - 仅 fixed-target 才有 agent 归属概念
-  //   - 必须传了 agents 才能渲染下拉
+  // Whether to show the "Belonging Agent" selector in the popup:
+  //   - Only fixed-target has the concept of agent belonging
+  //   - The dropdown must be rendered only when agents are passed
   const showAgentPicker = props.target === 'fixed' && !!props.agents;
 
   return (
     <Modal visible caption={t('importSkill.caption')} size="l" onClose={props.onClose} disableEscape={submitting}>
       <Modal.Body>
         <Alert type="info">{t('importSkill.hint')}</Alert>
-      {/* 归属 Agent —— 必选项。始终展示在导入方式上方，
-          与 ChatMemoryPanel.ImportBlockDialog 一致：即便外层已经传了 agentId
-          也允许在弹窗里重选。 */}
+      {/* Belongs to Agent —— Required. Always displayed above the import method,
+          Consistent with ChatMemoryPanel.ImportBlockDialog: even if agentId is passed from the outer layer
+          Also allows re-selection in the popup.
       {showAgentPicker && (
         <Form layout="vertical" style={{ width: '100%' }}>
           <Form.Item
@@ -335,7 +335,7 @@ export default function ImportSkillDialog(props: {
         </Form>
       )}
 
-      {/* Mode tabs：只保留 directory（目录导入）/ session（对话导入）两种 */}
+      {/* Mode tabs: only keep directory (directory import) / session (session import) */}
       <Segment
         className="_memory-isd-mode-segment"
         value={mode}
@@ -350,9 +350,9 @@ export default function ImportSkillDialog(props: {
         <div className="_memory-isd-section">
           <div className="_memory-isd-label">{t('importSkill.directory.label')}</div>
           {/*
-            目录选择无 Tea 组件等价物，此处保留原生 input 作为唯一豁免，隐藏后由下方
-            Tea Button 触发点击。webkitdirectory/directory 是非标准但广泛支持的浏览器
-            属性，React 类型定义未收录，用 spread + any 透传而非逐属性 @ts-expect-error。
+            The directory selection has no Tea component equivalent, so the native input is retained here as the sole exemption, hidden after the following
+            Tea Button triggers click. webkitdirectory/directory are non-standard but widely supported browsers
+            Attributes, React type definitions not included, pass through with spread + any instead of @ts-expect-error per attribute.
           */}
           <input
             ref={fileInputRef}

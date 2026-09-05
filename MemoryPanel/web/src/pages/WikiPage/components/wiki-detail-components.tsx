@@ -1,8 +1,8 @@
 /**
- * wiki-detail-components —— Wiki 详情页的展示子组件。
- * 从 WikiSourcesPanel.tsx 尾部拆出（WikiActions / ResizeHandle /
+ * wiki-detail-components —— The display sub-component for the Wiki detail page.
+ * Extracted from the end of WikiSourcesPanel.tsx (WikiActions / ResizeHandle /
  * GraphTabContent / PagesTabContent / RawFilesSection）。
- * 均为纯展示组件，数据与回调由外层注入，不含业务状态。
+ * All are purely display components, with data and callbacks injected by the outer layer, and do not contain business state.
  */
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -37,7 +37,7 @@ export function WikiActions({
   source: WikiDetail;
   scopeTab: WikiScopeTab;
   ingestBusy: boolean;
-  /** 当前这条 wiki 自身是否处于 ingest（pending / processing）状态 */
+  /** Whether the current wiki itself is in an ingest (pending / processing) state */
   isCurrentIngesting: boolean;
   onIngest: (wikiId: string) => void;
   onAllocate: (target: { wiki_id: string; name: string }) => void;
@@ -323,7 +323,7 @@ export function PagesTabContent({
 }
 
 // ═══════════════════════════════════════════
-// Raw Files Section — 原始文档列表，默认展开
+// Raw Files Section — Raw document list, expanded by default
 // ═══════════════════════════════════════════
 export function RawFilesSection({
   wikiId,
@@ -354,7 +354,7 @@ export function RawFilesSection({
       .finally(() => setLoading(false));
   }, [wikiId]);
 
-  // refreshKey 变化（如上传成功后）时强制重载原始文档列表，无需用户手动刷新。
+  // Force reload the original document list when refreshKey changes (e.g., after upload success), without requiring manual refresh from the user.
   useEffect(() => {
     reload();
   }, [reload, refreshKey]);
@@ -364,7 +364,7 @@ export function RawFilesSection({
     reload();
   }
 
-  // 加载中显示占位提示，避免请求期间直接渲染空态（return null）导致用户无感知。
+  // Show placeholder while loading to avoid rendering empty state (return null) directly during the request, causing users to be unaware.
   if (loading)
     return (
       <div className="_wiki-detail-rawfiles-loading">

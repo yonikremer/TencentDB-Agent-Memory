@@ -1,7 +1,7 @@
 /**
- * TabBar — 多标签页栏。
+ * TabBar — Multi-tab bar.
  *
- * 使用 Tea Design Token 统一样式。
+ * Use Tea Design Tokens to unify styles.
  */
 import { ITEM_ICON, usePageMeta, type PageId } from '@/constants/menu';
 import './style.css';

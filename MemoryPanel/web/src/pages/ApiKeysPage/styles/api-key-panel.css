@@ -60,7 +60,7 @@
  The reason for using `1fr 1fr` instead of `repeat(auto-fit, minmax(280px, 1fr))`:
  *   auto-fit + minmax(280, 1fr) will automatically
  *   Stack into a single column (triggers when the Card is narrowed, with the two endpoints arranged vertically
- *   宽度也不一致）。这里期望两个端点始终并排且等宽，所以强制 `1fr 1fr`，
+ *   and inconsistent widths). Here we expect the two endpoints to always sit side-by-side and equal width, so we force `1fr 1fr`,
  *   When the URL is too long, it is wrapped by `wordBreak: break-all` within the endpoint. */
 ._memory-apikey-endpoints {
   display: grid;

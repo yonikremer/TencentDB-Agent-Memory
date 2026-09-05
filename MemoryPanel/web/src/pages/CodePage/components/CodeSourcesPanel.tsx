@@ -1,7 +1,7 @@
 /**
- * CodeSourcesPanel —— Code 资产页主面板（列表视图 + 注册/分配组装）。
- * 列表视图渲染与组件组装；状态/数据逻辑在 useCodeSources，详情在 CodeDetailView，
- * Markdown 渲染统一走共享 AssetMarkdown。
+ * CodeSourcesPanel —— Code asset page main panel (list view + registration/allocation assembly).
+ * List view rendering and component assembly; state/data logic in useCodeSources, details in CodeDetailView,
+ * Markdown rendering uniformly goes through shared AssetMarkdown.
  */
 import { useTranslation } from 'react-i18next';
 import { Alert, Button, Card, Form, Input, Justify, MetricsBoard, Modal, SearchBox, Segment, Select, StatusTip, Table, Text } from 'tea-component';
@@ -117,7 +117,7 @@ export default function CodeSourcesPanel() {
               >
                 {t('code.allocateToAgent')}
               </Button>
-              {/* 注册（新增团队池资产）与 memory/skill 对齐，放右上角 header */}
+              {/* Register (add team pool assets) and align with memory/skill, place in top-right header */}
               <Button type="primary" onClick={() => setShowRegister(true)} data-guide="create-code">
                 + {t('code.register')}
               </Button>
@@ -436,7 +436,7 @@ export default function CodeSourcesPanel() {
           const trimmedRepo = formRepo.trim();
           const isSsh = trimmedRepo.startsWith('git@');
           const validUrl = isValidGitHttpUrl(trimmedRepo);
-          // 已输入内容、非 SSH、但又不是合法 http(s) 地址 → 提示格式错误。
+          // Input content is not entered, not SSH, and is not a valid http(s) address → prompt format error.
           const showUrlError = !!trimmedRepo && !isSsh && !validUrl;
           return (
             <Modal
@@ -493,7 +493,7 @@ export default function CodeSourcesPanel() {
           );
         })()}
 
-      {/* Allocate Code-Graph → Agent (固定资产) */}
+      {/* Allocate Code-Graph → Agent (Fixed Assets) */}
       {allocateTarget && (
         <AllocateAssetDialog
           assetType="code_graph"

@@ -1,6 +1,6 @@
 /**
- * WikiDetailView —— Wiki 详情视图（概览 / 图谱 / 页面 / 搜索 四个 Tab + 添加文档 Modal）。
- * 全部数据与回调来自 useWikiSources 的返回对象，组件只做渲染。
+ * WikiDetailView —— Wiki detail view (Overview / Graph / Page / Search tabs + Add Document Modal).
+ * All data and callbacks come from the return object of useWikiSources; the component only handles rendering.
  */
 import { useTranslation } from 'react-i18next';
 import { Alert, Button, Card, Input, MetricsBoard, Modal, Progress, SearchBox, StatusTip, TabPanel, Tabs, Tag, Text } from 'tea-component';
@@ -78,7 +78,7 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
   const source = sources.find((s) => s.wiki_id === selectedWikiId);
   const wikiName = source?.name ?? '';
 
-  // 选中 Wiki 已不存在（被删除或刷新失败）时给出可返回的空态，避免死胡同
+  // Show an empty state when Wiki is selected but does not exist (deleted or refresh failed), to avoid dead ends
   if (!source) {
     return (
       <Card>
@@ -601,8 +601,8 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
               multiple
               className="_wiki-detail-hidden-input"
               onChange={(e) => {
-                // accept 属性只是浏览器建议，用户可在选择器切换"所有文件"绕过，
-                // 这里做二次校验，与拖拽入口一致，避免二进制文件被读成乱码上传。
+                // The "accept" attribute is merely a browser suggestion, and users can bypass it by switching the selector to "all files",
+                // Here we perform a secondary verification, consistent with the drag-and-drop entry, to prevent binary files from being read as garbled text and uploaded.
                 const all = Array.from(e.target.files ?? []);
                 const allowed = all.filter((f) => WIKI_ALLOWED_FILE_RE.test(f.name));
                 const rejected = all.length - allowed.length;

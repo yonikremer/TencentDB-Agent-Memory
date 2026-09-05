@@ -1,16 +1,16 @@
 /**
- * api/meta-instances.ts — 登录前选实例（GET /api/v1/meta/instances）。
+ * api/meta-instances.ts — Select instance before login (GET /api/v1/meta/instances).
  */
 import { request, dedupeInFlight } from './base';
 
 /**
- * 客户端可见的实例元信息。
- *   - `api_key`（真 secret）不下发。
- *   - `gateway_endpoint` 是后端 → 内核的转发地址，也是"客户端接入 baseUrl"。
- *     不属于 secret；每个实例独立，前端不能硬编码。
- *   - `proxy_endpoint` 可选。本地部署时 core 和 proxy 分开，客户端要接的是
- *     proxy，需要显式配置这个字段。仅前端 UI "客户端接入地址" 卡片使用；后端
- *     转发始终走 `gateway_endpoint`，不受它影响。
+ * Instance metadata visible to the client.
+ *   - `api_key` (true secret) is not sent.
+ *   - `gateway_endpoint` is the backend → kernel forwarding address, and also the "baseUrl" for client access.
+ *     It is not a secret; it is independent for each instance, and the frontend cannot hardcode it.
+ *   - `proxy_endpoint` is optional. In local deployment, core and proxy are separate, and the client needs to connect to the
+ *     proxy, so this field needs to be explicitly configured. Only used in the frontend UI "Client Access Address" card; the backend
+ *     Forwarding always goes through `gateway_endpoint`, and is not affected by it.
  */
 export interface MetadataInstance {
   instance_id: string;
@@ -20,7 +20,7 @@ export interface MetadataInstance {
 }
 
 export const metaInstancesApi = {
-  /** 登录前选实例；GET /api/v1/meta/instances，公开、无需鉴权、无分页 */
+  /** Select instance before login; GET /api/v1/meta/instances, public, no authentication required, no pagination */
   list: () =>
     dedupeInFlight('meta/instances', () =>
       request<{ instances: MetadataInstance[] }>('GET', '/api/v1/meta/instances').then((r) => r.instances),

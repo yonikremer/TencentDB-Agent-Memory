@@ -1,13 +1,13 @@
 /**
- * AssetSplitLayout — 资产管理页分栏布局样式。
- * 左栏宽度可拖拽（列宽由内联 style 的 grid-template-columns 控制），
- * 中间为拖拽手柄，右侧详情自适应剩余宽度并在内部滚动。
+ * AssetSplitLayout — Asset management page split layout style.
+ * The left column width can be dragged (column width is controlled by the grid-template-columns in the inline style),
+ * The middle is a drag handle, and the right details adapt to the remaining width and scroll internally.
  */
 
 ._asset-split {
   display: grid;
-  /* grid-template-columns 由组件按拖拽宽度内联注入：<sidebar>px 6px minmax(0,1fr) */
-  /* 撑满视口剩余高度：两栏等高填满，内容少也不留空白 */
+  /* grid-template-columns is inlined by the component based on the drag width: <sidebar>px 6px minmax(0,1fr) */
+  /* Fills the remaining viewport height: the two columns are equal height and fill completely, leaving no blank space even with less content */
   height: calc(100vh - 220px);
   align-items: stretch;
   gap: 0;
@@ -18,21 +18,21 @@
   min-width: 0;
 }
 
-/* 右侧详情区：撑满高度，内容超出时在详情区内部滚动，不撑开外层页面高度 */
+/* Right detail area: fills the height, scrolls within the detail area when content overflows, does not expand the outer page height */
 ._asset-split-detail {
   height: 100%;
   min-height: 0;
   overflow-y: auto;
 }
 
-/* 左侧列表同样撑满高度并内部滚动，保证长列表不把整页撑高、短列表也不留空 */
+/* The left-side list also fills the height and scrolls internally, ensuring that long lists do not expand the entire page and short lists do not leave empty space */
 ._asset-split-sidebar {
   height: 100%;
   min-height: 0;
   overflow-y: auto;
 }
 
-/* ===== 拖拽手柄 ===== */
+/* ===== Drag Handle ===== */
 ._asset-split-resizer {
   align-self: stretch;
   display: flex;
@@ -42,7 +42,7 @@
   padding: 0;
   border: none;
   background: transparent;
-  /* 手柄本身 6px 宽，左右各留一点热区靠 flex 居中 */
+  /* The handle itself is 6px wide, with a small hot zone on each side for flex centering */
 }
 
 ._asset-split-resizer-bar {
@@ -65,11 +65,11 @@ width: 2px;
 @media (max-width: 960px) {
   ._asset-split {
     grid-template-columns: minmax(0, 1fr) !important;
-    /* 窄屏堆叠，回归文档流高度 */
+    /* Narrow screen stacking, return to document flow height */
     height: auto;
   }
 
-  /* 窄屏下堆叠显示，隐藏拖拽手柄，取消高度限制回归文档流 */
+  /* Stack display on narrow screens, hide drag handle, remove height restriction and return to document flow */
   ._asset-split-resizer {
     display: none;
   }

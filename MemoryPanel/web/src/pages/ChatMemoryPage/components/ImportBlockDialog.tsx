@@ -4,7 +4,7 @@ import { Alert, Button, Form, Input, Modal, Segment, Select, Text, Upload } from
 import { FilePasteIcon, UploadIcon } from 'tea-icons-react';
 import { type AgentOption } from '../constants/types';
 
-/** 与 docs/api/chat-memory.md §4.10 import 接口对齐 */
+/** Align with docs/api/chat-memory.md §4.10 import interface */
 interface ImportMessage {
   role: 'user' | 'assistant';
   content: string;

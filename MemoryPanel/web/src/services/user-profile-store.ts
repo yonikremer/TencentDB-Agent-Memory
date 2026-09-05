@@ -1,19 +1,19 @@
 /**
- * user-profile-store.ts — 用户显示名缓存。
+ * user-profile-store.ts — User display name cache.
  *
- * 从后端 usersApi.get() 拉取 display_name，内存缓存避免重复请求。
+ * Fetch display_name from backend usersApi.get() and cache it in memory to avoid repeated requests.
  */
 
 import { useState, useEffect, useCallback } from 'react';
 
-// 内存缓存：user_id → display_name
+// Memory cache: user_id → display_name
 const _displayNameCache = new Map<string, string>();
 const _fetching = new Set<string>();
 const _subscribers = new Set<() => void>();
 
 function notify() { _subscribers.forEach((fn) => fn()); }
 
-/** 批量写入展示名缓存（如 team-member/list 已带 username 时）。 */
+/** Batch write display name cache (e.g., when team-member/list already has username). */
 export function seedDisplayNameCache(entries: Array<{ user_id: string; username?: string }>): void {
   let changed = false;
   for (const { user_id, username } of entries) {
@@ -27,7 +27,7 @@ export function seedDisplayNameCache(entries: Array<{ user_id: string; username?
 }
 
 /**
- * 订阅指定 user 的显示名。优先用内存缓存；未缓存时异步从后端拉取。
+ * Subscribe to the display name of the specified user. Prefer memory cache; asynchronously fetch from the backend when not cached.
  */
 export function useUserDisplayName(user_id: string | null | undefined): string {
   const [, force] = useState(0);
@@ -41,7 +41,7 @@ export function useUserDisplayName(user_id: string | null | undefined): string {
   const cached = _displayNameCache.get(user_id);
   if (cached) return cached;
 
-  // 未缓存 → 异步拉取
+  // Not cached → fetch asynchronously
   if (!_fetching.has(user_id)) {
     _fetching.add(user_id);
     import('@/lib/teamApi').then(({ usersApi }) => {
@@ -51,18 +51,18 @@ export function useUserDisplayName(user_id: string | null | undefined): string {
           _displayNameCache.set(user_id, name);
           notify();
         })
-        .catch(() => { /* 静默失败 */ })
+        .catch(() => { /* silent failure */ })
         .finally(() => { _fetching.delete(user_id); });
     });
   }
 
-  return user_id; // 拉取完成前显示 user_id
+  return user_id; // Display user_id before pull is complete
 }
 
 /**
- * 批量场景（如列表 tooltip 需要 join 多个用户名）的解析器。
- * 返回稳定函数引用；渲染期触发未缓存 id 的拉取，缓存就绪后经订阅触发重渲染。
- * 与 useUserDisplayName 同套缓存/订阅，二者解析结果一致。
+ * Parser for batch scenarios (e.g., list tooltips that need to join multiple usernames).
+ * Returns a stable function reference; triggers fetching of uncached ids during rendering, and triggers re-rendering via subscription after the cache is ready.
+ * Shares the same cache/subscription as useUserDisplayName, so their parsing results are consistent.
  */
 export function useDisplayNameResolver(): (userId: string) => string {
   const [, force] = useState(0);
@@ -85,7 +85,7 @@ export function useDisplayNameResolver(): (userId: string) => string {
             _displayNameCache.set(userId, name);
             notify();
           })
-          .catch(() => { /* 静默失败 */ })
+          .catch(() => { /* silent failure */ })
           .finally(() => { _fetching.delete(userId); });
       });
     }

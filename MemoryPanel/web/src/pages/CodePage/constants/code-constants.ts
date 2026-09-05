@@ -1,19 +1,19 @@
 /**
- * code-constants —— Code 资产页的常量、类型与纯工具函数。
- * 从 CodeSourcesPanel.tsx 拆出。
+ * code-constants —— Constants, types, and pure utility functions for the Code asset page.
+ * Extracted from CodeSourcesPanel.tsx.
  *
- * 通用资产类型与 formatShortTime 已收敛到 @/lib/asset-common，此处 re-export
- * 保持原有 import 路径不变。
+ * Common asset types and formatShortTime have been consolidated into @/lib/asset-common; this re-exports them here
+ * Keep the original import path unchanged.
  */
 export type { SubView, ViewMode, StatusFilter, ScopeTab } from '@/lib/asset-common';
 export { formatShortTime } from '@/lib/asset-common';
 
 /**
- * 校验是否为合法的 HTTP(S) Git 仓库地址（正则匹配）。
- * 要求：http/https 协议、host 含点（真实域名）、路径不含空格且以 .git 结尾。
- * 用正则而非 URL 解析 —— new URL() 会接受路径中的空格（如 /a b/repo.git），
- * 且不强制 .git 后缀，均不符合 code graph 注册的严格约束。
- * SSH（git@...）不在此判定为 true —— 由调用方单独提示"暂不支持 SSH"。
+ * Validate whether it is a valid HTTP(S) Git repository URL (regex matching).
+ * Requirements: http/https protocol, host contains a dot (real domain), path has no spaces and ends with .git.
+ * Use regex instead of URL parsing — new URL() accepts spaces in the path (e.g., /a b/repo.git)
+ * and does not enforce the .git suffix, both of which do not meet the strict constraints for code graph registration.
+ * SSH (git@...) is not judged as true here — the caller will separately indicate "SSH is not supported for now".
  */
 const GIT_HTTP_URL_RE = /^https?:\/\/[^\s/]+\.[^\s/]+\/[^\s]+\.git$/i;
 export function isValidGitHttpUrl(raw: string): boolean {
@@ -21,15 +21,15 @@ export function isValidGitHttpUrl(raw: string): boolean {
 }
 
 /**
- * 从 Git URL 提取可读的仓库名称。
+ * Extract a readable repository name from a Git URL.
  *
- * repo_name 可能为空（旧数据），此时回退到 URL 会显得很长。
- * 这里从 URL 中提取最后两段路径作为 `namespace/repo` 格式：
+ * `repo_name` may be empty (old data), in which case falling back to the URL can make it appear long.
+ * Here, we extract the last two path segments from the URL as the `namespace/repo` format:
  *   https://gitlab.example.com/namespace/repo.git → namespace/repo
  *   https://github.com/org/project.git → org/project
  *   https://git.woa.com/group/sub/repo.git → sub/repo
- * 如果只有一段路径，直接返回该段（去掉 .git 后缀）。
- * 解析失败时返回原始 URL（保底）。
+ * If there is only one path segment, return that segment directly (removing the .git suffix).
+ * Return the original URL as a fallback when parsing fails.
  */
 export function formatRepoName(repoName: string, repoUrl: string): string {
   if (repoName && !repoName.startsWith('http')) return repoName;

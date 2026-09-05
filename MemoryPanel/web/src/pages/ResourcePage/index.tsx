@@ -1,8 +1,8 @@
 /**
- * 资源管理页面通用壳 — Wiki / Code / Skills / Memory 共用
+ * Resource Management Page Common Shell — Shared by Wiki / Code / Skills / Memory
  *
- * admin 与 member 均正常显示内容
- * 外层由 ConsoleLayout 的 Content.Body 包裹，这里作为直接子节点。
+ * Both admin and member display their content normally
+ * It is wrapped by ConsoleLayout's Content.Body here, and it is a direct child node.
  */
 import type { ReactNode } from 'react';
 import './styles/page-style.css';

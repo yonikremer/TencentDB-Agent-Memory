@@ -1,6 +1,6 @@
 /**
- * useWikiSources —— Wiki 资产页的全部状态与数据逻辑。
- * 组件层只保留 JSX 渲染，状态 / 数据逻辑集中在此。
+ * useWikiSources —— All states and data logic for the Wiki asset pages.
+ * The component layer only retains JSX rendering, with state / data logic centralized here.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -15,7 +15,7 @@ export function useWikiSources() {
   const { t } = useTranslation();
   const [sources, setSources] = useState<WikiDetail[]>([]);
   const [loading, setLoading] = useState(false);
-  // 默认展示 Agent 资产（fixed），避免用户误以为自己的资产在「团队资产」里
+  // Display default Agent assets (fixed) to prevent users from mistakenly thinking their assets are in "Team Assets"
   const [scopeTab, setScopeTab] = useState<WikiScopeTab>('fixed');
   const [keyword, setKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -35,12 +35,12 @@ export function useWikiSources() {
   );
   const [fixedBoundIds, setFixedBoundIds] = useState<Set<string>>(new Set());
   const { activeTeamId, activeTeam } = useTeams();
-  // 「可配置范围」tab 需要当前用户身份；改用 team role 判定。
+  // The "Configurable Range" tab requires the current user's identity; use team role determination instead.
   const auth = readAuth();
   const currentUser = auth?.user_id ?? '';
-  // 固定资产 tab 只列自己 owner 的 agent（与 ChatMemory / Skills 面板一致，
-  // 也符合文档 §4.2 权限规则：agent-fixed 只允许查看 caller 自己 owner 的 agent）。
-  // 之前用 readActiveTeamAgents 返回全量 team agent，导致用户能看到别人的 agent。
+  // The fixed assets tab only lists the agent owned by its own owner (consistent with the ChatMemory / Skills panel,
+  // and in line with documentation §4.2 permission rules: agent-fixed only allows viewing the agent owned by the caller's own owner).
+  // Previously, readActiveTeamAgents returned all team agents, causing users to be able to see other agents.
   const { agents: allAgents } = useAgents(activeTeamId);
   const teamAgents = useMemo(
     () =>
@@ -49,7 +49,7 @@ export function useWikiSources() {
         .map((a) => ({ id: a.agent_id, name: a.name })),
     [allAgents, currentUser],
   );
-  // fixed tab 下选中的 agent_id
+  // selected agent_id under fixed tab
   const [agentFilter, setAgentFilter] = useState<string>('');
 
   useEffect(() => {
@@ -80,7 +80,7 @@ export function useWikiSources() {
     if (scopeTab === 'fixed') void fetchFixedBindings();
   }, [scopeTab, fetchFixedBindings]);
 
-  // 按归属 tab 过滤
+  // Filter by owning tab
   const scopeSources = useMemo(() => {
     if (scopeTab === 'team') return sources;
     if (scopeTab === 'fixed') {
@@ -90,7 +90,7 @@ export function useWikiSources() {
     return sources;
   }, [sources, scopeTab, agentFilter, fixedBoundIds]);
 
-  // 统计只受资产范围影响，避免搜索或状态筛选让概览数据失真。
+  // Count only the impact of asset scope, to avoid overview data distortion from search or status filters.
   const stats = useMemo(
     () => ({
       total: scopeSources.length,
@@ -143,7 +143,7 @@ export function useWikiSources() {
     log: [],
   });
 
-  // Detail view state（Wiki 详情：图谱 / 页面 / 搜索 Tab）
+  // Detail view state (Wiki detail: Graph / Page / Search Tab)
   const [activeTab, setActiveTab] = useState<DetailTab>('overview');
   const [pages, setPages] = useState<WikiPage[]>([]);
   const [graphData, setGraphData] = useState<GraphData | null>(null);
@@ -156,19 +156,19 @@ export function useWikiSources() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
 
-  // Add doc（添加文档：文件 / 粘贴 markdown）
+  // Add doc (file / paste markdown)
   const [showAddDoc, setShowAddDoc] = useState(false);
   const [addDocTab, setAddDocTab] = useState<'file' | 'markdown'>('file');
-  // 批量 markdown：每条 { filename, content }，可增删
+  // Batch markdown: each { filename, content }, can be added or deleted
   const [mdDocs, setMdDocs] = useState<Array<{ filename: string; content: string }>>([
     { filename: '', content: '' },
   ]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // --- Fetch ---
-  // 请求序号防竞态：快速切换 tab 时，先发的请求可能后返回，
-  // 旧 tab 的数据会覆盖新 tab 的数据。每次 fetch 递增序号，
-  // 响应回来时校验序号是否仍是最新，不是就丢弃。
+  // Request sequence race prevention: when quickly switching tabs, requests sent first may return later,
+  // and data from the old tab may overwrite data from the new tab. Increment the sequence number each time fetch is called,
+  // and when the response returns, verify whether the sequence number is still the latest; if not, discard it.
   const fetchSeqRef = useRef(0);
 
   const fetchSources = useCallback(async () => {
@@ -178,20 +178,20 @@ export function useWikiSources() {
       return;
     }
     const seq = ++fetchSeqRef.current;
-    // 切 team 时静默刷新（保留旧列表直到新数据到达），不闪空不骨架屏；
-    // 切 tab 仍清空 + loading（避免看到上一个 tab 的列表）。
+    // Silently refresh when switching teams (keep the old list until new data arrives), without empty flashes or skeleton screens;
+    // Clearing + loading when switching tabs (to avoid seeing the previous tab's list).
     const teamChanged = prevTeamIdRef.current !== activeTeamId;
     if (!teamChanged) {
       setLoading(true);
-      // 立即清空旧数据 —— 否则切 tab 时会先看到上一个 tab 的列表，
-      // 新数据到了才突然替换，视觉上就是"闪一下"。
+      // Immediately clear old data —— otherwise switching tabs will first show the list from the previous tab,
+      // and new data suddenly replaces it, visually appearing as a "flash".
       setSources([]);
     }
     try {
-      // 资产统一为团队维度（visibility=team），无 private/我的资产概念。
-      // fixed tab 也是拿全量 team 资产，再按 fixedBoundIds 过滤。
+      // Assets are unified at the team dimension (visibility=team); there is no concept of private/my assets.
+      // The fixed tab also uses all team assets, then filters by fixedBoundIds.
       const d = await knowledgeApi.wiki.teamAssets(activeTeamId);
-      if (seq !== fetchSeqRef.current) return; // 已被后续请求取代
+      if (seq !== fetchSeqRef.current) return; // Replaced by subsequent request
       setSources(Array.isArray(d) ? d : []);
     } catch (e: unknown) {
       if (seq !== fetchSeqRef.current) return;
@@ -202,7 +202,7 @@ export function useWikiSources() {
     }
   }, [activeTeamId, scopeTab]);
 
-  // 触发 fetchSources：依赖原始参数 + fetchSources，并用 key 去重防止短时间内重复触发。
+  // Trigger fetchSources: depends on the original parameters + fetchSources, and uses key to deduplicate and prevent repeated triggering in a short time.
   const fetchKeyRef = useRef<string>('');
   useEffect(() => {
     const key = `${activeTeamId}|${scopeTab}`;
@@ -211,7 +211,7 @@ export function useWikiSources() {
     void fetchSources();
   }, [activeTeamId, scopeTab, fetchSources]);
 
-  // 切 team 时退出详情并清掉旧 wiki 的本地态，避免仍展示上一个 team 的页面/图谱/正文。
+  // When cutting team, exit details and clear the local state of the old wiki to avoid still displaying the pages/graphs/body of the previous team.
   const prevTeamIdRef = useRef(activeTeamId);
   useEffect(() => {
     if (prevTeamIdRef.current === activeTeamId) return;
@@ -231,8 +231,8 @@ export function useWikiSources() {
 
   const fetchDetail = useCallback(async (wikiId: string) => {
     setGraphLoading(true);
-    // 两个子请求各自兜底，外层 catch 抓不到；用标志位感知任一失败后统一提示，
-    // 避免加载失败时详情页静默空白、用户无从判断。
+    // Each of the two sub-requests has its own fallback; the outer catch cannot catch them; use a flag to detect any failure and provide a unified prompt,
+    // to avoid the detail page being silently blank when loading fails, so that users cannot determine the issue.
     let hadError = false;
     try {
       const [g, p] = await Promise.all([
@@ -336,7 +336,7 @@ export function useWikiSources() {
     () => sources.find((s) => s.status === 'pending' || s.status === 'processing') ?? null,
     [sources],
   );
-  /** 所有正在 ingest（pending / processing）的 wiki_id 集合，用于列表中逐卡片判断按钮状态。 */
+  /** The set of all wiki_ids that are currently being ingested (pending / processing), used to determine button states for each card in the list. */
   const runningWikiIds = useMemo(
     () =>
       new Set(
@@ -371,8 +371,8 @@ export function useWikiSources() {
   const ingestBusy = displayIngestState.active || !!runningWiki;
 
   const handleIngest = async (wikiId: string) => {
-    // 防御：同一时间只允许一个 Wiki 提取，避免并发 ingest 导致后端排队混乱。
-    // 按钮已按 ingestBusy 禁用，这里再挡一层防止绕过。
+    // Defense: only allow one Wiki extraction at a time to avoid backend queue chaos caused by concurrent ingest.
+    // The button is already disabled based on ingestBusy, and this layer adds another safeguard to prevent bypassing.
     if (ingestBusy) {
       tea.notify.warning(t('wiki.ingest.warning'));
       return;
@@ -475,8 +475,8 @@ export function useWikiSources() {
     setSearchQuery('');
     setSearchResults([]);
     setPageTypeFilter('all');
-    // 切换到另一个 wiki 详情时，必须清空上一个 wiki 的详情级数据（页面列表 / 图谱 / 已读正文）。
-    // 否则新 wiki 的 fetchDetail 返回前，概览/图谱/页面 tab 会一闪而过上一个 wiki 的内容。
+    // When switching to another wiki's detail, the previous wiki's detail-level data (page list / graph / read content) must be cleared.
+    // Otherwise, before the new wiki's fetchDetail returns, the overview/graph/page tabs will briefly flash the previous wiki's content.
     setPages([]);
     setGraphData(null);
     setReadContent('');
@@ -486,8 +486,8 @@ export function useWikiSources() {
 
   const handleReadPage = async (page: WikiPage) => {
     if (!selectedWikiId) return;
-    // 切换页面时先清空旧内容再进入 loading —— 否则派生的 metadata（来自 readContent）
-    // 会在新内容返回前残留上一个文档的标签，视觉上就是"闪一下旧文档"。
+    // Switch pages by clearing old content first before entering loading —— otherwise the derived metadata (from readContent)
+    // will remain from the previous document before new content returns, visually showing "a flash of the old document".
     setSelectedPage(page);
     setReadContent('');
     setReadLoading(true);
@@ -561,8 +561,8 @@ export function useWikiSources() {
     }
   };
 
-  // 原始文档列表刷新信号：RawFilesSection 维护自己独立的 state，只在 wikiId 变化时重载；
-  // 上传成功后 fetchDetail 只刷新 pages/graph，不会触发它重拉。递增此 key 强制其 reload。
+  // RawFilesSection refresh signal: RawFilesSection maintains its own independent state and only reloads when wikiId changes;
+  // After upload succeeds, fetchDetail only refreshes pages/graph and does not trigger it to re-fetch. Increment this key to force its reload.
   const [rawRefreshKey, setRawRefreshKey] = useState(0);
 
   const confirmOverwrite = async (filenames: readonly string[]): Promise<boolean> => {
@@ -587,8 +587,8 @@ export function useWikiSources() {
   };
 
   /**
-   * 上传只写入原始文档，不会自动触发知识抽取；成功后立即给出明确的下一步操作，
-   * 避免用户不知道还需要点击"开始抽取"。
+   * Uploads only write the original document and does not automatically trigger knowledge extraction; after success, immediately provide a clear next step operation,
+   * Avoid users not knowing they still need to click "Start Extraction".
    */
   const offerIngestAfterUpload = async (wikiId: string, uploadedCount: number) => {
     const shouldIngest = await tea.confirm({
@@ -636,7 +636,7 @@ export function useWikiSources() {
       await offerIngestAfterUpload(selectedWikiId, valid.length);
     } else {
       const okCount = valid.length - failures.length;
-      // 每个失败文件都列出原因，最多展示 3 个，超出折叠
+      // List the reasons for each failed file, showing a maximum of 3, with the rest collapsed
       const shown = failures
         .slice(0, 3)
         .map((f) => `${f.filename}: ${f.error}`)
@@ -649,7 +649,7 @@ export function useWikiSources() {
     }
   };
 
-  // 批量文件上传：支持多选 + 拖拽，并发上传
+  // Batch file upload: supports multi-select + drag & drop, concurrent upload
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [uploadProgress, setUploadProgress] = useState<
     Record<string, 'pending' | 'done' | 'error'>
@@ -666,7 +666,7 @@ export function useWikiSources() {
       return;
     }
     setUploadProgress(Object.fromEntries(pendingFiles.map((f) => [f.name, 'pending'])));
-    // 并发上传所有文件
+    // Concurrently upload all files
     const results = await Promise.allSettled(
       pendingFiles.map(async (f) => {
         const content = await f.text();
@@ -685,7 +685,7 @@ export function useWikiSources() {
       setShowAddDoc(false);
       fetchDetail(selectedWikiId);
       setRawRefreshKey((k) => k + 1);
-      // 文件上传入口此前遗漏了这一步，导致用户上传完成后不知道还需手动抽取。
+      // The file upload entry previously missed this step, causing users to not know they still need to manually extract after uploading.
       await offerIngestAfterUpload(selectedWikiId, succeeded);
     } else {
       results.forEach((r, i) => {

@@ -1,14 +1,14 @@
 /**
- * stores/backend.ts — 全局后端数据 store（zustand）。
+ * stores/backend.ts — Global backend data store (zustand).
  *
- * 取代 backendStore.ts 里的模块级变量（_cachedTeams / _cachedAgentsMap / _inflightTeams …）。
+ * Replace the module-level variables in backendStore.ts (_cachedTeams / _cachedAgentsMap / _inflightTeams …).
  *
- * 核心设计：
- *   - teamsLoaded / agentsLoadedTeamIds：标记"已加载过"，
- *     避免每个组件挂载都重复 fetch。
- *   - invalidate()：写操作后调，清所有缓存 + 广播 BACKEND_REFRESH_EVENT。
- *   - invalidateTeam(teamId)：切 team 时只清当前 team 的 agents/tasks 缓存。
- *   - useTeams / useAgents / useTasks：从 store 读数据 + 触发 fetch，多组件共享同一份状态。
+ * Core design:
+ *   - teamsLoaded / agentsLoadedTeamIds: mark "loaded",
+ *     to avoid repeated fetch on every component mount.
+ *   - invalidate(): called after write operations, clears all caches + broadcasts BACKEND_REFRESH_EVENT.
+ *   - invalidateTeam(teamId): called when switching teams, only clears the current team's agents/tasks cache.
+ *   - useTeams / useAgents / useTasks: read data from the store + trigger fetch, multiple components share the same state.
  */
 
 import { create } from 'zustand';
@@ -24,7 +24,7 @@ import { tea } from '@/lib/tea-bridge';
 import i18n from '@/i18n';
 import { seedDisplayNameCache } from '@/services/user-profile-store';
 
-// 从 backendStore.ts re-import 纯函数（adapters / types），避免循环依赖
+// re-import pure functions (adapters / types) from backendStore.ts to avoid circular dependencies
 import {
   type Team,
   type Agent,
@@ -38,7 +38,7 @@ import {
   ensureValidActiveTeamId,
 } from '@/services/backendStore';
 
-// ========================= 事件常量 =========================
+// ========================= Event Constants =========================
 
 const BACKEND_REFRESH_EVENT = 'tdai-memory.backend-refresh';
 const LOCAL_CHANGE_EVENT = 'tdai-memory.demo-store-change';
@@ -47,22 +47,22 @@ function emitBackendRefresh() {
   try { window.dispatchEvent(new Event(BACKEND_REFRESH_EVENT)); } catch { /* ignore */ }
 }
 
-// ========================= Store 类型 =========================
+// ========================= Store Type =========================
 
 interface BackendState {
-  // 数据
+  // Data
   teams: Team[];
   activeTeamId: string | null;
   agentsByTeam: Record<string, Agent[]>;
-  // 全量总数（内核返回的 total），前端分页基于此计算总页数
+  // Total count (total returned by the kernel), used by the frontend pagination to calculate the total number of pages
   tasksTotalByTeam: Record<string, number>;
-  // 后端分页缓存：tasksPagesByTeam[teamId]["offset:limit"] = Task[]
+  // Backend pagination cache: tasksPagesByTeam[teamId]["offset:limit"] = Task[]
   tasksPagesByTeam: Record<string, Record<string, Task[]>>;
-  // loaded 标记（避免重复 fetch）
+  // loaded marker (to avoid repeated fetch)
   teamsLoaded: boolean;
   teamsLoading: boolean;
   agentsLoadedTeamIds: Set<string>;
-  // in-flight 去重
+  // in-flight deduplication
   inflightTeams: Promise<void> | null;
   inflightAgents: Record<string, Promise<Agent[]>>;
   inflightTasks: Record<string, Promise<Task[]> | undefined>;
@@ -70,10 +70,10 @@ interface BackendState {
   // actions
   fetchTeams: () => Promise<void>;
   /**
-   * 强制重新拉取 team 列表（忽略 teamsLoaded 缓存，保留 in-flight 去重）。
-   * `silent: true` 时不在 UI 层翻转 teamsLoading —— 用于下拉框展开等后台保新鲜
-   * 场景，避免 TeamManagementPanel 等消费方因 teamsLoading=true 而整体进入
-   * loading 占位（表现为"点一下下拉框页面就刷新"）。
+   * Force re-fetch of team list (ignore teamsLoaded cache, preserve in-flight deduplication).
+   * `silent: true` does not flip teamsLoading at the UI layer —— used for background keeping fresh when expanding dropdowns
+   * Scenario, avoid consumers such as TeamManagementPanel from entirely entering due to teamsLoading=true
+   * loading placeholder (manifesting as "the dropdown page refreshes when you click once")
    */
   refreshTeams: (opts?: { silent?: boolean }) => Promise<void>;
   fetchAgents: (teamId: string) => Promise<Agent[]>;
@@ -84,7 +84,7 @@ interface BackendState {
   clearAll: () => void;
 }
 
-// ========================= Store 实现 =========================
+// ========================= Store Implementation =========================
 
 export const useBackendStore = create<BackendState>((set, get) => ({
   teams: [],
@@ -101,25 +101,25 @@ export const useBackendStore = create<BackendState>((set, get) => ({
 
   fetchTeams: async () => {
     const state = get();
-    // 已加载过 → 不重复 fetch（只有 invalidate / clearAll 后才会重新拉）
+    // Already loaded → no repeated fetch (only refetches after invalidate / clearAll)
     if (state.teamsLoaded) return;
     await get().refreshTeams();
   },
 
   refreshTeams: async (opts?: { silent?: boolean }) => {
     const state = get();
-    // in-flight 去重：多个组件同时挂载时只发一次
+    // in-flight deduplication: only send once when multiple components mount simultaneously
     if (state.inflightTeams) { await state.inflightTeams; return; }
 
     const silent = opts?.silent === true;
     const promise = (async () => {
-      // 静默刷新不翻转 teamsLoading —— 消费方（TeamManagementPanel 等）依赖它
-      // 显示 loading 占位；下拉框展开这类后台保新鲜场景翻转它会导致
-      // "点一下下拉框整个页面闪成 loading 再恢复"。
+      // Silently refresh without flipping teamsLoading —— Consumers (such as TeamManagementPanel) depend on it
+      // Display loading placeholder; flipping it in background-freshness scenarios like dropdown expansion causes
+      // "Clicking the dropdown makes the entire page flash to loading and then recover".
       if (!silent) set({ teamsLoading: true });
       try {
         const backendTeams = await teamsApi.list();
-        // 批量拉 members（N+1 → N，但这是后端 API 限制，无批量接口）
+        // Batch fetch members (N+1 → N, but this is a backend API limitation, no batch interface)
         const memberResults = await Promise.all(
           backendTeams.map((t) => membersApi.list(t.team_id).catch(() => [] as BackendMember[]))
         );
@@ -149,11 +149,11 @@ export const useBackendStore = create<BackendState>((set, get) => ({
 
   fetchAgents: async (teamId: string) => {
     const state = get();
-    // 已加载过 → 直接返回缓存
+    // Already loaded → return cache directly
     if (state.agentsLoadedTeamIds.has(teamId)) {
       return state.agentsByTeam[teamId] ?? [];
     }
-    // in-flight 去重
+    // in-flight deduplication
     if (state.inflightAgents[teamId] != null) {
       return state.inflightAgents[teamId];
     }
@@ -190,13 +190,13 @@ export const useBackendStore = create<BackendState>((set, get) => ({
     const state = get();
     const limit = params?.limit ?? 20;
     const offset = params?.offset ?? 0;
-    // 缓存 key：按 (offset, limit) 粒度（teamId 已在 tasksPagesByTeam[teamId] 这层隔离）
+    // Cache key: granularity of (offset, limit) (teamId is already isolated at the tasksPagesByTeam[teamId] level)
     const cacheKey = `${offset}:${limit}`;
-    // 已缓存且非强制刷新 → 直接返回
+    // Cached and not forced refresh → return directly
     if (!params?.force && state.tasksPagesByTeam[teamId]?.[cacheKey]) {
       return state.tasksPagesByTeam[teamId][cacheKey];
     }
-    // in-flight 去重
+    // in-flight deduplication
     if (state.inflightTasks[cacheKey]) { await state.inflightTasks[cacheKey]; return get().tasksPagesByTeam[teamId]?.[cacheKey] ?? []; }
 
     const promise = (async () => {
@@ -237,7 +237,7 @@ export const useBackendStore = create<BackendState>((set, get) => ({
     set({ activeTeamId: teamId });
   },
 
-  // 写操作后调：清所有缓存 + 广播刷新
+  // Called after write operation: clear all cache + broadcast refresh
   invalidate: () => {
     set({
       teams: [],
@@ -254,7 +254,7 @@ export const useBackendStore = create<BackendState>((set, get) => ({
     emitBackendRefresh();
   },
 
-  // 切 team 时调：只清当前 team 的 agents/tasks 缓存
+  // Called when cutting team: only clears the agents/tasks cache of the current team
   invalidateTeam: (teamId) => {
     set((s) => {
       const agentsLoadedTeamIds = new Set(s.agentsLoadedTeamIds);
@@ -270,7 +270,7 @@ export const useBackendStore = create<BackendState>((set, get) => ({
     emitBackendRefresh();
   },
 
-  // 登出 / 401 时调：清所有缓存但不广播事件
+  // Call when logout / 401: clear all caches but do not broadcast events
   clearAll: () => {
     set({
       teams: [],
@@ -290,11 +290,11 @@ export const useBackendStore = create<BackendState>((set, get) => ({
 // ========================= React Hooks =========================
 
 /**
- * useTeams — 从 store 读 team 列表 + activeTeamId。
+ * useTeams — Read team list from store + activeTeamId.
  *
- * 多个组件调 useTeams() 只会触发一次 fetchTeams（teamsLoaded 标记 + in-flight 去重）。
- * 写操作后调 invalidate() → teamsLoaded=false → 下次组件挂载/渲染时重新 fetch。
- * 切 team 通过 setActiveTeamId → 写 localStorage + 更新 state。
+ * Multiple components calling useTeams() will only trigger a single fetchTeams (teamsLoaded flag + in-flight deduplication).
+ * After write operations, call invalidate() → teamsLoaded=false → fetch again on next component mount/render.
+ * Switching teams via setActiveTeamId → write to localStorage + update state.
  */
 export function useTeams(): {
   teams: Team[];
@@ -314,7 +314,7 @@ export function useTeams(): {
     }
   }, [teamsLoaded, teamsLoading, fetchTeams]);
 
-  // 监听 localStorage 变化（TeamSwitcher 写 activeTeamId 时触发）
+  // Listen for localStorage changes (triggered when TeamSwitcher writes activeTeamId)
   const [, force] = useState(0);
   useEffect(() => {
     const onLocalChange = () => {
@@ -333,16 +333,16 @@ const EMPTY_AGENTS: Agent[] = [];
 const EMPTY_TASKS: Task[] = [];
 
 /**
- * useAgents — 从 store 读指定 team 的 agent 列表。
+ * useAgents — Read the specified team's agent list from the store.
  *
- * 同一 teamId 多个组件调用只触发一次 fetch。
- * invalidate() 或 invalidateTeam(teamId) 后才会重新拉。
+ * Multiple components in the same teamId trigger only one fetch.
+ * It will only re-fetch after invalidate() or invalidateTeam(teamId).
  */
 export function useAgents(teamId: string | null | undefined): {
   agents: Agent[];
   loading: boolean;
 } {
-  // 用 ref 缓存上次的 teamId，避免 selector 每次返回不同引用
+  // Cache the previous teamId with ref to avoid selector returning different references each time
   const agents = useBackendStore((s) =>
     teamId ? (s.agentsByTeam[teamId] ?? EMPTY_AGENTS) : EMPTY_AGENTS
   );
@@ -360,7 +360,7 @@ export function useAgents(teamId: string | null | undefined): {
 }
 
 /**
- * useTasks — 从 store 读指定 team 的 task 列表。
+ * useTasks — Read the task list for the specified team from the store.
  */
 export function useTasks(teamId: string | null | undefined, page: number = 1, pageSize: number = 12): {
   tasks: Task[];
@@ -389,19 +389,19 @@ export function useTasks(teamId: string | null | undefined, page: number = 1, pa
 }
 
 /**
- * readActiveTeamAgents — 同步读缓存的 agent 列表（不触发请求）。
- * 供 SkillsPanel 等仅需"引用列表"的场景使用。
+ * readActiveTeamAgents — Synchronously reads the cached agent list (does not trigger a request).
+ * Used by scenarios such as SkillsPanel that only need to "reference the list".
  */
 export function readActiveTeamAgents(teamId: string | null): Array<{ id: string; name: string }> {
   if (!teamId) return [];
   const cached = useBackendStore.getState().agentsByTeam[teamId];
   if (cached) return cached.map((a) => ({ id: a.agent_id, name: a.name }));
-  // 缓存未命中：触发后台拉取
+  // Cache miss: trigger background fetch
   void useBackendStore.getState().fetchAgents(teamId);
   return [];
 }
 
-// ========================= 导出 invalidate / clearAll（供 mutations 调用） =========================
+// ========================= Export invalidate / clearAll (for mutations to call) =========================
 
 export function invalidateBackendCache(): void {
   useBackendStore.getState().invalidate();

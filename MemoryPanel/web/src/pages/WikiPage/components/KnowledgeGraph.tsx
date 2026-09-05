@@ -16,8 +16,8 @@ export interface GraphData {
   communities?: { id: number; nodeCount: number; topNodes: string[] }[];
 }
 
-// Sigma 的 Canvas 绘制不能直接解析 CSS var()，因此在组件渲染时读取 Tea Token 的计算值。
-// 这避免模块加载早于 Tea 主题 CSS 时取得空值，并会在主题属性变更后刷新画布调色板。
+// Sigma's Canvas drawing cannot directly parse CSS var(), so it reads the computed value of Tea Token during component rendering.
+// This avoids obtaining an empty value when the module loads before Tea theme CSS, and refreshes the canvas palette after theme properties change.
 interface AtlasPalette {
   bg: string;
   toolbarBg: string;
@@ -127,7 +127,7 @@ function GraphLoader({ nodes, edges, colorMode, onNodeClick, highlightNode, pale
         const key = `${edge.source}->${edge.target}`;
         if (!graph.hasEdge(key) && !graph.hasEdge(`${edge.target}->${edge.source}`)) {
           const nw = edge.weight / maxW;
-          // 连接线颜色走 Tea 次级边框 Token，权重仅影响线宽。
+          // The connection line color follows the Tea secondary border Token, and the weight only affects the line width.
           graph.addEdgeWithKey(key, edge.source, edge.target, { size: 0.5 + nw * 1.4, color: palette.edgeBase });
         }
       }
@@ -221,7 +221,7 @@ export default function KnowledgeGraph({ data, loading, onNodeClick, highlightNo
   const typeSet = new Set(filteredData.nodes.map((n) => n.type));
   const types = [...typeSet].sort();
 
-  // 极细网格背景 + 白底，营造"高科技画布"感（CSS grid pattern）
+  // Fine grid background + white background, creating a "high-tech canvas" feel (CSS grid pattern)
   const gridBg: CSSProperties = {
     background: palette.bg,
     backgroundImage:

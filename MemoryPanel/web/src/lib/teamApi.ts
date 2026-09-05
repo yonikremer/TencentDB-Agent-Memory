@@ -1,24 +1,24 @@
 /**
  * teamApi.ts — Control API barrel re-export。
  *
- * 原始 1400+ 行文件已按业务域拆分到 lib/api/ 下：
- *   - api/base.ts          基础设施（ApiError / request / metaPost / metaListAll / …）
- *   - api/types.ts         跨模块共享类型
- *   - api/meta-instances   登录前选实例
- *   - api/auth.ts          登录验活 + 环境绑定
+ * Original 1400+ line file has been split by business domain into lib/api/:
+ *   - api/base.ts           Infrastructure (ApiError / request / metaPost / metaListAll / …)
+ *   - api/types.ts          Cross-module shared types
+ *   - api/meta-instances    Select instance before login
+ *   - api/auth.ts           Login verification + environment binding
  *   - api/teams.ts         Team + Member
  *   - api/agents.ts        Agent
  *   - api/tasks.ts         Task + ParticipationLog
  *   - api/users.ts         User + UserKey + UserConfig
  *   - api/assets.ts        Asset
- *   - api/skills.ts        Skill 数据面
+ *   - api/skills.ts        Skill data
  *   - api/chat-memory.ts   Chat Memory
  *
- * 外部消费方继续 `import { xxx } from '@/lib/teamApi'` 即可，无需改路径。
- * 新代码建议直接从 `@/lib/api/xxx` 导入，按需引用，减少打包体积。
+ * External consumers can continue to `import { xxx } from '@/lib/teamApi'`; no path changes are needed.
+ * For new code, it is recommended to import directly from `@/lib/api/xxx`, referencing as needed, to reduce bundle size.
  */
 
-// ── 基础设施 ──
+// ── Infrastructure ──
 export { ApiError, onUnauthorized, clearSessionCache, PANEL_CAPABILITIES } from './api/base';
 
 // ── Meta Instances ──
@@ -83,7 +83,7 @@ export {
   type ChatMemorySearchHit,
 } from './api/chat-memory';
 
-// ── 共享类型（从 types.ts 透传） ──
+// ── Shared Types (Passed through from types.ts) ──
 export type {
   MetaEnvelope,
   PaginatedResult,

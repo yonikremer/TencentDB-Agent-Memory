@@ -1,16 +1,16 @@
 /**
- * TaskCreateDialog — 「新建 Task」弹窗。
+ * TaskCreateDialog — "New Task" dialog.
  *
- * 必填字段（前端校验）：
- *   - title         任务标题
- *   - description   任务描述
+ * Required fields (frontend validation):
+ *   - title          Task title
+ *   - description    Task description
  *
- * 关于 team 归属：
- *   不再让用户在 dialog 里选 team。team 由右上角全局 TeamSwitcher 决定，
- *   这里只 readonly 展示「将创建到 team：name (team_id)」，避免出现「右上角是 A
- *   但弹窗里默认选了 B、用户没注意一切就走偏」的两套上下文不一致问题。
+ * Regarding team ownership:
+ *   Users will no longer select team within the dialog. The team is determined by the global TeamSwitcher in the top-right corner,
+ *   here we only display in readonly mode "Team to create into: name (team_id)", to avoid the inconsistency of two contexts where "the top-right corner is A
+ *   but the popup defaults to B and the user doesn't notice and everything goes off track".
  *
- * 不再在创建时选 Agent — 关联 Agent 放到 task 创建之后再做。
+ * No longer select Agent at creation time — associate Agent after task creation.
  */
 
 import { useState } from 'react';

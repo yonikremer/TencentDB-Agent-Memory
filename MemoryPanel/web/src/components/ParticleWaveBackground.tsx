@@ -1,32 +1,32 @@
 /**
- * ParticleWaveBackground — 明亮风格的点阵波纹动效背景（纯 Canvas，零外部依赖）。
+ * ParticleWaveBackground — Bright-style dot ripple animation background (pure Canvas, zero external dependencies).
  *
- * 视觉参考 React Bits 的 Particles / DotGrid：网格点阵 + 多层正弦波驱动的起伏，
- * 点的半径与透明度随波峰变化，形成"呼吸感"的柔和波纹。
+ * Visual reference to React Bits' Particles / DotGrid: a grid of dots with undulating effects driven by multi-layer sine waves,
+ * where the radius and opacity of the points change with the wave peaks, creating a "breathing" soft ripple.
  *
- * 为什么不直接装 React Bits 的包：
- *   其 Particles / DotGrid / Aurora 分别依赖 ogl / gsap / three，本项目均未安装。
- *   按 React Bits 官方推荐的 manual 方式（复制源码进项目）实现，避免新增运行时依赖
- *   与构建风险，同时保留完全可控的视觉调参能力。
+ * Why not directly install the React Bits package:
+ *   Its Particles / DotGrid / Aurora each depend on ogl / gsap / three, which this project has not installed.
+ *   Implement it via the manual method recommended by the React Bits official (copying source code into the project) to avoid adding new runtime dependencies
+ *   and build risks, while retaining fully controllable visual parameter adjustment capabilities.
  *
- * 实现要点：
- *   - devicePixelRatio 适配，避免高清屏发虚；
- *   - ResizeObserver 跟随容器尺寸，不监听 window 以免多实例互相干扰；
- *   - 尊重 prefers-reduced-motion：偏好减少动效时渲染静态一帧，不启动 rAF；
- *   - 组件卸载时取消 rAF 与 observer，无内存泄漏。
+ * Implementation points:
+ *   - Adapt to devicePixelRatio to avoid blur on high-definition screens;
+ *   - Use ResizeObserver to follow container size, and do not listen to window to avoid interference between multiple instances;
+ *   - Respect prefers-reduced-motion: when motion is preferred to be reduced, render a static frame and do not start rAF;
+ *   - Cancel rAF and observer when the component is unmounted, with no memory leaks.
  */
 import { useEffect, useRef } from 'react';
 
 export interface ParticleWaveBackgroundProps {
-  /** 点阵间距（px），越小越密。默认 26 */
+  /** Dot spacing (px), smaller means denser. Default 26 */
   gap?: number;
-  /** 点的基础半径（px）。默认 1.5 */
+  /** Base radius of a point (px). Default 1.5 */
   dotRadius?: number;
-  /** 点颜色，需为 `r, g, b` 形式（透明度由内部按波峰计算）。默认深灰蓝 */
+  /** Point color, must be in `r, g, b` format (opacity calculated internally based on peaks). Default dark gray blue */
   color?: string;
-  /** 动画速度系数，默认 1 */
+  /** Animation speed coefficient, default 1 */
   speed?: number;
-  /** 附加类名 */
+  /** Additional class name */
   className?: string;
 }
 
@@ -65,17 +65,17 @@ export default function ParticleWaveBackground({
       canvas!.height = Math.max(1, Math.floor(height * dpr));
       canvas!.style.width = `${width}px`;
       canvas!.style.height = `${height}px`;
-      // 用 setTransform 而非 scale，避免多次 resize 后缩放系数累积
+      // Use setTransform instead of scale to avoid scaling coefficient accumulation after multiple resizes
       ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
 
     /**
-     * 渲染一帧。三层不同频率/相位的正弦波叠加，得到 [-1, 1] 的强度场；
-     * 强度映射到点的半径与透明度，形成明暗起伏的点阵波纹。
+     * Render a frame. Three sine waves with different frequencies/phases are superimposed to obtain an intensity field in [-1, 1];
+     * The intensity is mapped to the radius and opacity of points, forming a rippling point array of light and dark variations.
      *
-     * 参数取值说明：时间系数决定"看起来动得多快"。太小（<0.5）时单个波周期会长达
-     * 十几秒，肉眼几乎判断不出在动、像一张静态图；这里取 0.65~1.15 让主波约 5 秒
-     * 一个周期，既能明确看出流动感又不至于晃眼。
+     * Parameter value description: The time coefficient determines "how fast it looks like it is moving". When too small (<0.5), a single wave period will last for over ten seconds, making it almost impossible to tell with the naked eye that it is moving, like a static image; here 0.65~1.15 is taken to make the main wave about 5 seconds
+     * one period, which can clearly show the sense of flow without being dazzling.
+     *
      */
     function draw(elapsedMs: number) {
       if (width <= 0 || height <= 0) return;
@@ -89,21 +89,21 @@ export default function ParticleWaveBackground({
         for (let col = 0; col < cols; col++) {
           const x = col * gap;
           const y = row * gap;
-          // 归一化坐标让波形不随画布尺寸变形
+          // Normalize coordinates so the waveform does not distort with canvas size
           const nx = x / Math.max(width, 1);
           const ny = y / Math.max(height, 1);
 
-          // 主波自右向左流动，另两层不同角度叠加，避免出现规则条纹
+          // The main wave flows from right to left, with two other layers superimposed at different angles, to avoid regular stripes
           const wave =
             Math.sin(nx * 7.5 - t * 1.15) * 0.45 +
             Math.sin(ny * 5.5 + t * 0.75) * 0.28 +
             Math.sin((nx * 3.2 + ny * 4.1) + t * 0.95) * 0.27;
 
-          // wave ∈ 约 [-1, 1] → intensity ∈ [0, 1]
+          // wave ∈ [-1, 1] → intensity ∈ [0, 1]
           const intensity = (wave + 1) / 2;
-          // 幂次收缩暗部，让波峰更突出、波谷更干净，明暗对比更清晰
+          // Shrink the dark areas by power, making the peaks more prominent and the valleys cleaner, with clearer light and dark contrast
           const shaped = Math.pow(intensity, 1.4);
-          // 顶部略淡、底部略实，增强"光从上方来"的明亮感
+          // Slightly faded at the top and slightly solid at the bottom, enhancing the sense of light coming from above
           const depth = 0.6 + ny * 0.4;
           const alpha = (0.08 + shaped * 0.5) * depth;
           const radius = dotRadius * (0.45 + shaped * 1.15);
@@ -127,7 +127,7 @@ export default function ParticleWaveBackground({
 
     const observer = new ResizeObserver(() => {
       resize();
-      // 偏好减少动效时不跑 rAF，resize 后需手动补画一帧
+      // When reducing animations, do not run rAF, and manually draw one frame after resize
       if (reduceMotion) draw(0);
     });
     const parent = canvas.parentElement;

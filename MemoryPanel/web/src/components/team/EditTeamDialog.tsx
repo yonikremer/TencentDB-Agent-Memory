@@ -4,11 +4,11 @@ import { Button, Form, Input, Modal } from 'tea-component';
 import type { Team } from '@/services';
 
 /**
- * EditTeamDialog — 编辑当前 team 的名称 / 描述。
+ * EditTeamDialog — Edit the name / description of the current team.
  *
- * 与 CreateTeamDialog 同款表单样式，进入时以 team 当前值预填；
- * 提交调 teamsApi.update（team/update，仅 owner / admin 可改，
- * 后端会静默忽略 owner_user_id 等不可改字段）。
+ * Same form style as CreateTeamDialog, pre-filled with the current team value on entry;
+ * Submit by calling teamsApi.update (team/update, only owner / admin can modify,
+ * The backend will silently ignore non-modifiable fields such as owner_user_id).
  */
 export default function EditTeamDialog({
   team,

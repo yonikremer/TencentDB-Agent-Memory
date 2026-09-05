@@ -1,11 +1,11 @@
 /**
- * SettingsDialog — 全局设置弹窗（从顶栏⚙图标触发）。
+ * SettingsDialog — Global settings dialog (triggered from the top bar ⚙ icon).
  *
- * 当前只有一个 Tab：「权限管理」— 控制资源管理模块的开关
- * （Wiki / Code / Skill / Chat_Memory），防止未稳定使用的模块
- * 被注入内核运行。
+ * Currently there is only one Tab: "Permission Management" — controlling the switch for the resource management module
+ * (Wiki / Code / Skill / Chat_Memory), to prevent modules that are not yet stable from
+ * being injected into the kernel for execution.
  *
- * 后续可在 TABS 数组里追加其他 Tab（如通知、偏好设置等）。
+ * Other Tabs (such as notifications, preference settings, etc.) can be appended in the TABS array later.
  *
  */
 import { useEffect, useState } from 'react';
@@ -26,7 +26,7 @@ import {
 import { userConfigApi, type AssetCapabilityKey } from '@/lib/teamApi';
 import { tea } from '@/lib/tea-bridge';
 
-// ===== 资源模块 =====
+// ===== Resource Module =====
 
 interface ResourceModule {
   id: string;

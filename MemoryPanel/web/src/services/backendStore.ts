@@ -1,21 +1,21 @@
 /**
- * backendStore.ts — Team / Agent / Task 的后端数据层（链路 A）。
+ * backendStore.ts — Team / Agent / Task backend data layer (Pipeline A).
  *
- * 取代原来 demoStore.ts 里 team/agent/task 相关的 localStorage 实现：
- *   - Team    走 teamApi.teamsApi + teamApi.membersApi
- *   - Agent   走 teamApi.agentsApi
- *   - Task    走 teamApi.tasksApi
+ * Replace the original localStorage implementation for team/agent/task in demoStore.ts:
+ *   - Team     uses teamApi.teamsApi + teamApi.membersApi
+ *   - Agent    uses teamApi.agentsApi
+ *   - Task     uses teamApi.tasksApi
  *
- * 后端 schema 里没有的 UI 专属字段（icon / accent / role_prompt / rules_prompt /
- * skills / code_graphs / llm_wikis / chat_memories / task.participants 等）
- * 统一序列化进 agent.metadata_json / task.metadata_json 的 "ui" namespace，
- * 保证刷新页面后这些字段不丢 —— 等对应的资产/字段在后端落地后，把
- * readXxxUiMeta / writeXxxUiMeta 里的读写目标换成真字段即可，组件层不用改。
+ * UI-specific fields not present in the backend schema (icon / accent / role_prompt / rules_prompt /
+ * skills / code_graphs / llm_wikis / chat_memories / task.participants, etc.)
+ * are uniformly serialized into the "ui" namespace of agent.metadata_json / task.metadata_json,
+ * ensuring these fields are not lost after refreshing the page — once the corresponding assets/fields are
+ * implemented on the backend, just replace the read/write targets in readXxxUiMeta / writeXxxUiMeta with the real fields, no component changes needed.
  *
- * 缓存策略：
- *   - 模块级缓存 + in-flight promise 去重：同一时刻多个 useTeams()/useAgents() 只发一次请求；
- *   - invalidateBackendCache()：所有写操作后调用，清缓存并广播 BACKEND_REFRESH_EVENT；
- *   - useTeams/useAgents/useTasks 监听该事件自动重新拉取。
+ * Caching strategy:
+ *   - Module-level cache + in-flight promise deduplication: multiple simultaneous useTeams()/useAgents() only send one request;
+ *   - invalidateBackendCache(): called after all write operations, clears the cache and broadcasts BACKEND_REFRESH_EVENT;
+ *   - useTeams/useAgents/useTasks listen to this event to automatically refetch.
  */
 
 import {
@@ -27,7 +27,7 @@ import {
 } from '@/lib/teamApi';
 import { invalidateBackendCache } from '@/stores/backend';
 
-// ========================= Types（前端展示形状，尽量贴近旧 demoStore，减少调用方改动） =========================
+// ========================= Types (Frontend display shapes, try to align with the old demoStore, minimize changes to callers) =========================
 
 export interface TeamMember {
   user_id: string;
@@ -59,7 +59,7 @@ export interface Agent {
   code_graphs: string[];
   llm_wikis: string[];
   chat_memories: string[];
-  /** 后端 metadata_json 透传（写回时需要在旧值基础上 merge，而不是整体覆盖） */
+  /** Backend metadata_json pass-through (when writing back, merge with the old value rather than overwriting entirely) */
   metadata_json?: string;
   created_at_ms: number;
   updated_at_ms: number;
@@ -84,7 +84,7 @@ export interface Task {
   metadata_json?: string;
 }
 
-// ========================= metadata_json 兜底读写（"ui" namespace） =========================
+// ========================= metadata_json fallback read/write ("ui" namespace) =========================
 
 interface AgentUiMeta {
   role_prompt: string;
@@ -128,7 +128,7 @@ function readAgentUiMeta(metadataJson: string | undefined, index: number): Agent
   }
 }
 
-/** 把 ui 专属字段 merge 写回 metadata_json（保留其它 namespace，如 chat_memory）。 */
+/** Merge the ui-specific fields into metadata_json (preserving other namespaces, such as chat_memory). */
 export function writeAgentUiMeta(prevMetadataJson: string | undefined, patch: Partial<AgentUiMeta>): string {
   let meta: Record<string, unknown> = {};
   if (prevMetadataJson) {
@@ -136,7 +136,7 @@ export function writeAgentUiMeta(prevMetadataJson: string | undefined, patch: Pa
       const parsed = JSON.parse(prevMetadataJson);
       if (parsed && typeof parsed === 'object') meta = parsed as Record<string, unknown>;
     } catch {
-      /* 旧值不合法直接丢 */
+      /* Invalid old value, discard directly */
     }
   }
   const prevUi = (meta.ui && typeof meta.ui === 'object' ? meta.ui : {}) as Partial<AgentUiMeta>;
@@ -178,7 +178,7 @@ function writeTaskUiMeta(prevMetadataJson: string | undefined, patch: Partial<Ta
   return JSON.stringify(meta);
 }
 
-// ========================= Adapters（export 供 stores/backend.ts 使用） =========================
+// ========================= Adapters (exported for use by stores/backend.ts) =========================
 
 export function adaptTeam(bt: BackendTeam, members: TeamMember[]): Team {
   return {
@@ -202,9 +202,9 @@ export function adaptMember(bm: BackendMember): TeamMember {
 
 export function adaptAgent(ba: BackendAgent, index: number): Agent {
   const ui = readAgentUiMeta(ba.metadata_json, index);
-  // prompt 回退：当 metadata_json 不含 ui.role_prompt 时（agent 可能通过后端 API 直接创建，
-  // 而非前端 UI），从后端 prompt 字段回退。prompt 是 role+rules 合在一起的完整文本，
-  // 没有 ui 拆分时整体放到 role_prompt，rules_prompt 保持空。
+  // prompt fallback: when metadata_json does not contain ui.role_prompt (the agent may be created directly via a backend API,
+  // rather than through the frontend UI), fall back to the backend prompt field. The prompt is the complete text combining role+rules,
+  // and when there is no ui splitting, it is placed entirely into role_prompt, while rules_prompt remains empty.
   const rolePrompt = ui.role_prompt || ba.prompt || '';
   return {
     agent_id: ba.agent_id,
@@ -216,10 +216,10 @@ export function adaptAgent(ba: BackendAgent, index: number): Agent {
     rules_prompt: ui.rules_prompt,
     icon: ui.icon,
     accent: ui.accent,
-    // 资产绑定不再从 metadata_json.ui 读（.ui 已废弃为资产存储）。
-    // 真实绑定读 skill 表 owner_agent_id / agent-fixed-asset 表：
-    // list 计数走 agent-overview/bootstrap.counts，详情弹窗走 skillApi.listByAgent
-    // + knowledgeApi.agentFixed + chatMemoryApi.agentFixed。这些字段保留仅为类型兼容。
+    // Asset binding is no longer read from metadata_json.ui (the .ui is deprecated as the asset storage).
+    // Real binding reads skill table owner_agent_id / agent-fixed-asset table:
+    // list count goes through agent-overview/bootstrap.counts, detail popup goes through skillApi.listByAgent
+    // + knowledgeApi.agentFixed + chatMemoryApi.agentFixed. These fields are retained only for type compatibility.
     skills: [],
     code_graphs: [],
     llm_wikis: [],
@@ -253,7 +253,7 @@ export function adaptTask(bt: BackendTask, linkedAgents: string[]): Task {
   };
 }
 
-// ========================= Active team id（客户端 UI 状态，localStorage 持久化） =========================
+// ========================= Active team id (Client UI state, persisted in localStorage) =========================
 
 const ACTIVE_TEAM_KEY = 'tdai-memory.activeTeam.v1';
 const LOCAL_CHANGE_EVENT = 'tdai-memory.demo-store-change';
@@ -270,7 +270,7 @@ export function writeActiveTeamId(teamId: string | null): void {
   try { window.dispatchEvent(new Event(LOCAL_CHANGE_EVENT)); } catch { /* ignore */ }
 }
 
-/** teams 加载完成后确保 activeTeamId 指向一个有效 team（否则选第一个 / 清空）。 */
+/** After the teams are loaded, ensure that activeTeamId points to a valid team (otherwise select the first / clear). */
 export function ensureValidActiveTeamId(teams: Team[]): void {
   const cur = readActiveTeamId();
   if (cur && teams.some((t) => t.team_id === cur)) return;
@@ -281,14 +281,14 @@ export function ensureValidActiveTeamId(teams: Team[]): void {
   writeActiveTeamId(teams[0].team_id);
 }
 
-// ========================= Hooks & cache（已迁移到 stores/backend.ts） =========================
+// ========================= Hooks & cache (migrated to stores/backend.ts) =========================
 //
-// 旧的模块级变量（_cachedTeams / _cachedAgentsMap / _inflightTeams …）已全部
-// 迁移到 zustand store（stores/backend.ts），通过 useTeams / useAgents / useTasks
-// 从 store 读数据 + 触发 fetch，多个组件共享同一份状态，不再重复请求。
+// The old module-level variables (_cachedTeams / _cachedAgentsMap / _inflightTeams ...) have all been
+// migrated to the zustand store (stores/backend.ts), reading data and triggering fetch via useTeams / useAgents / useTasks
+// from the store, so multiple components share the same state and no longer make repeated requests.
 //
-// invalidateBackendCache / clearBackendCache 也由新 store 提供，这里 re-export
-// 保持调用方无需改 import 路径。
+// invalidateBackendCache / clearBackendCache are also provided by the new store, so they are re-exported here
+// to keep callers from needing to change their import paths.
 
 export {
   useTeams,
@@ -306,10 +306,10 @@ export function roleInTeam(team: Team | null | undefined, userId: string): 'admi
   if (!team) return null;
   const member = team.members.find((m) => m.user_id === userId);
   if (member) return member.role;
-  // team owner 如果不在 members 列表里（后端 owner 不一定出现在 members 数组中），
-  // 默认按 'member' 处理——owner 在 team 内能管理资源，应能看到资源页。
-  // 不返回 'admin' 是因为 useCurrentRole 返回的 'admin' 语义是"全局 admin"（看不到资源页），
-  // team owner 不是全局 admin，不应被 AdminResourceLock 锁住。
+  // If the team owner is not in the members list (the backend owner may not appear in the members array),
+  // it is treated as a 'member' by default — the owner can manage resources within the team and should be able to see the resource page.
+  // 'admin' is not returned because the 'admin' returned by useCurrentRole has the semantics of "global admin" (cannot see the resource page),
+  // and team owner is not a global admin, so it should not be locked by AdminResourceLock.
   if (team.owner_user_id === userId) return 'member';
   return null;
 }
@@ -331,7 +331,7 @@ export function canManageAsset(
   _isGlobalAdminFlag?: boolean
 ): boolean {
   if (!userId) return false;
-  // admin 不再拥有全局特权，与 member 一致：只能操作自己 owner 的资产。
+  // admin no longer has global privileges, consistent with member: can only operate assets of their own owner.
   if (asset.owner_user_id === userId) return true;
   if (team && team.team_id === asset.team_id && isTeamAdmin(team, userId)) return true;
   return false;
@@ -347,7 +347,7 @@ export function canDeleteTask(task: Task, team: Team | null | undefined, userId:
   return canManageAsset({ owner_user_id: task.creator_user_id, team_id: task.team_id }, team, userId);
 }
 
-// ========================= Task mutations（async，包一层 diff/参与者逻辑） =========================
+// ========================= Task mutations (async, wrapping with diff/participant logic) =========================
 
 export async function createTaskAsync(input: {
   team_id: string;
@@ -377,7 +377,7 @@ export async function deleteTaskAsync(taskId: string): Promise<void> {
 export async function updateTaskStatusAsync(taskId: string, status: TaskStatus, actorUserId?: string): Promise<void> {
   const patch: Record<string, unknown> = { status };
   if (actorUserId) {
-    // 参与者留痕：读一次当前 task 详情，把 actor 并入 participants 再写回 metadata_json
+    // Participant trace: read the current task details once, merge the actor into participants, then write back to metadata_json
     try {
       const current = await tasksApi.get(taskId);
       const ui = readTaskUiMeta(current.metadata_json, current.creator_user_id);
@@ -386,7 +386,7 @@ export async function updateTaskStatusAsync(taskId: string, status: TaskStatus, 
           participants: [...ui.participants, actorUserId],
         });
       }
-    } catch { /* 参与者留痕失败不阻断状态切换 */ }
+    } catch { /* Participant trace failure does not block state switching */ }
   }
   await tasksApi.update(taskId, patch as Parameters<typeof tasksApi.update>[1]);
   invalidateBackendCache();

@@ -1,18 +1,18 @@
 /**
- * api/auth.ts — 登录验活 + 环境绑定。
+ * api/auth.ts — Login verification + environment binding.
  *
- * 登录流程：
- *   ① GET /meta/instances 选实例
- *   ② 用户输入自持的 user_key（sk-mem-…）
- *   ③ POST /meta/auth/verify（Header 仅 X-Tdai-Service-Id，body 带 user_key）
- *   ④ data.valid === true → 登录成功，前端把 { instance_id, user_key, user } 写入 session
- * 无 OAuth、无 Cookie；见 lib/panelSession.ts。
+ * Login flow:
+ *   ① GET /meta/instances to select instance
+ *   ② User enters their own user_key (sk-mem-…)
+ *   ③ POST /meta/auth/verify (Header only X-Tdai-Service-Id, body with user_key)
+ *   ④ data.valid === true → login successful, frontend writes { instance_id, user_key, user } to session
+ * No OAuth, no Cookie; see lib/panelSession.ts.
  */
 import { request, metaCall } from './base';
 import type { PublicUser } from './types';
 
 export const authVerifyApi = {
-  /** 登录验活：Header 仅带实例 ID，user_key 只放 body（meta-api.openapi.yaml §auth/verify） */
+  /** Login verification: Header only contains instance ID, user_key only in body (meta-api.openapi.yaml §auth/verify) */
   verify: (instanceId: string, userKey: string) =>
     metaCall<{ valid: boolean; user?: PublicUser }>(
       'auth/verify',
@@ -23,15 +23,15 @@ export const authVerifyApi = {
 
 // ========================= Environment Bindings =========================
 //
-// ⚠️ 当前部署未注册 /api/v1/users/* 路由，以下接口可能 404。
-// 保留代码用于兼容仍启用该路由的环境；若某个页面依赖这组接口，请先确认路由已注册。
+// ⚠️ The current deployment has not registered the /api/v1/users/* route, so the following endpoints may return 404.
+// Keep the code for compatibility with environments where this route is still enabled; if any page depends on this set of endpoints, please first confirm that the route is registered.
 
 /**
- * 环境绑定（environment_bindings）：把用户在外部环境（IDE / 编程助手等）的
- * 外部 user_id 与本平台 user 关联，供 proxy 通过 (environment, environment_user_id)
- * 反查到团队 / agent / task。
+ * environment_bindings: bind the user's environment in external environments (such as IDEs / programming assistants)
+ * The external user_id is associated with the platform user, for proxy to use via (environment, environment_user_id)
+ * Reverse-lookup team / agent / task.
  *
- * 唯一约束：(environment, environment_user_id) 全局唯一；被他人占用 → 409。
+ * Unique constraint: (environment, environment_user_id) is globally unique; occupied by another person → 409.
  */
 export interface EnvironmentBinding {
   id: string;
@@ -43,13 +43,13 @@ export interface EnvironmentBinding {
 }
 
 export const environmentBindingsApi = {
-  /** 列出当前登录用户的全部绑定 */
+  /** List all bound items of the currently logged-in user */
   list: () => request<EnvironmentBinding[]>('GET', '/api/v1/users/me/environment-bindings'),
 
-  /** 新增一条绑定（幂等：同 user 重复 POST 同样的 (env, env_user_id) 不报错） */
+  /** Add a binding (idempotent: repeated POST with the same (env, env_user_id) for the same user does not error) */
   create: (data: { environment: string; environment_user_id: string }) =>
     request<EnvironmentBinding>('POST', '/api/v1/users/me/environment-bindings', data),
 
-  /** 删除一条绑定（只能删自己的；删别人 → 403） */
+  /** Delete a binding (only your own can be deleted; deleting others → 403) */
   remove: (id: string) => request<{ ok: boolean }>('DELETE', `/api/v1/users/me/environment-bindings/${id}`),
 };

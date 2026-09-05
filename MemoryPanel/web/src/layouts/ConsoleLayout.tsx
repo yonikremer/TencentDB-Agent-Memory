@@ -1,7 +1,7 @@
 /**
- * ConsoleLayout — 主布局壳。
+ * ConsoleLayout — Main layout shell.
  *
- * 基于 tea-component 的 `Layout` + `Menu` 组件，包含 TabBar、路由、菜单过滤等业务逻辑。
+ * Tea-component-based `Layout` + `Menu` components, including business logic such as TabBar, routing, and menu filtering.
  */
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
@@ -16,7 +16,7 @@ import { ITEM_ICON, usePageMeta, GROUP_ORDER_KEYS, type PageId } from '@/constan
 
 const { Body, Sider, Content } = Layout;
 
-/** 路由 path → PageId */
+/** Route path → PageId */
 const PATH_TO_PAGE: Record<string, PageId> = {
   '/': 'workbench_board',
   '/wiki': 'wiki',
@@ -28,7 +28,7 @@ const PATH_TO_PAGE: Record<string, PageId> = {
   '/team/api-keys': 'api_keys',
 };
 
-/** PageId → 路由 path */
+/** PageId → route path */
 const PAGE_TO_PATH: Record<PageId, string> = Object.fromEntries(
   Object.entries(PATH_TO_PAGE).map(([path, id]) => [id, path]),
 ) as Record<PageId, string>;
@@ -69,20 +69,20 @@ export function ConsoleLayout() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 使用说明页为独立页（自带返回按钮与页头），不占用多标签页栏
+  // The usage instructions page is an independent page (with its own back button and header), and does not occupy the multi-tab bar
   const isGuide = location.pathname === '/guide';
 
   const [openPages, setOpenPages] = useState<PageId[]>(() => (isGuide ? [] : [activePage]));
 
   useEffect(() => {
-    // /guide 独立页不把 workbench_board 等页面追加进标签栏，避免返回时多出标签
+    // /guide does not append pages such as workbench_board into the tab bar, to avoid extra tabs when returning
     if (isGuide) return;
     setOpenPages((prev) => (prev.includes(activePage) ? prev : [...prev, activePage]));
   }, [activePage, isGuide]);
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  // 首次使用引导：登录后按「每用户仅首次」判定自动弹出
+  // First-time usage guidance: automatically pops up after login, judged as "once per user only"
   const currentUserId = auth?.user_id;
   const [onboardingVisible, setOnboardingVisible] = useState(false);
   useEffect(() => {
@@ -92,10 +92,10 @@ export function ConsoleLayout() {
   }, [currentUserId]);
 
   /**
-   * 回顾引导入口（由 GlobalHeader 的「我的资料 → 回顾引导」菜单项触发）：
-   * 清掉 onboarded 标记 + 把 Guide 重新置为可见。
-   * 必须先清标记再 setVisible，否则 Guide 内部的 close→markOnboarded 链路里
-   * 立刻又会重新标记为已看过（虽然本次不冲突，但下次自动判定仍会按"已看过"处理）。
+   * Review entry (triggered by the "My Profile → Review Guide" menu item in GlobalHeader):
+   * Clear the onboarded flag and re-show the Guide.
+   * The flag must be cleared before setVisible, otherwise the Guide's internal close→markOnboarded chain
+   * will immediately re-mark it as viewed (though there is no conflict this time, next time's automatic judgment will still treat it as "viewed").
    */
   const handleReplayOnboarding = useCallback(() => {
     if (!currentUserId) return;
@@ -103,7 +103,7 @@ export function ConsoleLayout() {
     setOnboardingVisible(true);
   }, [currentUserId]);
 
-  // GuidePage 底部「引导回放」通过自定义事件触发与「我的资料 → 回顾引导」一致的链路
+  // GuidePage bottom "Guide Replay" is triggered via a custom event to match the "My Profile → Review Guide" flow
   useEffect(() => {
     const onReplay = () => handleReplayOnboarding();
     window.addEventListener('tdai-replay-onboarding', onReplay);
@@ -131,9 +131,9 @@ export function ConsoleLayout() {
     [activePage, navigateTo],
   );
 
-  // ===== 基于 team role 的菜单过滤 =====
-  // admin 可访问所有页面（含资源管理）
-  // 「成员管理」项：reviewer 不可见
+  // ===== Menu Filter Based on team role =====
+  // admin can access all pages (including resource management)
+  // "Member Management" item: reviewer cannot see it
   const menuGroups = useMemo(() => {
     const byGroup = new Map<string, (typeof PAGE_META)[PageId][]>();
 
@@ -188,7 +188,7 @@ export function ConsoleLayout() {
       <Layout>
         <Body>
           <Sider>
-            {/* 品牌已在全局 Header 展示，侧栏只承载导航（与 Memory项目公共壳层一致）。 */}
+            {/* The brand is already displayed in the global Header, and the sidebar only carries navigation (consistent with the shared shell of the Memory project). */}
             <Menu collapsable collapsed={sidebarCollapsed} onCollapsedChange={setSidebarCollapsed}>
               {pinnedGroup?.items.map((item) => renderMenuItem(item))}
               {restGroups.map((group) => (
@@ -208,7 +208,7 @@ export function ConsoleLayout() {
               />
             )}
             <Content.Body className="_memory-content-body">
-              {/* key 绑定 pathname：路由切换时重挂载页面帧，触发 _page-enter 过渡，保持跨页连续性 */}
+              {/* key binding pathname: remount page frames on route switching, trigger _page-enter transition, maintain cross-page continuity */}
               <main key={location.pathname} className="_memory-page-frame">
                 <Outlet />
               </main>

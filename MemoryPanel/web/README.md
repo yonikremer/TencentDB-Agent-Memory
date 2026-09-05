@@ -1,8 +1,8 @@
 # Team Memory Control Web
 
-Team Memory Control 的 Web 管理界面，对接同仓库的无状态 Control 服务。
+The Web management interface of Team Memory Control, connecting to the stateless Control service in the same repository.
 
-## 技术栈
+## Tech Stack
 
 - React 18
 - TypeScript
@@ -11,9 +11,9 @@ Team Memory Control 的 Web 管理界面，对接同仓库的无状态 Control �
 - Zustand
 - Tailwind CSS
 
-## 本地开发
+## Local Development
 
-先从仓库根目录启动 Control：
+Start Control from the repository root directory first:
 
 ```bash
 pnpm install
@@ -22,7 +22,7 @@ cp config/metadata-instances.example.json config/metadata-instances.json
 pnpm dev
 ```
 
-再启动前端：
+Start the frontend again:
 
 ```bash
 cd web
@@ -31,30 +31,30 @@ cp .env.example .env
 npm run dev
 ```
 
-浏览器访问 `http://127.0.0.1:5173`。
+Open the browser to `http://127.0.0.1:5173`.
 
-## 开发代理
+Developing an agent
 
-`vite.config.ts` 默认配置：
+`vite.config.ts` default configuration:
 
-| 请求前缀 | 默认目标 | 环境变量 |
+| Request prefix | Default target | Environment variable |
 |----------|----------|----------|
 | `/api/v1`、`/health` | `http://127.0.0.1:8123` | `VITE_TMC_BACKEND_URL` |
 | `/v3` | `http://127.0.0.1:8420` | `VITE_SKILL_GATEWAY_URL` |
 
-如需连接其他开发环境，请在未提交的 `web/.env` 中使用实际地址。不要把内部地址、账号或凭证写入 README、源码或已跟踪的环境文件。
+To connect to other development environments, use the actual address in the uncommitted `web/.env`. Do not write internal addresses, accounts, or credentials into the README, source code, or tracked environment files.
 
-## 构建
+Build
 
 ```bash
 npm run build
 ```
 
-产物生成到 `web/dist/`。Control 可通过 `UI_DIST_DIR=./web/dist` 同源托管这些静态文件。
+Products are generated to `web/dist/`. Control can host these static files via `UI_DIST_DIR=./web/dist` from the same origin.
 
-## API 边界
+## API Boundary
 
-前端使用以下 Control API：
+The frontend uses the following Control API:
 
 - `/api/v1/meta/*`
 - `/api/v1/skill/*`
@@ -63,16 +63,16 @@ npm run build
 - `/api/v1/agent-overview/*`
 - `/api/v1/agent/*`
 
-登录凭证保存在浏览器 `localStorage`，业务请求通过 `X-Tdai-Service-Id` 和 `X-Tdai-User-Key` Header 发送。前端不得记录、展示或上传完整凭证。
+Login credentials are stored in the browser `localStorage`, and business requests are sent via the `X-Tdai-Service-Id` and `X-Tdai-User-Key` Headers. The frontend must not record, display, or upload the complete credentials.
 
-API 对接以仓库 `docs/api/` 下的公开契约为准；未列入公开契约的外部服务接口不属于前端对接范围。
+API integration is based on the public contracts under `docs/api/`; external service interfaces not listed in the public contracts are not within the scope of frontend integration.
 
-## 常用命令
+Common Commands
 
-| 命令 | 说明 |
+| Command | Description |
 |------|------|
-| `npm run dev` | 启动开发服务器 |
-| `npm run build` | 类型检查并构建 |
-| `npm run preview` | 预览构建产物 |
-| `npm run lint:check` | 检查 ESLint |
-| `npm run format:check` | 检查格式 |
+| `npm run dev` | Start dev server |
+| `npm run build` | Type check and build |
+| `npm run preview` | Preview build output |
+| `npm run lint:check` | Check ESLint |
+| `npm run format:check` | Check formatting |

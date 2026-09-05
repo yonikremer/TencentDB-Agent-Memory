@@ -1,6 +1,6 @@
 /**
- * memory-utils —— Chat Memory 页的常量、纯工具函数与类型。
- * 从 ChatMemoryPanel.tsx 拆出。
+ * memory-utils —— Constants, pure utility functions, and types for the Chat Memory page.
+ * Extracted from ChatMemoryPanel.tsx.
  */
 import { ApiError, type ChatMemoryLayerItem } from '@/lib/teamApi';
 import type { MemoryBlock, MemoryLayer } from '../constants/types';
@@ -10,20 +10,20 @@ export function layerPageSize(layer: MemoryLayer): number {
   return LAYER_PAGE_SIZE[layer];
 }
 
-/** 详情页时间筛选器范围，start / end 为 ISO8601 字符串 */
+/** Detail page time filter range, start / end are ISO8601 strings */
 export interface TimeRange {
   start: string;
   end: string;
 }
 
-/** 详情页时间筛选器默认范围：当前时间 ~ 前一天 */
+/** Detail page time filter default range: current time ~ previous day */
 export function defaultTimeRange(): TimeRange {
   const end = new Date();
   const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
-/** 后端探测到「筛选范围过大，VDB 无法支撑」时返回的业务错误 */
+/** Business error returned when the backend detects that "the filter range is too large for VDB to support" */
 export function isRangeTooLargeError(e: unknown): boolean {
   return e instanceof ApiError && e.message === 'RANGE_TOO_LARGE';
 }
@@ -40,9 +40,9 @@ export function mapLayerItem(i: ChatMemoryLayerItem) {
 }
 
 /**
- * 剥掉 scenario（L2）markdown 的 META 头。
- * scenario/read 返回的正文带 `-----META-START-----...-----META-END-----`
- * 系统字段头；编辑框只展示纯正文，写回时后端会用现有 META 自动重建。
+ * Strip the META header from the scenario (L2) markdown.
+ * The body returned by scenario/read contains `-----META-START-----...-----META-END-----`
+ * System field headers; the editor only displays the plain body, and the backend will automatically rebuild it using the existing META when writing back.
  */
 export function stripScenarioMeta(content: string): string {
   return content
@@ -50,9 +50,9 @@ export function stripScenarioMeta(content: string): string {
     .replace(/^\n+/, '');
 }
 
-// 由列表接口的 layer_counts 构造初始 layerCounts：只保留 >0 的真实计数，
-// 其余留 undefined＝「未知」。徽章据此显示占位，避免把「未加载」误显示成「0」，
-// 也不再为拿计数而预请求。后端 layer_counts 落地真实值后此处会自动直接采用。
+// Construct the initial layerCounts from the list interface's layer_counts: only keep real counts greater than 0,
+// leaving the rest as undefined = "unknown". Badges use this to display placeholders, avoiding displaying "not loaded" as "0",
+// and also avoiding pre-requesting for counts. This will automatically adopt the values directly once the backend's layer_counts is implemented.
 export function buildInitialLayerCounts(lc: {
   L0_messages: number;
   L1: number;
@@ -68,28 +68,28 @@ export function buildInitialLayerCounts(lc: {
 }
 
 /**
- * 复制文本到剪贴板，返回是否成功。
+ * Copy text to clipboard and return whether it was successful.
  *
- * navigator.clipboard 仅在安全上下文（HTTPS / localhost）可用；面板若经
- * http:// + 内网 IP 访问，navigator.clipboard 为 undefined，会导致复制失败。
- * 因此优先用 Clipboard API，不可用时降级到 document.execCommand('copy')
- * 的临时 textarea 方案，兼容非安全上下文。
+ * navigator.clipboard is only available in a secure context (HTTPS / localhost); if the panel is via
+ * http:// + intranet IP access, navigator.clipboard is undefined, which will cause copy to fail.
+ Therefore, prefer the Clipboard API, and fall back to document.execCommand('copy') when it is unavailable
+ * The temporary textarea solution, compatible with non-secure contexts.
  */
 export async function copyToClipboard(text: string): Promise<boolean> {
-  // 优先：安全上下文下的 Clipboard API
+  // Preferred: Clipboard API in a secure context
   if (navigator.clipboard && window.isSecureContext) {
     try {
       await navigator.clipboard.writeText(text);
       return true;
     } catch {
-      // 落到下方 execCommand 兜底
+      // Falls back to the execCommand below
     }
   }
-  // 兜底：非安全上下文（http + IP）用 execCommand
+  // Fallback: use execCommand for non-secure context (http + IP)
   try {
     const ta = document.createElement('textarea');
     ta.value = text;
-    // 移出视口、避免滚动与聚焦跳动
+    // Move out of viewport, avoid scroll and focus jumping
     ta.style.position = 'fixed';
     ta.style.top = '-9999px';
     ta.style.left = '-9999px';

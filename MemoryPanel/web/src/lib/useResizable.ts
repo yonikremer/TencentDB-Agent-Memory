@@ -1,11 +1,11 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 
 /**
- * 可拖拽分割线 hook
- * @param initial  初始宽度 (px)
- * @param min      最小宽度 (px)
- * @param max      最大宽度 (px)
- * @param side     拖拽边：'left' 表示左侧面板宽度可调，'right' 表示右侧面板宽度可调
+ * Draggable divider hook
+ * @param initial   Initial width (px)
+ * @param min       Minimum width (px)
+ * @param max       Maximum width (px)
+ * @param side      Drag side: 'left' indicates the left panel width is adjustable, 'right' indicates the right panel width is adjustable
  */
 export function useResizable(initial: number, min: number, max: number, side: 'left' | 'right' = 'left') {
   const [width, setWidth] = useState(initial);

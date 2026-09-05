@@ -1,6 +1,6 @@
 /**
- * useCodeSources —— Code 资产页的全部状态与数据逻辑。
- * 组件层只保留 JSX 渲染，状态 / 数据逻辑集中在此。
+ * useCodeSources —— All state and data logic for the Code assets page.
+ * The component layer only retains JSX rendering, with state / data logic centralized here.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -14,7 +14,7 @@ export function useCodeSources() {
   const { t } = useTranslation();
   const [sources, setSources] = useState<CodeGraphDetail[]>([]);
   const [loading, setLoading] = useState(false);
-  // 默认展示 Agent 资产（fixed），避免用户误以为自己的资产在「团队资产」里
+  // Default display Agent assets (fixed) to prevent users from mistakenly thinking their assets are in "Team Assets"
   const [scopeTab, setScopeTab] = useState<ScopeTab>('fixed');
   const [keyword, setKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -45,8 +45,8 @@ export function useCodeSources() {
   const { activeTeamId, activeTeam } = useTeams();
   const auth = readAuth();
   const currentUser = auth?.user_id ?? '';
-  // 固定资产 tab 只列自己 owner 的 agent（与 ChatMemory / Skills 面板一致，
-  // 也符合文档 §4.2 权限规则：agent-fixed 只允许查看 caller 自己 owner 的 agent）。
+  // The fixed assets tab only lists the agent owned by the caller (consistent with the ChatMemory / Skills panel,
+  // also conforms to document §4.2 permission rules: agent-fixed only allows viewing the agent owned by the caller).
   const { agents: allAgents } = useAgents(activeTeamId);
   const teamAgents = useMemo(
     () =>
@@ -55,7 +55,7 @@ export function useCodeSources() {
         .map((a) => ({ id: a.agent_id, name: a.name })),
     [allAgents, currentUser],
   );
-  // fixed tab 下选中的 agent_id
+  // selected agent_id in fixed tab
   const [agentFilter, setAgentFilter] = useState<string>('');
   const [fixedBoundIds, setFixedBoundIds] = useState<Set<string>>(new Set());
 
@@ -88,7 +88,7 @@ export function useCodeSources() {
   }, [scopeTab, fetchFixedBindings]);
 
   const displaySources = useMemo(() => {
-    // team tab 下合并 inFlight（刚注册的仓库还在构建中，列表里先占位显示）
+    // merge inFlight under team tab (repositories just registered are still being built, so they are shown as placeholders in the list)
     if (scopeTab === 'team') {
       const ids = new Set(sources.map((s) => s.code_graph_id));
       const extras = inFlight.filter((x) => x.code_graph_id && !ids.has(x.code_graph_id));
@@ -108,7 +108,7 @@ export function useCodeSources() {
     return displaySources;
   }, [displaySources, scopeTab, agentFilter, fixedBoundIds]);
 
-  // 统计只跟随当前资产范围，避免搜索或状态筛选让概览数据失真。
+  // Count only the current asset scope, to avoid overview data distortion from search or status filters.
   const stats = useMemo(
     () => ({
       total: scopeSources.length,
@@ -149,9 +149,9 @@ export function useCodeSources() {
   const [exploring, setExploring] = useState(false);
   const [exploreResult, setExploreResult] = useState('');
 
-  // 请求序号防竞态：快速切换 tab 时，先发的请求可能后返回，
-  // 旧 tab 的数据会覆盖新 tab 的数据。每次 fetch 递增序号，
-  // 响应回来时校验序号是否仍是最新，不是就丢弃。
+  // Request sequence race prevention: when quickly switching tabs, requests sent first may return later,
+  // and data from the old tab may overwrite data from the new tab. Increment the sequence number each fetch,
+  // and when the response returns, verify whether the sequence number is still the latest; if not, discard it.
   const fetchSeqRef = useRef(0);
 
   const fetchSources = useCallback(async () => {
@@ -162,14 +162,14 @@ export function useCodeSources() {
     }
     const seq = ++fetchSeqRef.current;
     setLoading(true);
-    // 立即清空旧数据 —— 否则切 tab 时会先看到上一个 tab 的列表，
-    // 新数据到了才突然替换，视觉上就是"闪一下"。
+    // Immediately clear old data — otherwise switching tabs will first show the previous tab's list,
+    // and new data suddenly replaces it, visually appearing as a "flash".
     setSources([]);
     try {
-      // 资产统一为团队维度（visibility=team），无 private/我的资产概念。
-      // fixed tab 也是拿全量 team 资产，再按 fixedBoundIds 过滤。
+      // Assets are unified at the team dimension (visibility=team); there is no concept of private/my assets.
+      // The fixed tab also uses all team assets, then filters by fixedBoundIds.
       const data = await knowledgeApi.code.teamAssets(activeTeamId);
-      if (seq !== fetchSeqRef.current) return; // 已被后续请求取代
+      if (seq !== fetchSeqRef.current) return; // Replaced by subsequent request
       setSources(Array.isArray(data) ? data : []);
     } catch (e: unknown) {
       if (seq !== fetchSeqRef.current) return;
@@ -180,7 +180,7 @@ export function useCodeSources() {
     }
   }, [activeTeamId, scopeTab]);
 
-  // 触发 fetchSources：依赖原始参数 + fetchSources，并用 key 去重防止短时间内重复触发。
+  // Trigger fetchSources: depends on the original parameters + fetchSources, and uses key for deduplication to prevent repeated triggering in a short time.
   const fetchKeyRef = useRef<string>('');
   useEffect(() => {
     const key = `${activeTeamId}|${scopeTab}`;
@@ -189,9 +189,9 @@ export function useCodeSources() {
     void fetchSources();
   }, [activeTeamId, scopeTab, fetchSources]);
 
-  // inFlight 的 ref 镜像：poll 闭包通过 ref 读取最新值，
-  // 避免把 inFlight 放进 effect 依赖——否则每次 setInFlight（即使内容不变、
-  // 只是数组引用变了）都会重新触发 effect → 立即 poll → 又 setInFlight → 死循环。
+  // the ref mirror of inFlight: the poll closure reads the latest value via ref,
+  // to avoid putting inFlight into the effect dependencies — otherwise every setInFlight (even when the content is unchanged,
+  // but only the array reference changes) would re-trigger the effect → immediately poll → then setInFlight again → infinite loop.
   const inFlightRef = useRef<CodeGraphDetail[]>([]);
   inFlightRef.current = inFlight;
   const hasInFlight = inFlight.length > 0;
@@ -211,8 +211,8 @@ export function useCodeSources() {
             try {
               await knowledgeApi.code.registerMeta(activeTeamId, detail.code_graph_id);
             } catch (e: unknown) {
-              // 幂等：asset 已存在 / 409 → 忽略；其它真错报出来便于排查
-              // （callback S2S 是主力，这里只是兜底，但失败要可见）
+              // Idempotent: asset already exists / 409 → ignore; other real errors are reported for troubleshooting
+              // (callback S2S is the primary, this is just a fallback, but failures must be visible)
               const msg = e instanceof Error ? e.message : String(e);
               if (!/already|exist|409|registered|ok/i.test(msg)) {
                 tea.notify.error(t('code.notify.metaFailed', { msg }));
@@ -221,7 +221,7 @@ export function useCodeSources() {
             toRemove.push(detail.code_graph_id);
             void fetchSources();
           } else {
-            // 只在状态真正变化时才记录更新，避免无意义的 setInFlight 触发重渲染
+            // Only record updates when the state actually changes, to avoid meaningless setInFlight triggering re-render
             if (detail.status !== item.status) updates.push(detail);
           }
         } catch {
@@ -272,7 +272,7 @@ export function useCodeSources() {
   const handleRegister = async () => {
     const repo = formRepo.trim();
     if (!repo || !formBranch.trim() || !activeTeamId) return;
-    // 防御性校验：按钮已按 validUrl 禁用，这里再挡一层防止绕过
+    // Defensive validation: the button is disabled according to validUrl, and this layer is added again to prevent bypassing
     if (!isValidGitHttpUrl(repo)) {
       tea.notify.error(t('code.register.invalidUrl'));
       return;
@@ -319,9 +319,9 @@ export function useCodeSources() {
     if (!ok) return;
     try {
       await knowledgeApi.code.delete(cgId);
-      // 乐观更新：立即从本地列表移除。后端删除是最终一致的，删除刚成功时再拉 teamAssets
-      // 可能仍返回该仓库，导致列表不变、需手动刷新页面才消失。这里先本地摘除，
-      // fetchSources 仅作兜底对齐。
+      // Optimistic update: immediately remove from the local list. The backend deletion is eventually consistent, and the teamAssets are fetched again only after the deletion has just succeeded
+      // It may still return the repository, causing the list to remain unchanged and requiring a manual page refresh for it to disappear. Here, it is removed locally first,
+      // fetchSources is only used as a fallback to align.
       setSources((prev) => prev.filter((x) => x.code_graph_id !== cgId));
       setInFlight((prev) => prev.filter((x) => x.code_graph_id !== cgId));
       if (selectedCodeAsset?.cgId === cgId) setSelectedCodeAsset(null);

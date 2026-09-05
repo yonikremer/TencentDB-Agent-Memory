@@ -1,6 +1,6 @@
 /**
- * AdminResourceLock — Admin 账号访问资源管理时的锁定提示。
- * 用 Tea `Card` + `Icon` 承载空态提示。
+ * AdminResourceLock — Lock prompt when Admin account accesses resources.
+ * Use Tea `Card` + `Icon` to carry the empty-state prompt.
  */
 import { useTranslation } from 'react-i18next';
 import { Card } from 'tea-component';

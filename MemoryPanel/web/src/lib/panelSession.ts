@@ -1,34 +1,34 @@
 /**
- * Panel Session — 新面板前端会话缓存（localStorage）。
+ * Panel Session — New Panel Frontend Session Cache (localStorage).
  *
- * 对接 docs/architecture/09-new-panel-control-backend-design.md §3.3.2：
- * 新面板 Control 是无状态代理，不建 Cookie/Session；登录凭证
- * （instance_id + user_key）由前端自行持有，缓存在 localStorage
- * （跨 tab 共享，关 tab 不失效），每次 meta 请求从这里读出注入 Header：
- *   - X-Tdai-Service-Id（= 注册表 id = 内核 x-tdai-service-id；早期版本文档曾用
- *     `X-Metadata-Instance-Id` 这个名字，meta-api.openapi.yaml v1.1.0 起已改名，
- *     务必以最新契约为准，否则 Control 会报 400 MISSING_INSTANCE_ID）
- *   - X-Tdai-User-Key（auth/verify 除外）
+ * Connect to docs/architecture/09-new-panel-control-backend-design.md §3.3.2:
+ * New Panel Control is a stateless proxy, does not create Cookie/Session; login credentials
+ * (*instance_id + user_key*) is held by the frontend and cached in localStorage
+ * (Shared across tabs, remains valid when closing tabs), read and inject Header from here for each meta request:
+ *   - X-Tdai-Service-Id (= registry id = kernel x-tdai-service-id; early version documentation once used
+ *     The name `X-Metadata-Instance-Id` was renamed, starting from meta-api.openapi.yaml v1.1.0,
+ *      *Be sure to use the latest contract as the standard, otherwise Control will report 400 MISSING_INSTANCE_ID）
+ *   - X-Tdai-User-Key (except auth/verify)
  *
- * 之前用 sessionStorage（tab 级），导致新开 tab 需要重新登录。
- * 改为 localStorage 后多 tab 共享登录态，登出时通过 storage 事件同步。
+ * Previously used sessionStorage (tab-level), causing re-login when opening a new tab.
+ * After switching to localStorage, multiple tabs share the login state, and logout is synchronized via the storage event.
  */
 import type { PublicUser } from './teamApi';
 
 export interface PanelSession {
-  /** = 注册表 id = 内核 x-tdai-service-id；登录页选择实例时确定 */
+  /** = Registry id = Kernel x-tdai-service-id; Determined when selecting instance on login page */
   instanceId: string;
-  /** 仅展示用（实例列表里的 name），非必需 */
+  /** For display only (name from the instance list), not required */
   instanceName?: string;
-  /** 用户自持的 API 密钥 sk-mem-…；经 auth/verify 验活后缓存 */
+  /** User-held API key sk-mem-…; cached after verification via auth/verify */
   userKey: string;
-  /** auth/verify 响应 data.user（可选，用于展示 + 作为 owner_user_id/creator_user_id 来源） */
+  /** auth/verify response data.user (optional, for display + as source for owner_user_id/creator_user_id) */
   user?: PublicUser;
 }
 
 const STORAGE_KEY = 'tdai-panel.session';
 
-/** 读取当前会话；无会话或解析失败均返回 null（不抛错，调用方按未登录处理） */
+/** Read the current session; return null if there is no session or parsing fails (do not throw errors, the caller handles it as not logged in) */
 export function getPanelSession(): PanelSession | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -39,16 +39,16 @@ export function getPanelSession(): PanelSession | null {
   }
 }
 
-/** 登录成功（auth/verify 返回 valid===true）后写入会话 */
+/** Write session after successful login (auth/verify returns valid===true) */
 export function setPanelSession(session: PanelSession): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
   } catch {
-    /* 隐私模式 / 存储配额异常：静默失败，不阻断登录后的本次会话内存态 */
+    /* Privacy mode / storage quota anomaly: silent failure, does not block the in-memory session after login */
   }
 }
 
-/** 登出 / 401 兜底时清空会话 */
+/** Logout / 401 fallback: clear session */
 export function clearPanelSession(): void {
   try {
     localStorage.removeItem(STORAGE_KEY);

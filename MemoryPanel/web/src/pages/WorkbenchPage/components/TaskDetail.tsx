@@ -1,5 +1,5 @@
 /**
- * TaskDetail —— 工作台任务详情（编辑标题/描述、切换状态、查看参与者、删除）。
+ * TaskDetail —— Workspace Task Details (Edit title/description, switch status, view participants, delete).
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -11,9 +11,9 @@ import { tea } from '@/lib/tea-bridge';
 import { useStatusLabels, type AgentOption, type TaskParticipationView } from '../utils/workbench-utils';
 
 /**
- * 参与者 chip：可见文本显示 display_name（缓存未命中先回退 id），
- * title 保留语义 tooltip + user_id 供排查。
- * 抽子组件是 Rules of Hooks 要求（不能在 .map 里循环调 useUserDisplayName）。
+ * Participant chip: visible text displays display_name (falls back to id if cache miss),
+ * title preserves semantic meaning as tooltip + user_id for troubleshooting.
+ * Extracting a sub-component is required by Rules of Hooks (cannot call useUserDisplayName in a .map loop).
  */
 function UserChip({
   userId,
@@ -49,27 +49,27 @@ export default function TaskDetail({
   task: Task;
   onUpdateStatus: (s: Task['status']) => void;
   onUpdateTask: (patch: Partial<Pick<Task, 'title' | 'description' | 'source_type' | 'source_url' | 'linked_agents'>>) => void;
-  /** 删除当前 task（权限校验与二次确认由外层统一处理） */
+  /** Delete the current task (permission verification and secondary confirmation are handled uniformly by the outer layer) */
   onDelete: () => void;
   canDelete: boolean;
   agents: AgentOption[];
-  /** 当前 task 所属 team — 可能为 null（理论上不会，但 team 被删除场景需兜底） */
+  /** The team to which the current task belongs — may be null (theoretically it won't be, but a fallback is needed for the case where the team is deleted) */
   team: Team | null;
   currentUser: string;
-  /** 从 useTeamParticipation 分桶后传下来的当前 task 观测数据 */
+  /** Current task observation data passed down from the useTeamParticipation bucket */
   participation: TaskParticipationView;
 }) {
   const { t } = useTranslation();
   const statusLabels = useStatusLabels();
-  // 编辑权限：team 内任意 member 可改 task（含切换 status）。
+  // Edit permission: any member in the team can edit tasks (including switching status).
   const canEdit = canEditTask(task, team, currentUser);
 
-  // —— 编辑态：只在用户点「编辑」后才进入；草稿独立维护，取消即丢弃 —— //
+  // —— Edit mode: only entered after the user clicks "Edit"; drafts are maintained independently, and are discarded upon cancellation ——
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState(task.title);
   const [draftDesc, setDraftDesc] = useState(task.description);
 
-  // 切换 task / 退出编辑时同步草稿（避免编辑 A 后切换到 B 草稿还停在 A）
+  // Sync draft when switching task / exiting edit (to avoid staying on draft A after switching to draft B)
   useEffect(() => {
     setEditing(false);
     setDraftTitle(task.title);
@@ -102,14 +102,14 @@ export default function TaskDetail({
     setEditing(false);
   }
 
-  // 参与者展示：creator 单列独立；其余进 "参与的 User"。
-  // 数据源统一走 participation-log 观测 —— proxy session init 完成时 append 的
-  // "实际起过 session 的 user"。creator 用自己的 agent 开工也算一次真实参与，
-  // 所以不再过滤 creator（会同时出现在"创建者"和"参与的 User"两处，语义不同）。
+  // Participant display: creator is listed independently; the rest are added to "participating User".
+  // Data source is uniformly via the participation-log observation —— the "users who actually started a session" appended when proxy session init is complete.
+  // Creator's own agent starting work also counts as a real participation,
+  // so creator is no longer filtered (it appears in both "creator" and "participating User", with different semantics).
   const participantUsers = participation.users;
 
-  // 「实际参与 Agent」：session 观测到的 agent，映射到 team 的 agent name；
-  // 未在 team agents 列表里的（比如已被删除）保留 agent_id 兜底展示。
+  // "Actual Agent Participating": the agent observed in the session, mapped to the team's agent name;
+  // Those not in the team agents list (e.g., already deleted) retain the agent_id as a fallback for display.
   const sessionAgents = useMemo(() => {
     const nameById = new Map(agents.map((a) => [a.id, a.name]));
     return participation.agentIds.map((id) => ({ id, name: nameById.get(id) ?? id }));
@@ -117,7 +117,7 @@ export default function TaskDetail({
 
   return (
     <div className="_memory-workbench-detail-content">
-      {/* === 工具行：编辑 + 状态切换（标题 / task_id / team 已在抽屉头部展示） === */}
+      {/* === Utility line: edit + status toggle (title / task_id / team already displayed in drawer header) === */}
       <div className="_memory-workbench-detail-toolbar">
         {editing ? (
           <>
@@ -152,7 +152,7 @@ export default function TaskDetail({
         )}
       </div>
 
-      {/* === 参与者 === */}
+      <!-- === Participants === -->
       <div className="_memory-workbench-people">
         <div className="_memory-workbench-people-row">
           <Text theme="weak" className="_memory-workbench-people-label">{t('task.creator')}</Text>
@@ -196,7 +196,7 @@ export default function TaskDetail({
         </div>
       </div>
 
-      {/* === 描述 === */}
+      {/* === Description === */}
       <div className="_memory-workbench-block">
         <Text theme="label" className="_memory-workbench-block-label">{t('task.description')}</Text>
         {editing ? (
@@ -216,7 +216,7 @@ export default function TaskDetail({
         {t('task.footer', { created: new Date(task.created_at_ms).toLocaleString(), updated: new Date(task.updated_at_ms).toLocaleString() })}
       </Text>
 
-      {/* === 危险操作 === */}
+      <!-- === Dangerous Operation === -->
       {canDelete && (
         <div className="_memory-workbench-danger">
           <Button type="error" onClick={onDelete}>

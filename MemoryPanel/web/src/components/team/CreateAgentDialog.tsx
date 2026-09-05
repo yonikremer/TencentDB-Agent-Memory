@@ -1,6 +1,6 @@
 /**
- * CreateAgentDialog —— 创建 Agent 弹窗。
- * 支持套用/保存模板、勾选 skills/code_graph/llm_wiki/chat_memory 原子能力。
+ * CreateAgentDialog —— Create Agent dialog.
+ * Supports applying/saving templates, and checking atomic capabilities such as skills/code_graph/llm_wiki/chat_memory.
  */
 
 import { useState } from 'react';
@@ -33,8 +33,8 @@ export default function CreateAgentDialog({
   onCreated,
   busy,
 }: {
-  /** Agent 严格归属一个 team，这里不让用户在 dialog 里改归属或转交 owner
-   *  （owner 由后端在创建时固定为当前登录用户）。 */
+  /** An agent is strictly assigned to a team, and users cannot change the assignment or transfer the owner within dialog
+   *  (the owner is fixed to the currently logged-in user by the backend when it is created). */
   team: { team_id: string; name: string };
   currentUser: string;
   onClose: () => void;
@@ -59,13 +59,13 @@ export default function CreateAgentDialog({
   const [saveTplOpen, setSaveTplOpen] = useState(false);
   const [tplName, setTplName] = useState('');
   const [tplSummary, setTplSummary] = useState('');
-  // 保存模板表单里可编辑的 agent 内容字段：默认取自当前主表单，
-  // 展开保存表单时预填，用户可微调后再存入模板（不含 agent 名字）。
+  // Save the editable agent content fields in the template form: by default taken from the current main form,
+  // Pre-filled when expanding and saving the form, and stored after the user makes minor adjustments (excluding the agent name).
   const [tplDescription, setTplDescription] = useState('');
   const [tplRolePrompt, setTplRolePrompt] = useState('');
   const [tplRulesPrompt, setTplRulesPrompt] = useState('');
 
-  // 从真实 API 拉取团队资产列表
+  // Fetch team asset list from real API
   const assets = useTeamAssets(team.team_id);
   const { t } = useTranslation();
 
@@ -77,14 +77,14 @@ export default function CreateAgentDialog({
   }
 
   function applyTemplate(tpl: AgentTemplate) {
-    // 模板只承载文本描述，套用时不改动用户已勾选的原子能力。
+    // The template only carries text descriptions and does not modify the user's checked atomic capabilities when applied.
     setDescription(tpl.description);
     setRolePrompt(tpl.role_prompt);
     setRulesPrompt(tpl.rules_prompt);
     setAppliedTemplateId(tpl.template_id);
   }
 
-  // 展开「保存为模板」表单时，用当前主表单值预填可编辑字段。
+  // When expanding the "Save as Template" form, pre-fill editable fields with the current main form values.
   function openSaveTemplateForm() {
     setSaveTplOpen((v) => {
       const next = !v;
@@ -97,7 +97,7 @@ export default function CreateAgentDialog({
     });
   }
 
-  // 关闭并清空保存模板表单的全部字段。
+  // Close and clear all fields of the saved template form.
   function resetSaveTemplateForm() {
     setSaveTplOpen(false);
     setTplName('');
@@ -110,7 +110,7 @@ export default function CreateAgentDialog({
   function handleSaveTemplate() {
     const nm = tplName.trim();
     if (!nm) return;
-    // 模板只保存文本描述，不保存所选原子能力（skills / code_graph / llm_wiki / chat_memory）。
+    // The template only saves text descriptions, not the selected atomic capabilities (skills / code_graph / llm_wiki / chat_memory).
     createAgentTemplate({
       name: nm,
       summary: tplSummary.trim(),

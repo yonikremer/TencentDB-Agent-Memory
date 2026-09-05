@@ -1,14 +1,14 @@
 /**
- * code-ui —— Code 资产页的小型展示组件。
- * 从 CodeSourcesPanel.tsx 拆出：Owner 标签 / 状态标签。
+ * code-ui —— A small display component for the Code asset page.
+ * Extracted from CodeSourcesPanel.tsx: Owner label / Status label.
  */
 import { useTranslation } from 'react-i18next';
 import { StatusTag, type StatusTheme } from '@/components/StatusTag';
 import { OwnerLabel } from '@/components/OwnerLabel';
 
 /**
- * Owner 展示 —— 复用通用 OwnerLabel（走 user-profile-store 全局缓存，同一 owner 多行共享）。
- * 抽子组件是 Rules of Hooks 要求（不能在 .map 里循环调 hook）。
+ * Owner Display —— Reuse the generic OwnerLabel (uses the global cache from user-profile-store, with multiple lines sharing the same owner).
+ * Extracting a sub-component is required by the Rules of Hooks (cannot call hooks in a .map loop).
  */
 export function CodeOwnerLabel({ userId, currentUserId }: { userId: string; currentUserId: string }) {
   const { t } = useTranslation();
@@ -23,7 +23,7 @@ export function CodeOwnerLabel({ userId, currentUserId }: { userId: string; curr
   );
 }
 
-// 状态 → Tea Tag 语义主题映射（soft 变体），对齐 Memory 的 statusTheme。
+// Status → Tea Tag Semantic Theme Mapping (soft variant), aligned with Memory's statusTheme.
 export function statusLabel(t: (key: string, options?: Record<string, unknown>) => string, s: string) {
   const map: Record<string, [string, StatusTheme]> = {
     ready: [t('code.status.ready'), 'success'],

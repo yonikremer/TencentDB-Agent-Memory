@@ -1,11 +1,11 @@
 /**
- * skill-api.ts — Skill 数据面 API 客户端。
+ * skill-api.ts — Skill data plane API client.
  *
- * 对接文档：见团队内部知识库 Skill API 章节
- * 14 个 POST 接口，前端走 Panel 后端代理 `/api/v1/skill/`，由 Panel 再转发到记忆 Gateway `/v3/skill/`。
- * 鉴权 Header：`X-Tdai-Service-Id` + `X-Tdai-User-Key`（与 meta API 一致）。
+ * Documentation: See the Skill API section in the team's internal knowledge base.
+ * 14 POST endpoints; the frontend goes through the Panel backend proxy `/api/v1/skill/`, which then forwards to the Memory Gateway `/v3/skill/`.
+ * Auth Header: `X-Tdai-Service-Id` + `X-Tdai-User-Key` (same as the meta API).
  *
- * 统一信封 `{ code, message, request_id, data }`，code === 0 为成功。
+ * Unify the envelope `{ code, message, request_id, data }`, where code === 0 indicates success.
  */
 
 import { getPanelSession } from '../panelSession';
@@ -37,7 +37,7 @@ export class SkillApiError extends Error {
 
 // ========================= Types =========================
 
-/** 列表/搜索结果的基础形态 */
+/** The basic form of a list/search result */
 export interface SkillSummary {
   skill_id: string;
   name: string;
@@ -54,7 +54,7 @@ export interface SkillSummary {
   metadata?: Record<string, unknown>;
 }
 
-/** get 接口返回，包含完整内容 */
+/** get interface return, including complete content */
 export interface SkillDetail extends SkillSummary {
   content: string;
   manifest: SkillManifestEntry[];
@@ -69,7 +69,7 @@ export interface SkillManifestEntry {
   is_executable: boolean;
 }
 
-/** 资源文件入参 */
+/** Resource file input parameter */
 export interface SkillResourcePayload {
   path: string;
   content: string;
@@ -78,7 +78,7 @@ export interface SkillResourcePayload {
   is_executable?: boolean;
 }
 
-/** 搜索命中结果 */
+/** Search hit results */
 export interface SkillSearchHit extends SkillSummary {
   score: number;
   snippet: string;
@@ -88,7 +88,7 @@ export interface SkillSearchHit extends SkillSummary {
 
 const SKILL_PREFIX = '/api/v1/skill';
 
-/** 去除 body 中值为空字符串或 undefined 的字段（v3 校验要求字符串字段要么不传，要么非空） */
+/** Remove fields in body that have an empty string or undefined value (v3 validation requires string fields to either not be passed or be non-empty) */
 function stripEmpty(body: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(body)) {
@@ -361,14 +361,14 @@ export function getSkillListing(params: {
 // ---- 3.13 extract ----
 
 /**
- * `/v3/skill/extract` 入参（space_id 已转 optional）：
- *   - user_id / team_id / agent_id：必填
- *   - space_id：**前端不传**。跟其他 12 个 skill 接口一致, 从 `X-Tdai-Service-Id`
- *     header (= panelSession.instanceId) 走; 后端 handler 用 `auth.serviceId` 兜底。
- *   - session_id：可选，缺省时后端生成 `sx-<8hex>`
- *   - task_id：可选，透传为 SkillTaskEntry.task_ref_id（业务 ref，与归档 task_id 不同）
- *   - reason / options.max_iterations：透传给主 agent extractor prompt
- *   - role 新增 `system`（对齐 conversation/add 的 5 种 role）
+ * `/v3/skill/extract` input parameters (space_id is now optional):
+ *   - user_id / team_id / agent_id: required
+ *   - space_id: **not sent by the frontend**. Consistent with the other 12 skill interfaces, it is obtained from the `X-Tdai-Service-Id`
+ *     header (= panelSession.instanceId); the backend handler uses `auth.serviceId` as a fallback.
+ *   - session_id: optional, and the backend generates `sx-<8hex>` when missing
+ *   - task_id: optional, passed through as SkillTaskEntry.task_ref_id (business ref, different from the archived task_id)
+ *   - reason / options.max_iterations: passed through to the main agent extractor prompt
+ *   - role adds `system` (aligned with the 5 roles in conversation/add)
  */
 export interface ExtractParams {
   user_id: string;
@@ -387,11 +387,11 @@ export interface ExtractParams {
 }
 
 /**
- * `/v3/skill/extract` 返回体：
- *   - 后端恒走 archive → agent 队列 → worker 异步链路，永远返回 task_id；
- *     老版本的 `{mode:'sync', candidates}` 已被移除。
- *   - task_id 是**归档 task_id**（`task-<uuid8>`），跟入参 task_id (业务 task_ref_id) 是两个字段。
- *   - archive_key 是 COS 归档路径（含 `/skill_buffer/{user}/{team}/{agent}/{session}/`）。
+ * `/v3/skill/extract` response body:
+ *   - The backend always follows the archive → agent queue → worker async chain, and always returns task_id;
+ *     The old version's `{mode:'sync', candidates}` has been removed.
+ *   - task_id is the **archive task_id** (`task-<uuid8>`), which is a separate field from the input task_id (business task_ref_id).
+ *   - archive_key is the COS archive path (including `/skill_buffer/{user}/{team}/{agent}/{session}/`).
  */
 export interface ExtractResult {
   ok: true;
@@ -428,7 +428,7 @@ const EXPORT_TIMEOUT_MS = 30_000;
 
 export function exportSkill(params: ExportSkillParams, signal?: AbortSignal): Promise<ExportSkillResult> {
   const timeout = AbortSignal.timeout ? AbortSignal.timeout(EXPORT_TIMEOUT_MS) : undefined;
-  // 合并外部 signal 与内部超时
+  // Merge external signal with internal timeout
   const effectiveSignal = signal && timeout
     ? AbortSignal.any?.([signal, timeout]) ?? timeout
     : (signal ?? timeout);
@@ -444,6 +444,6 @@ export function exportSkill(params: ExportSkillParams, signal?: AbortSignal): Pr
 
 // ---- 3.15 extract/result (deprecated) ----
 //
-// `/v3/skill/extract/result` 已下线。SkillCoreSink 会在 worker
-// drain 后直接把 skill 写入表，提取结果通过 `/v3/skill/list` 拿到（不再有独立
-// 的 result 查询接口）。前端拿到 extract 的 task_id 即视为"任务已受理"。
+// `/v3/skill/extract/result` is offline. SkillCoreSink will directly write the skill into the table after the worker
+// drain, and the extraction results are obtained via `/v3/skill/list` (there is no longer an independent
+// result query interface). The frontend considers a task as "accepted" once it obtains the extract task_id.

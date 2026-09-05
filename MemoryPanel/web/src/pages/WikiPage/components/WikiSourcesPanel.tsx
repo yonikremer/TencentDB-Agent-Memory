@@ -1,7 +1,7 @@
 /**
- * WikiSourcesPanel —— Wiki 资产页主面板（列表视图 + 详情/创建/分配组装）。
- * 列表视图渲染与组件组装；状态/数据逻辑在 useWikiSources，详情在 WikiDetailView，
- * 展示小组件 / 常量工具 / 共享 Markdown 分别独立收口。
+ * WikiSourcesPanel —— Main panel for the Wiki assets page (list view + detail/create/allocation assembly).
+ * List view rendering and component assembly; state/data logic in useWikiSources, details in WikiDetailView,
+ * Display sub-components / constant utilities / shared Markdown are each independently encapsulated.
  */
 import { useTranslation } from 'react-i18next';
 import { Button, Card, Form, Input, Justify, MetricsBoard, Modal, SearchBox, Segment, Select, StatusTip, Table, Text } from 'tea-component';
@@ -110,8 +110,8 @@ export default function WikiSourcesPanel() {
           ) : undefined
         }
         actions={
-          // 创建（新增团队池资产）与 memory/skill 对齐，放右上角 header；
-          // 仅「团队资产」tab 开放，固定资产 tab 只做绑定/查看。
+          // Create (add team pool asset) aligned with memory/skill, placed in the top-right header;
+          // Only the "Team Asset" tab is enabled, the Fixed Asset tab only for binding/viewing.
           scopeTab !== 'fixed' ? (
             <Button type="primary" onClick={() => setShowCreate(true)} data-guide="create-wiki">
               {t('wiki.create')}
@@ -354,7 +354,7 @@ export default function WikiSourcesPanel() {
         </Modal>
       )}
 
-      {/* Allocate Wiki → Agent (固定资产) */}
+      <!-- Allocate Wiki → Agent (Fixed Assets) -->
       {allocateTarget && (
         <AllocateAssetDialog
           assetType="llm_wiki"

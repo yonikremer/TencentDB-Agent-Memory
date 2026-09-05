@@ -1,19 +1,19 @@
 /**
- * wiki-constants —— Wiki 资产页的常量、类型与纯工具函数。
- * 从 WikiSourcesPanel.tsx 拆出，供主面板 / 详情视图 / hooks 复用。
+ * wiki-constants —— Constants, types, and pure utility functions for the Wiki asset page.
+ * Extracted from WikiSourcesPanel.tsx, for reuse by the main panel / detail view / hooks.
  *
- * 通用资产类型与 formatShortTime 已收敛到 @/lib/asset-common，此处 re-export
- * 保持原有 import 路径不变。
+ * Common asset types and formatShortTime have been consolidated into @/lib/asset-common, and are re-exported here
+ * Keep the original import path unchanged.
  */
 import type { WikiDetail } from '@/lib/api/knowledge-api';
 export type { SubView, ViewMode, StatusFilter } from '@/lib/asset-common';
 export { formatShortTime } from '@/lib/asset-common';
 
-/** Wiki 仅允许上传 Markdown 类文件（.md / .markdown / .txt）。 */
+/** Wiki only allows uploading Markdown type files (.md / .markdown / .txt). */
 export const WIKI_ALLOWED_FILE_RE = /\.(md|txt|markdown)$/i;
 
-// Wiki 状态徽章：draft=建壳未加工（待用户点 ingest）；pending=排队；processing=加工中；ready=就绪；failed=失败；missing=KS 数据丢失。
-// 走 Tea Tag 的语义 theme（soft 变体），随主题响应，不用硬编码调色板色。
+// Wiki status badge: draft=unprocessed shell (awaiting user to click ingest); pending=queued; processing=processing; ready=ready; failed=failed; missing=KS data missing.
+// Use Tea Tag's semantic theme (soft variant), respond to theme, no hardcoded palette colors.
 export const WIKI_STATUS_THEME: Record<WikiDetail['status'], 'warning' | 'success' | 'error' | 'default'> = {
   draft: 'warning',
   pending: 'warning',

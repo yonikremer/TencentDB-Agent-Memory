@@ -1,5 +1,5 @@
 /**
- * api/assets.ts — 资产管理（meta/asset/*）。
+ * api/assets.ts — Asset Management (meta/asset/*).
  */
 import { metaPost, metaListAll, getCurrentUser } from './base';
 import type { Asset, AssetType, AssetStatus } from './types';
@@ -11,7 +11,7 @@ function newExternalAssetId(assetType: AssetType): string {
 }
 
 export const assetsApi = {
-  /** 列出 team 资产（支持按 type/status/owner 筛选） */
+  /** List team assets (supports filtering by type/status/owner) */
   list: (
     teamId: string,
     params?: { asset_type?: AssetType; status?: AssetStatus; owner_user_id?: string }
@@ -23,10 +23,10 @@ export const assetsApi = {
       owner_user_id: params?.owner_user_id,
     }),
 
-  /** 资产详情 */
+  /** Asset Details */
   get: (assetId: string) => metaPost<Asset>('asset/get', { asset_id: assetId }),
 
-  /** 创建/登记资产（两段式：主表 + 详情表） */
+  /** Create/Register Asset (two-part: main table + detail table) */
   create: async (
     teamId: string,
     data: {
@@ -56,30 +56,30 @@ export const assetsApi = {
     });
   },
 
-  /** 更新资产 */
+  /** Update asset */
   update: (
     assetId: string,
     data: Partial<{ name: string; description: string; status: AssetStatus; visibility: string }>
   ) => metaPost<Asset>('asset/update', { asset_id: assetId, ...data }),
 
-  /** 删除资产（meta asset/delete → 物理删除行） */
+  /** Delete asset (meta asset/delete → physically delete row) */
   delete: async (assetId: string) => {
     await metaPost<{ deleted_ids: string[] }>('asset/delete', { asset_ids: [assetId] });
   },
 
   /**
-   * 列出当前用户在指定 team 内**可访问**的资产（走后端 permission-checker，
-   * 严格执行 visibility × ACL 过滤）。
+   * List the assets accessible by the current user within the specified team (via the backend permission-checker,
+   * strictly enforcing visibility × ACL filtering).
    *
-   * 与 asset/list 的区别：
-   *   - asset/list：SQL 直查 meta_assets，不做 visibility/ACL 过滤，adminOps 视角。
-   *   - asset/list-accessible：先按 visibility × role × ACL 计算可见集合，
-   *     私密 skill 别人自动看不到；owner 优先放行。
+   * Difference with asset/list:
+   *   - asset/list: Direct SQL query on meta_assets, no visibility/ACL filtering, adminOps perspective.
+   *   - asset/list-accessible: First calculate the visible set based on visibility × role × ACL,
+   *      private skills are automatically not visible to others; owner is prioritized for access.
    *
-   * 可选 `visibility` 参数：在服务端做二次白名单过滤（例 `['team']` 只返回
-   * 团队共享的），避免"响应体带全量、前端 JS 过滤"的信息泄露风险。
+   * Optional `visibility` parameter: perform secondary whitelist filtering on the server side (e.g. `['team']` only returns
+   (* Shared by the team), to avoid the information leakage risk of "full response body with frontend JS filtering".
    *
-   * 用于"团队资产"tab —— 团队成员应该只看到"团队公开 + 自己私密 + 显式授权"三部分。
+   * Used for the "Team Assets" tab —— team members should only see the "Team Public + Personal Private + Explicitly Authorized" sections.
    */
   listAccessible: async (
     teamId: string,

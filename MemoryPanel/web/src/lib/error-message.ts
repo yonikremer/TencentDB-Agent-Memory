@@ -7,8 +7,8 @@ export interface ErrorEnvelopeLike {
 }
 
 /**
- * 已知错误码集合 —— locale 文件中 error.* key 的来源。
- * 保留列表用于快速判断 code 是否有效（比 i18n.exists 更显式）。
+ * Known error code set —— source of error.* key in locale file.
+ * Retained list for quickly determining whether code is valid (more explicit than i18n.exists).
  */
 const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set([
   'UNAUTHORIZED', 'INVALID_USER_KEY', 'MISSING_USER_KEY', 'MISSING_INSTANCE_ID',
@@ -29,12 +29,12 @@ const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * 按错误码查找本地化文案。
- * 通过 i18n 实例动态翻译，跟随用户当前语言切换。
+ * Find localized text by error code.
+ * Dynamically translate via the i18n instance, following the user's current language switch.
  */
 function lookupErrorCode(code: string): string | null {
   if (KNOWN_ERROR_CODES.has(code)) return i18n.t('error.' + code);
-  // snake_case 归一：后端可能返回小写
+  // snake_case normalization: the backend may return lowercase
   if (/^[a-z][a-z0-9_]+$/.test(code)) {
     const upper = code.toUpperCase();
     if (KNOWN_ERROR_CODES.has(upper)) return i18n.t('error.' + upper);
@@ -49,8 +49,8 @@ function getMessagePatterns(): Array<[RegExp, string]> {
     [/missing.*team_id/i, i18n.t('error.MISSING_TEAM_ID')],
     [/missing.*agent_id/i, i18n.t('error.MISSING_AGENT_ID')],
     [/not team member/i, i18n.t('error.NOT_TEAM_MEMBER')],
-    // 注：asset_not_bindable / visibility_restricted 在 PRIORITY_MESSAGE_PATTERNS 里前置匹配，
-    // 因为它们会被 permission_denied 前缀吞掉。
+    // Note: asset_not_bindable / visibility_restricted are matched with a prefix in PRIORITY_MESSAGE_PATTERNS,
+    // because they would be swallowed by the permission_denied prefix.
     [/permission[_\s-]?denied/i, i18n.t('error.PERMISSION_DENIED')],
     [/fetch failed|networkerror|failed to fetch/i, i18n.t('error.network')],
     [/timeout|aborted/i, i18n.t('error.timeout')],
@@ -60,11 +60,11 @@ function getMessagePatterns(): Array<[RegExp, string]> {
 }
 
 /**
- * 优先匹配的语义 pattern —— 在 extractCodeLike 兜底提取之前先跑。
+ * Priority-matched semantic pattern — run before the fallback extraction in extractCodeLike.
  *
- * 场景：内核抛的错误消息形如 `permission_denied: visibility_restricted` —— 前缀 `permission_denied`
- * 会被 extractCodeLike 提取成 `PERMISSION_DENIED` 直接命中通用文案，掩盖后面的 `visibility_restricted`
- * 语义关键词。因此凡是"通用错误码 + 细化子原因"的组合都必须在这里精准命中。
+ * Scenario: The error message thrown by the kernel is like `permission_denied: visibility_restricted` — the prefix `permission_denied`
+ * It will be extracted into `PERMISSION_DENIED` by `extractCodeLike` and directly hit the generic copy, masking the subsequent `visibility_restricted`
+ * Semantic keywords. Therefore, any combination of "generic error code + refined sub-reason" must be precisely matched here.
  */
 function getPriorityPatterns(): Array<[RegExp, string]> {
   return [
@@ -110,7 +110,7 @@ export function mapErrorCode(codeOrMessage: number | string | undefined, fallbac
   const raw = String(codeOrMessage ?? '').trim();
   const text = fallbackMessage ?? raw;
 
-  // 先跑优先 pattern：避免 extractCodeLike 用 `permission_denied` 前缀吃掉子原因关键词。
+  // First run priority pattern: avoid extractCodeLike using the `permission_denied` prefix to swallow sub-cause keywords.
   for (const [pattern, message] of getPriorityPatterns()) {
     if (pattern.test(text) || pattern.test(raw)) return message;
   }

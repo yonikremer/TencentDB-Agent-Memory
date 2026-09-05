@@ -1,5 +1,5 @@
 /**
- * BoardView —— 工作台任务卡片网格 + 详情抽屉。
+ * BoardView —— Workspace task card grid + detail drawer.
  */
 import { useTranslation } from 'react-i18next';
 import { Button, Drawer, Pagination, Tag, Text } from 'tea-component';
@@ -46,17 +46,17 @@ export default function BoardView({
 }) {
   const { t } = useTranslation();
   const statusLabels = useStatusLabels();
-  // 参与者 tooltip 展示 display_name 而非 user_id（与抽屉详情 UserChip 同一缓存）
+  // Display participant tooltip with display_name instead of user_id (same cache as drawer detail UserChip)
   const resolveUserName = useDisplayNameResolver();
   const selectedTeam = selected ? teams.find((x) => x.team_id === selected.team_id) ?? null : null;
 
-  // 后端分页：useTasks 已只返回当前页数据，不需要前端切片
+  // Backend pagination: useTasks already only returns the current page data, no frontend slicing needed
   const totalPages = Math.max(1, Math.ceil(tasksTotal / pageSize));
   const safePage = Math.min(currentPage, totalPages);
   const pagedTasks = tasks;
   return (
     <div className="_memory-panel-card">
-      {/* 头部：复用 members / agents 的 Section 通用头部（标题 + 计数 Tag + 副标题 + 右侧操作） */}
+      {/* Header: Reuse the common Section header for members / agents (title + count Tag + subtitle + right-side actions) */}
       <div className="_memory-section-header">
         <div className="_memory-section-header-info">
           <div className="_memory-section-header-title-row">
@@ -72,7 +72,7 @@ export default function BoardView({
       </div>
 
       {tasksLoading && tasks.length === 0 ? (
-        // 首屏加载骨架屏：6 个占位卡片 + shimmer 动画
+        // First-screen loading skeleton screen: 6 placeholder cards + shimmer animation
         <div className="_memory-workbench-skeleton-grid" aria-label="loading">
           {[0, 1, 2, 3, 4, 5].map((i) => (
             <div key={i} className="_memory-workbench-skeleton-card">
@@ -100,7 +100,7 @@ export default function BoardView({
                 className="_memory-workbench-task-card"
                 onClick={() => onSelect(task.task_id)}
               >
-                {/* 标题行：状态 pill + 标题 + 箭头 */}
+                {/* Title row: status pill + title + arrow */}
                 <div className="_memory-workbench-task-card-head">
                   <span className={`_memory-workbench-status-pill _memory-workbench-status-pill--${task.status}`}>
                     {statusLabels[task.status]}
@@ -109,12 +109,12 @@ export default function BoardView({
                   <ChevronRightIcon size={14} className="_memory-workbench-task-card-chevron" />
                 </div>
 
-                {/* 描述 */}
+                {/* Description */}
                 {task.description && (
                   <p className="_memory-workbench-task-card-desc">{task.description}</p>
                 )}
 
-                {/* 元信息行：参与者 · Agent · 时间 */}
+                {/* Meta line: Participant · Agent · Time */}
                 <div className="_memory-workbench-task-card-meta">
                   <span
                     className="_memory-workbench-meta-item"
@@ -140,7 +140,7 @@ export default function BoardView({
         </div>
       )}
 
-      {/* 分页：超过 1 页才展示 */}
+      {/* Pagination: only show when exceeding 1 page */
       {totalPages > 1 && (
         <div className="_memory-workbench-pagination">
           <Pagination
@@ -155,7 +155,7 @@ export default function BoardView({
         </div>
       )}
 
-      {/* 详情抽屉：设置（状态 / 编辑 / 删除）都在抽屉内完成 */}
+      {/* Detail drawer: settings (status / edit / delete) are all completed within the drawer */}
       <Drawer
         visible={!!selected}
         size="l"

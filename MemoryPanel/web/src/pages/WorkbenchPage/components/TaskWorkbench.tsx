@@ -1,14 +1,14 @@
 /**
- * TaskWorkbench — 用户工作台。
+ * TaskWorkbench — User Workbench.
  *
- * 收敛到两件事：
- *   1. 列出/创建/管理本团队下的 task；
- *   2. 通过 log tab 看 task 历史记录。
+ * Converges to two things:
+ *   1. List/create/manage tasks under this team;
+ *   2. View task history through the log tab.
  *
- * 布局：进入页面为全宽卡片网格；点击卡片拉出 Drawer，在抽屉内查看详情与设置
- * （改状态、编辑标题/描述、删除）。
+ * Layout: The page enters as a full-width card grid; clicking a card pulls out a Drawer to view details and settings.
+ * (Change status, edit title/description, delete).
  *
- * 数据走后端链路 A（services/backendStore.ts，内部调用 @/lib/teamApi 的 meta 接口）。
+ * Data flows through the backend chain A (services/backendStore.ts, internally calling the meta interface of @/lib/teamApi).
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -48,18 +48,18 @@ function EmptyTeam() {
 export default function TaskWorkbench(props: {
   tab?: WorkbenchTab;
   onTabChange?: (tab: WorkbenchTab) => void;
-  /** 当前激活的 team id（可空：未选时只显示 empty state） */
+  /** The currently active team id (can be empty: only shows empty state when not selected) */
   activeTeamId: string | null;
-  /** 当前用户名（task 的 creator_user_id） */
+  /** Current username (task's creator_user_id) */
   currentUser: string;
-  /** 当前 team 下可关联的 Agent 列表（来自 TeamManagementPanel 的同源数据） */
+  /** The list of Agents that can be associated under the current team (from the same-source data of TeamManagementPanel) */
   agents: AgentOption[];
-  /** 是否为全局 admin（保留接口兼容；admin 不再有 task 特权） */
+  /** Whether it is a global admin (retains interface compatibility; admin no longer has task privileges) */
   isAdmin?: boolean;
 }) {
   const { t } = useTranslation();
   const { activeTeamId, currentUser, agents } = props;
-  // 后端分页：useTasks 根据 page + pageSize 调 Panel 聚合接口，内核只返回当前页
+  // Backend pagination: useTasks calls the Panel aggregation interface based on page + pageSize, and the kernel only returns the current page
   const PAGE_SIZE = 12;
   const [currentPage, setCurrentPage] = useState(1);
   const { tasks, total: tasksTotal, loading: tasksLoading } = useTasks(activeTeamId, currentPage, PAGE_SIZE);
@@ -68,7 +68,7 @@ export default function TaskWorkbench(props: {
   const [showCreate, setShowCreate] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // 切换 team 时重置到第 1 页
+  // Switch to team and reset to page 1
   useEffect(() => { setCurrentPage(1); }, [activeTeamId]);
 
   const sortedTasks = useMemo(() => {
@@ -81,11 +81,11 @@ export default function TaskWorkbench(props: {
   );
 
   /**
-   * 创建 task：team_id 完全由当前激活 team 决定，不再让 dialog 选 team
-   * （切 team 的唯一入口在右上角全局 TeamSwitcher）。
+   * Create task: team_id is entirely determined by the currently active team and no longer allows dialog to select a team
+   * (The only entry point for switching teams is the global TeamSwitcher in the top right corner).
    */
   async function handleCreate(draft: TaskDraft) {
-    // 谁点击「创建 Task」，谁就是 creator_user_id。
+    // Whoever clicks "Create Task" is the creator_user_id.
     const team = teams.find((t) => t.team_id === draft.team_id);
     if (!team) {
       tea.notify.error(`team "${draft.team_id}" ${t('task.emptyTeam.title')}`);
@@ -114,7 +114,7 @@ export default function TaskWorkbench(props: {
         <EmptyTeam />
       ) : (
         <>
-          {/* 当前 team 概览（与 team 管理页同一组件） */}
+          {/* Current team overview (same component as team management page) */}
           {activeTeam && <TeamHeaderCard team={activeTeam} />}
           <BoardView
           tasks={sortedTasks}
@@ -127,7 +127,7 @@ export default function TaskWorkbench(props: {
           onSelect={(id) => setSelectedId(id)}
           onCreate={() => setShowCreate(true)}
           onDelete={async (task) => {
-            // 权限：删除 task 仅创建者 / team admin / 全局 admin
+            // Permission: deleting task only allowed for creator / team admin / global admin
             const team = teams.find((t) => t.team_id === task.team_id) ?? null;
             if (!canDeleteTask(task, team, currentUser)) {
               tea.notify.warning(
@@ -151,7 +151,7 @@ export default function TaskWorkbench(props: {
             }
           }}
           onUpdateStatus={async (task, status) => {
-            // 权限：编辑 task（含切换 status）允许 team 内任意 member / admin
+            // Permission: Edit task (including switching status) allows any member / admin within the team
             const team = teams.find((t) => t.team_id === task.team_id) ?? null;
             if (!canEditTask(task, team, currentUser)) {
               tea.notify.warning(t('task.noPermissionEdit'));
@@ -184,8 +184,8 @@ export default function TaskWorkbench(props: {
       )}
 
       {showCreate && activeTeam && (
-        // team 由右上角全局 TeamSwitcher 决定，dialog 里不再让用户选；
-        // 这里 activeTeam 必为非空，因为上面 !activeTeamId 分支已经走 EmptyTeam 了
+        // team is determined by the global TeamSwitcher in the top-right corner, and users no longer select it in the dialog;
+        // activeTeam here must be non-empty, because the !activeTeamId branch above has already gone to EmptyTeam
         <TaskCreateDialog
           team={{ team_id: activeTeam.team_id, name: activeTeam.name }}
           onClose={() => setShowCreate(false)}

@@ -1,21 +1,21 @@
 /**
- * permissions.ts — 全局权限判断的唯一权威实现。
+ * permissions.ts — The sole authoritative implementation for global permission checks.
  *
- * 从原 demoStore.ts 中抽出。isGlobalAdmin 是全站唯一的"全局 admin"判定
- * 入口（与 team/agent/task 的后端实现无关，纯前端 auth state 判断）。
+ * Extracted from the original demoStore.ts. isGlobalAdmin is the sole "global admin" determination across the entire site.
+ * Entry point (independent of the backend implementation for team/agent/task, purely a frontend auth state determination).
  */
 
 /**
- * 全局 admin 判断：admin 拥有所有权限，可见所有内容。
+ * Global admin check: admin has all permissions and can see all content.
  *
- * 唯一权威来源：auth/verify 响应的 `user.user_type === 'system_admin'`，
- * 由 LoginGate 在登录时写入 `AuthState.isAdmin`。
+ * The sole authoritative source: `auth/verify` response's `user.user_type === 'system_admin'`,
+ * Written by LoginGate into `AuthState.isAdmin` during login.
  *
- * 不再保留 `username === 'admin'` 字符串兜底——该兜底是早期演示阶段遗留，
- * 会导致 display_name / username 恰好为 "admin" 的普通用户被误判为全局 admin，
- * 尤其在"用户没有归属任何 team"或"team 里只有自己一个人"时，
- * roleInTeam 返回 null，UI 会按 admin 逻辑渲染（如 ResourcePage 显示 AdminResourceLock），
- * 出现 normal/member 用户看到 admin 锁定页的问题。
+ * Remove the `username === 'admin'` string fallback — this fallback is a leftover from the early demo phase,
+ * It causes ordinary users whose `display_name` / `username` happen to be "admin" to be mistakenly judged as global admins,
+ * Especially when a "user has no affiliation with any team" or "a team only has themselves",
+ * `roleInTeam` returns null, and the UI renders according to admin logic (e.g., ResourcePage shows AdminResourceLock),
+ * causing normal/member users to see the admin lock page.
  */
 export function isGlobalAdmin(_currentUser: string, isAdminFlag?: boolean): boolean {
   return isAdminFlag === true;

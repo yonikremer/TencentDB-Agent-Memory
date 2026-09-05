@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * 中文残留扫描脚本 — 扫描 src 下（排除 locale 文件）是否还有 UI 中文残留
+ * Chinese residue scan script — scans src (excluding locale files) for any remaining UI Chinese residue
  *
- * 使用方式：
+ Usage:
  *   node scripts/scan-chinese.cjs
  *
- * 退出码：
- *   0 — 无残留
- *   1 — 发现中文残留
+ * Exit code:
+ *   0 — No residue
+ *   1 — Chinese residue found
  */
 const fs = require('fs');
 const path = require('path');

@@ -1,6 +1,6 @@
 /**
- * workbench-utils —— 工作台的共享类型、常量与纯工具函数。
- * 从 TaskWorkbench.tsx 拆出。
+ * workbench-utils —— Shared types, constants, and pure utility functions for the workbench.
+ * Extracted from TaskWorkbench.tsx.
  */
 import { useTranslation } from 'react-i18next';
 
@@ -10,8 +10,8 @@ export function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-// Task 状态在演示阶段简化为二态：进行中 / 已完成。
-// 历史的 待处理 / 阻塞 / 已归档 已下线（参见 backendStore.ts 里的 normalizeTaskStatus）。
+// Task status is simplified to a two-state in the demo phase: in progress / completed.
+// The historical pending / blocked / archived states have been taken offline (see normalizeTaskStatus in backendStore.ts).
 export function useStatusLabels() {
   const { t } = useTranslation();
   return {
@@ -26,16 +26,16 @@ export interface AgentOption {
 }
 
 /**
- * task 层聚合视图：按 task_id 分桶后再各自 dedupe。
+ * task layer aggregated view: bucket by task_id and then dedupe each one.
  *
- * 内核 append-only 语义：同一 (user, agent, task) 每次 session init 都追加一条，
- * 数据库表里会累积冗余；前端按 Set 做客户端 dedupe，"跑 10 次 session"和
- * "跑 1 次"展示一致。
+ * Kernel append-only semantics: for the same (user, agent, task), append one entry each time session init occurs,
+ * The database table accumulates redundancy; the frontend performs client-side dedupe based on Set, "running 10 sessions" and
+ * "Run 1 time" displays consistently.
  */
 export interface TaskParticipationView {
-  /** dedupe 后的 user_id 列表 */
+  /** deduplicated user_id list */
   users: string[];
-  /** dedupe 后的 agent_id 列表 */
+  /** deduplicated agent_id list */
   agentIds: string[];
 }
 

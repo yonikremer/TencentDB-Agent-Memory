@@ -1,15 +1,15 @@
 /**
- * useCurrentRole — 获取当前登录用户的角色
+ * useCurrentRole — Get the role of the currently logged-in user
  *
- * 返回 'admin' | 'member' | 'reviewer' | null（null = 未登录）。
+ * Return 'admin' | 'member' | 'reviewer' | null (null = not logged in).
  *
- * 角色模型（唯一权威口径，勿再改回"按 team 成员表判断 admin"）：
- *   - admin  是**全局角色**，与是否创建/加入任何 team 无关（哪怕当前没有任何 team，也始终是 admin）。
- *     admin 的职责是管理 team（建团队、录入成员），不管理具体资源。
- *   - member 是**team 内角色**，即某个 team 的成员，负责在 team 内管理资源（agent/skill/wiki/code/memory）。
- *   - 因此判断顺序必须是：先判是不是全局 admin；不是，才去查其在 active team 里的成员角色。
- *     反过来"先查 team 成员表、查不到就当无角色"是错的——会导致"admin 账号下没有 team 时
- *     被误判为非 admin（甚至 null）"。
+ * Role model (the sole authoritative standard, do not revert to "determine admin by team member table"):
+ *   - admin is a **global role**, unrelated to whether they have created or joined any team (even if there are currently no teams, they are always admin).
+ *     The responsibility of admin is to manage teams (create teams, input members), not to manage specific resources.
+ *   - member is a **role within a team**, i.e., a member of a specific team, responsible for managing resources within the team (agent/skill/wiki/code/memory).
+ *   - Therefore, the judgment order must be: first determine if it is a global admin; if not, then check the member role in their active team.
+ *     The reverse approach of "first check the team member table, and if not found, treat as having no role" is wrong—it will lead to "when an admin account has no teams
+ *     Misjudged as non-admin (even null)".
  */
 import { useMemo } from 'react';
 import { useTeams, roleInTeam, isGlobalAdmin } from '@/services';
@@ -22,10 +22,10 @@ export function useCurrentRole(): TeamRole | null {
   const { activeTeam } = useTeams();
   return useMemo(() => {
     if (!auth) return null;
-    // 全局 admin：独立于 team，始终是 admin（不依赖 activeTeam / team.members 查询结果）
-    // isAdmin 来自 auth/verify 的 user_type === 'system_admin'，是唯一权威字段。
+    // Global admin: independent of team, always admin (does not depend on activeTeam / team.members query results)
+    // isAdmin comes from auth/verify's user_type === 'system_admin', which is the sole authoritative field.
     if (isGlobalAdmin(auth.user, auth.isAdmin)) return 'admin';
-    // 非 admin：角色取决于其在当前 active team 里的成员记录（一般就是 'member'）
+    // Non-admin: role depends on their member record in the current active team (usually 'member')
     return roleInTeam(activeTeam, auth.user_id);
   }, [activeTeam, auth]);
 }
