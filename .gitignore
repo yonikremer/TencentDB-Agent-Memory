@@ -143,3 +143,5 @@ offline-deps.zip
 
 # ZH->EN translation tooling (derived census output - regenerate with leak-count.mjs)
 scripts/zh-en/worklist.json
+
+.pi/
