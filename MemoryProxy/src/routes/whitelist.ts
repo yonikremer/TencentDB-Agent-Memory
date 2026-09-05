@@ -175,7 +175,7 @@ const PROXY_PREFIX_RE = /^\/proxy\/[^/]+/;
  * Whitelist entries `/v1/messages` and `/responses` themselves are never stripped
  * (they don't match the agent segment — the agent segment is limited to known names).
  */
-const AGENT_PREFIX_RE = /^\/(claude-code|codebuddy|codex|cursor|anthropic|openai)(?:\/[^/]+)?(?=\/v1\/|\/responses(?:\/|$)|\/memories\/|\/realtime\/)/i;
+const AGENT_PREFIX_RE = /^\/(claude-code|codebuddy|codex|cursor|anthropic|openai|pi)(?:\/[^/]+)?(?=\/v1\/|\/responses(?:\/|$)|\/memories\/|\/realtime\/)/i;
 
 /**
  * `/cost-guard` marker regex: an independent segment after `/{agent}/{spaceId}`.
