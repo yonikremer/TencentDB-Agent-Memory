@@ -44,6 +44,8 @@ export const zhCN = {
   'header.profile.role.reviewer': '审核员',
   'header.profile.close': '关闭',
   'header.brand': 'Memory Hub',
+  'header.theme.switchToDark': '切换到深色模式',
+  'header.theme.switchToLight': '切换到浅色模式',
 
   // ===== TeamSwitcher =====
   'teamSwitcher.selectTeam': '选择 team',

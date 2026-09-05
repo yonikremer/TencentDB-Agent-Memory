@@ -22,6 +22,7 @@ import { SettingIcon } from 'tea-icons-react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { SettingsDialog } from '@/components/SettingsDialog';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { type TeamRole } from '@/services/useCurrentRole';
 import { TeamSwitcher } from './TeamSwitcher';
 import { LanguageSwitcher } from './LanguageSwitcher';
@@ -81,6 +82,8 @@ export function GlobalHeader({
         </button>
 
         <LanguageSwitcher />
+
+        <ThemeToggle />
 
         <button
           type="button"

@@ -56,6 +56,10 @@
   color-scheme: light;
 }
 
+.dark {
+  color-scheme: dark;
+}
+
 /* 映射到 Tailwind 可用的 bg-* / text-* / border-* */
 @layer base {
   * {

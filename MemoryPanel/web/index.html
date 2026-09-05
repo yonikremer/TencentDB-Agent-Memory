@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Memory Hub</title>
     <link rel="icon" type="image/png" href="/logo.png" />
+    <script>
+      try {
+        var s = localStorage.getItem('tdai-memory.theme');
+        var m = s === 'dark' || s === 'light' ? s : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        if (m === 'dark') document.documentElement.classList.add('dark');
+        document.documentElement.setAttribute('theme-mode', m);
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -20,6 +20,7 @@ import { Select, Input, Button, Alert } from 'tea-component';
 import { authVerifyApi, metaInstancesApi, type MetadataInstance, type PublicUser } from '@/lib/teamApi';
 import { getPanelSession, setPanelSession, clearPanelSession } from '@/lib/panelSession';
 import ParticleWaveBackground from './ParticleWaveBackground';
+import { ThemeToggle } from './ThemeToggle';
 import './login-gate.css';
 
 export interface AuthState {
@@ -164,6 +165,9 @@ export default function LoginGate({
 
   return (
     <div className="_tdai-login">
+      <div className="_tdai-login-theme">
+        <ThemeToggle className="_tdai-login-theme-btn" />
+      </div>
       {/* 明亮点阵波纹动效背景（纯 Canvas，零外部依赖） */}
       <div className="_tdai-login-bg" aria-hidden="true">
         <ParticleWaveBackground
