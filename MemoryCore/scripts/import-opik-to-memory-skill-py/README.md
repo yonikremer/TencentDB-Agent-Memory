@@ -1,62 +1,62 @@
-# Opik → Memory Core Skill 导入工具（Python 版）
+# Opik → Memory Core Skill Import Tool (Python Version)
 
-**只用 Python 标准库，无第三方依赖**，Python 3.9+ 直接跑。
+**Only use Python standard library, no third-party dependencies**, runs directly on Python 3.9+.
 
-## 三个子命令
+Three subcommands
 
-- `list-projects` — 只列 Opik 项目
-- `fetch` — 从 Opik 拉数据 + 聚合成本地 session JSON 文件（不写 core）
-- `import` — 把本地 session 文件灌到 Memory Core
+- `list-projects` — lists Opik projects only
+- `fetch` — fetches data from Opik + aggregates local session JSON files (does not write core)
+- `import` — imports local session files into Memory Core
 
-**推荐做法：fetch 与 import 分开**。fetch 完就可以断开 Opik，import 慢慢跑；import 有断点续传（默认开），跑一半挂了重来只补差量。
+**Recommended approach: separate fetch and import**. After fetch is complete, you can disconnect Opik, and let import run slowly; import supports resumable transfers (enabled by default), so if it crashes halfway through, restarting only fills in the missing parts.
 
-## 与 TS 版（`../import-opik-to-memory-skill/`）的关系
+Relationship with the TS version (`../import-opik-to-memory-skill/`)
 
-| 维度 | TS 版 | Python 版 |
+| Dimension | TS version | Python version |
 |---|---|---|
-| 拉取 vs 灌入 | 一步 | **两步分离**（fetch → import） |
-| 依赖 | Node ≥ 22.16 + `npm install` | Python 3.9+，零依赖 |
-| 灌入分批 | 按字节/条数打包 | **按"一轮对话"分批**（一个 user + 它后面的 assistant/tool_call/tool_result） |
-| 灌入节奏 | 尽量快 | 每轮 sleep（默认 3s），Opik 全局限流 500ms |
-| 断点续传 | 有 | **import 有，per-session 粒度** |
-| 抽取产出统计 | 会轮询 `skill/list` 收敛 | 不查，产出去 UI 或 `/v3/skill/list` 看 |
+| Fetch vs Ingest | One Step | **Two-Step Separation** (fetch → import) |
+| Dependencies | Node ≥ 22.16 + `npm install` | Python 3.9+, Zero Dependencies |
+| Ingest Batching | Pack by bytes/items | **Batch by "one round of conversation"** (one user + its subsequent assistant/tool_call/tool_result) |
+| Ingest Rhythm | As fast as possible | Sleep per round (default 3s), Opik global rate limit 500ms |
+| Resume | Yes | **import has it, per-session granularity** |
+| Extracted Output Stats | Polls `skill/list` until convergence | No query; view output in UI or via `/v3/skill/list` |
 
-## 前置条件
+Prerequisites
 
 - Python 3.9+
-- Opik REST API 可达
-- Memory Core Gateway 业务接口（`/v3/skill/*`）通
-- Memory Core 侧 skill 抽取 + LLM 都在跑（否则 0 产出）
-- `team_id` + `agent_id` 已在 metadata 层注册
-  - ⚠️ agent id 是 `agt-xxx` 而不是 `apt-xxx`；在 metadata `/api/v1/meta/asset/list-accessible` 里查到的 `asset_id` 是 `skl-*`（skill 主键），对应 `agent_id` 需要用 core 的 `/v3/skill/list` 反查 `owner_agent_id`
+- Opik REST API is reachable
+- Memory Core Gateway business interface (`/v3/skill/*`) is working
+- Memory Core side skill extraction + LLM are both running (otherwise 0 output)
+- `team_id` + `agent_id` are registered at the metadata layer
+  - ⚠️ agent id is `agt-xxx` instead of `apt-xxx`; the `asset_id` found in metadata `/api/v1/meta/asset/list-accessible` is `skl-*` (skill primary key), and the corresponding `agent_id` needs to be reverse-looked up via `owner_agent_id` using core's `/v3/skill/list`
 
-## 只有密钥用环境变量，其余都是命令行参数
+Only the key uses an environment variable, the rest are command-line arguments
 
-刻意这样设计：env 容易搞错、忘记 unset、被其他进程继承。身份类参数（`--team-id / --agent-id / --user-id / --service-id / --memory-url / --opik-url`）**必须在命令行显式给**，让每次调用都能看清打向的是哪个环境。
+Deliberately design it this way: env is easy to mess up, forget to unset, and be inherited by other processes. Identity-type parameters (`--team-id / --agent-id / --user-id / --service-id / --memory-url / --opik-url`) **must be explicitly provided on the command line**, so that each call can clearly see which environment it is targeting.
 
-密钥只从环境变量读，不接受 CLI 参数（避免出现在 shell history / `ps aux`）:
+Keys are read only from environment variables and do not accept CLI parameters (to avoid appearing in shell history / `ps aux`)
 
 ```bash
 export MEMORY_CORE_API_KEY='ck_xxx.xxx'
-# Opik 开鉴权时才需要：
+# Opik is needed only when authentication:
 # export OPIK_API_KEY='...'
 # export OPIK_AUTH_SCHEME='Bearer'
 ```
 
-> `user_id` / `team_id` / `agent_id` / `session_id` 不能含 `|`（Redis 队列元素分隔符），脚本启动时会校验。
+> `user_id` / `team_id` / `agent_id` / `session_id` must not contain `|` (Redis queue element separator), which is validated when the script starts.
 
-## 用法
+Usage
 
-### 1. 列 Opik 项目
+### 1. List Opik project
 
 ```bash
 python3 scripts/import-opik-to-memory-skill-py/import_opik.py list-projects \
   --opik-url 'http://<opik-host>:5173'
 ```
 
-不需要 Memory Core 参数或密钥。
+No Memory Core parameter or key is needed.
 
-### 2. Fetch —— 只从 Opik 拉数据到本地
+### 2. Fetch —— Pull data from Opik to local
 
 ```bash
 python3 scripts/import-opik-to-memory-skill-py/import_opik.py fetch \
@@ -65,14 +65,14 @@ python3 scripts/import-opik-to-memory-skill-py/import_opik.py fetch \
   --out-dir ./opik-dump-3367b740
 ```
 
-- `--project` 支持 id 精确 / name 精确 / id 前缀 / name 前缀
-- 输出目录里每个 session 一个 `.json` 文件（`session_id + .json`，非法字符转 `-`）
-- 目录里还有一个 `manifest.json`，写了项目 id、trace 数、session 数、抓取时间
-- 默认跳过已存在的文件；加 `--overwrite` 才会覆盖
+- `--project` supports exact id / exact name / id prefix / name prefix
+- Each session in the output directory has a `.json` file (`session_id + .json`, illegal characters converted to `-`)
+- There is also a `manifest.json` in the directory, which records the project id, trace count, session count, and capture time
+- Existing files are skipped by default; only overwrite with `--overwrite`
 
-**重要**：fetch 只压 Opik、不压 Memory Core，两者解耦。
+**Important**: fetch only compresses Opik, not Memory Core, and the two are decoupled.
 
-### 3. Import —— 从本地目录灌到 Memory Core
+### 3. Import —— Pouring from local directory into Memory Core
 
 ```bash
 MEMORY_CORE_API_KEY='ck_xxx.xxx' \
@@ -88,20 +88,20 @@ python3 scripts/import-opik-to-memory-skill-py/import_opik.py import \
   --turn-gap-ms 2000
 ```
 
-首次跑就会看到粗略 ETA：
+You will see a rough ETA on the first run:
 
 ```
-[import] 总 sessions=87 (已完成 0, 待办 87) 总 turns=412 待办 turns=412
-[import] 并发=5 turn-gap=2000ms → 粗略 ETA ~2m44s（HTTP 耗时另计）
+[import] total sessions=87 (completed 0, pending 87) total turns=412 pending turns=412
+[import] concurrency=5 turn-gap=2000ms → rough ETA ~2m44s (HTTP time to be added separately)
 ```
 
-跑的过程中每完成一个 session 会打一行进度：
+A progress line is printed after each session is completed during the running process:
 
 ```
 [progress] sessions 12/87  turns 68/412  elapsed 34s  ETA ~2m5s
 ```
 
-断点保存在 `--in-dir/.import-state.json`（可用 `--state-file` 覆盖）。挂了重跑会自动跳过已完成的 session；要强制重灌加 `--no-resume`。
+Breakpoints are saved in `--in-dir/.import-state.json` (overridable with `--state-file`). Re-running after a crash will automatically skip completed sessions; add `--no-resume` to force a re-import.
 
 ### Dry-run
 
@@ -114,86 +114,86 @@ python3 scripts/import-opik-to-memory-skill-py/import_opik.py import \
   --dry-run
 ```
 
-不会真发 core、不写断点，只走一遍分组逻辑。dry-run 也要给身份参数（脚本要读进去校验、算 ETA）。
+It won't really send core, won't write breakpoints, only goes through the grouping logic once. dry-run also needs to provide identity parameters (the script needs to read them in for validation and calculating ETA).
 
-## 参数对照
+## Parameter Mapping
 
 ### `fetch`
 
-| 参数 | 默认 | 说明 |
+| Parameter | Default | Description |
 |---|---:|---|
-| `--project` | **必填** | id / name / 前缀 |
-| `--out-dir` | **必填** | 输出目录 |
-| `--max-traces` | 0 | 从 Opik 拉 trace 数上限（0=不限） |
-| `--max-sessions` | 0 | 只保留前 N 个 session |
-| `--page-size` | 100 | Opik 分页 size |
-| `--opik-request-gap-ms` | 500 | Opik 请求最小间隔（保护 Opik） |
-| `--include-system` | 关 | 保留 system 消息（默认丢弃） |
-| `--overwrite` | 关 | 覆盖已有文件 |
+| `--project` | **Required** | id / name / prefix |
+| `--out-dir` | **Required** | output directory |
+| `--max-traces` | 0 | maximum number of traces to pull from Opik (0=unlimited) |
+| `--max-sessions` | 0 | keep only the first N sessions |
+| `--page-size` | 100 | Opik pagination size |
+| `--opik-request-gap-ms` | 500 | minimum interval between Opik requests (protect Opik) |
+| `--include-system` | Off | Keep system messages (default: discard) |
+| `--overwrite` | Off | Overwrite existing files |
 
 ### `import`
 
-| 参数 | 默认 | 说明 |
+| Parameter | Default | Description |
 |---|---:|---|
-| `--in-dir` | **必填** | fetch 生成的目录 |
-| `--max-sessions` | 0 | 只灌前 N 个 session |
-| `--concurrency` | 2 | 不同 session 之间并发上限 |
-| `--turn-gap-ms` | 3000 | 同 session 每轮间隔 |
-| `--no-force-archive` | 关 | 不做尾部 force-archive |
-| `--dry-run` | 关 | 只读不写 |
-| `--state-file` | `<in-dir>/.import-state.json` | 断点文件 |
-| `--no-resume` | 关 | 忽略断点 |
+| `--in-dir` | **Required** | directory generated by fetch |
+| `--max-sessions` | 0 | only fetch the first N sessions |
+| `--concurrency` | 2 | concurrency limit between different sessions |
+| `--turn-gap-ms` | 3000 | interval between turns in the same session |
+| `--no-force-archive` | Off | do not perform tail force-archive |
+| `--dry-run` | Off | read-only, no writes |
+| `--state-file` | `<in-dir>/.import-state.json` | checkpoint file |
+| `--no-resume` | off | ignore checkpoint |
 
-## 数据流
+## Data Flow
 
 ```
 Opik /projects
-    ↓ (选中 project)
-Opik /traces?project_id=...   (分页；每次请求全局限流 500ms)
+    ↓ (select project)
+Opik /traces?project_id=...   (pagination; global rate limit 500ms per request)
     ↓
-按 thread_id 聚合 → 同 thread 只保留消息数最多的那条 trace（累积快照）
+Aggregate by thread_id → keep only the trace with the most messages per thread (cumulative snapshot)
     ↓
-本地 JSON 文件：<out-dir>/<session_id>.json
-    ↓ (fetch 结束；此时可断开 Opik)
-    ↓ (import 开始)
-读本地文件 → 每个 session 切成"一轮对话"
+Local JSON file: <out-dir>/<session_id>.json
+    ↓ (fetch finished; you can disconnect Opik at this point)
+    ↓ (import started)
+Read local file → split each session into "one round of conversation"
     ↓
-concurrency=N 并发跑不同 session；同 session 内串行
+concurrency=N run different sessions concurrently; serially within the same session
     ↓
-每一轮 POST /v3/skill/conversation/add (同 session_id)
+Each round POST /v3/skill/conversation/add (same session_id)
     ↓ sleep turn-gap-ms
     ↓
-force-archive 兜底 → 记入断点
+force-archive fallback → record breakpoint
 ```
 
-**几个关键点**：
-- 同一个 session 始终用同一个 `session_id`；每次只推一轮对话
-- 同 session 一轮之间 sleep（默认 3s），不同 session 并发
-- Opik 抓取全局最小间隔（默认 500ms）
-- import 断点粒度是 session；session 内某轮失败会 warn 并继续下一轮
+**Key points**:
+- The same session always uses the same `session_id`; only one round of conversation is pushed each time
+- Sleep between rounds within the same session (default 3s), different sessions run concurrently
+- Opik captures the global minimum interval (default 500ms)
+- The import breakpoint granularity is session; if a round within a session fails, it will warn and continue to the next round
 
-## 抽取阈值
+Extraction Threshold
 
-服务端 `add-handler` 满足任一条件触发归档：
+The server `add-handler` triggers archiving when any of the following conditions are met:
 
-| 条件 | 阈值 |
+| Condition | Threshold |
 |---|---:|
-| `tool_call` 累计条数 | 10 |
-| 字节累计 | 40 KB |
-| 单次请求字节 | ≥ 40 KB 立即压缩归档 |
+| `tool_call` total count | 10 |
+| Total bytes | 40 KB |
+| Bytes per request | ≥ 40 KB compress and archive immediately |
 
-如果一个 session 里 tool_call 不多、内容也不长，只有 `force-archive` 那一下会归档；抽取器判"不值得沉淀" → 0 skill，这是**正常结果**。
+If a session has few tool calls and short content, only `force-archive` triggers archiving; the extractor judging it as "not worth persisting" → 0 skills, this is a **normal result**.
 
-## 快速验证（1 个 session，链路验通）
+Quick verification (1 session, link verification)
 
 ```bash
-# fetch 1 个 session
+# fetch 1 session
 python3 scripts/import-opik-to-memory-skill-py/import_opik.py fetch \
   --opik-url 'http://<opik-host>:5173' \
   --project '019ed0c0' --out-dir /tmp/opik-smoke \
   --max-sessions 1 --max-traces 20
 
-# 灌进 core
+# Inject into core
 MEMORY_CORE_API_KEY='ck_xxx.xxx' \
 python3 scripts/import-opik-to-memory-skill-py/import_opik.py import \
   --in-dir /tmp/opik-smoke \
@@ -203,8 +203,8 @@ python3 scripts/import-opik-to-memory-skill-py/import_opik.py import \
   --turn-gap-ms 1000
 ```
 
-## 已知限制
+## Known Limitations
 
-- 不做 SWE-bench 之类的评测数据过滤（选 project 时手工避开）
-- 抽取产出不查，稍后自己看 UI / `/v3/skill/list`
-- 单 session 内一轮失败会 warn 继续，不整体回滚（下次重跑同 session 内容一致，不会重复归档？—— 会重复；断点粒度是 session，session 内不细分。如果单轮失败很多，可以删掉这个 session 的断点条目重跑）
+- Do not filter evaluation data such as SWE-bench (manually avoid when selecting projects)
+- Do not check the extraction output; review the UI / `/v3/skill/list` later
+- A single round failure within a single session will warn and continue, without overall rollback (next rerun of the same session content is consistent, will it not be archived repeatedly? — it will be repeated; the granularity of the checkpoint is the session, and no further subdivision within the session. If many rounds fail, you can delete the checkpoint entries of this session and rerun)

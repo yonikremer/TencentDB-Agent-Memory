@@ -58,7 +58,7 @@ function buildTelemetryMetadata(params: LLMRunParams): Record<string, unknown> {
   };
   if (params.traceName) {
     meta.langfuseTraceName = params.traceName;
-    // langfuseUpdateParent=true 让子 span 的 name/attrs 传播到 Langfuse trace 根
+    // langfuseUpdateParent=true propagates the name/attrs of child spans to the Langfuse trace root
     meta.langfuseUpdateParent = true;
   }
   if (Array.isArray(params.tags) && params.tags.length > 0) {

@@ -53,6 +53,11 @@ export const protectedGlobs = [
   'ZH_EN_TRANSLATION_PLAN.md',
   // .gitignore rules that reference real Chinese-named local docs (keep the patterns intact).
   '.gitignore',
+  // Core prompt files: remaining Chinese is the §4.3 language-contract content (Chinese
+  // example headings/filenames the model is told to follow the user's language).
+  'MemoryCore/src/core/prompts/scene-extraction.ts',
+  'MemoryCore/src/core/prompts/l1-extraction.ts',
+  'MemoryCore/src/core/prompts/persona-generation.ts',
 ];
 
 // Committed scratch from earlier passes. `git rm` each and it stops showing here.

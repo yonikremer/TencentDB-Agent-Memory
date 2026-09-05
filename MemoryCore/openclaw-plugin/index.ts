@@ -76,8 +76,8 @@ export default function register(api: any) {
     rejectUnauthorized,
   });
 
-  // COS STS 旁路；无独立配置块。
-  // STS 凭证仍走 POST /v2/cos/secret，鉴权复用 server.apiKey / instanceId。
+  // COS STS bypass; no independent configuration block.
+  // STS credentials still go through POST /v2/cos/secret, with authentication reusing server.apiKey / instanceId.
   const fileReader = createMemoryFileReader({
     endpoint: serverUrl,
     apiKey,

@@ -1,11 +1,11 @@
 /**
- * 一次性排查脚本（**只读**）：统计 VDB 库数量与集合占用，定位集合数超限来源。
+ * One-time troubleshooting script (**read-only**): count the number of VDB databases and collection usage, and identify the source of exceeding collection limits.
  *
- * 背景：VDB 实例集合数上限 1500。每个 memory 库会占 8 个集合，新建库前需要
- * 确认还有余量，否则 createCollection 会以 code=15129 失败、store 进 degraded
- * 模式，导致后续所有写入静默失败（已实测踩到）。
+ * Background: The maximum number of VDB instance collections is 1500. Each memory database occupies 8 collections, so before creating a new database, you need to
+ * confirm there is still capacity, otherwise createCollection will fail with code=15129 and enter the degraded
+ * mode, causing all subsequent writes to silently fail (this has been tested and confirmed).
  *
- * 本脚本不做任何创建/删除，只输出统计，供人工判断清理哪些库。
+ * This script does not perform any creation/deletion, only outputs statistics for manual judgment on which databases to clean.
  */
 import { TcvdbClient } from "../src/core/store/tcvdb-client.js";
 
@@ -13,7 +13,7 @@ const VDB_URL = process.env.VDB_URL;
 const VDB_API_KEY = process.env.VDB_API_KEY;
 
 if (!VDB_URL || !VDB_API_KEY) {
-  console.error("需要环境变量 VDB_URL / VDB_API_KEY");
+  console.error("Environment variable VDB_URL / VDB_API_KEY required");
   process.exit(2);
 }
 
@@ -29,10 +29,10 @@ async function main() {
     logger: silent,
   });
 
-  // TcvdbClient 没有封装 list 接口，直接用底层 request 调（只读）
+  // TcvdbClient does not encapsulate the list interface, directly calling the underlying request (read-only)
   const dbResp = await client.request<{ databases?: string[] }>("/database/list", {});
   const dbs = dbResp.databases ?? [];
-  console.log(`库总数: ${dbs.length}`);
+  console.log(`Total number of databases: ${dbs.length}`);
 
   const counts: Array<{ db: string; n: number }> = [];
   let total = 0;
@@ -45,18 +45,18 @@ async function main() {
       counts.push({ db, n });
       total += n;
     } catch {
-      counts.push({ db, n: -1 }); // 无权限或异常
+      counts.push({ db, n: -1 }); // No permission or exception
     }
   }
 
-  console.log(`集合总数: ${total} / 1500（余量 ${1500 - total}）`);
+  console.log(`Total: ${total} / 1500 (remaining ${1500 - total}`);
 
   const leftovers = counts.filter((c) => c.db.startsWith("clearverify-"));
-  console.log(`\n本验证脚本残留库 clearverify-*: ${leftovers.length} 个`);
-  for (const c of leftovers) console.log(`  ${c.db}  (${c.n} 集合)`);
+  console.log(`\nLeftover library clearverify-* in this verification script: ${leftovers.length} items`);
+  for (const c of leftovers) console.log(`  ${c.db}  (${c.n} collections)`);
 
   counts.sort((a, b) => b.n - a.n);
-  console.log("\n集合数 top 15:");
+  console.log("\nTop 15 collections:");
   for (const c of counts.slice(0, 15)) {
     console.log(`  ${String(c.n).padStart(5)}  ${c.db}`);
   }

@@ -1,11 +1,11 @@
 -- ============================================================
--- 记忆内核 metadata 模块 — SQLite 初始化脚本（v3.2 · 按实例分库）
--- 每个实例独立库文件；表内无 instance_id。
+-- Memory Core metadata module — SQLite initialization script (v3.2 · Database per instance)
+-- Each instance has an independent database file; there is no instance_id in the tables.
 --
--- 用法:
+Usage:
 --   sqlite3 data/metadata/tdai_metadata_default/metadata.db < scripts/db/sqlite-init.sql
 --
--- 注意：此脚本须与 sqlite-adapter.ts createSchema() 保持同步。
+-- Note: This script must remain in sync with sqlite-adapter.ts createSchema().
 -- ============================================================
 
 PRAGMA foreign_keys = ON;

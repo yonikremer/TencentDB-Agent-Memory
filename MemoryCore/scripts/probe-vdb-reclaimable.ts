@@ -1,20 +1,20 @@
 /**
- * 一次性排查脚本（**只读**）：识别 VDB 上可安全清理的一次性测试残留库。
+ * One-time troubleshooting script (**read-only**): identify one-time test residual databases on VDB that can be safely cleaned up.
  *
- * 背景：实例集合数已达上限 1500/1500，无法新建库。需要先回收测试残留。
+ * Background: The number of instance collections has reached the limit of 1500/1500, and creating a new database is not possible. Test residue needs to be recycled first.
  *
- * 判定规则（只认**明确带一次性测试特征**的库，宁漏不误伤）：
- *   - `memory-tdai-test-*`        自动化 e2e 生成，名字里带随机 run id
- *   - `verify_memory_bm25_*`      BM25 验证脚本生成，名字里带时间戳
- *   - `clearverify-*`             本次 clear 验证脚本生成
- *   - `*_probe` / `*probe*`       探测用临时库
+ * Judgment rules (only recognize libraries with **explicit one-time test features**, preferring to miss rather than mistakenly harm):
+ *   - `memory-tdai-test-*`         Automated e2e generation, with random run id in the name
+ *   - `verify_memory_bm25_*`      BM25 verification script generation, with timestamp in the name
+ *   - `clearverify-*`              Clear verification script generation for this time
+ *   - `*_probe` / `*probe*`        Probing temporary libraries
  *
- * 明确**排除**（可能是别人在用的长期环境）：
- *   - memory-tencentdb-testing-*  共享测试库
- *   - memory_dev_*               开发环境库
- *   - 其它不匹配上述模式的一切库
+ * Clearly **exclude** (possibly long-term environments used by others):
+ *   - memory-tencentdb-testing-*   Shared test database
+ *   - memory_dev_*                Development environment database
+ *   - All databases that do not match the above patterns
  *
- * 本脚本只输出清单与统计，**不执行任何删除**。
+ * This script only outputs lists and statistics, **does not execute any deletions**.
  */
 import { TcvdbClient } from "../src/core/store/tcvdb-client.js";
 
@@ -22,20 +22,20 @@ const VDB_URL = process.env.VDB_URL;
 const VDB_API_KEY = process.env.VDB_API_KEY;
 
 if (!VDB_URL || !VDB_API_KEY) {
-  console.error("需要环境变量 VDB_URL / VDB_API_KEY");
+  console.error("Environment variable VDB_URL / VDB_API_KEY required");
   process.exit(2);
 }
 
 const silent = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
 
-/** 明确的一次性测试库特征。 */
+/** A clear one-time test library feature. */
 const DISPOSABLE_PATTERNS: Array<{ name: string; test: (db: string) => boolean }> = [
   { name: "memory-tdai-test-*", test: (d) => d.startsWith("memory-tdai-test-") },
   { name: "verify_memory_bm25_*", test: (d) => d.startsWith("verify_memory_bm25_") },
   { name: "clearverify-*", test: (d) => d.startsWith("clearverify-") },
 ];
 
-/** 明确保护、绝不纳入清理清单。 */
+/** Explicitly protect, never include in the cleanup list. */
 const PROTECTED_PATTERNS: Array<(db: string) => boolean> = [
   (d) => d.startsWith("memory-tencentdb-testing"),
   (d) => d.startsWith("memory_dev_"),
@@ -76,7 +76,7 @@ async function main() {
         "/collection/list", { database: db },
       );
       n = (r.collections ?? []).length;
-    } catch { /* 统计不到就按 0 计 */ }
+    } catch { /* Count as 0 if not counted */ }
     totalCols += n;
 
     const { disposable, reason } = classify(db);
@@ -89,18 +89,18 @@ async function main() {
     else if (reason === "unknown-keep") keepUnknown.push(db);
   }
 
-  console.log(`库总数: ${dbs.length}`);
-  console.log(`集合总数: ${totalCols} / 1500（余量 ${1500 - totalCols}）\n`);
+  console.log(`Total number of databases: ${dbs.length}`);
+  console.log(`Total number of collections: ${totalCols} / 1500 (remaining ${1500 - totalCols})\n`);
 
-  console.log("按分类统计:");
+  console.log("By category:");
   for (const [reason, s] of [...byReason.entries()].sort((a, b) => b[1].cols - a[1].cols)) {
-    const tag = DISPOSABLE_PATTERNS.some((p) => p.name === reason) ? "可清理" : "保留";
-    console.log(`  [${tag}] ${reason.padEnd(24)} ${String(s.dbs).padStart(4)} 库${String(s.cols).padStart(5)} 集合`);
+    const tag = DISPOSABLE_PATTERNS.some((p) => p.name === reason) ? "Cleanable" : "Retain";
+    console.log(`  [${tag}] ${reason.padEnd(24)} ${String(s.dbs).padStart(4)} db(s), ${String(s.cols).padStart(5)} collection(s)`);
   }
 
-  console.log(`\n可回收集合数: ${reclaimable}（清理后余量约 ${1500 - totalCols + reclaimable}）`);
-  console.log(`未识别、保守保留的库: ${keepUnknown.length} 个`);
-  if (keepUnknown.length) console.log(`  示例: ${keepUnknown.slice(0, 10).join(", ")}`);
+  console.log(`\nReclaimable set: ${reclaimable} (remaining after cleanup approx. ${1500 - totalCols + reclaimable})`);
+  console.log(`Unrecognized, conservatively kept libraries: ${keepUnknown.length} items`);
+  if (keepUnknown.length) console.log(`   Example: ${keepUnknown.slice(0, 10).join(", ")}`);
 }
 
 main().catch((err) => {

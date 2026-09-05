@@ -1,57 +1,57 @@
-# Opik → Memory Core 导入工具
+# Opik → Memory Core Import Tool
 
-将 Opik Project 下的 Trace 转换为对话消息，并通过 Memory Core Gateway 的 `POST /v3/conversation/add` 写入 L0。
+Convert the Trace under Opik Project into conversation messages, and write them to L0 via the `POST /v3/conversation/add` of Memory Core Gateway.
 
-## 能力
+## Capabilities
 
-- 自动分页读取全部 Opik Projects 和指定 Project 的全部 Traces
-- 支持按 Project 名称或 UUID 选择项目
-- 识别 `messages`、`conversation`、`history`、`prompt/response`、OpenAI `choices` 等常见 Trace 结构
-- 自动合并 input/output 消息、消除重叠并限制单条消息和单批大小
-- 写入前按 Session 预检；预计超过 4 万条 L0 时，跨 Trace 去重并优先导入最新尾部快照
-- 支持 Dry Run、断点续传、网络重试和 Pipeline 节流
-- 密钥只从环境变量读取
+- Automatically paginate to read all Opik Projects and the specified Project's Traces
+- Support selecting a project by Project name or UUID
+- Recognize common Trace structures such as `messages`, `conversation`, `history`, `prompt/response`, and OpenAI `choices`
+- Automatically merge input/output messages, eliminate overlaps, and limit the size of individual messages and batches
+- Perform a pre-check by Session before writing; when the estimated number of L0 records exceeds 40,000, deduplicate across Traces and prioritize importing the latest tail snapshot
+- Support Dry Run, resumable transfers, network retries, and Pipeline throttling
+- The key is read only from environment variables
 
-## 前置条件
+## Prerequisites
 
 - Node.js `>= 22.16.0`
-- 已安装当前项目依赖
-- Opik REST API 可访问
-- 远端 Memory Core Gateway 可访问 `/health`、`/v3/conversation/add` 和 `/v3/conversation/query`
-- 已确定目标 `service_id`、`team_id`、`agent_id` 和 `user_id`
+- Current project dependencies are installed
+- Opik REST API is accessible
+- Remote Memory Core Gateway is accessible at `/health`, `/v3/conversation/add`, and `/v3/conversation/query`
+- Target `service_id`, `team_id`, `agent_id`, and `user_id` have been determined
 
-进入 Memory Core 目录：
+Enter the Memory Core directory:
 
 ```bash
 cd MemoryCore
 ```
 
-查看全部参数：
+View all parameters:
 
 ```bash
 npm run import:opik -- --help
 ```
 
-## Opik 地址与分页
+## Opik Address and Pagination
 
-推荐只配置 Opik 根地址和 workspace：
+Recommended to configure only the Opik root address and workspace:
 
 ```bash
 export OPIK_URL='http://opik.example.com:5173'
 export OPIK_WORKSPACE='default'
 ```
 
-也兼容 UI 地址：
+Also compatible with UI address:
 
 ```text
 http://opik.example.com:5173/default/projects?size=25
 ```
 
-UI URL 中的 `size=25` 不会限制导入范围。工具会转换为 `/api/v1/private` API 地址，并按 `page`、`size` 自动读取全部分页；`--page-size` 默认是 `100`。
+The `size=25` in the UI URL does not limit the import scope. The tool converts it to the `/api/v1/private` API address and automatically reads all paginated data by `page` and `size`; the default for `--page-size` is `100`.
 
-## 配置远端 Memory Core
+Configure Remote Memory Core
 
-以下地址仅为示例，请替换成实际 Gateway 地址：
+The following address is only an example, please replace it with the actual Gateway address:
 
 ```bash
 export MEMORY_CORE_URL='http://memory-core.example.com:8423'
@@ -61,19 +61,19 @@ export MEMORY_CORE_AGENT_ID='agent-001'
 export MEMORY_CORE_USER_ID='user-001'
 ```
 
-可选 Task 隔离：
+Optional Task isolation:
 
 ```bash
 export MEMORY_CORE_TASK_ID='task-001'
 ```
 
-不需要 Task 时：
+When no Task is needed:
 
 ```bash
 unset MEMORY_CORE_TASK_ID
 ```
 
-安全输入 API Key，避免写入代码或配置文件：
+Safely input API Key, avoid writing it into code or configuration files:
 
 ```bash
 read -s "MEMORY_CORE_API_KEY?Memory Core API Key: "
@@ -81,15 +81,15 @@ echo
 export MEMORY_CORE_API_KEY
 ```
 
-检查 Gateway：
+Check Gateway:
 
 ```bash
 curl --fail --silent --show-error "${MEMORY_CORE_URL}/health"
 ```
 
-## 先执行 Dry Run
+First, run a Dry Run
 
-Dry Run 会读取真实 Opik 并转换 Trace，但不会写入 Memory Core 或断点文件：
+Dry Run reads the real Opik and converts Traces, but does not write to Memory Core or breakpoint files:
 
 ```bash
 npm run import:opik -- \
@@ -98,7 +98,7 @@ npm run import:opik -- \
   --dry-run
 ```
 
-`--project` 同时接受 Project 名称和 UUID，可以重复传入或使用逗号分隔：
+`--project` accepts both the Project name and UUID, and can be passed repeatedly or separated by commas:
 
 ```bash
 npm run import:opik -- \
@@ -107,9 +107,9 @@ npm run import:opik -- \
   --dry-run
 ```
 
-不传 `--project` 会处理 workspace 下全部项目。项目数量较多时，应先指定项目和 `--max-traces` 做小批验证。
+If `--project` is not passed, all projects under the workspace are processed. When there are many projects, you should first specify the project and `--max-traces` for small-batch verification.
 
-## 正式导入
+Formal import
 
 ```bash
 npm run import:opik -- \
@@ -118,49 +118,49 @@ npm run import:opik -- \
   --state-file './opik-import-remote-state.json'
 ```
 
-成功时会输出：
+It outputs:
 
 ```text
 [import] project=... trace=... accepted=...
 [done] seen_traces=5 imported_traces=5 ... imported_messages=...
 ```
 
-工具实际调用：
+Tool actual call:
 
 ```text
 POST <MEMORY_CORE_URL>/v3/conversation/add
 ```
 
-写入范围由以下字段共同决定：
+The write range is determined by the following fields:
 
 - `x-tdai-service-id`: `MEMORY_CORE_SERVICE_ID`
 - `team_id`: `MEMORY_CORE_TEAM_ID`
 - `agent_id`: `MEMORY_CORE_AGENT_ID`
 - `user_id`: `MEMORY_CORE_USER_ID`
-- `task_id`: `MEMORY_CORE_TASK_ID`，可选
-- `session_id`: 根据 Opik Project ID 和 `thread_id`/Trace ID 稳定生成
+- `task_id`: `MEMORY_CORE_TASK_ID`, optional
+- `session_id`: Stably generated based on the Opik Project ID and `thread_id`/Trace ID
 
-每条消息会把 Opik 原始时间同时写入：
+Each message writes the Opik original time simultaneously:
 
-- `timestamp`：消息实际发生时间
-- `recorded_at`：L0 入库排序时间，对应 TCVDB 的 `recorded_at_ms`
+- `timestamp`: The actual time the message occurred
+- `recorded_at`: The L0 ingestion sorting time, corresponding to TCVDB's `recorded_at_ms`
 
-因此面板按 `recorded_at_ms desc` 排序时，会按 Opik 历史时间展示，而不是按本次导入执行时间展示。未显式传入 `recorded_at` 的普通 Memory Core 写入仍使用服务端接收时间。
+Therefore, when the panel is sorted by `recorded_at_ms desc`, it displays by Opik's historical time rather than by the time of this import execution. Ordinary Memory Core writes that do not explicitly pass `recorded_at` still use the server's reception time.
 
-## 超大 Session 保护
+## Super Large Session Protection
 
-默认 `--max-session-messages 40000`。这里统计的是 L0 消息条数，不是 user/assistant 配对后的“轮数”；4 万条消息约等于 2 万轮标准问答，低于已知的单 Session 5 万条风险边界。
+Default `--max-session-messages 40000`. This counts the number of L0 messages, not the "turns" after pairing user/assistant; 40,000 messages is approximately equivalent to 20,000 standard Q&A turns, which is below the known single Session 50,000-message risk boundary.
 
-工具会先按目标 `session_id` 汇总本次将处理的 Trace。若同一 Session 预计写入超过上限：
+The tool will first aggregate the Trace to be processed by the target `session_id`. If the same Session is expected to write more than the limit:
 
-1. 按 Trace 时间顺序合并累计对话，消除前一个 Trace 历史在后一个 Trace 中重复出现的问题；
-2. 只保留去重后最新的 N 条消息；
-3. 优先写入一个独立的尾部快照 Session，ID 形如 `原session:t40000:<快照哈希>`；
-4. 不再把该源 Session 的旧 Trace 逐条写入，因此单个新 Session 不会超过配置上限。
+1. Merge cumulative conversations in Trace chronological order to eliminate the issue of previous Trace history being repeatedly appearing in subsequent Traces;
+2. Only retain the latest N messages after deduplication;
+3. Prioritize writing to an independent tail snapshot Session, with ID in the format `original session:t40000:<snapshot hash>`;
+4. No longer write the old Traces of the source Session one by one, so a single new Session will not exceed the configured limit.
 
-独立快照 ID 会随尾部内容变化。数据源后续新增消息时会生成新的快照 Session，避免继续向旧 Session 追加并重新突破上限。
+The independent snapshot ID changes with the trailing content. When new messages are added to the data source, a new snapshot Session is generated to avoid appending to the old Session and exceeding the limit again.
 
-Dry Run 检查超大 Session：
+Check large sessions in Dry Run
 
 ```bash
 npm run import:opik -- \
@@ -170,7 +170,7 @@ npm run import:opik -- \
   --dry-run
 ```
 
-如果不允许截断，希望发现超限就停止：
+If truncation is not allowed, we want to stop when an overflow is detected:
 
 ```bash
 npm run import:opik -- \
@@ -180,11 +180,11 @@ npm run import:opik -- \
   --dry-run
 ```
 
-使用 `--max-session-messages 0` 可以关闭保护，但对于可能超过 5 万条 L0 的 Session 不建议这样做。
+Using `--max-session-messages 0` can disable protection, but it is not recommended for Sessions that may exceed 50,000 L0 messages.
 
-## 断点续传
+Resume from breakpoint
 
-默认启用断点续传。每个成功批次会立即写入 `--state-file`，重新执行相同命令时自动跳过已完成批次：
+Default resume from breakpoint is enabled. Each successful batch is immediately written to `--state-file`, and re-executing the same command will automatically skip completed batches:
 
 ```bash
 npm run import:opik -- \
@@ -192,7 +192,7 @@ npm run import:opik -- \
   --state-file './opik-import-remote-state.json'
 ```
 
-忽略已有断点：
+Ignore existing breakpoints:
 
 ```bash
 npm run import:opik -- \
@@ -200,13 +200,13 @@ npm run import:opik -- \
   --no-resume
 ```
 
-`--no-resume` 可能造成重复导入，只应在明确需要重新导入时使用。断点文件权限为 `0600`，但其中不保存 API Key。
+`--no-resume` may cause duplicate imports, and should only be used when explicitly needing to re-import. The breakpoint file permissions are `0600`, but it does not store API Keys.
 
-## Pipeline 策略
+## Pipeline Strategy
 
-默认每写入 20 个批次等待 L1 空闲，并在结束时等待 L1/L2/L3 全部空闲。
+Wait for L1 to be idle after every 20 batches written, and wait for L1/L2/L3 to be idle at the end.
 
-如果目标环境关闭了记忆提取、只需要写 L0：
+If the target environment has memory extraction disabled, just write L0:
 
 ```bash
 npm run import:opik -- \
@@ -216,7 +216,7 @@ npm run import:opik -- \
   --state-file './opik-import-remote-state.json'
 ```
 
-## 回查导入结果
+Review import results
 
 ```bash
 curl --fail --silent --show-error \
@@ -236,9 +236,9 @@ JSON
 )"
 ```
 
-## Opik 鉴权
+## Opik Authentication
 
-自托管 Opik 默认可能不需要鉴权。启用鉴权时：
+Self-hosted Opik may not require authentication by default. When authentication is enabled:
 
 ```bash
 read -s "OPIK_API_KEY?Opik API Key: "
@@ -247,33 +247,33 @@ export OPIK_API_KEY
 export OPIK_AUTH_SCHEME='Bearer'
 ```
 
-`OPIK_AUTH_SCHEME` 为空时，`OPIK_API_KEY` 会原样作为 `Authorization` Header。
+When `OPIK_AUTH_SCHEME` is empty, `OPIK_API_KEY` is used as the `Authorization` Header as-is.
 
-## 常用参数
+Common Parameters
 
-| 参数 | 默认值 | 说明 |
+| Parameter | Default Value | Description |
 |---|---:|---|
-| `--project` | 全部项目 | Project 名称或 UUID，可重复或逗号分隔 |
-| `--page-size` | `100` | Opik API 每页数量 |
-| `--max-traces` | `0` | 本次最多处理的 Trace 数，`0` 表示不限 |
-| `--max-session-messages` | `40000` | 单个目标 Session 最多写入的 L0 消息数，`0` 禁用保护 |
-| `--large-session-strategy` | `tail` | 超限时保留最新尾部；`error` 表示直接停止 |
-| `--state-file` | `.opik-memory-import-state.json` | 断点文件 |
-| `--dry-run` | 关闭 | 只拉取和转换，不写入 |
-| `--no-resume` | 关闭 | 忽略断点，可能重复导入 |
-| `--include-system` | 关闭 | 将 system/developer 转成带前缀的 user 消息 |
-| `--wait-every` | `20` | 每 N 个写请求等待 L1，`0` 禁用 |
-| `--no-final-wait` | 关闭 | 不等待最终 L1/L2/L3 空闲 |
-| `--timeout-ms` | `30000` | 单次 HTTP 请求超时 |
-| `--retries` | `4` | 网络错误、429 和 5xx 重试次数 |
+| `--project` | All projects | Project name or UUID, repeatable or comma-separated |
+| `--page-size` | `100` | Number of items per page in the Opik API |
+| `--max-traces` | `0` | Maximum number of Traces to process this time, `0` means no limit |
+| `--max-session-messages` | `40000` | Maximum number of L0 messages written to a single target Session, `0` disables the protection |
+| `--large-session-strategy` | `tail` | Keep the latest tail when over limit; `error` means stop directly |
+| `--state-file` | `.opik-memory-import-state.json` | Checkpoint file |
+| `--dry-run` | Off | Only fetch and convert, do not write |
+| `--no-resume` | Off | Ignore checkpoint, may import repeatedly |
+| `--include-system` | Off | Convert system/developer to user messages with prefix |
+| `--wait-every` | `20` | Wait for L1 every N write requests, `0` disables |
+| `--no-final-wait` | Off | Do not wait for final L1/L2/L3 to be idle |
+| `--timeout-ms` | `30000` | Timeout for a single HTTP request |
+| `--retries` | `4` | Retries for network errors, 429, and 5xx |
 
-## 已验证链路
+Verified Link
 
-该工具已使用真实 Opik API 和隔离的本地 Memory Core 完成端到端验证：
+This tool has been end-to-end verified using a real Opik API and an isolated local Memory Core:
 
-1. 分页读取 Opik Project 和 Trace
-2. 将 5 个 Trace 转换为 15 条 L0 消息
-3. 写入 `/v3/conversation/add`
-4. 通过 `/v3/conversation/query` 回查 15 条消息
-5. 重复执行时断点命中、写入数为 0
-6. SQLite 与 JSONL 镜像落盘数量一致
+1. Paginate and read Opik Project and Trace
+2. Convert 5 Traces into 15 L0 messages
+3. Write to `/v3/conversation/add`
+4. Query 15 messages back via `/v3/conversation/query`
+5. On repeated execution, breakpoint hit and write count is 0
+6. SQLite and JSONL mirror disk write count are consistent

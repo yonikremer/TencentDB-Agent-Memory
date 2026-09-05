@@ -154,7 +154,7 @@ export class PersonaGenerator {
     if (changedSceneContents.length > 0) {
       changedScenesContent =
         `\n\n## 📄 Full Content of Changed Scenes\n\n` +
-        `*自上次 Persona 更新后，以下 ${changedSceneContents.length} 个场景发生了变化。工程已为你预加载完整内容：*\n\n` +
+        `*After the last Persona update, the following ${changedSceneContents.length} scenes have changed. The project has preloaded the complete content for you:*\n\n` +
         changedSceneContents.join("\n\n") +
         `\n\n---\n\n` +
         `⚠️ **Focus on analyzing changed scenes**: The above scenes are the **new/modified content** since the last update, please **focus on analyzing** the new information in these scenes.\n`;
@@ -283,7 +283,7 @@ export class PersonaGenerator {
         hasError: false,
       });
     } catch {
-      // 静默忽略
+      // Silently ignore
     }
 
     return true;

@@ -1,6 +1,6 @@
 # OpenClaw Adapter for TencentDB Agent Memory (v3)
 
-[简体中文](./README_CN.md) · English
+[Simplified Chinese](./README_CN.md) · English
 
 This directory is the **OpenClaw client adapter** for Memory Gateway **`/v3/*`**. It does not run extraction, indexing, scene generation, or persona generation. It connects to an already-running Memory Gateway and uses the npm TypeScript SDK to capture conversations, recall memories, and expose memory tools to the Agent.
 

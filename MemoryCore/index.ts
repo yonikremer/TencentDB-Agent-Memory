@@ -374,7 +374,7 @@ export default function register(api: OpenClawPluginApi) {
   // ============================
 
   // tdai_memory_search — Agent-callable L1 memory search tool
-  // TODO: implement hard per-turn call limit via before_tool_call hook + execute early-return (方案 D)
+  // TODO: implement hard per-turn call limit via before_tool_call hook + execute early-return (Plan D)
   if (cfg.recall.enabled || cfg.capture.enabled) {
   api.registerTool(
     {
@@ -462,7 +462,7 @@ export default function register(api: OpenClawPluginApi) {
   );
 
   // tdai_conversation_search — Agent-callable L0 conversation search tool
-  // TODO: implement hard per-turn call limit via before_tool_call hook + execute early-return (方案 D)
+  // TODO: implement hard per-turn call limit via before_tool_call hook + execute early-return (Plan D)
   api.registerTool(
     {
       name: "tdai_conversation_search",

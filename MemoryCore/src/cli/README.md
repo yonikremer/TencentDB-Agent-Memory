@@ -1,56 +1,56 @@
 # memory-tdai CLI
 
-`openclaw memory-tdai` 命令空间，提供离线数据管理工具。
+`openclaw memory-tdai` command space, providing offline data management tools.
 
-## seed — 导入历史对话数据
+## seed — import historical conversation data
 
-将历史对话 JSON 文件导入到记忆管线中，完整执行 L0→L1→L2→L3 流程。适用于：
+Import the historical conversation JSON file into the memory pipeline, and fully execute the L0→L1→L2→L3 process. Applicable to:
 
-- 将已有对话数据灌入记忆系统
-- 批量测试记忆提取效果
-- 迁移/恢复记忆数据
+- Ingest existing conversation data into the memory system
+- Batch test memory extraction effectiveness
+- Migrate/restore memory data
 
-### 用法
+Usage
 
 ```bash
 openclaw memory-tdai seed --input <file> [options]
 ```
 
-### 参数
+Parameters
 
-| 参数 | 必填 | 说明 |
+| Parameter | Required | Description |
 |------|------|------|
-| `--input <file>` | ✅ | 输入 JSON 文件路径 |
-| `--output-dir <dir>` | — | 输出目录（默认自动生成带时间戳的目录） |
-| `--session-key <key>` | — | 回退 session key（当输入数据缺少时使用） |
-| `--config <file>` | — | 配置覆盖文件（JSON，与 openclaw.json 插件配置深度合并） |
-| `--strict-round-role` | — | 严格校验每轮对话必须包含 user 和 assistant 消息 |
-| `--yes` | — | 跳过交互确认（如时间戳自动填充确认） |
+| `--input <file>` | ✅ | Input JSON file path |
+| `--output-dir <dir>` | — | Output directory (default auto-generated directory with timestamp) |
+| `--session-key <key>` | — | Fallback session key (used when input data is missing) |
+| `--config <file>` | — | Config override file (JSON, deeply merged with openclaw.json plugin config) |
+| `--strict-round-role` | — | Strictly validate that each round of conversation must contain user and assistant messages |
+| `--yes` | — | Skip interactive confirmation (e.g., confirmation for automatic timestamp filling) |
 
-### 示例
+### Example
 
 ```bash
-# 基本用法
+# Basic Usage
 openclaw memory-tdai seed --input conversations.json
 
-# 指定输出目录
+# Specified output directory
 openclaw memory-tdai seed --input data.json --output-dir ./seed-output
 
-# 使用自定义配置覆盖（如调整 pipeline 参数）
+# Use custom configuration to override (e.g., adjust pipeline parameters)
 openclaw memory-tdai seed --input data.json --config seed-config.json
 
-# 跳过所有确认
+# Skip all confirmations
 openclaw memory-tdai seed --input data.json --yes
 
-# 严格模式 + 自定义配置
+# Strict Mode + Custom Configuration
 openclaw memory-tdai seed --input data.json --config seed-config.json --strict-round-role --yes
 ```
 
-### 输入文件格式
+### Input File Format
 
-支持两种 JSON 格式：
+Supports two types of JSON formats:
 
-#### Format A：对象包装
+#### Format A: Object Wrapping
 
 ```json
 {
@@ -60,12 +60,12 @@ openclaw memory-tdai seed --input data.json --config seed-config.json --strict-r
       "sessionId": "conv-001",
       "conversations": [
         [
-          { "role": "user", "content": "你好", "timestamp": 1711929600000 },
-          { "role": "assistant", "content": "你好！有什么可以帮你？", "timestamp": 1711929601000 }
+          { "role": "user", "content": "Hello", "timestamp": 1711929600000 },
+          { "role": "assistant", "content": "Hello! How can I help you?", "timestamp": 1711929601000 }
         ],
         [
-          { "role": "user", "content": "今天天气怎么样？" },
-          { "role": "assistant", "content": "今天晴天，适合出门。" }
+          { "role": "user", "content": "How is the weather today?" },
+          { "role": "assistant", "content": "It's sunny today, perfect for going out." }
         ]
       ]
     }
@@ -73,7 +73,7 @@ openclaw memory-tdai seed --input data.json --config seed-config.json --strict-r
 }
 ```
 
-#### Format B：顶层数组
+#### Format B: Top-level Array
 
 ```json
 [
@@ -81,33 +81,33 @@ openclaw memory-tdai seed --input data.json --config seed-config.json --strict-r
     "sessionKey": "user-alice",
     "conversations": [
       [
-        { "role": "user", "content": "你好" },
-        { "role": "assistant", "content": "你好！" }
+        { "role": "user", "content": "Hello" },
+        { "role": "assistant", "content": "Hello!" }
       ]
     ]
   }
 ]
 ```
 
-#### 字段说明
+Field Description
 
-| 字段 | 类型 | 必填 | 说明 |
+| Field | Type | Required | Description |
 |------|------|------|------|
-| `sessionKey` | string | ✅ | Session 标识（如用户 ID、频道名） |
-| `sessionId` | string | — | 会话实例 ID（同一 sessionKey 下可有多个 sessionId） |
-| `conversations` | message[][] | ✅ | 对话轮次数组，每个轮次是一组消息 |
-| `role` | string | ✅ | 消息角色：`user` 或 `assistant` |
-| `content` | string | ✅ | 消息内容 |
-| `timestamp` | number \| string | — | 时间戳：epoch 毫秒或 ISO 8601 字符串。缺失时 seed 会提示自动填充 |
+| `sessionKey` | string | ✅ | Session identifier (e.g., user ID, channel name) |
+| `sessionId` | string | — | Session instance ID (multiple sessionIds can exist under the same sessionKey) |
+| `conversations` | message[][] | ✅ | Conversation turn array, where each turn is a set of messages |
+| `role` | string | ✅ | Message role: `user` or `assistant` |
+| `content` | string | ✅ | Message content |
+| `timestamp` | number \| string | — | Timestamp: epoch milliseconds or ISO 8601 string. If missing, seed will prompt for automatic filling |
 
-### 配置覆盖
+Configuration Override
 
-`--config` 接受一个 JSON 文件，与 `openclaw.json` 中的插件配置**两级深度合并**：
+`--config` accepts a JSON file, performing a **two-level deep merge** with the plugin configuration in `openclaw.json`:
 
-- 顶层 key 如果两边都是对象 → 浅合并（保留 base 中未覆盖的字段）
-- 其他类型 → 直接覆盖
+- If the top-level key is an object on both sides → shallow merge (preserve fields not overridden in base)
+- Other types → direct overwrite
 
-常见场景：seed 时使用更激进的 pipeline 参数以加速处理：
+Common scenarios: use more aggressive pipeline parameters when seeding to accelerate processing:
 
 ```json
 {
@@ -122,7 +122,7 @@ openclaw memory-tdai seed --input data.json --config seed-config.json --strict-r
 }
 ```
 
-如果需要 seed 到独立的 TCVDB 数据库：
+If you need to seed an independent TCVDB database:
 
 ```json
 {
@@ -138,21 +138,21 @@ openclaw memory-tdai seed --input data.json --config seed-config.json --strict-r
 }
 ```
 
-### 输出目录结构
+### Output directory structure
 
 ```
 <output-dir>/
-├── conversations/          — L0 JSONL 文件
-├── records/                — L1 JSONL 文件
-├── scene_blocks/           — L2 场景块
-├── vectors.db              — SQLite 向量数据库（仅 sqlite 后端）
+├── conversations/          — L0 JSONL files
+├── records/                — L1 JSONL files
+├── scene_blocks/           — L2 scene blocks
+├── vectors.db              — SQLite vector database (sqlite backend only)
 ├── .metadata/
-│   ├── manifest.json       — 元数据（store 绑定 + seed 运行记录）
-│   └── checkpoint.json     — 管线进度
-└── .backup/                — 滚动备份
+│   ├── manifest.json       — Metadata (store binding + seed run records)
+│   └── checkpoint.json     — Pipeline progress
+└── .backup/                — Rolling backup
 ```
 
-Seed 完成后，`manifest.json` 会记录本次运行信息：
+After `Seed` is complete, `manifest.json` will record the information of this run:
 
 ```json
 {
