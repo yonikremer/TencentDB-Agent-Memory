@@ -3,25 +3,25 @@
 @tailwind utilities;
 
 /*
- * ===== Design Token Bridging: Tailwind Semantic Colors → Tea Design Token =====
+ * ===== 设计令牌桥接：Tailwind 语义色 → Tea Design Token =====
  *
- * This file no longer maintains a separate shadcn/HSL color palette; all semantic variables are directly aliased to
- * tea-component official Design Token (--tea-color-*, --tea-shadow-*),
- * Ensure Tailwind's bg-primary / text-muted-foreground / border-border, etc.
- * Semantically meaningful utility classes are visually identical to Tea components and automatically follow Tea theme changes.
+ * 本文件不再维护一套独立的 shadcn/HSL 色板，所有语义变量均直接别名到
+ * tea-component 官方 Design Token（--tea-color-*、--tea-shadow-*），
+ * 保证 Tailwind 的 bg-primary / text-muted-foreground / border-border 等
+ * 语义化 utility class 与 Tea 组件在视觉上完全一致，并自动跟随 Tea 主题变化。
  *
- * Naming Reference Table:
- *   background      → Card/panel-level default background   (--tea-color-bg-primary-default)
- *   background-deep → Page outer background         (--tea-color-bg-page-default)
- *   foreground      → Primary text               (--tea-color-text-primary)
- *   card            → Card background/text
- *   primary         → Brand color (buttons/highlights)   (--tea-color-bg-brand-default)
- *   secondary/muted → secondary background / secondary text
- *   accent          → hover state background
- *   destructive     → error semantic color
- *   success/warning → success/warning semantic color
- *   border/input    → border color
- *   ring            → focus ring color (brand color)
+ * 命名对照表：
+ *   background      → 卡片/面板级默认背景   (--tea-color-bg-primary-default)
+ *   background-deep → 页面外层背景         (--tea-color-bg-page-default)
+ *   foreground      → 主文本               (--tea-color-text-primary)
+ *   card            → 卡片背景/文本
+ *   primary         → 品牌色（按钮/高亮）   (--tea-color-bg-brand-default)
+ *   secondary/muted → 次级背景/次要文本
+ *   accent          → hover 态背景
+ *   destructive     → 错误语义色
+ *   success/warning → 成功/警告语义色
+ *   border/input    → 边框色
+ *   ring            → 焦点环颜色（品牌色）
  */
 :root {
   --background: var(--tea-color-bg-primary-default);
@@ -51,12 +51,12 @@
   --input-background: var(--tea-color-bg-primary-default);
   --ring: var(--tea-color-border-brand-default);
   --heavy: var(--tea-color-border-secondary-default);
-  /* Monospace font stack (code/key/ID display uniformly uses this token) */
+  /* 等宽字体栈（代码/密钥/ID 展示统一走此 token） */
   --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
   color-scheme: light;
 }
 
-/* Map to Tailwind-available bg-* / text-* / border-* */
+/* 映射到 Tailwind 可用的 bg-* / text-* / border-* */
 @layer base {
   * {
     border-color: var(--border);
@@ -64,7 +64,7 @@
 }
 
 body {
-  /* Align Tea Design official font stack (node_modules/tea-component/dist/tea.css) */
+  /* 对齐 Tea Design 官方字体栈（node_modules/tea-component/dist/tea.css） */
   font-family:
     Roboto, 'San Francisco', 'Helvetica Neue', Helvetica, Arial, 'PingFang SC', 'Hiragino Sans GB',
     'Microsoft YaHei', sans-serif;
@@ -76,9 +76,9 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ===== Global Interaction Feedback (0.25s cubic-bezier) ===== */
+/* ===== 全局交互反馈（0.25s cubic-bezier） ===== */
 
-/* Button: hover color change + active scale */
+/* 按钮：hover 色变 + active 缩放 */
 button,
 [role='button'] {
   transition:
@@ -95,7 +95,7 @@ button:not(:disabled):active,
   transition-duration: 0.1s;
 }
 
-/* Input box: ring on focus */
+/* 输入框：聚焦有 ring */
 input,
 select,
 textarea {
@@ -104,12 +104,12 @@ textarea {
     box-shadow 0.2s;
 }
 
-/* Link */
+/* 链接 */
 a {
   transition: color 0.2s;
 }
 
-/* Focus Ring */
+/* 焦点环 */
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
@@ -119,7 +119,7 @@ textarea:focus-visible,
   outline-offset: 2px;
 }
 
-/* Card / rounded container: hover enhances shadow + slight displacement */
+/* 卡片 / 圆角容器：hover 提升阴影 + 微位移 */
 [class*='rounded-xl'],
 [class*='rounded-lg'] {
   transition:
@@ -129,7 +129,7 @@ textarea:focus-visible,
     transform 0.25s cubic-bezier(0.25, 0.8, 0.5, 1);
 }
 
-/* Selected list item left highlight bar */
+/* 选中列表项左侧高亮条 */
 .active-bar-left {
   position: relative;
 }
@@ -149,7 +149,7 @@ textarea:focus-visible,
   opacity: 1;
 }
 
-/* ===== Scrollbar ===== */
+/* ===== 滚动条 ===== */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -165,7 +165,7 @@ textarea:focus-visible,
   background: color-mix(in srgb, var(--foreground) 20%, transparent);
 }
 
-/* ===== Input Focus ===== */
+/* ===== 输入框聚焦 ===== */
 input[type='text']:focus,
 input[type='search']:focus,
 input[type='email']:focus,
@@ -176,13 +176,13 @@ select:focus {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 10%, transparent);
 }
 
-/* ===== Card hover (elevated shadow + slight upward shift) ===== */
+/* ===== 卡片 hover（阴影提升 + 微上移） ===== */
 .card-hover:hover {
   box-shadow: var(--tea-shadow-md);
   transform: translateY(-1px);
 }
 
-/* Gradient divider between list items */
+/* 列表项之间的渐变分隔线 */
 .skill-list-item:not(:last-child)::after,
 .memory-list-item:not(:last-child)::after,
 .agent-list-item:not(:last-child)::after,
@@ -196,18 +196,18 @@ select:focus {
   background: linear-gradient(to right, transparent, var(--border) 50%, transparent);
 }
 
-/* ===== Bootstrap custom highlight layer (replaces built-in tea Guide mask) =====
-   The built-in mask in tea Guide uses react-popper for positioning: there is a fixed offset (about 3~5px) within the internal scroll container
-   (.tea-layout__content) that does not update with scrolling,
-   causing the highlight box to "miss the edges". Here we hide the built-in mask and switch to the _guide-mask layer,
-   which is calculated in real-time by getBoundingClientRect in OnboardingGuide. */
+/* ===== 引导自定义高亮层（替代 tea Guide 内置 mask） =====
+   tea Guide 内置 mask 用 react-popper 定位：在内部滚动容器
+   （.tea-layout__content）下存在固定偏差（约 3~5px）且不随滚动更新，
+   导致高亮框"漏边"。这里隐藏内置 mask，改用 OnboardingGuide 里
+   getBoundingClientRect 实时计算的 _guide-mask 层。 */
 .tea-overlay[style*='z-index: 9999'] {
   display: none !important;
 }
 
-/* ===== Guided Smooth Animation (Aligned with scrollIntoView smooth scroll curve) =====
-   Bubble (popper transform) and highlight box/mask block (top/left/width/height)
-   with transition animation: smooth slide to new position on page switch with scroll, fully visible throughout, no "no-mask blank window". */
+/* ===== 引导平滑动画（与 scrollIntoView smooth 滚动曲线对齐） =====
+   步骤切换时气泡（popper transform）与高亮框/遮罩块（top/left/width/height）
+   带过渡动画：同页切换随滚动平滑滑到新位置，全程可见、无"无遮罩空窗"。 */
 .tea-guide {
   transition:
     transform 0.3s ease-in-out,
@@ -224,18 +224,18 @@ select:focus {
     opacity 0.18s ease-in-out;
 }
 
-/* Cross-page transition window: the old anchor is unloaded with the page (popper positions detached elements to 0,0),
-   first fade out the window to cover it; once the new page anchor is ready, instantly settle it and then fade in (see OnboardingGuide.tsx).
-   ⚠️ Only fade out the "bubble" and "highlight outline (ring)" — they will jump to (0,0) with the old anchor unloaded and need to be covered;
-   the dark mask block (_guide-mask-block) must be retained throughout and never fully faded out:
-   otherwise, the dark mask is removed at the cross-page moment, exposing the underlying light page, causing a "full-screen flash white".
-   The displacement of the hole is completed by _guide-no-anim instantly settling after the new page is ready, maintaining a dark background throughout with no flash white. */
+/* 跨页切换窗口：旧锚点随页面卸载（popper 对 detached 元素会定位到 0,0），
+   先淡出遮住该窗口；新页面锚点就绪后瞬间落位再淡入（见 OnboardingGuide.tsx）。
+   ⚠️ 只淡出「气泡」与「高亮描边(ring)」——它们会随旧锚点卸载跳到 (0,0) 需遮住；
+   深色遮罩块 (_guide-mask-block) 必须全程保留、绝不整体淡出：
+   否则跨页瞬间深色遮罩撤除、底下浅色页面全露，会造成「整屏闪白」。
+   洞的位移由 _guide-no-anim 在新页就绪后瞬间落位完成，全程暗底、无闪白。 */
 body._guide-fading .tea-guide,
 body._guide-fading ._guide-mask-ring {
   opacity: 0 !important;
 }
 
-/* Disable transitions before first frame positioning is complete: avoid sliding in from (0,0) during initial display / page transition */
+/* 首帧定位完成前禁用过渡：避免初始显示 / 跨页落位时从 (0,0) 滑入 */
 body._guide-no-anim .tea-guide,
 body._guide-no-anim ._guide-mask-block,
 body._guide-no-anim ._guide-mask-ring {

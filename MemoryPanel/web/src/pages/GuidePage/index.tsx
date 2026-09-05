@@ -1,14 +1,14 @@
 /**
- * GuidePage — Instructions page (route /guide)
+ * GuidePage — 使用说明页（路由 /guide）
  *
- * Two major sections:
- *   1. Quick Integration: Proxy address (read current instance) → Default/Analyse mode → API Key,
- *      with two integration methods: Skill / Script, and a "Manual Configuration" option to configure the file and content for each IDE one by one;
- *   2. Best Practices: Step-by-step guidance for two scenarios: team Coding / personal OPC.
- * Provide a "Guide Replay" entry at the bottom: consistent with "My Profile → Review Guide", to rewatch the first-time usage guide.
+ * 两大块：
+ *   1. 快速接入：Proxy 地址（读当前实例）→ Default/Analyse 模式 → API Key，
+ *      Skill / 脚本两种接入方式，另提供「手动配置」逐 IDE 给配置文件与内容；
+ *   2. 最佳实践：团队 Coding / 个人 OPC 两个场景的分步引导。
+ * 底部提供「引导回放」入口：与「我的资料 → 回顾引导」一致，重看首次使用引导。
  *
- * The manually configured configuration file path and content are consistent with the write_* functions in agents/setup-proxy.sh
- * (This page is read-only for display and does not perform writes. API Keys are always placeholders and no real keys appear.)
+ * 手动配置的配置文件路径与内容与 agents/setup-proxy.sh 的 write_* 函数保持一致
+ * （本页为只读展示，不执行写入）。API Key 一律使用占位符，不出现真实密钥。
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -27,15 +27,15 @@ type ManualIdeId = 'claude' | 'codebuddy' | 'codex' | 'workbuddy' | 'dsh' | 'her
 type ProxyMode = 'default' | 'analyse';
 
 interface PracticeStep {
-  /** i18n key (guide.practice.team.stepN.title, etc.) */
+  /** i18n key（guide.practice.team.stepN.title 等） */
   title: string;
   short: string;
   points: string[];
-  /** label is the i18n key (reuses menu.* keys) */
+  /** label 为 i18n key（复用 menu.* 键） */
   links: Array<{ label: string; path: string }>;
 }
 
-/** Quick Integration Three-Step Process (Title/Description are both i18n keys) */
+/** 快速接入三步流程（标题/描述均为 i18n key） */
 const QUICK_STEPS: Array<{ id: QuickTab; title: string; sub: string }> = [
   { id: 'download', title: 'guide.step.download.title', sub: 'guide.step.download.sub' },
   { id: 'ide', title: 'guide.step.ide.title', sub: 'guide.step.ide.sub' },
@@ -45,14 +45,14 @@ const QUICK_STEPS: Array<{ id: QuickTab; title: string; sub: string }> = [
 const QUICK_SETUP_SCRIPT = 'bash agents/setup-proxy.sh';
 const QUICK_SETUP_SKILL_PREP = 'cp -r agents ~/agents';
 const QUICK_SETUP_SKILL_PROMPT =
-  'Please read ~/agents/skills/setup-proxy/SKILL.md, and then follow the steps inside to guide me through configuring Agent integration with Memory Proxy.';
+  '请阅读 ~/agents/skills/setup-proxy/SKILL.md，然后按照里面的步骤引导我完成 Agent 接入 Memory Proxy 的配置。';
 const HISTORY_IMPORT_SCRIPT = 'tsx agents/asset-import.ts --source <agent> --agent-id <id> --team-id <tid>';
 const HISTORY_SOURCES = 'claude-code, codebuddy, codex, workbuddy, dsh, hermes, openclaw';
 const KEY_PLACEHOLDER = '<your-team-memory-api-key>';
 
-/** Base address: {base}/{agent}/{instanceId}(/analyse), consistent with the Proxy whitelist format.
- * Note that Claude Code's proxy routing segment is `claude-code` (see MemoryProxy whitelist.ts's
- * AGENT_PREFIX_RE and setup-proxy.sh), while this page's IDE identifier is `claude`, which needs to be normalized. */
+/** 接入地址：{base}/{agent}/{instanceId}(/analyse)，与 Proxy 白名单形态一致。
+ * 注意 Claude Code 的代理路由段是 `claude-code`（见 MemoryProxy whitelist.ts 的
+ * AGENT_PREFIX_RE 与 setup-proxy.sh），而本页 IDE 标识为 `claude`，需归一化。 */
 function proxyEndpoint(base: string, agent: ManualIdeId, instanceId: string, mode: ProxyMode) {
   const pathAgent = agent === 'claude' ? 'claude-code' : agent;
   return `${base}/${pathAgent}/${instanceId}${mode === 'analyse' ? '/analyse' : ''}`;
@@ -63,9 +63,9 @@ interface ManualIde {
   name: string;
   file: string;
   protocol: string;
-  /** Generate configuration file content (placeholders, no real keys). The second parameter is the access address. */
+  /** 生成配置文件内容（占位符，不含真实密钥）。第二个参数为接入地址。 */
   config: (base: string, instanceId: string, mode: ProxyMode, model: string) => string;
-  /** Start/Notes (Optional) */
+  /** 启动/注意事项（可空） */
   notes?: string[];
 }
 
@@ -112,7 +112,7 @@ const MANUAL_IDES: ManualIde[] = [
     file: '~/.dsh/settings.yaml + ~/.dsh/.credentials.yaml',
     protocol: 'OpenAI Chat',
     config: (base, instanceId, mode, model) =>
-      `# ~/.dsh/settings.yaml\nllm-deepseek:\n  apiKeyEnv: PROXY_USER_KEY\n  # do not append /v1 —— dsh hardcodes baseURL/chat/completions\n  baseURL: ${proxyEndpoint(base, 'dsh', instanceId, mode)}\n  model: ${model}\n  reasoningEffort: high\n\n# ~/.dsh/.credentials.yaml\nPROXY_USER_KEY: ${KEY_PLACEHOLDER}`
+      `# ~/.dsh/settings.yaml\nllm-deepseek:\n  apiKeyEnv: PROXY_USER_KEY\n  # 尾巴不要加 /v1 —— dsh 硬编码 baseURL/chat/completions\n  baseURL: ${proxyEndpoint(base, 'dsh', instanceId, mode)}\n  model: ${model}\n  reasoningEffort: high\n\n# ~/.dsh/.credentials.yaml\nPROXY_USER_KEY: ${KEY_PLACEHOLDER}`,
     notes: [
       'guide.manual.note.dsh.0',
       'guide.manual.note.dsh.1',
@@ -123,7 +123,7 @@ const MANUAL_IDES: ManualIde[] = [
     id: 'hermes',
     name: 'Hermes',
     file: '~/.hermes/config.yaml',
-    protocol: 'OpenAI Chat + Header Pre-selection'
+    protocol: 'OpenAI Chat + Header 预选',
     config: (base, instanceId, mode, model) =>
       `model:\n  default: ${model}\n  provider: custom\n  base_url: ${proxyEndpoint(base, 'hermes', instanceId, mode)}\n  api_key: ${KEY_PLACEHOLDER}\n  extra_headers:\n    x-team-id: "<team-id>"\n    x-agent-id: "<agent-id>"\n    x-task-id: "no-task"\n    x-conversation-id: "<conv-id>"`,
     notes: [
@@ -136,7 +136,7 @@ const MANUAL_IDES: ManualIde[] = [
     id: 'openclaw',
     name: 'OpenClaw',
     file: '~/.openclaw/openclaw.json',
-    protocol: 'OpenAI Chat + Header Pre-selection'
+    protocol: 'OpenAI Chat + Header 预选',
     config: (base, instanceId, mode, model) =>
       `{\n  "models": {\n    "mode": "merge",\n    "providers": {\n      "memory-proxy": {\n        "baseUrl": "${proxyEndpoint(base, 'openclaw', instanceId, mode)}",\n        "apiKey": "${KEY_PLACEHOLDER}",\n        "api": "openai-completions",\n        "headers": {\n          "x-team-id": "<team-id>",\n          "x-agent-id": "<agent-id>",\n          "x-task-id": "no-task",\n          "x-conversation-id": "<conv-id>"\n        },\n        "request": { "allowPrivateNetwork": true },\n        "models": [\n          {\n            "id": "${model}",\n            "name": "${model}",\n            "reasoning": false,\n            "input": ["text"],\n            "contextWindow": 128000,\n            "maxTokens": 32000,\n            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }\n          }\n        ]\n      }\n    }\n  }\n}`,
     notes: [
@@ -285,10 +285,10 @@ export function GuidePage() {
   const auth = useAuthStore((s) => s.auth);
 
   const [mainTab, setMainTab] = useState<MainTab>('quick');
-  // Quick Integration Three-Step Guide: Download Configuration Package → Connect IDE → Import Historical Data.
-  // Defaults to Step 1, with the step bar guiding users to proceed step by step.
+  // 快速接入三步曲：下载配置包 → 接入 IDE → 导入历史数据。
+  // 默认定位第 1 步，步骤条引导用户一步步往下走。
   const [quickTab, setQuickTab] = useState<QuickTab>('download');
-  // Steps Completed (used for the "Completed" state of the step bar, to let users know the progress)
+  // 已走过的步骤（用于步骤条"已完成"态，让用户知道进度）
   const [visitedSteps, setVisitedSteps] = useState<QuickTab[]>(['download']);
   const [practice, setPractice] = useState<PracticeId>('team');
   const [practiceStep, setPracticeStep] = useState(0);
@@ -330,11 +330,11 @@ export function GuidePage() {
       });
   }, [t]);
 
-  /** Guided replay: completely consistent with "My Profile → Review Guidance" —— clear markers + re-populate via ConsoleLayout */
+  /** 引导回放：与「我的资料 → 回顾引导」完全一致 —— 清标记 + 由 ConsoleLayout 重新弹出 */
   const handleReplayOnboarding = () => {
     if (auth?.user_id) {
       resetOnboarding(auth.user_id);
-      // ConsoleLayout listens to this event and setOnboardingVisible(true)
+      // ConsoleLayout 监听该事件后 setOnboardingVisible(true)
       window.dispatchEvent(new CustomEvent('tdai-replay-onboarding'));
       tea.notify.success(t('guide.replayStarted'));
     }
@@ -384,7 +384,7 @@ export function GuidePage() {
 
       {mainTab === 'quick' ? (
         <section className="guide-surface">
-          {/* 3-Step Process Step Bar: Download Configuration Package → Connect to IDE → Import Historical Data */}
+          {/* 三步流程步骤条：下载配置包 → 接入 IDE → 导入历史数据 */}
           <ol className="guide-stepper" aria-label={t('guide.quick.tabs.aria')}>
             {QUICK_STEPS.map((step, index) => {
               const isDone = visitedSteps.includes(step.id);
@@ -410,23 +410,23 @@ export function GuidePage() {
             })}
           </ol>
 
-          {/* Step 1: Download configuration package */}
+          {/* 第 1 步：下载配置包 */}
           {quickTab === 'download' && (
             <div className="guide-package-download">
               <div>
                 <b>{t('guide.download.title')}</b>
                 <small>{t('guide.download.desc')}</small>
               </div>
-              {/* Use root-relative paths instead of absolute paths: Under HashRouter, absolute paths are resolved as routes
-                  and jump to /downloads/... instead of triggering file downloads.
-                  Add a ?v= version parameter to force the browser to bypass cache and download the latest ZIP, avoiding downloading the old package before the fix */}
+              {/* 使用根相对路径而非绝对路径：HashRouter 下绝对路径会被解析为路由
+                  跳到 /downloads/... 而不是触发文件下载。
+                  加 ?v= 版本参数强制浏览器绕过缓存下载最新 ZIP，避免下载到修复前的旧包 */}
               <a href="./downloads/tdai-memory-agents.zip?v=2" download>
                 {t('guide.download.button')}
               </a>
             </div>
           )}
 
-          {/* Step 2: Connect to IDE */}
+          {/* 第 2 步：接入 IDE */}
           {quickTab === 'ide' && (
             <>
               <div className="guide-prepare">
@@ -452,8 +452,8 @@ export function GuidePage() {
                       className={proxyMode === 'analyse' ? 'active' : ''}
                       onClick={() => {
                         setProxyMode('analyse');
-                        // Analyse manual configuration of the access address is required (the script/Skill will only write the Default address),
-                        // When selected, the manual configuration area is automatically expanded to avoid users being "unsure where to configure after selection".
+                        // Analyse 需要手动配置接入地址（脚本/Skill 只会写 Default 地址），
+                        // 选中时自动展开手动配置区，避免用户"选完不知道去哪配"。
                         setManualOpen(true);
                       }}
                     >
@@ -597,7 +597,7 @@ export function GuidePage() {
             </>
           )}
 
-          {/* Step 3: Import historical data */}
+          {/* 第 3 步：导入历史数据 */}
           {quickTab === 'history' && (
             <div className="guide-history">
               <h3>{t('guide.quick.history.title')}</h3>
@@ -613,7 +613,7 @@ export function GuidePage() {
             </div>
           )}
 
-          {/* Step Navigation: Previous Step / Next Step, clearly guiding users to complete the three steps in order */}
+          {/* 步骤导航：上一步 / 下一步，明确引导用户按序走完三步 */}
           <nav className="guide-step-nav" aria-label={t('guide.step.navAria')}>
             {quickTab !== 'download' && (
               <button
@@ -798,7 +798,7 @@ export function GuidePage() {
         </section>
       )}
 
-      {/* Bottom: Frontend Guide Replay */}
+      {/* 底部：前端引导回放 */}
       <section className="guide-replay">
         <div>
           <h3>{t('guide.replay.title')}</h3>

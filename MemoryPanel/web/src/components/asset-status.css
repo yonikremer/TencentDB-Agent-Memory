@@ -1,8 +1,8 @@
 /**
- * General asset display component styles (StatusTag / OwnerLabel).
+ * 通用资产展示小组件样式（StatusTag / OwnerLabel）。
  *
- * The `_codedetail-status` / `_codedetail-status-hint` from the original `code-ui` (see
- * code-sources-panel.css) are consolidated here, for shared use by assets pages such as Wiki / Code.
+ * 原 code-ui 的 _codedetail-status / _codedetail-status-hint（见
+ * code-sources-panel.css）收敛到此，供 Wiki / Code 等资产页共用。
  */
 ._asset-status {
   display: inline-flex;
@@ -24,7 +24,7 @@
   line-height: 1.5;
 }
 
-/* OwnerLabel's default "you" marker (callers can also inject their own class) */
+/* OwnerLabel 的默认「你」标记（调用方也可注入自己的 class） */
 ._owner-label-you {
   margin-left: 4px;
   font-size: 12px;

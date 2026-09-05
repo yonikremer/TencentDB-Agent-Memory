@@ -1,5 +1,5 @@
 /**
- * TeamManagementPanel style patch — layout, spacing, and colors follow Tea Design Token.
+ * TeamManagementPanel 样式补丁 — 版式、间距，颜色统一走 Tea Design Token。
  */
 
 ._memory-team-mgmt {
@@ -90,7 +90,7 @@
   gap: 8px;
 }
 
-/* ===== Section (members / agents) General Header ===== */
+/* ===== Section (members / agents) 通用头部 ===== */
 ._memory-section-header {
   display: flex;
   align-items: center;
@@ -505,7 +505,7 @@
   color: var(--tea-color-text-tertiary);
 }
 
-/* ===== Common Form Elements ===== */
+/* ===== 通用表单元素 ===== */
 ._memory-field-hint {
   margin-top: 4px;
   font-size: 12px;
@@ -547,7 +547,7 @@
   gap: 12px;
 }
 
-/* ===== CreateAgentDialog: Target team prompt bar ===== */
+/* ===== CreateAgentDialog: 目标 team 提示条 ===== */
 ._memory-target-team-row {
   display: flex;
   align-items: center;
@@ -607,7 +607,7 @@
   line-height: 14px;
 }
 
-/* ===== Apply template ===== */
+/* ===== 套用模板 ===== */
 ._memory-template-box {
   display: flex;
   flex-direction: column;
@@ -738,7 +738,7 @@
   font-family: var(--font-mono);
 }
 
-/* ===== Atomic capability toolbar + Collapse ===== */
+/* ===== 原子能力工具条 + Collapse ===== */
 ._memory-asset-section {
   border-top: 1px solid var(--tea-color-border-primary-default);
   padding-top: 12px;
@@ -768,7 +768,7 @@
   text-align: center;
 }
 
-/* Skill Group Read-only Description */
+/* Skill 分组只读说明 */
 ._memory-asset-readonly-hint {
   font-size: 12px;
   color: var(--tea-color-text-tertiary);
@@ -848,11 +848,11 @@
 }
 
 /* ============================================================
- * Collapsible group skeleton (assets are bound during loading when the detail popup is opened)
- * Reuse the _memory-agents-skeleton-shimmer keyframes for unified visual style
+ * 折叠组骨架（详情弹窗打开时资产绑定在加载时使用）
+ * 复用 _memory-agents-skeleton-shimmer keyframes，视觉风格统一
  * ============================================================ */
 
-/* count number area skeleton placeholder (preserve structure of label/title, avoid layout jitter) */
+/* count 数字区骨架占位（保留 label/title 等结构，避免布局抖动） */
 ._memory-collapse-group-count--loading {
   display: inline-block;
   width: 64px;
@@ -869,7 +869,7 @@
   animation: _memory-agents-skeleton-shimmer 1.4s ease-in-out infinite;
 }
 
-/* Title placeholder (only used in the "whole asset area loading" skeleton card) */
+/* 标题占位（仅在「整个资产区 loading」骨架卡片中使用） */
 ._memory-collapse-group-title-skeleton {
   display: inline-block;
   width: 80px;
@@ -885,12 +885,12 @@
   animation: _memory-agents-skeleton-shimmer 1.4s ease-in-out infinite;
 }
 
-/* Entire asset area loading container: retains the "loading" prompt + 4 collapsed group outlines */
+/* 整个资产区加载中容器：保留「加载中」提示 + 4 个折叠组轮廓 */
 ._memory-asset-section-loading ._memory-asset-loading {
   margin-bottom: 12px;
 }
 
-/* Collapse group loading state: disable hover feedback */
+/* 折叠组加载态：禁用 hover 反馈 */
 ._memory-collapse-group--loading ._memory-collapse-group-header {
   cursor: default;
   opacity: 0.7;
@@ -953,7 +953,7 @@
   color: var(--tea-color-text-tertiary);
 }
 
-/* ===== Agents Management Page: Align layout with Memory Project's Tea Card / ActionPanel ===== */
+/* ===== Agents 管理页：与 Memory项目的 Tea Card / ActionPanel 版式对齐 ===== */
 ._memory-agents-panel {
   border: 1px solid var(--tea-color-border-primary-default);
   border-radius: 4px;
@@ -991,9 +991,9 @@
   flex-wrap: wrap;
 }
 
-/* SearchBox in the Agent list toolbar: English placeholder ("Search agent name / description / ID")
-   Long, tea's default width is truncated in narrow containers. Provide a minimum width to ensure complete display.
-   tea-component actual class name: outer .tea-form--search, inner .tea-search. */
+/* Agent 列表工具栏内的 SearchBox：英文 placeholder（"Search agent name / description / ID"）
+   较长，tea 默认宽度在窄容器中会被截断。给一个最小宽度确保完整显示。
+   tea-component 实际类名：外层 .tea-form--search、内层 .tea-search。 */
 ._memory-agents-toolbar .tea-form--search,
 ._memory-agents-toolbar .tea-search {
   min-width: 280px;
@@ -1116,7 +1116,7 @@
   color: var(--tea-color-text-tertiary);
 }
 
-/* Owner tag: a concise pill, same style as the Memory detail badge (light background + same-color text) */
+/* Owner 标签：简洁 pill，与 Memory 详情徽章同一风格（浅色底 + 同色文字） */
 ._memory-agents-owner-tag {
   display: inline-flex;
   align-items: center;
@@ -1167,10 +1167,10 @@
   }
 }
 
-/* Agent Card Skeleton Screen (displays 4 placeholder cards during first-screen loading)
-   1:1 alignment with the 6 sections of the real _memory-agents-card (head / id / desc / owner / stats / actions),
-   including key dimensions such as padding(12px) / border-radius(4px) / gap(8px) to avoid the visual jump from "skeleton → real card".
-   Light gray background + shimmer sweep animation. */
+/* Agent 卡片骨架屏（首屏加载时展示 4 个占位卡）
+   1:1 对齐真实 _memory-agents-card 的 6 个区块（head / id / desc / owner / stats / actions），
+   含 padding(12px) / border-radius(4px) / gap(8px) 等关键尺寸，避免「骨架 → 真实卡」的视觉跳变。
+   浅灰底 + shimmer 横扫动画。 */
 ._memory-agents-skeleton-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -1185,7 +1185,7 @@
   border: 1px solid var(--tea-color-border-primary-default);
   border-radius: 4px;
   background: var(--tea-color-bg-primary-default);
-  /* Load orchestration: skeleton cards fade in and move up, with JS injecting animationDelay to stagger them one by one */
+  /* 加载编排：骨架卡淡入上移，由 JS 注入 animationDelay 逐张错峰 */
   opacity: 0;
   animation: _memory-agents-skeleton-card-in 0.35s ease-out forwards;
 }
@@ -1201,7 +1201,7 @@
   }
 }
 
-/* General shimmer line */
+/* 通用 shimmer 线条 */
 ._memory-agents-skeleton-line {
   height: 12px;
   border-radius: 4px;
@@ -1215,7 +1215,7 @@
   animation: _memory-agents-skeleton-shimmer 1.4s ease-in-out infinite;
 }
 
-/* 1. head: name (left, bold, 14px visual, 16px bar) + chevron (right, square) */
+/* 1. head：名称（左，加粗 14px 视觉用 16px 条）+ chevron（右，方块） */
 ._memory-agents-skeleton-head {
   display: flex;
   align-items: center;
@@ -1236,12 +1236,12 @@
   flex: 0 0 auto;
 }
 
-/* 2. id: monospace small text */
+/* 2. id：等宽小字 */
 ._memory-agents-skeleton-line--id {
   width: 60%;
 }
 
-/* 3. desc: two lines (aligning real min-height 40px / line-height 20px) */
+/* 3. desc：两行（对齐真实 min-height 40px / line-height 20px） */
 ._memory-agents-skeleton-desc {
   display: flex;
   flex-direction: column;
@@ -1253,7 +1253,7 @@
   width: 70%;
 }
 
-/* 4. owner row: label (narrow bar) + pill (rounded capsule) */
+/* 4. owner 行：label（窄条）+ pill（圆角胶囊） */
 ._memory-agents-skeleton-owner {
   display: flex;
   align-items: center;
@@ -1270,7 +1270,7 @@
   border-radius: 4px;
 }
 
-/* 5. stats: 2 columns, 4 chips (aligned with real _memory-agents-stats) */
+/* 5. stats：2 列 4 个 chip（对齐真实 _memory-agents-stats） */
 ._memory-agents-skeleton-stats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1298,7 +1298,7 @@
   height: 12px;
 }
 
-/* 6. actions: right-aligned delete button (aligned to actual border-top + min-height 28px) */
+/* 6. actions：右对齐删除按钮（对齐真实 border-top + min-height 28px） */
 ._memory-agents-skeleton-actions {
   display: flex;
   align-items: center;
@@ -1319,8 +1319,8 @@
 }
 
 /* ============================================================
- * Counts chip skeleton (counts are used when loading)
- * Reuses the same shimmer keyframes as the entire card skeleton for visual consistency.
+ * 计数 chip 骨架（counts 在加载时使用）
+ * 与整卡片骨架复用同套 shimmer keyframes，视觉一致。
  * ============================================================ */
 ._memory-mounted-chip-count--loading {
   display: inline-block;
@@ -1337,12 +1337,12 @@
   animation: _memory-agents-skeleton-shimmer 1.4s ease-in-out infinite;
 }
 
-/* List view assets column placeholder: counts display "—" for the entire row when loading, and maintain stable height to avoid row height flickering */
+/* 列表视图的 assets 列占位：counts 在加载时整行显示「—」，并保持高度稳定，避免行高闪动 */
 ._memory-agents-list-assets--loading {
   color: var(--tea-color-text-tertiary);
 }
 
-/* ===== DefaultAgentTemplateSection (Default Agent template, visible only to admin) ===== */
+/* ===== DefaultAgentTemplateSection（默认 Agent 模板，仅 admin 可见）===== */
 ._memory-default-agent-section {
   padding: 14px 16px;
 }

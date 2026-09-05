@@ -61,6 +61,22 @@ export const protectedGlobs = [
   // agents/asset-import.ts: large tool-description file whose template-literal regions are
   // corrupted by every line-based translation pass - needs a careful whole-file pass (like prompts).
   'agents/asset-import.ts',
+  // JSX-heavy web files where line-based translation corrupts JSX/HTML comments (drops `*/}` / `-->`
+  // delimiters) - reverted to valid original; need a JSX-aware whole-file pass, not line edits.
+  'MemoryPanel/web/src/components/LoginGate.tsx',
+  'MemoryPanel/web/src/components/RouteGuards.tsx',
+  'MemoryPanel/web/src/layouts/GlobalHeader/index.tsx',
+  'MemoryPanel/web/src/pages/CodePage/components/code-detail-view.tsx',
+  'MemoryPanel/web/src/pages/GuidePage/index.tsx',
+  'MemoryPanel/web/src/pages/SkillsPage/components/SkillDetailPane.tsx',
+  'MemoryPanel/web/src/pages/SkillsPage/components/SkillsPanel.tsx',
+  'MemoryPanel/web/src/pages/WikiPage/components/WikiSourcesPanel.tsx',
+  'MemoryPanel/web/src/pages/WorkbenchPage/components/BoardView.tsx',
+  'MemoryPanel/web/src/pages/WorkbenchPage/components/TaskDetail.tsx',
+  // CSS: line-based translation corrupts comment delimiters (/* */ boundaries), breaking
+  // vite/postcss. All CSS reverted to original Chinese comments - CSS comments left Chinese
+  // (dev-facing, low value); re-translate only with a CSS-aware pass if ever desired.
+  '**/*.css',
 ];
 
 // Committed scratch from earlier passes. `git rm` each and it stops showing here.

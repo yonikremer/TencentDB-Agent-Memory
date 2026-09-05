@@ -1,11 +1,11 @@
 /**
- * TaskWorkbench — Full-width card grid + Drawer details.
+ * TaskWorkbench — 全宽卡片网格 + Drawer 详情。
  *
- * Design principles:
- *   - Display all task cards on the page when entering (style aligned with Agents / Wiki cards), no longer split into left and right columns
- *   - Use concise pills for status (light background + same-color text), no bright-colored Tags / dots
- *   - Details and settings are moved into a Drawer: title/ID are in the drawer header, status switching, editing, and deletion are within the drawer
- *   - All colors use Tea Token, no hardcoding
+ * 设计原则：
+ *   - 进入页面展示全部 task 卡片（风格对齐 Agents / Wiki 卡片），不再左右分栏
+ *   - 状态用简洁 pill（浅色底 + 同色文字），不用亮色 Tag / 圆点
+ *   - 详情与设置收进 Drawer：标题/ID 在抽屉头部，状态切换、编辑、删除在抽屉内
+ *   - 所有颜色走 Tea Token，不硬编码
  */
 
 ._memory-workbench-body {
@@ -14,13 +14,13 @@
   gap: 16px;
 }
 
-/* General monospace font (unique identifiers such as task_id / agent_id) */
+/* 通用等宽字体（task_id / agent_id 等唯一标识） */
 ._memory-mono {
   font-family: var(--font-mono) !important;
   font-size: 12px !important;
 }
 
-/* ===== Empty team state ===== */
+/* ===== 空 team 态 ===== */
 ._memory-workbench-empty-card {
   padding: 48px 0;
   text-align: center;
@@ -35,11 +35,11 @@
   margin-top: 8px;
 }
 
-/* ===== Full-width Dashboard (card grid, style aligned with Agents / Wiki cards) ===== */
-/* Shell and Section headers reuse the classes shared on the team page (global CSS, routes not lazy-loaded):
+/* ===== 全宽看板（卡片网格，风格对齐 Agents / Wiki 卡片） ===== */
+/* 外壳与 Section 头部复用 team 页共享类（全局 CSS，路由非懒加载）：
    ._memory-panel-card / ._memory-section-header / ._memory-section-header-info
    / ._memory-section-header-title-row / ._memory-section-title / ._memory-section-subtitle
-   See definition in pages/team/components/team-management-panel.css */
+   定义见 pages/team/components/team-management-panel.css */
 
 ._memory-workbench-list-empty {
   border: 1px dashed var(--tea-color-border-primary-default);
@@ -48,7 +48,7 @@
   text-align: center;
 }
 
-/* ===== Task Card Grid ===== */
+/* ===== Task 卡片网格 ===== */
 ._memory-workbench-task-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -81,7 +81,7 @@
   transform: translateX(2px);
 }
 
-/* Title row: status pill + title + arrow */
+/* 标题行：状态 pill + 标题 + 箭头 */
 ._memory-workbench-task-card-head {
   display: flex;
   align-items: center;
@@ -89,7 +89,7 @@
   min-width: 0;
 }
 
-/* Status pill — a simple light badge, same style as the Memory detail badge */
+/* 状态 pill — 简洁浅色徽章，与 Memory 详情徽章同一风格 */
 ._memory-workbench-status-pill {
   flex-shrink: 0;
   font-size: 11px;
@@ -127,7 +127,7 @@
   transition: color 0.15s ease-in-out, opacity 0.15s ease-in-out, transform 0.15s ease-in-out;
 }
 
-/* Description: 2-line truncation */
+/* 描述：2 行截断 */
 ._memory-workbench-task-card-desc {
   margin: 0;
   font-size: 12px;
@@ -141,7 +141,7 @@
   -webkit-box-orient: vertical;
 }
 
-/* Metadata line: Participant · Agent · Time */
+/* 元信息行：参与者 · Agent · 时间 */
 ._memory-workbench-task-card-meta {
   display: flex;
   align-items: center;
@@ -156,7 +156,7 @@
   gap: 4px;
 }
 
-/* "Contains you" — Plain text, no Tags */
+/* "含你" — 纯文本，不用 Tag */
 ._memory-workbench-meta-you {
   color: var(--tea-color-text-brand-default);
   font-weight: 500;
@@ -172,7 +172,7 @@
   margin: 0 4px;
 }
 
-/* ===== Detail Drawer ===== */
+/* ===== 详情抽屉 ===== */
 ._memory-workbench-drawer-subtitle {
   display: inline-flex;
   align-items: center;
@@ -185,7 +185,7 @@
   gap: 24px;
 }
 
-/* Utility line: edit + state toggle */
+/* 工具行：编辑 + 状态切换 */
 ._memory-workbench-detail-toolbar {
   display: flex;
   align-items: center;
@@ -199,7 +199,7 @@
   min-width: 0;
 }
 
-/* Dangerous Operation Area */
+/* 危险操作区 */
 ._memory-workbench-danger {
   display: flex;
   justify-content: flex-end;
@@ -207,7 +207,7 @@
   border-top: 1px solid var(--tea-color-border-secondary-default);
 }
 
-/* ===== Participants — Borderless, Pure Background Section ===== */
+/* ===== 参与者 — 无边框，纯背景分区 ===== */
 ._memory-workbench-people {
   display: flex;
   flex-wrap: wrap;
@@ -231,7 +231,7 @@
   margin-right: 2px;
 }
 
-/* Person chip — borderless, rounded pill, clean */
+/* 人员 chip — 无边框，圆角药丸，干净 */
 ._memory-workbench-chip {
   display: inline-flex;
   align-items: center;
@@ -242,14 +242,14 @@
   font-size: 12px;
 }
 
-/* "You" identifier — plain text */
+/* "你" 标识 — 纯文本 */
 ._memory-workbench-chip-you {
   color: var(--tea-color-text-brand-default);
   font-weight: 500;
   font-size: 11px;
 }
 
-/* ===== Content Section ===== */
+/* ===== 内容分区 ===== */
 ._memory-workbench-block {
   display: flex;
   flex-direction: column;
@@ -260,7 +260,7 @@
   font-weight: 600;
 }
 
-/* Description — borderless, pure background, more padding */
+/* 描述 — 无边框，纯背景，更多内边距 */
 ._memory-workbench-desc-view {
   margin: 0;
   padding: 16px;
@@ -277,8 +277,8 @@
   font-size: 12px;
 }
 
-/* Task card skeleton screen (displays placeholder card during first screen loading)
-   Style consistent with AgentGrid's _memory-agents-skeleton */
+/* Task 卡片骨架屏（首屏加载时展示占位卡片）
+   风格与 AgentGrid 的 _memory-agents-skeleton 一致 */
 ._memory-workbench-skeleton-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));

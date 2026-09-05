@@ -1,10 +1,10 @@
 /**
- * SkillDetailPane style patch — colors/fonts all use Tea Design Token.
- * Do not use tailwind semantic colors, do not write inline style on native tags.
+ * SkillDetailPane 样式补丁 — 颜色/字体全部走 Tea Design Token。
+ * 不使用 tailwind 语义色，不在原生标签上写内联 style。
  */
 
-/* The right-side details are the main content column: 24px padding and aligned to the 32px baseline of the left column title. */
-/* Fills the height of the right column (the outer _asset-split-detail has already limited the viewport height), and no blank space is left even if there is little content */
+/* 右侧详情是内容主列：24px 内边距与左栏标题的 32px 基线对齐。 */
+/* 撑满右栏高度（外层 _asset-split-detail 已限定视口高度），内容少也不留空白 */
 ._memory-skill-detail-card {
   --card-body-padding: 24px;
   height: 100%;
@@ -12,8 +12,8 @@
   flex-direction: column;
 }
 
-/* Tea Card internal structure is filled; change to a two-part layout of "fixed head + scrolling body",
-   overflow is moved down to _memory-skill-detail-scroll, head stays fixed and does not scroll */
+/* Tea Card 内部结构撑满；改为「固定 head + 滚动 body」两段式，
+   overflow 下沉到 _memory-skill-detail-scroll，head 常驻不滚动 */
 ._memory-skill-detail-card > .tea-card__body {
   flex: 1;
   min-height: 0;
@@ -38,9 +38,9 @@
   overflow: hidden;
 }
 
-/* Tea Card.Body will wrap children in another .tea-card__content,
-   it needs to also stretch fully and be a flex column, otherwise the internal fixed head + scroll area flex layout fails,
-   scroll cannot get a bounded height resulting in "body cannot scroll". */
+/* Tea Card.Body 会把 children 再包一层 .tea-card__content，
+   需让它同样撑满并成为 flex 列，否则内部的固定 head + 滚动区 flex 布局失效、
+   scroll 拿不到 bounded 高度导致「正文无法滚动」。 */
 ._memory-skill-detail-body > .tea-card__content {
   flex: 1;
   min-height: 0;
@@ -49,7 +49,7 @@
   overflow: hidden;
 }
 
-/* Scrolling content area: occupies all space below head and scrolls independently */
+/* 滚动内容区：占据 head 以下全部空间并独立滚动 */
 ._memory-skill-detail-scroll {
   flex: 1;
   min-height: 0;
@@ -57,7 +57,7 @@
   padding-top: 12px;
 }
 
-/* Refreshing (reload after editing/new save): locate context + reduce content opacity, combined with overlay to provide loading feedback */
+/* 刷新中（编辑/新建保存后 reload）：定位上下文 + 内容降透明度，配合遮罩层给出加载反馈 */
 ._memory-skill-detail-scroll--refreshing {
   position: relative;
 }
@@ -79,7 +79,7 @@
   pointer-events: none;
 }
 
-/* Attached resources fixed at the bottom: do not scroll with the main content, always visible; scroll internally when the list itself is too tall */
+/* 附属资源固定底部：不随正文滚动，始终可见；列表自身超高时内部滚动 */
 ._memory-skill-detail-footer {
   flex: 0 0 auto;
   padding-top: 12px;
@@ -87,7 +87,7 @@
   border-top: 1px solid var(--tea-color-border-primary-default);
 }
 
-/* In a narrow-screen stacked layout (AssetSplitLayout removes height restrictions), cards return to document flow height */
+/* 窄屏堆叠布局下（AssetSplitLayout 取消高度限制），卡片回归文档流高度 */
 @media (max-width: 960px) {
   ._memory-skill-detail-card {
     height: auto;
@@ -103,21 +103,21 @@
     overflow-y: visible;
   }
 
-  /* Narrow screen stacking: attached resources no longer fixed/internal scrolling, return to document flow following the entire card */
+  /* 窄屏堆叠：附属资源不再固定/内部滚动，回归文档流跟随整卡片 */
   ._memory-skill-files-box--footer {
     max-height: none;
     overflow-y: visible;
   }
 }
 
-/* Fixed floating header: does not scroll, carries skill name + description + action bar */
+/* 固定悬浮头部：不滚动，承载 skill 名 + 描述 + 操作栏 */
 ._memory-skill-detail-head {
   flex: 0 0 auto;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--tea-color-border-primary-default);
 }
 
-/* Header main row: left info area + right operation area */
+/* 头部主行：左信息区 + 右操作区 */
 ._memory-skill-detail-head-main {
   display: flex;
   align-items: flex-start;
@@ -130,7 +130,7 @@
   flex: 1;
 }
 
-/* Action bar: Edit / New File / History, right-aligned, no wrap */
+/* 操作栏：编辑 / 新建文件 / 历史版本，靠右不换行 */
 ._memory-skill-detail-actions {
   flex: 0 0 auto;
   display: flex;
@@ -152,7 +152,7 @@
   margin-top: 4px;
 }
 
-/* skill_id row: monospace, weakened small text + copy button, tightly below the name */
+/* skill_id 行：等宽弱化小字 + 复制按钮，紧贴名称下方 */
 ._memory-skill-detail-id {
   display: flex;
   align-items: center;
@@ -185,7 +185,7 @@
   font-weight: 600;
 }
 
-/* Section title row: title on the left, edit/new and other action buttons on the right */
+/* section 标题行：标题占左，编辑/新建等操作按钮靠右 */
 ._memory-skill-detail-section-head {
   display: flex;
   align-items: center;
@@ -197,14 +197,14 @@
   margin-bottom: 0;
 }
 
-/* ===== Edit mode (body / file / new file) ===== */
+/* ===== 编辑态（正文 / 文件 / 新建文件）===== */
 ._memory-skill-edit-box {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-/* Input.TextArea fills the width, uses monospace font, and provides sufficient editing height */
+/* Input.TextArea 撑满宽度，等宽字体，给足编辑高度 */
 ._memory-skill-edit-textarea,
 ._memory-skill-edit-textarea textarea {
   width: 100%;
@@ -233,14 +233,14 @@
   font-family: var(--font-mono);
 }
 
-/* History version view Modal: spacing between associated resources and body */
+/* 历史版本查看 Modal 内：附属资源与正文的间距 */
 ._memory-skill-version-files {
   margin-top: 16px;
   padding-top: 12px;
   border-top: 1px solid var(--tea-color-border-primary-default);
 }
 
-/* ===== Version History (Version Number Cells within the Table) ===== */
+/* ===== 版本历史（Table 内的版本号单元格）===== */
 ._memory-skill-version-label {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -268,7 +268,7 @@
   word-break: break-word;
 }
 
-/* Markdown body box styles have been migrated to shared component components/markdown-view.css (._md-view) */
+/* Markdown 正文盒样式已迁移到共享组件 components/markdown-view.css（._md-view） */
 
 ._memory-skill-files-box {
   padding: 8px 12px;
@@ -276,20 +276,20 @@
   background-color: var(--tea-color-bg-secondary-default);
 }
 
-/* Fixed bottom area's associated resource box: limits maximum height, scrolls internally when there are many files, does not squeeze the middle content */
+/* 底部固定区的附属资源盒：限制最大高度，文件多时内部滚动，不挤压中间正文 */
 ._memory-skill-files-box--footer {
   max-height: 180px;
   overflow-y: auto;
 }
 
-/* ===== File Tree ===== */
+/* ===== 文件树 ===== */
 ._memory-skill-filetree {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-/* Sub-levels rely on the fixed indentation of nested ul to avoid writing dynamic inline styles on li */
+/* 子层级靠嵌套 ul 的固定缩进，避免在 li 上写动态内联 style */
 ._memory-skill-filetree ._memory-skill-filetree {
   padding-left: 12px;
 }

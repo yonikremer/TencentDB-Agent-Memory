@@ -313,7 +313,7 @@ export default function ImportSkillDialog(props: {
         <Alert type="info">{t('importSkill.hint')}</Alert>
       {/* Belongs to Agent —— Required. Always displayed above the import method,
           Consistent with ChatMemoryPanel.ImportBlockDialog: even if agentId is passed from the outer layer
-          Also allows re-selection in the popup.
+          Also allows re-selection in the popup. */}
       {showAgentPicker && (
         <Form layout="vertical" style={{ width: '100%' }}>
           <Form.Item

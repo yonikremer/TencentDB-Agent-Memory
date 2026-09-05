@@ -1,6 +1,6 @@
 /**
- * GuidePage usage instructions page style
- * Bright and simple style, colors follow Tea Design Token, command blocks use monospace font.
+ * GuidePage 使用说明页样式
+ * 明亮简洁风格，颜色走 Tea Design Token，命令块用等宽字体。
  */
 
 .guide-page {
@@ -10,7 +10,7 @@
   color: var(--tea-color-text-primary);
 }
 
-/* ===== Header ===== */
+/* ===== 页头 ===== */
 .guide-titlebar {
   display: flex;
   align-items: flex-start;
@@ -54,7 +54,7 @@
   color: var(--tea-color-text-tertiary);
 }
 
-/* ===== Main tab ===== */
+/* ===== 主 tab ===== */
 .guide-main-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -96,7 +96,7 @@
   border-color: var(--tea-color-border-brand-default);
 }
 
-/* ===== Content Area ===== */
+/* ===== 内容区 ===== */
 .guide-surface {
   border: 1px solid var(--tea-color-border-primary-default);
   border-radius: 10px;
@@ -104,7 +104,7 @@
   padding: 20px;
 }
 
-/* ===== Quick Integration Steps Bar (Three-Step Process) ===== */
+/* ===== 快速接入步骤条（三步流程）===== */
 .guide-stepper {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -190,7 +190,7 @@
   white-space: nowrap;
 }
 
-/* ===== Step Navigation (Previous Step / Next Step) ===== */
+/* ===== 步骤导航（上一步 / 下一步）===== */
 .guide-step-nav {
   display: flex;
   align-items: center;
@@ -241,7 +241,7 @@
   }
 }
 
-/* ===== Config Package Download ===== */
+/* ===== 配置包下载 ===== */
 .guide-package-download {
   display: flex;
   align-items: center;
@@ -281,7 +281,7 @@
   opacity: 0.9;
 }
 
-/* ===== Prepare Information Area ===== */
+/* ===== 准备信息区 ===== */
 .guide-prepare {
   display: flex;
   flex-direction: column;
@@ -336,7 +336,7 @@
   color: var(--tea-color-text-tertiary);
 }
 
-/* Analyse mode prompt: Script cannot be configured as /analyse, requires manual configuration (prominent but not harsh) */
+/* Analyse 模式提示：脚本配不出 /analyse，需手动配置（醒目但不刺眼） */
 .guide-mode-notice {
   color: var(--tea-color-text-warning) !important;
   line-height: 18px;
@@ -375,7 +375,7 @@
   padding: 0;
 }
 
-/* ===== Choose one of the two integration methods ===== */
+/* ===== 接入方式二选一 ===== */
 .guide-method-picker {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -412,7 +412,7 @@
   box-shadow: 0 0 0 1px var(--tea-color-border-brand-default);
 }
 
-/* ===== Command Block ===== */
+/* ===== 命令块 ===== */
 .guide-command {
   display: flex;
   align-items: center;
@@ -461,7 +461,7 @@
   line-height: 18px;
 }
 
-/* ===== Copy Button ===== */
+/* ===== 复制按钮 ===== */
 .guide-copy {
   flex-shrink: 0;
   padding: 4px 10px;
@@ -478,7 +478,7 @@
   color: var(--tea-color-text-primary);
 }
 
-/* ===== Manual Configuration ===== */
+/* ===== 手动配置 ===== */
 .guide-manual-entry {
   margin-top: 16px;
   text-align: center;
@@ -623,7 +623,7 @@
   line-height: 20px;
 }
 
-/* ===== Get Historical Data ===== */
+/* ===== 获取历史数据 ===== */
 .guide-history h3 {
   margin: 0 0 8px;
   font-size: 15px;
@@ -637,7 +637,7 @@
   line-height: 20px;
 }
 
-/* ===== Best Practices ===== */
+/* ===== 最佳实践 ===== */
 .guide-practice-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -851,7 +851,7 @@
   margin-bottom: 4px;
 }
 
-/* ===== Guide Replay ===== */
+/* ===== 引导回放 ===== */
 .guide-replay {
   display: flex;
   align-items: center;
@@ -893,7 +893,7 @@
   opacity: 0.9;
 }
 
-/* ===== Narrow Screen Adaptation ===== */
+/* ===== 窄屏适配 ===== */
 @media (max-width: 720px) {
   .guide-practice-detail {
     grid-template-columns: 1fr;

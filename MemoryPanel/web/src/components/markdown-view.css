@@ -1,6 +1,6 @@
 /**
- * MarkdownView styles — colors and fonts all follow Tea Design Tokens.
- * Shared Markdown display box for all pages (Skill / Memory details, etc.).
+ * MarkdownView 样式 — 颜色/字体全部走 Tea Design Token。
+ * 各页面（Skill / Memory 详情等）共用的 Markdown 展示盒。
  */
 
 ._md-view {
@@ -11,7 +11,7 @@
   color: var(--tea-color-text-primary);
 }
 
-/* bare: used embedded within the card, remove the shell, with the outer card bearing the border/background */
+/* bare：嵌入卡片内部使用，去掉外壳，由外层卡片承载边框/背景 */
 ._md-view--bare {
   padding: 0;
   border: none;
