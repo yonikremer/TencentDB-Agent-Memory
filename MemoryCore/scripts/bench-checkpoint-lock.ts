@@ -1,14 +1,14 @@
 /**
- * Check throughput testing of writes after adding distributed locks to checkpoint.
+ * checkpoint 加分布式锁后的写入吞吐压测。
  *
- * Objective: Quantify how many QPS can be supported after adding an instance-level lock to "checkpoint mutate",
- * and under what concurrency/data scale it becomes a bottleneck for the L1 pipeline.
+ * 目的：量化"给 checkpoint mutate 加实例级锁"之后能支撑多少 QPS，
+ * 以及在什么并发/数据规模下会成为 L1 流水线的瓶颈。
  *
- * Using real CheckpointManager + real Redis lock + real COS/local storage,
- * Selecting the backend via environment variables:
- *   REDIS_HOST/REDIS_PORT/REDIS_PASSWORD  → real Redis lock (falls back to in-process lock if not set)
+ * 用真实 CheckpointManager + 真实 Redis 锁 + 真实 COS/本地存储，
+ * 通过环境变量选择后端：
+ *   REDIS_HOST/REDIS_PORT/REDIS_PASSWORD  → 真实 Redis 锁（未设置则用进程内锁）
  *
- * Run:
+ * 运行：
  *   npx tsx scripts/bench-checkpoint-lock.ts [--sessions 500] [--concurrency 60]
  */
 import { mkdtemp, rm } from "node:fs/promises";
@@ -34,7 +34,7 @@ function percentile(sorted: number[], p: number): number {
   return sorted[idx]!;
 }
 
-/** Real Redis lock (if REDIS_HOST is configured) */
+/** 真实 Redis 锁（若配置了REDIS_HOST） */
 async function createRedisLock(): Promise<{ lock: CheckpointDistributedLock; close: () => Promise<void> } | null> {
   const host = process.env.REDIS_HOST;
   if (!host) return null;
@@ -53,7 +53,7 @@ async function createRedisLock(): Promise<{ lock: CheckpointDistributedLock; clo
       return res === "OK";
     },
     async renewLock(key, ownerId, ttlMs) {
-      // Only continue locks that you hold (consistent with production Redis backend semantics)
+      // 只续自己持有的锁（与生产Redis backend 语义一致）
       const res = await client.eval(
         `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('PEXPIRE', KEYS[1], ARGV[2]) else return 0 end`,
         1,
@@ -64,7 +64,7 @@ async function createRedisLock(): Promise<{ lock: CheckpointDistributedLock; clo
       return res === 1;
     },
     async releaseLock(key, ownerId) {
-      // Only release the locks it holds (consistent with the production Redis backend semantics)
+      // 只释放自己持有的锁（与生产 Redis backend 语义一致）
       await client.eval(
         `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end`,
         1,
@@ -78,9 +78,9 @@ async function createRedisLock(): Promise<{ lock: CheckpointDistributedLock; clo
 }
 
 /**
- * @param sessions Total number of submissions (each = one markL1ExtractionComplete)
- * @param concurrency Number of concurrent coroutines
- * @param preload Number of sessions preloaded, used to test the impact of file size on throughput
+ * @param sessions 总提交次数（每次 = 一次 markL1ExtractionComplete）
+ * @param concurrency 并发协程数
+ * @param preload 预先写入多少 session，用于测试文件体积对吞吐的影响
  */
 async function bench(opts: {
   label: string;
@@ -96,7 +96,7 @@ async function bench(opts: {
       : undefined;
     const mgr = new CheckpointManager(dir, undefined, undefined, lockOptions);
 
-    // Pre-fill: simulate checkpoints with a large number of existing sessions
+    // 预填充：模拟已有大量 session 的 checkpoint
     for (let i = 0; i < opts.preload; i++) {
       await mgr.markL1ExtractionComplete(`preload-sess-${i}`, 1, 1_700_000_000_000 + i, "scene");
     }
@@ -170,7 +170,7 @@ async function main() {
   try {
     const rows: BenchResult[] = [];
 
-    // 1) Concurrent gradients: observe throughput and latency under lock contention
+    // 1) 并发梯度：观察锁竞争下的吞吐与延迟
     for (const c of [1, 10, 30, 60, 120]) {
       rows.push(await bench({
         label: `concurrency=${c}`,
@@ -182,7 +182,7 @@ async function main() {
     }
     printTable(rows);
 
-    // 2) File size gradient: observe the impact of runner_states growth on a single mutate
+    // 2) 文件体积梯度：观察 runner_states 增长对单次 mutate 的影响
     const sizeRows: BenchResult[] = [];
     for (const preload of [0, 500, 2000, 5000]) {
       sizeRows.push(await bench({
@@ -195,14 +195,14 @@ async function main() {
     }
     printTable(sizeRows);
 
-    // 3) Conclusion Prompt
+    // 3) 结论提示
     const peak = rows.reduce((a, b) => (b.qps > a.qps ? b : a));
     console.log(
-      `\n   Peak throughput ≈ ${peak.qps.toFixed(0)} QPS (${peak.label})`,
+      `\n  峰值吞吐 ≈ ${peak.qps.toFixed(0)} QPS (${peak.label})`,
     );
     console.log(
-      L1 Single-task LLM invocation typically takes 3-30s; if concurrency=60, +
-      `checkpoint write requirement ≈ ${(60 / 5).toFixed(0)} QPS, far below the above peak.`,
+      "  L1 单任务含 LLM 调用通常耗时 3-30s；若 concurrency=60，" +
+      `checkpoint 写入需求 ≈ ${(60 / 5).toFixed(0)} QPS，远低于上述峰值。`,
     );
   } finally {
     await redis?.close();
