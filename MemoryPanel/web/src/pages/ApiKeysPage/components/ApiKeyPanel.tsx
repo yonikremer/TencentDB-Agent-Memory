@@ -1,21 +1,21 @@
 /**
- * ApiKeyPanel — User_Key 管理（组织与权限分组）。
+ * ApiKeyPanel — User_Key Management (Organization and Permission Groups).
  *
- * 精简版：列表只展示 4 个核心字段——key_id / user_id / key_prefix / 创建时间，
- * 不再展示「名称」「过期时间」两列（对应地，新建弹窗也不再要求填写名称）。
- * Tea 组件：列表用 Table + autotip，头部用 Justify + H3，
- * 破坏性操作统一走 Modal.confirm 二次确认，新建弹窗复用全站统一的 Modal 外壳。
+ * Simplified version: the list only displays 4 core fields — key_id / user_id / key_prefix / creation time,
+ * No longer display the "name" and "expiration time" columns (correspondingly, the new creation modal no longer requires filling in the name).
+ * Tea component: the list uses Table + autotip, the header uses Justify + H3,
+ * Destructive operations uniformly go through Modal.confirm for secondary confirmation, and the new creation modal reuses the site-wide unified Modal shell.
  *
- * 后端链路：新面板（stateless）走 meta action `user-key/list|create|revoke`，
- * 由 Control 透明代理到内核 /v3/meta。前端不直接调内核，也不走旧 REST 路径。
- * owner 由登录 user_key 推断，前端不用也不能传别人的 user_id —— 天然满足
- * 「用户只能看到 / 管理自己的 key」。
+ * Backend chain: the new panel (stateless) goes through the meta action `user-key/list|create|revoke`,
+ * Transparently proxied by Control to the kernel /v3/meta. The frontend does not directly call the kernel, nor does it use the old REST path.
+ * The owner is inferred from the logged-in user_key; the frontend does not need to and cannot pass another user's user_id — naturally satisfying
+ * "Users can only see / manage their own keys".
  *
- * 安全设计（内核既有行为，不是本组件的取舍）：
- *   - key 明文只在 `create` 响应里出现这一次，之后 list/get 都不会再回传；
- *   - `key_prefix` 是内核给的可展示前缀（如 `sk-mem-ab12****`），用于免密识别
- *     具体是哪把 key，不等同于明文；
- *   - 因此列表里已存在的 key 无法「展开显示完整 key」，只能吊销。
+ * Security design (existing kernel behavior, not a trade-off of this component):
+ *   - The plaintext `key` only appears once in the `create` response; subsequent `list`/`get` will no longer return it;
+ *   - `key_prefix` is a displayable prefix provided by the kernel (e.g., `sk-mem-ab12****`), used for passwordless recognition
+ *      and is not equivalent to the plaintext key;
+ *   - Therefore, existing keys in the list cannot be "expanded to display the full key"; they can only be revoked.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -50,9 +50,9 @@ export default function ApiKeyPanel() {
   const { auth } = useAuthStore();
   const [keys, setKeys] = useState<UserKey[]>([]);
   const [loading, setLoading] = useState(true);
-  // 客户端接入 base 地址（来自当前登录的 instance 元数据；每个实例不同）。
-  // 优先取 proxy_endpoint —— 开源本地部署 core+proxy 分开时客户端要接的是 proxy；
-  // 未配置时回落 gateway_endpoint，等同老行为（线上 gateway 前置 proxy，两者合一）。
+  // Client access base address (from the current logged-in instance metadata; each instance is different).
+  // Prefer proxy_endpoint —— when open-source core+proxy are deployed separately locally, the client should connect to proxy;
+  // Fall back to gateway_endpoint when not configured, equivalent to the old behavior (online gateway is in front of proxy, the two are combined).
   const [clientBaseUrl, setClientBaseUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -80,9 +80,9 @@ export default function ApiKeyPanel() {
     setLoading(true);
     try {
       const list = await userKeysApi.list();
-      // 按创建时间倒序（内核未必保证顺序）
+      // Sort by creation time in descending order (the kernel may not guarantee the order)
       list.sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''));
-      // 已吊销的 key 不再展示
+      // Revoked keys are no longer displayed
       setKeys(list.filter((k) => !k.revoked_at));
     } catch (e) {
       tea.notify.error(e);
@@ -96,12 +96,12 @@ export default function ApiKeyPanel() {
     void refresh();
   }, [refresh]);
 
-  // ---- 新建弹窗 ----
-  // 不再收集「名称」——列表本身也不展示名称列，创建时无需再让用户填写。
+  // ---- Create new popup ----
+  // No longer collect "Name" — the list itself does not display a name column, so users do not need to fill it in when creating.
   const [showCreate, setShowCreate] = useState(false);
   const [newExpiresAt, setNewExpiresAt] = useState<Moment | null>(null);
   const [creating, setCreating] = useState(false);
-  // 刚创建出来的 key（含完整明文，仅展示一次）
+  // The newly created key (contains full plaintext, displayed only once)
   const [freshKey, setFreshKey] = useState<{ keyId: string; secret: string } | null>(null);
 
   async function handleCreate() {
@@ -146,7 +146,7 @@ export default function ApiKeyPanel() {
   };
   return (
     <div className="_memory-apikey-body">
-      {/* ===== 刚创建的 Key 提示（仅展示一次） ===== */}
+      {/* ===== Newly Created Key Hint (Displayed Only Once) ===== */}
       {freshKey && (
         <Alert type="success" onClose={() => setFreshKey(null)}>
           <div className="_memory-apikey-fresh">
@@ -158,7 +158,7 @@ export default function ApiKeyPanel() {
               <Copy
                 text={freshKey.secret}
                 onCopy={() => {
-                  // 复制成功后自动关闭完整 Key 显示，避免明文长时间停留在屏幕上
+                  // After successful copy, automatically close the full Key display to avoid plaintext lingering on the screen
                   setFreshKey(null);
                 }}
               />
@@ -167,7 +167,7 @@ export default function ApiKeyPanel() {
         </Alert>
       )}
 
-      {/* ===== 页面头部（Justify 左右布局） ===== */}
+      {/* ===== Page Header (Justify Left-Right Layout) ===== */}
       <Justify
         left={
           <div>
@@ -194,7 +194,7 @@ export default function ApiKeyPanel() {
         }
       />
 
-      {/* ===== Key 列表：key_id / key_prefix / 创建时间 + 操作 ===== */}
+      {/* ===== Key list: key_id / key_prefix / creation time + operations ===== */}
       <Card>
         <Table
           verticalTop
@@ -279,11 +279,11 @@ export default function ApiKeyPanel() {
         />
       </Card>
 
-      {/* ===== 接入指引 ===== */}
+      {/* ===== Integration Guide ===== */}
       {/*
-        instance-id 从当前登录态注入（auth.instance_id）—— 用户不用再手工替换
-        [instance-id] 占位符，也不用去别处找自己现在连的是哪个实例。
-        未登录理论上不会走到这个页（LoginGate 挡在外面），仍保留占位 fallback 兜底。
+        instance-id is injected from the current login state (auth.instance_id) — users no longer need to manually replace it
+        [instance-id] placeholder, and no need to look elsewhere to find which instance you are currently connected to.
+        Theoretically, this page will not be reached when not logged in (blocked by LoginGate), but the placeholder fallback is still retained as a safeguard.
       */}
       <Card>
         <Card.Body title={t('apiKey.endpoint.title')}>
@@ -296,7 +296,7 @@ export default function ApiKeyPanel() {
           )}
           <div className="_memory-apikey-endpoints">
             {(() => {
-              // base 未拉到就显示加载中；防止用户误抄硬编码 URL
+              // show loading if base is not pulled; prevent users from copying hardcoded URLs
               if (!clientBaseUrl) {
                 return (
                   <Text theme="weak" style={{ fontSize: 11 }}>
@@ -304,28 +304,28 @@ export default function ApiKeyPanel() {
                   </Text>
                 );
               }
-              // 去掉结尾斜杠，避免 base + /path 拼成双斜杠（! 绕过闭包窄化）
+              // Remove trailing slash to avoid base + /path forming double slashes (! bypasses closure narrowing)
               const base = clientBaseUrl!.replace(/\/+$/, '');
               const iid = auth?.instance_id ?? '[instance-id]';
               const endpoints: Array<{ label: string; url: string }> = [
                 { label: 'CodeBuddy', url: `${base}/codebuddy/${iid}` },
                 { label: 'Claude Code', url: `${base}/claude-code/${iid}` },
-                // WorkBuddy 走 /workbuddy/<spaceId>（spaceId=instance_id，与 codebuddy 对称）。
-                // 网页版底层 OpenAI ChatCompletions、桌面版 Responses API，proxy 均已适配。
+                // WorkBuddy runs at /workbuddy/<spaceId> (spaceId=instance_id, symmetric with codebuddy).
+                // The web version uses OpenAI ChatCompletions at the backend, and the desktop version uses the Responses API; proxy support has been adapted.
                 { label: 'WorkBuddy', url: `${base}/workbuddy/${iid}` },
-                // codex 用 OpenAI Responses API（POST /v1/responses）；proxy 侧
-                // 同时注册了 v1/无v1 两种路径，惯例用不带 /v1 的 base，客户端
-                // config.toml 里 base_url 直接填这个地址即可，wire_api="responses"。
+                // codex uses OpenAI Responses API (POST /v1/responses); proxy side
+                // Both v1/without v1 paths are registered, conventionally using the base without /v1, client
+                // In config.toml, just fill in this address for base_url, and set wire_api="responses".
                 { label: 'Codex', url: `${base}/codex/${iid}` },
-                // dsh (deepseek-harness) — DeepSeek 官方 agent harness,Web UI 会话
-                // 走 OpenAI Chat Completions。**尾巴不带 /v1** —— dsh 客户端
-                // hardcoded 拼 ${baseURL}/chat/completions,与 CB 同族;proxy 侧
-                // 路由 /dsh/{spaceId}/chat/completions 已对齐。用户填的 baseURL
-                // 直接是这里的地址,不要在后面再加 /v1。
+                // dsh (deepseek-harness) — DeepSeek official agent harness, Web UI session
+                // Uses OpenAI Chat Completions. **No /v1 at the end** — the dsh client
+                // hardcodes ${baseURL}/chat/completions, same family as CB; the proxy side
+                // routes /dsh/{spaceId}/chat/completions, already aligned. The baseURL
+                // entered by the user is the address here directly, do not add /v1 at the end.
                 { label: 'DeepSeek Harness (dsh)', url: `${base}/dsh/${iid}` },
-                // OpenCode — sst/opencode 通用终端 AI 编程 Agent，协议 = 标准
-                // OpenAI Chat Completions（POST /v1/chat/completions），与 CB/dsh 同族。
-                // proxy 侧 agent-adapters/opencode.ts 已适配 form 回填 + mem: 命令族全套。
+                // OpenCode — sst/opencode universal terminal AI coding Agent, protocol = standard
+                // OpenAI Chat Completions (POST /v1/chat/completions), same family as CB/dsh.
+                // proxy side agent-adapters/opencode.ts has already adapted form backfill + full mem: command family.
                 { label: 'OpenCode', url: `${base}/opencode/${iid}` },
                 { label: 'OpenClaw', url: `${base}/openclaw/default` },
                 { label: 'Hermes', url: `${base}/hermes/default` },
@@ -358,7 +358,7 @@ export default function ApiKeyPanel() {
           </div>
         </Card.Body>
       </Card>
-      {/* ===== 新建弹窗：只需设置「过期时间」（可留空＝永不过期），不再需要名称 ===== */}
+      {/* ===== New popup: only set the "expiration time" (can be left blank = never expires), no longer need for a name ===== */}
       {showCreate && (
         <Modal
           visible
