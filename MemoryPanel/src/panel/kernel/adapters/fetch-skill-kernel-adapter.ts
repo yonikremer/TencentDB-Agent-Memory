@@ -5,7 +5,7 @@ import { toKernelCredentials, type MetaCallContext } from '../types.js';
 /**
  * Skill data plane adapter based on fetch: POST /v3/skill/{action}.
  *
- * skill body 使用嵌套 pagination（不是顶层 limit/offset），故不做 meta 的
+ * skill body uses nested pagination (not top-level limit/offset), so it does not do meta
  * sanitizeBody is cropped and transmitted as is. The credentials and meta share the same set (instance + api_key +
  * user_key), user_key is always transparently transmitted (skill does not have authentication-free actions such as auth/verify).
  */

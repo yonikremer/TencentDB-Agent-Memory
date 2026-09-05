@@ -1,16 +1,16 @@
 /**
  * Startup hook: ensure each instance has a knowledge-service LLM binding in KS.
  *
- * Design 2026-07-07-009 (方案 A'). TMC 的 `metadata-instances.json` 是 source of truth。
- * 对每个 TMC 实例，查 KS 当前状态，决定动作：
- *   1. 调 KS `/llm-binding/list` 一次拿到所有 binding 缓存成 Map。
- *   2. 对每个 TMC 实例：
- *      - KS 已有可用 key（has_api_key=true）→ 不碰 Gateway，只调 `/set` 更新 proxy_base_url
- *        （不传 api_key，KS 保留原值）。地址没变也调，保持简单。
- *      - KS 无可用 key → 走 Gateway user/list + user/create 或 user-key/create 流程，
- *        push `/set` 带新 key。
+ * Design 2026-07-07-009 (Plan A'). The TMC `metadata-instances.json` is the source of truth.
+ * For each TMC instance, check the current status of KS and decide the action:
+ *   1. Call KS `/llm-binding/list` once to get all bindings and cache them in a Map.
+ *   2. For each TMC instance:
+ *      - If KS already has an available key (has_api_key=true) → do not touch Gateway, only call `/set` to update proxy_base_url
+ *        (do not pass api_key, KS keeps the original value). Call it even if the address hasn't changed, to keep it simple.
+ *      - KS has no available key → go through the Gateway user/list + user/create or user-key/create flow,
+ *        push `/set` with the new key.
  *
- * 这样避免每次 Panel 重启都去 Gateway mint 新 key（受 active key 上限 20 约束）。
+ * This avoids minting a new key to the Gateway every time the Panel restarts (constrained by the active key limit of 20).
  *
  * Best-effort: any per-instance failure is logged and skipped (never blocks startup).
  */
@@ -36,7 +36,7 @@ export interface KnowledgeLlmBindingOptions {
 
 type EnsureOutcome = 'skipped' | 'bound' | 'error';
 
-/** KS /llm-binding/list 返回的单条 binding 快照（不含 api_key 明文）。 */
+/** KS /llm-binding/list returns a single binding snapshot (without plaintext api_key). */
 interface KsBindingSnapshot {
   service_id: string;
   mode: string;
@@ -64,7 +64,7 @@ async function ksPost<T>(
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
-    // /list 不需要 service-id 头；其他路径需要
+    // /list does not require the service-id header; other paths do
     if (serviceId) headers['x-tdai-service-id'] = serviceId;
     if (opts.knowledgeAuthToken) headers.Authorization = `Bearer ${opts.knowledgeAuthToken}`;
     const resp = await fetch(`${opts.knowledgeBaseUrl.replace(/\/+$/, '')}${path}`, {
@@ -93,19 +93,19 @@ export async function ensureKnowledgeLlmBinding(
   const serviceId = instance.instance_id;
   const cached = ksBindings.get(serviceId);
 
-  // 场景 A: KS 已有可用 key → 不碰 Gateway，只更新 proxy_base_url（KS 保留原 key）
+  // Scenario A: KS already has an available key → do not touch Gateway, only update proxy_base_url (KS retains the original key)
   if (cached?.has_api_key) {
     await ksPost(opts, '/v3/internal/llm-binding/set', serviceId, {
       mode: 'proxy',
       proxy_base_url: opts.proxyBaseUrl,
       enabled: true,
-      // 不传 api_key → KS 保留原值
+      // api_key not passed → KS retains original value
     });
     logger.info('knowledge llm-binding refreshed (key retained)', { instanceId: serviceId });
     return 'bound';
   }
 
-  // 场景 B: KS 无可用 key → 需要 Gateway user + key 流程
+  // Scenario B: KS has no available key → requires Gateway user + key flow
   const metaCfg = {
     endpoint: instance.gateway_endpoint,
     apiKey: instance.api_key,
@@ -129,8 +129,8 @@ export async function ensureKnowledgeLlmBinding(
 
   if (!existing) {
     const createEnv = await executeMetaFetch<MetaEnvelope<{ user_id: string; default_user_key: string }>>(
-      // 传确定性 user_id = username，让 proxy systemUsers 白名单能按稳定 user_id 命中
-      // （一条 config 通吃所有实例，无需知道随机 usr-xxx）。
+      // Pass deterministic user_id = username, so the proxy systemUsers whitelist can match by stable user_id
+      // (one config serves all instances, no need to know random usr-xxx).
       metaCfg, '/v3/meta/user/create', { username: KNOWLEDGE_SERVICE_USERNAME, user_id: KNOWLEDGE_SERVICE_USERNAME }, 'envelope',
     );
     if (createEnv.code !== 0) throw new Error(`user/create failed: ${createEnv.message}`);
@@ -166,7 +166,7 @@ export async function ensureKnowledgeLlmBindings(
   opts: KnowledgeLlmBindingOptions,
   logger: Logger,
 ): Promise<void> {
-  // 1. 一次性查 KS /llm-binding/list 拿到当前状态缓存
+  // 1. Query KS /llm-binding/list once to get the current status cache
   let ksBindings = new Map<string, KsBindingSnapshot>();
   try {
     const resp = await ksPost<{ items: KsBindingSnapshot[] }>(
@@ -178,10 +178,10 @@ export async function ensureKnowledgeLlmBindings(
     logger.warn('failed to fetch KS llm-binding list, will mint per-instance', {
       error: err instanceof Error ? err.message : String(err),
     });
-    // KS /list 失败时回退：ksBindings 为空 Map，每个实例都走 mint 流程（兼容老 KS）
+    // KS /list fails: ksBindings is an empty Map, each instance goes through the mint process (compatible with old KS)
   }
 
-  // 2. 以 TMC instances 列表为准逐个处理
+  // 2. Process each one based on the TMC instances list
   for (const instance of instances) {
     try {
       await ensureKnowledgeLlmBinding(instance, opts, logger, ksBindings);

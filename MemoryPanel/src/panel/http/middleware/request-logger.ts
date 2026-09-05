@@ -10,15 +10,15 @@ declare module 'hono' {
 }
 
 /**
- * 访问日志中间件：
- * - 为每个请求生成（或透传 x-request-id）reqId，并回写响应头；
- * - 注入 ctx.var.log（带 reqId 的子 logger），业务处理器可直接用它打业务日志；
- * - 请求结束后按级别记录：5xx=error / 4xx=warn / 2xx=info（除噪音路径）。
+ * Access log middleware:
+ * - Generate (or pass through) reqId for each request, and write it back to the response header;
+ * - Inject ctx.var.log (a sub logger with reqId), so business handlers can use it to log business logs directly;
+ * - After the request ends, log by level: 5xx=error / 4xx=warn / 2xx=info (except for noise paths).
  *
- * 噪音过滤：
- *   - 静态资源（/、/assets/*、/favicon.ico、/*.html 等）默认不打 access log
- *   - /health 频繁被外部探活，仅 4xx/5xx 才打
- *   - 其他 API 路径（/api/v1/*）正常打 info（保留可观测性）
+ * Noise filtering:
+ *   - Static resources (/, /assets/*, /favicon.ico, *.html, etc.) are not logged by default
+ *   - /health is frequently probed externally, so only log 4xx/5xx
+ *   - Other API paths (/api/v1/*) are logged normally as info (preserve observability)
  */
 const STATIC_PREFIXES = ['/assets/', '/favicon'];
 const STATIC_EXTS = ['.js', '.css', '.map', '.png', '.svg', '.ico', '.html', '.woff', '.woff2'];
@@ -50,7 +50,7 @@ export function requestLogger(logger: Logger) {
       const isError = status >= 500;
       const isWarn = status >= 400 && status < 500;
 
-      // 噪音过滤：静态资源 + 成功的 health 都不打 info 日志
+      // Noise filtering: neither static resources nor successful health checks log info
       const isNoise = !isError && !isWarn && (isStaticAsset(path) || isHealthCheck(path));
       if (isNoise) return;
 

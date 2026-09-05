@@ -24,14 +24,14 @@ export function buildPanelApp(deps: PanelDeps): Hono {
   const api = new Hono();
   registerMetaInstanceRoutes(api, deps);
   registerMetaProxyRoutes(api, deps);
-  // Skill 数据面透明代理：/api/v1/skill/* → 内核 /v3/skill/*
+  // Skill data plane transparent proxy: /api/v1/skill/* → kernel /v3/skill/*
   registerSkillProxyRoutes(api, deps);
-  // Chat Memory 面板 3-tab 专属业务路由（12.3 决策例外，见 chat-memory.ts 顶注释）
+  // Chat Memory panel 3-tab dedicated business routing (12.3 decision exception, see top comment in chat-memory.ts)
   registerChatMemoryRoutes(api, deps);
-  // Task 聚合路由：task/list + 批量 task-agent/list 一次返回
+  // Task aggregation route: task/list + batch task-agent/list returned in one call
   registerTaskRoutes(api, deps);
   registerAgentOverviewRoutes(api, deps);
-  // Agent 生命周期业务路由：/agent/delete-cascade 在 control 层级联清 skill 再 archive
+  // Agent lifecycle business routing: /agent/delete-cascade cascades to clear skills at the control level before archiving
   registerAgentLifecycleRoutes(api, deps);
   registerKnowledgeRoutes(api, deps);
   app.route(API_PREFIX, api);

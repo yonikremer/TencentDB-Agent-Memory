@@ -1,11 +1,11 @@
 /**
- * Knowledge Panel 路由聚合注册。
+ * Knowledge Panel routing aggregation registration.
  *
- * 挂载：
+ * Mount:
  *   - /api/v1/knowledge/wiki/*        （wiki-routes）
  *   - /api/v1/knowledge/code-graph/*  （code-graph-routes）
  *   - /api/v1/knowledge/status-callback（callback-routes，S2S）
- *   - /api/v1/knowledge/allocate 等    （allocate-routes）
+ *   - /api/v1/knowledge/allocate etc.    （allocate-routes）
  *   - /api/v1/knowledge/{type}/team-assets （list-routes）
  */
 import type { Hono } from 'hono';

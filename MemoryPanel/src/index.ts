@@ -1,5 +1,5 @@
-// 统一入口：直接启动 stateless panel（链路 A）。
-// Legacy 链路 B 已移除，不再需要 PANEL_MODE 分叉。
+// Unified entry point: directly start the stateless panel (Link A).
+// Legacy Link B has been removed and no longer requires the PANEL_MODE branching.
 import { config as loadDotenv } from 'dotenv';
 loadDotenv();
 

@@ -20,17 +20,17 @@ export interface PanelConfig {
   metadataRemoteTimeoutMs: number;
   ui: { distDir: string };
   log: { level: LogLevel; format: 'json' | 'pretty' };
-  /** Knowledge Service (KS :8421) 连接配置。serviceId 按请求 instanceId 注入。 */
+  /** Knowledge Service (KS :8421) Connection Configuration. serviceId is injected based on the request instanceId. */
   knowledge: { baseUrl: string; authToken: string; timeoutMs: number };
   /**
-   * 启动时为每个实例确保 knowledge-service LLM 绑定（走 proxy 记账）。
-   * sync=false 时完全跳过（不改变现有部署行为）。
+   * Ensure knowledge-service LLM binding for each instance at startup (via proxy accounting).
+   * Completely skip when sync=false (does not change existing deployment behavior).
    */
   knowledgeLlmBinding: {
     sync: boolean;
     proxyBaseUrl: string;
   };
-  /** 默认 Agent 模板文件的本地存储目录根（存 Panel 本地，按 {dir}/{instanceId}/{team_id}/template.json）。 */
+  /** Default Agent template file local storage directory root (stored locally in Panel, organized as {dir}/{instanceId}/{team_id}/template.json). */
   agentTemplateDir: string;
 }
 

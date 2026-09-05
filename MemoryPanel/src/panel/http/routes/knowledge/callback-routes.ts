@@ -1,19 +1,19 @@
 /**
- * /api/v1/knowledge/status-callback —— KS → Panel 状态回调（S2S，无 user-key）。
+ * /api/v1/knowledge/status-callback —— KS → Panel status callback (S2S, no user-key).
  *
- * KS ingest/sync 完成后回调。设计 §0.6：
- *   - status=ready + summary → 写内核明细 entity_knowledge（/v3/knowledge/create）；
- *     这是 Proxy 注入的唯一闸门。
- *   - code-graph ready 时再以 owner 身份登记 meta_asset（/v3/meta/asset/create）；
- *     callback 是 S2S 无 user_key，用 code-graph/create 时内存任务表 stash 的
- *     owner_user_key 走 ForCaller 路径（caller===owner）。失败 best-effort，
- *     前端 register-meta 兜底（幂等）。
- *   - status=failed → 不写明细、不写 meta（资源不可注入，UI 读 KS status 显示失败）。
+ * Callback after KS ingest/sync is complete. Design §0.6:
+ *   - status=ready + summary → write kernel detail entity_knowledge (/v3/knowledge/create);
+ *     This is the only gate for Proxy injection.
+ *   - register meta_asset (/v3/meta/asset/create) as owner when code-graph is ready;
+ *     callback is the S2S without user_key, stashed in the memory task table when using code-graph/create
+ *     owner_user_key goes through the ForCaller path (caller===owner). Failure is best-effort,
+ *      Frontend register-meta fallback (idempotent).
+ *   - status=failed → do not write details, do not write meta (resource cannot be injected, UI reads KS status to display failure).
  *
- * 用 payload.service_id 从注册表解析实例凭证（endpoint + api_key）→ 组 S2S 凭证
- * → 取 KS 详情 → POST /v3/knowledge/create。
+ * Parse instance credentials (endpoint + api_key) from the registry using payload.service_id → assemble S2S credentials
+ * → Retrieve KS details → POST /v3/knowledge/create.
  *
- * 不挂 validatePanelMetaHeaders（S2S，无浏览器 session header）。
+ * Do not attach validatePanelMetaHeaders (S2S, no browser session header).
  */
 import type { Hono } from 'hono';
 import type { PanelDeps } from '../../../panel-deps.js';
@@ -28,11 +28,11 @@ interface CallbackBody {
   summary?: string | null;
   sync_error?: string | null;
   timestamp?: string;
-  /** 细粒度 ingest 进度（与终态 status 回调共用 endpoint） */
+  /** Fine-grained ingest progress (shares endpoint with final status callback) */
   event?: 'ingest_progress';
   wiki_id?: string;
   team_id?: string;
-  /** 单次 ingest 代际；与 progress / 终态共用，防 clear 后迟到包 */
+  /** Single ingest generation; shared with progress / terminal state, to prevent late packages after clear */
   run_id?: string;
   progress?: {
     phase?: string;
@@ -59,10 +59,10 @@ function isProgressPhase(p: unknown): p is 'extracting' | 'merging' | 'indexing'
 }
 
 /**
- * code-graph ready 后用内存任务表里 stash 的 owner key 注册 meta asset。
- * callback 是 S2S、无 user_key，靠 create 时记录的 owner_user_key 以 owner
- * 身份打 /v3/meta/asset/create（ForCaller 路由要求 caller===owner）。
- * best-effort：失败只 log，前端 register-meta 会兜底（幂等）。
+ * code-graph ready, then register the meta asset using the owner key stashed in the in-memory task table.
+ * callback is S2S, has no user_key, and relies on the owner_user_key recorded at create time to call /v3/meta/asset/create in owner
+ * identity (ForCaller routing requires caller===owner).
+ * best-effort: on failure, only log, and the frontend register-meta will fall back (idempotent).
  */
 async function registerCodeGraphAsset(
   deps: PanelDeps,
@@ -73,7 +73,7 @@ async function registerCodeGraphAsset(
 ): Promise<void> {
   const task = deps.knowledgeTaskRegistry.peek(knowledgeId);
   if (!task) {
-    // 内存里没有（进程重启 / 非 panel 创建路径）——交给前端 register-meta 兜底
+    // Not in memory (process restart / non-panel creation path) — left to frontend register-meta as fallback
     log.info('[knowledge-callback] no in-memory task stash; skip S2S asset register (frontend fallback)', {
       knowledge_id: knowledgeId,
     });
@@ -117,7 +117,7 @@ export function registerKnowledgeCallbackRoutes(api: Hono, deps: PanelDeps): voi
   api.post('/knowledge/status-callback', async (c) => {
     const body = await safeJson(c);
 
-    // ── ingest 细粒度进度（非终态）──
+    // ── ingest fine-grained progress (non-terminal) ──
     if (body.event === 'ingest_progress') {
       const wikiId = body.wiki_id?.trim();
       const p = body.progress;
@@ -165,12 +165,12 @@ export function registerKnowledgeCallbackRoutes(api: Hono, deps: PanelDeps): voi
       run_id: body.run_id,
     });
 
-    // 终态：清掉细粒度进度，并记录 run_id 以拒绝该代际迟到包
+    // Terminal state: clear fine-grained progress and record run_id to reject late packets of this generation
     if (body.type === 'wiki' && (body.status === 'ready' || body.status === 'failed')) {
       deps.ingestProgressStore.clear(body.knowledge_id, body.run_id);
     }
 
-    // ready 即写明细（即使无 summary 也推——用户觉得有问题可自行删除）
+    // ready means writing details (push even if no summary - users can delete it themselves if there are issues)
     if (body.status === 'ready') {
       if (!body.summary) {
         log.warn('[knowledge-callback] ready but no summary; pushing kernel entity anyway', { knowledge_id: body.knowledge_id });
@@ -181,7 +181,7 @@ export function registerKnowledgeCallbackRoutes(api: Hono, deps: PanelDeps): voi
           log.error(`[knowledge-callback] ${body.knowledge_id}: missing service_id, cannot resolve instance; skip`);
           return c.json({ code: 0, message: 'ok', request_id: '', data: null });
         }
-        const entry = deps.instanceRegistry.resolve(serviceId); // 抛 → 下方 catch
+        const entry = deps.instanceRegistry.resolve(serviceId); // throw → below catch
         const cred: KernelCredentials = {
           endpoint: entry.gateway_endpoint,
           apiKey: entry.api_key,
@@ -209,7 +209,7 @@ export function registerKnowledgeCallbackRoutes(api: Hono, deps: PanelDeps): voi
               user_id: detail.owner_user_id,
             }, cred);
             log.info('[knowledge-callback] wiki → kernel entity written', { knowledge_id: detail.wiki_id });
-            // wiki 的 meta 资产在创建时已注册，callback 不再重复注册。
+            // The wiki's meta assets are registered when created, so callback is no longer registered repeatedly.
           }
         } else {
           const detail = await kc.codeGraphGet(body.knowledge_id);
@@ -236,9 +236,9 @@ export function registerKnowledgeCallbackRoutes(api: Hono, deps: PanelDeps): voi
               branch: detail.branch,
             }, cred);
             log.info('[knowledge-callback] code-graph → kernel entity written', { knowledge_id: detail.code_graph_id });
-            // 注册 meta asset（主力路径）：用 create 时 stash 的 owner key 以 owner 身份
-            // 打 /v3/meta/asset/create。callback 本身是 S2S 无 user_key，靠内存任务表补。
-            // 失败 best-effort——前端 register-meta 会兜底（幂等）。
+            // Register meta asset (primary path): use the owner key stashed at create time to register as owner
+            // via /v3/meta/asset/create. The callback itself is S2S without user_key, relying on the in-memory task table to fill in.
+            // Failure is best-effort—the frontend register-meta will fall back (idempotent).
             await registerCodeGraphAsset(deps, log, body.knowledge_id, detail, entry);
           }
         }

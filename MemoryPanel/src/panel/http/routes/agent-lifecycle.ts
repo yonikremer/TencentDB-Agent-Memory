@@ -1,26 +1,26 @@
 /**
- * /api/v1/agent/delete-cascade —— 删除 agent 时先级联清理该 agent 名下的 skill。
+ * /api/v1/agent/delete-cascade —— When deleting an agent, first cascade clean up the skills under that agent.
  *
- * 背景（与内核 archiveAgent 的分工）：
- *   - 内核 archiveAgent (metadata-service.ts) 会在同一次调用里顺手归档该 agent 自身的
- *     chat_memory asset + 清其它 agent 借入这块 memory 的绑定；skill 完全不管。
- *   - 结果是：直接调 meta/agent/archive 会留下 owner_agent_id = 被删 agent 的
- *     active skill 脏数据（前端只按 status 过滤，看似消失但表里还在）。
+ * Background (division of work with the kernel archiveAgent):
+ *   - The kernel `archiveAgent` (metadata-service.ts) will archive the agent itself in the same call
+ *     chat_memory asset + clear the bindings of other agents borrowing this memory; skill is completely unrelated.
+ *   - Result: directly calling meta/agent/archive leaves owner_agent_id = the deleted agent's
+ *     active skill dirty data (frontend only filters by status, so it appears to disappear but still exists in the table).
  *
- * 本路由的做法（业务级联收口在 control 层，不改内核）：
- *   1. auth/verify 反查 caller
- *   2. agent/get 拿到 agent，强校验 owner_user_id === caller（本期不允许 admin 代删）
- *   3. skill/list 按 owner_agent_id + active 分页拉全
- *   4. 逐条 skill/delete —— 任一失败立即中断，返回 500 + 已删列表 + 失败 skill_id
- *      + 内核错误 message；此时 agent/archive 不会被调用，caller 需要修复后重试
- *   5. 全部 skill 成功归档后调 meta/agent/archive
- *      —— 内核在同一次 archive 里顺手清 chat_memory（这部分保持原样）
+ * The approach of this route (business-level cascading closure at the control layer, without modifying the kernel):
+ *   1. auth/verify reverse-lookup caller
+ *   2. agent/get to obtain the agent, strictly validate owner_user_id === caller (admins are not allowed to delete on behalf in this phase)
+ *   3. skill/list to fetch all with pagination based on owner_agent_id + active
+ *   4. skill/delete one by one —— if any fails, immediately interrupt, return 500 + deleted list + failed skill_id
+ *      + kernel error message; in this case agent/archive will not be called, caller needs to fix and retry
+ *   5. After all skills are successfully archived, call meta/agent/archive
+ *      —— The kernel cleans chat_memory in the same archive (keep this as is)
  *
- * 为什么不做 admin 代删：内核 skill/delete 要求 caller 是 owner_agent 的 owner；
- * admin 代删需要 impersonation 或 control 层拿到 owner 的 user_key，本期先不做。
+ * Why not do admin proxy deletion: the kernel skill/delete requires the caller to be the owner_agent's owner;
+ * Admin proxy deletion requires obtaining the owner's user_key via impersonation or control layers, which is not done in this phase.
  *
- * 前端配套：agentsApi.delete 需从 meta/agent/archive 切到本路由；如果要跳过级联走
- * 老逻辑（例如迁移工具），可继续直接调 /api/v1/meta/agent/archive（保留逃生舱）。
+ * Frontend support: agentsApi.delete needs to switch from meta/agent/archive to this route; if you want to skip the cascade
+ * Old logic (e.g., migration tools) can continue to directly call /api/v1/meta/agent/archive (preserving the escape pod).
  */
 import type { Hono } from 'hono';
 import type { PanelDeps } from '../../panel-deps.js';
@@ -37,7 +37,7 @@ import {
   str,
 } from './knowledge/common.js';
 
-/** skill/list 一页 100 条 —— 与 knowledge fetchAllMetaListItems 分页步长对齐。 */
+/** skill/list page 100 items —— aligned with the pagination step of knowledge fetchAllMetaListItems. */
 const SKILL_LIST_PAGE = 100;
 
 interface AgentRaw {
@@ -54,7 +54,7 @@ interface SkillRow {
   owner_agent_id?: string;
 }
 
-/** skill/list 分页拉取该 agent 名下所有 active skill。 */
+/** skill/list fetch all active skills under this agent with pagination. */
 async function listAgentSkills(
   deps: PanelDeps,
   ctx: MetaCallContext,
@@ -99,7 +99,7 @@ export function registerAgentLifecycleRoutes(api: Hono, deps: PanelDeps): void {
     const callerId = await resolveCallerUserId(deps, ctx);
     if (!callerId) return respondControlError(c, 401, 'INVALID_USER_KEY');
 
-    // 2. agent + owner 强校验
+    // 2. agent + owner strong validation
     const agentEnv = await deps.metaKernel.invoke('agent/get', { agent_id: agentId }, ctx);
     if (agentEnv.code === 404 || (agentEnv.code === 0 && !agentEnv.data)) {
       return respondControlError(c, 404, 'AGENT_NOT_FOUND');
@@ -115,7 +115,7 @@ export function registerAgentLifecycleRoutes(api: Hono, deps: PanelDeps): void {
     if (!listRes.ok) return respondEnvelope(c, listRes.envelope);
     const skills = listRes.items;
 
-    // 4. 逐条 skill/delete —— 任一失败立即中断，agent 不 archive
+    // 4. Skill/delete one by one —— Interrupt immediately on any failure, agent does not archive
     const deletedIds: string[] = [];
     for (const s of skills) {
       const delEnv = await deps.skillKernel.invoke(
@@ -145,7 +145,7 @@ export function registerAgentLifecycleRoutes(api: Hono, deps: PanelDeps): void {
       deletedIds.push(s.skill_id);
     }
 
-    // 5. agent/archive —— 内核仍然会顺手清 chat_memory
+    // 5. agent/archive —— the kernel will still clean chat_memory by itself
     const archiveEnv = await deps.metaKernel.invoke('agent/archive', { agent_id: agentId }, ctx);
     if (archiveEnv.code !== 0) return respondEnvelope(c, archiveEnv);
 

@@ -1,14 +1,14 @@
 /**
- * /api/v1/knowledge/wiki/* —— Panel Wiki 业务路由（stateless）。
+ * /api/v1/knowledge/wiki/* —— Panel Wiki business routing (stateless).
  *
- * 实现冻结契约 docs/api/knowledge-panel-api.md §2.0 Wiki 最小端点集，透传
- * HttpKnowledgeClient → KS /v3/wiki/*。风格与 chat-memory.ts 一致：
+ * Implement frozen contract docs/api/knowledge-panel-api.md §2.0 Wiki minimal endpoint set, pass through
+ * HttpKnowledgeClient → KS /v3/wiki/*. Style consistent with chat-memory.ts:
  * validatePanelMetaHeaders → auth/verify(+team-member) → KS → envelope。
  *
- * 门控：
- *   - 带 team_id 的端点（list/create/raw/write）→ 要求 team 成员；
- *   - id-only 端点（get/ingest/delete/graph/page/search/raw/ls）→ 要求有效 caller，
- *     KS 按 x-tdai-service-id + team 逻辑隔离。
+ * Gate:
+ *   - Endpoints with team_id (list/create/raw/write) → require team members;
+ *   - id-only endpoints (get/ingest/delete/graph/page/search/raw/ls) → require valid caller,
+ *     KS isolated by x-tdai-service-id + team logic.
  */
 import type { Hono } from 'hono';
 import { validatePanelMetaHeaders } from '../../middleware/validate-panel-headers.js';
@@ -33,7 +33,7 @@ import {
 export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
   const mw = validatePanelMetaHeaders(deps);
 
-  // W2 list — @deprecated 面板 UI 已改用 team-assets / my-assets
+  // W2 list — @deprecated Panel UI has been replaced with team-assets / my-assets
   api.post('/knowledge/wiki/list', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -50,7 +50,7 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
     return runKs(c, () => kc.wikiList(teamId, opts));
   });
 
-  // W1 create — team 门控；KS create → 拿 wiki_id → 幂等登记 meta_asset（asset_id=wiki_id）
+  // W1 create — team gate; KS create → get wiki_id → idempotent register meta_asset (asset_id=wiki_id)
   api.post('/knowledge/wiki/create', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -67,8 +67,8 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
     } catch (err) {
       return runKs(c, () => Promise.reject(err));
     }
-    // 登记 meta_asset（权限权威）；asset_id == wiki_id（外键联查约束）
-    // 创建时即注册，前端可立刻看到抽取中的 wiki；callback 回来时不再重复注册。
+    // Register meta_asset (permission authority); asset_id == wiki_id (foreign key join constraint)
+    // Registered at creation time, so the frontend can immediately see the extracting wiki; no need to re-register when the callback returns.
     const reg = await ensureKnowledgeAsset(deps, ctx, {
       assetId: detail.wiki_id,
       teamId,
@@ -77,11 +77,11 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
       ownerUserId: gate.userId,
       serviceUrl: detail.service_url,
     });
-    if (!reg.ok) return respondEnvelope(c, reg.env); // 用户重试，KS 幂等自愈
+    if (!reg.ok) return respondEnvelope(c, reg.env); // User retry, KS idempotent self-healing
     return respondEnvelope(c, okEnvelope(c, detail));
   });
 
-  // W4 ingest — id-only（需 read 权限）+ 空 wiki 校验
+  // W4 ingest — id-only (requires read permission) + empty wiki validation
   api.post('/knowledge/wiki/ingest', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -90,19 +90,19 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
     const gate = await requireKnowledgeRead(deps, c, ctx, wikiId, { action: 'write' });
     if ('error' in gate) return gate.error;
     const kc = deps.knowledgeClientFactory(ctx.instanceId);
-    // 空 wiki 禁止 ingest：先查 raw/ls，无源文件则拒绝
+    // Empty wiki ingest prohibited: first check raw/ls, reject if no source files
     try {
       const listing = await kc.wikiRawLs(wikiId);
       if (!listing.items || listing.items.length === 0) {
         return respondControlError(c, 400, 'WIKI_EMPTY_NO_SOURCES');
       }
     } catch {
-      // raw/ls 查询失败不阻塞 ingest（KS 侧也有防御）
+      // raw/ls query failure does not block ingest (KS side also has defense)
     }
     return runKs(c, () => kc.wikiIngest(wikiId));
   });
 
-  // W3 get — id-only（需 read 权限）；聚合 Panel 内存 ingest progress（不新增接口）
+  // W3 get — id-only (requires read permission); aggregate Panel memory ingest progress (no new interface)
   api.post('/knowledge/wiki/get', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -123,7 +123,7 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
     });
   });
 
-  // W5 delete — 删三处：KS + entity_knowledge 明细 + meta_asset（见 §0.6）
+  // W5 delete — delete three places: KS + entity_knowledge details + meta_asset (see §0.6)
   api.post('/knowledge/wiki/delete', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -179,7 +179,7 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
     return runKs(c, () => kc.wikiPageRead(wikiId, refs));
   });
 
-  // W14 page/rm — id-only + write 权限；KS 需要 team_id，来自 meta_asset.team_id
+  // W14 page/rm — id-only + write permissions; KS needs team_id, from meta_asset.team_id
   api.post('/knowledge/wiki/page/rm', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -236,7 +236,7 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
     return runKs(c, () => kc.wikiRawRead(wikiId, filenames));
   });
 
-  // W10 raw/rm — id-only + write 权限；KS 需要 team_id，来自 meta_asset.team_id
+  // W10 raw/rm — id-only + write permissions; KS needs team_id, from meta_asset.team_id
   api.post('/knowledge/wiki/raw/rm', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -252,10 +252,10 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
     return runKs(c, () => kc.wikiRawRm(teamId, wikiId, filenames, gate.userId));
   });
 
-  // W9 raw/write — team 门控 + 上传大小限制
-  const MAX_FILE_SIZE = 512 * 1024;        // 单文件 512KB
-  const MAX_FILES_PER_REQUEST = 10;        // 单次最多 10 个文件
-  const MAX_TOTAL_SIZE = 5 * 1024 * 1024;  // 单次总大小 5MB
+  // W9 raw/write — team gate + upload size limit
+  const MAX_FILE_SIZE = 512 * 1024;        // single file 512KB
+  const MAX_FILES_PER_REQUEST = 10;        // max 10 files per request
+  const MAX_TOTAL_SIZE = 5 * 1024 * 1024;  // total size per request 5MB
 
   api.post('/knowledge/wiki/raw/write', mw, async (c) => {
     const ctx = buildCtx(c);

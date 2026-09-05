@@ -1,13 +1,13 @@
 /**
- * Wiki ingest 细粒度进度（进程内存）。
- * KS → status-callback(event=ingest_progress) 写入；
- * wiki/get 聚合读出；终态 ready/failed 时 clear。
+ * Wiki ingest fine-grained progress (process memory).
+ * KS → status-callback(event=ingest_progress) writes;
+ * wiki/get aggregates reads; clear on terminal states ready/failed.
  *
- * B-2：带 run_id 代际 + TTL，避免「终态 clear 后迟到的 indexing/98」写回，
- * 导致下一轮 extracting/0 被单调规则丢弃、进度条卡在 98%。
+ * B-2: with run_id generation + TTL, to avoid late writes of "final clear" indexing/98,
+ * causing the next round's extracting/0 to be discarded by monotonic rules and the progress bar to get stuck at 98%.
  *
- * cleared 按 wiki 保留近期已清理的 runId 集合（非只记最后一个），
- * 防止：clear(run-1) → 写入 run-2 → 迟到的 run-1 被误判为「新代际」覆盖。
+ * cleared keeps the set of recently cleared runIds per wiki (not just the last one),
+ * to prevent: clear(run-1) → write run-2 → the late run-1 being mistakenly judged as a "new generation" and overwritten.
  */
 
 export interface IngestProgress {
@@ -21,7 +21,7 @@ export interface IngestProgress {
 
 const PHASE_ORDER = { extracting: 0, merging: 1, indexing: 2 } as const;
 
-/** 默认 30min；卡住的 processing 残留不会永久占坑。 */
+/** Default 30min; stuck processing residuals do not permanently occupy slots. */
 export const DEFAULT_INGEST_PROGRESS_TTL_MS = 30 * 60 * 1000;
 
 interface StoreEntry {
@@ -32,13 +32,13 @@ interface StoreEntry {
 
 export interface IngestProgressStoreOptions {
   ttlMs?: number;
-  /** 可注入时钟，便于 TTL 单测 */
+  /** Injectable clock for TTL unit testing */
   now?: () => number;
 }
 
 export class IngestProgressStore {
   private readonly store = new Map<string, StoreEntry>();
-  /** wikiId → (runId → clearedAt)；拒绝这些代际的迟到 progress */
+  /** wikiId → (runId → clearedAt); reject these intergenerational late progress */
   private readonly cleared = new Map<string, Map<string, number>>();
   private readonly ttlMs: number;
   private readonly now: () => number;
@@ -49,14 +49,14 @@ export class IngestProgressStore {
   }
 
   /**
-   * 单调更新：更高 phase 胜出；
-   * 同 phase 时 percent 更高胜出；
-   * percent 相同（取整撞车）则 completed+failed 更大胜出，避免计数停滞。
+   * Monotonic update: higher phase wins;
+   * When phases are the same, higher percent wins;
+   * If percent is the same (rounding collision), higher completed+failed wins to avoid counting stagnation.
    *
    * runId：
-   * - 落在已 clear 集合 → 丢弃（含跨代迟到包）；
-   * - 与当前条目相同（或双方皆无）→ 套用单调规则；
-   * - 与当前条目不同且非空 → 视为新一轮 ingest，直接覆盖。
+   * - Falls into an already clear set → discard (including late packets across generations);
+   * - Same as the current entry (or both are empty) → apply the monotonic rule;
+   * - Different from the current entry and non-empty → treated as a new ingest round, directly overwrite.
    */
   update(wikiId: string, incoming: IngestProgress, runId?: string | null): void {
     const rid = normalizeRunId(runId);
@@ -64,9 +64,9 @@ export class IngestProgressStore {
 
     const clearedRuns = this.cleared.get(wikiId);
     if (clearedRuns && clearedRuns.size > 0) {
-      if (rid && clearedRuns.has(rid)) return; // 已终态清理的代际迟到包
+      if (rid && clearedRuns.has(rid)) return; // Late packets for cleared generations
       if (!rid) {
-        // 该 wiki 刚 clear 过：无 runId 的迟到包也丢弃，避免 clear 后再写回 98%
+        // This wiki has just been cleared: late packages without runId are also discarded, to avoid writing back 98% after clear
         return;
       }
     }
@@ -78,12 +78,12 @@ export class IngestProgressStore {
       return;
     }
 
-    // 新 runId → 允许从 extracting/0 重新开始（且该 rid 不在 cleared 集合）
+    // New runId → allows restarting from extracting/0 (and that rid is not in the cleared set)
     if (rid && prev.runId && rid !== prev.runId) {
       this.store.set(wikiId, { runId: rid, progress: incoming, updatedAt: ts });
       return;
     }
-    // 当前无 runId、来包有 runId：视为新代际覆盖（升级路径）
+    // No runId currently, but the package has a runId: treated as a new generation override (upgrade path)
     if (rid && !prev.runId) {
       this.store.set(wikiId, { runId: rid, progress: incoming, updatedAt: ts });
       return;
@@ -119,7 +119,7 @@ export class IngestProgressStore {
   }
 
   /**
-   * 终态清理。若提供 runId（或条目上已有），记入 cleared 集合，拒绝该代际迟到包。
+   * Final state cleanup. If a runId (or one already present on the entry) is provided, add it to the cleared set and reject the late package of this generation.
    */
   clear(wikiId: string, runId?: string | null): void {
     const prev = this.store.get(wikiId);

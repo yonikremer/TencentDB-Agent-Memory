@@ -1,17 +1,17 @@
 /**
- * /api/v1/task/list-with-agents —— Task 聚合接口（Panel 层 N+1 消除）。
+ * /api/v1/task/list-with-agents —— Task aggregation endpoint (eliminates Panel layer N+1).
  *
- * 为什么需要这个接口：
- *   内核 `task/list` 只返回 task 本体，不含 linked_agents。
- *   前端原先需要逐条调 `task/get` + `task-agent/list`（2N+1 次），
- *   10 个 task = 21 次请求，严重 N+1。
+ * Why this interface is needed:
+ *    The kernel `task/list` only returns the task itself, without `linked_agents`.
+ *    The frontend originally needed to call `task/get` + `task-agent/list` one by one (2N+1 times),
+ *    10 tasks = 21 requests, which is a serious N+1 problem.
  *
- * Panel 层聚合：
- *   1. 调一次内核 `task/list` 拿 task 列表（含分页）
- *   2. 并行调 N 次 `task-agent/list` 补齐 linked_agents
- *   3. 一次返回给前端 `{ items: TaskWithAgents[], total, limit, offset }`
+ * Panel layer aggregation:
+ *   1. Call the kernel `task/list` once to get the task list (including pagination)
+ *   2. Call `task-agent/list` in parallel N times to complete linked_agents
+ *   3. Return `{ items: TaskWithAgents[], total, limit, offset }` to the frontend once
  *
- * 网络往返在 Panel 层内部消化（同主机，延迟极低），前端只发 1 次请求。
+ * Network round-trip is handled internally within the Panel layer (same host, extremely low latency), and the frontend only sends 1 request.
  *
  */
 import type { Hono, Context } from "hono";
@@ -36,7 +36,7 @@ function okEnvelope<T>(c: Context, data: T): MetaEnvelope<T> {
   return { code: 0, message: "ok", request_id: c.get("reqId") ?? "", data };
 }
 
-// ── 类型定义 ──────────────────────────────────────────────────────────────────
+// ── Type Definitions ──────────────────────────────────────────────────────────────────
 
 interface TaskEntity {
   task_id: string;
@@ -70,14 +70,14 @@ interface ListWithAgentsBody {
   title?: string;
 }
 
-// ── 路由注册 ──────────────────────────────────────────────────────────────────
+// ── Route Registration ──────────────────────────────────────────────────────────────────
 
 export function registerTaskRoutes(api: Hono, deps: PanelDeps): void {
   /**
    * POST /api/v1/task/list-with-agents
    *
-   * 聚合 task/list + 批量 task-agent/list，一次返回 task 列表及其关联 agents。
-   * 前端只调这一个接口，不再需要 N+1。
+   * Aggregates task/list + batch task-agent/list, returning the task list along with their associated agents in a single response.
+   * The frontend only calls this single endpoint, eliminating the need for N+1 calls.
    */
   api.post(
     "/task/list-with-agents",
@@ -94,7 +94,7 @@ export function registerTaskRoutes(api: Hono, deps: PanelDeps): void {
 
       const ctx = buildCtx(c);
 
-      // 1. 调一次 task/list 拿 task 列表（含分页）
+      // 1. Call task/list once to get the task list (including pagination)
       const listPayload: Record<string, unknown> = { team_id: teamId };
       if (typeof limit === "number" && limit > 0)
         listPayload.limit = Math.min(limit, 200);
@@ -121,9 +121,9 @@ export function registerTaskRoutes(api: Hono, deps: PanelDeps): void {
       const tasks = taskData?.items ?? [];
       const total = taskData?.total ?? tasks.length;
 
-      // 2. 并行调 N 次 task-agent/list 补齐 linked_agents
-      //    分批并行（每批 20 个），避免 N 很大时压垮内核连接池。
-      //    读读不冲突（SQLite WAL / MongoDB），但连接数/线程数有上限。
+      // 2. Call task-agent/list N times in parallel to fill in linked_agents
+      //    batched in parallel (20 per batch) so a large N does not overwhelm the kernel connection pool.
+      //    Reads don't conflict (SQLite WAL / MongoDB), but connection/thread counts are bounded.
       const BATCH_SIZE = 20;
       const agentsResults: TaskAgent[][] = [];
       for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
@@ -143,7 +143,7 @@ export function registerTaskRoutes(api: Hono, deps: PanelDeps): void {
         agentsResults.push(...batchResults);
       }
 
-      // 3. 合并返回
+      // 3. Merge and return
       const items: TaskWithAgents[] = tasks.map((t, i) => ({
         ...t,
         agents: agentsResults[i] ?? [],

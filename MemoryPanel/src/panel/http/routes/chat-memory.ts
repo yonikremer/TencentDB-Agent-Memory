@@ -1,35 +1,35 @@
 /**
- * /api/v1/chat-memory/* —— Chat Memory 面板专用业务路由（stateless panel 架构）。
+ * /api/v1/chat-memory/* —— Chat Memory panel dedicated business route (stateless panel architecture).
  *
- * 为什么单独一层而不是走 /meta/{action}：
- *   - 新面板 §0 决策 12.3：`asset/*` 与 `agent-fixed-asset/*` 一期在 meta pass-through
- *     里 501（NOT_IN_SCOPE）。
- *   - 但 Chat Memory 面板 3-tab 页面需要这些资产操作。本文件就是那个"12.3 决策例外"
- *     的落点：只对 chat_memory 这一类 asset 做业务化包装，跟 skill/wiki/code_graph 隔离。
+ Why a single layer instead of going to /meta/{action}:
+ *   - New Panel §0 Decision 12.3: `asset/*` and `agent-fixed-asset/*` Phase 1 in meta pass-through
+ *     501 (NOT_IN_SCOPE)。
+ *   - But the 3-tab Chat Memory panel requires these asset operations. This file is that "12.3 Decision Exception"
+ *     is the landing point: it business-wraps only the chat_memory asset class, keeping it isolated from skill/wiki/code_graph.
  *
- * 请求约定（跟 /meta/* 相同）：
- *   - 全部 POST
- *   - Header 必带 `X-Tdai-Service-Id`（选实例）+ `X-Tdai-User-Key`（caller 身份）
- *   - 返回 envelope `{ code, message, request_id, data }`
+ * Request conventions (same as /meta/*):
+ *   - All POST
+ *   - Header must include `X-Tdai-Service-Id` (instance selection) + `X-Tdai-User-Key` (caller identity)
+ *   - Return envelope `{ code, message, request_id, data }`
  *
- * 内核调用：
- *   元数据层走 `deps.metaKernel.invoke(action, body, ctx)` → 内核 `/v3/meta/*`。
- *   数据面层（/layer、/import）走 `deps.kernelHttp.postEnvelope('/v3/...', body, cred)`。
- *   面板层职责：拼装 caller header、聚合多次调用、权限/类型/借入 ≤ 2 校验。
+ * Kernel invocation:
+ *    Metadata layer goes through `deps.metaKernel.invoke(action, body, ctx)` → kernel `/v3/meta/*`.
+ *   Data layer (/layer, /import) goes through `deps.kernelHttp.postEnvelope('/v3/...', body, cred)`.
+ *   Panel layer responsibilities: assemble caller header, aggregate multiple calls, validate permissions/type/borrow ≤ 2.
  *
- * 12 endpoints（与前端 web/src/components/ChatMemoryPanel.tsx 3 tab 对应）：
- *   POST /chat-memory/team-assets     团队 tab（visibility=team 且非 me owner）
- *   POST /chat-memory/agent-fixed     固定资产 tab（选中 agent 的 fixed_assets）
- *   POST /chat-memory/my-agents       我的资产分配 tab（我 owner 的 agent 列表）
- *   POST /chat-memory/mine            (老) owner=me 的 asset 列表
- *   POST /chat-memory/create          创建独立 UserAsset (mem-xxx)
- *   POST /chat-memory/patch-scope     改 scope（team ↔ private）
- *   POST /chat-memory/allocate        分配（借入），含 ≤ 2 校验
- *   POST /chat-memory/unbind          从 agent 解绑
- *   POST /chat-memory/layer           L0/L1/L2/L3 分层懒加载
- *   POST /chat-memory/layer-delete    L0/L1 列表批量删除（Owner-only）
- *   POST /chat-memory/clear           一键清空内容、保留资产（Owner-only）
- *   POST /chat-memory/import          导入历史对话到 agent 的 L0
+ * 12 endpoints (corresponding to the 3 tabs in frontend web/src/components/ChatMemoryPanel.tsx):
+ *   POST /chat-memory/team-assets      Team tab (visibility=team and not me owner)
+ *   POST /chat-memory/agent-fixed      Fixed assets tab (fixed_assets of the selected agent)
+ *   POST /chat-memory/my-agents        My assets allocation tab (list of agents I own)
+ *   POST /chat-memory/mine            (old) asset list where owner=me
+ *   POST /chat-memory/create           Create standalone UserAsset (mem-xxx)
+ *   POST /chat-memory/patch-scope      Change scope (team ↔ private)
+ *   POST /chat-memory/allocate         Allocate (borrow), including ≤ 2 validation
+ *   POST /chat-memory/unbind           Unbind from agent
+ *   POST /chat-memory/layer           L0/L1/L2/L3 layered lazy loading
+ *   POST /chat-memory/layer-delete    Batch delete L0/L1 list (Owner-only)
+ *   POST /chat-memory/clear            One-click clear content, keep assets (Owner-only)
+ *   POST /chat-memory/import           Import historical conversations into the agent's L0
  */
 import type { Hono } from "hono";
 import { validatePanelMetaHeaders } from "../middleware/validate-panel-headers.js";
@@ -45,9 +45,9 @@ import { newExternalAssetId } from "../../domain/asset-id.js";
 import { fetchAllMetaListItems } from "./knowledge/common.js";
 
 /**
- * 归一化详情页时间筛选器传来的 time_start / time_end。
- * 接受任意可被 Date 解析的字符串（含 datetime-local 的 `YYYY-MM-DDTHH:mm`），
- * 统一转成 UTC ISO8601 后交给内核；非字符串/不可解析一律返 undefined（视为不筛选）。
+ * Normalize the `time_start` / `time_end` passed from the time filter on the detail page.
+ * Accept any string that can be parsed by `Date` (including `YYYY-MM-DDTHH:mm` from `datetime-local`),
+ * Convert them uniformly to UTC ISO8601 and pass to the kernel; return `undefined` for non-strings or unparseable values (treated as no filtering).
  */
 function normalizeTimeInput(v: unknown): string | undefined {
   if (typeof v !== "string") return undefined;
@@ -59,12 +59,12 @@ function normalizeTimeInput(v: unknown): string | undefined {
 }
 
 /**
- * 判断「筛选范围过大，VDB 无法支撑本次分页查询」。
- * 依据：内核统计说这个范围内有数据（total > 0）、且请求的 offset 仍落在总量内，
- * 但本页却一条都没返回。TCVDB 的分页查询（queryL0Paginated / queryL1Paginated）
- * 在超出可支撑窗口时会捕获异常并静默返回空集（见 MemoryCore/src/core/store/tcvdb.ts），
- * 所以这一组合不可能是"真的没有数据"，只能是查询被 VDB 拒绝。
- * 命中后由前端提示用户缩短筛选的时间范围，而不是错误地展示"暂无数据"。
+ * Determine "the filtering range is too large, and VDB cannot support this paginated query."
+ * Basis: The kernel statistics indicate that there is data in this range (total > 0) and the requested offset is still within the total,
+ * but this page returns no records at all. The TCVDB paginated queries (queryL0Paginated / queryL1Paginated)
+ * capture exceptions and silently return an empty set when exceeding the supported window (see MemoryCore/src/core/store/tcvdb.ts),
+ * so this combination cannot be "truly no data"; it can only mean the query was rejected by VDB.
+ * Upon a hit, prompt the user in the frontend to shorten the time range of the filter, rather than incorrectly displaying "No data available."
  */
 function isRangeTooLarge(
   total: number,
@@ -74,7 +74,7 @@ function isRangeTooLarge(
   return total > 0 && returned === 0 && offset < total;
 }
 
-// ── 内核 raw 类型（只列本文件用到的字段，避免依赖 SDK） ────────────
+// ── Kernel raw type (only list the fields used in this file to avoid SDK dependencies) ────────────
 interface AssetRaw {
   asset_id: string;
   team_id: string;
@@ -106,7 +106,7 @@ interface ListEnvelopeData<T> {
   offset?: number;
 }
 
-// ── 出参 shape（与前端 MemoryBlock 对齐） ─────────────────────────
+// ── Output shape (aligned with frontend MemoryBlock) ─────────────────────────
 interface MemoryBlockOut {
   id: string;
   title: string;
@@ -120,11 +120,11 @@ interface MemoryBlockOut {
 }
 
 export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
-  // 4.1 团队资产 tab
+  // 4.1 Team Assets tab
   //
-  // 产品语义：这个 tab 显示当前团队内所有已共享的记忆资产。
-  //   - visibility=team（已共享）
-  //   - 不区分 owner，自己共享出去的也应在团队资产里可见。
+  // This tab displays all shared memory assets within the current team.
+  //   - visibility=team (shared)
+  //   - No distinction is made for the owner; those shared by oneself should also be visible as team assets.
   api.post(
     "/chat-memory/team-assets",
     validatePanelMetaHeaders(deps),
@@ -133,7 +133,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
       const teamId = requiredTeamId(await readJson(c));
       if (!teamId) return respondControlError(c, 400, "MISSING_TEAM_ID");
 
-      // 分页拉全量：内核 DEFAULT_PAGINATION=20，单页截断会让列表显示不全
+      // Paginate to full: kernel DEFAULT_PAGINATION=20, single-page truncation will cause the list to be displayed incompletely
       let listError: MetaEnvelope<unknown> | null = null;
       const items = (
         await fetchAllMetaListItems<AssetRaw>(
@@ -148,11 +148,11 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
       ).filter(isActive);
       if (listError) return respondEnvelope(c, listError);
 
-      // perf: 列表接口不再计算 bound_agent_count（旧实现 N+1：M 条 asset × 每条
-      // 一次 agent/list + 一次 summary-by-agents，20 asset 场景实测 41 次 kernel 调用，
-      // 用户实测 3.5s+ 卡顿）。前端不在列表 UI 里展示该字段（layer counts / 绑定数都
-      // 只在右侧详情面板出现），故直接省掉。若后续需要在列表里显示绑定数，走独立
-      // 懒加载端点，不要放回主列表循环。
+      // perf: list interface no longer calculates bound_agent_count (old implementation N+1: M assets × each
+      // one agent/list + one summary-by-agents, 20 asset scenario tested 41 kernel calls,
+      // User real-world test 3.5s+ lag). The frontend does not display this field in the list UI (layer counts / bindings all
+      // (only appears in the right-side detail panel), so it is directly omitted. If binding counts need to be displayed in the list later, go through a separate
+      // Lazy-load endpoint, do not return to the main list loop.
       const out: MemoryBlockOut[] = items.map((a) => ({
         id: a.asset_id,
         title: a.name,
@@ -168,17 +168,17 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
     },
   );
 
-  // ── 4.2 固定资产 tab ─────────────────────────────────────
+  // ── 4.2 Fixed Assets tab ─────────────────────────────────────
   //
   // POST /chat-memory/agent-fixed  body: { agent_id }
   //
-  // 返回该 agent 名下 meta_agent_fixed_assets 里 asset_type=chat_memory 的绑定。
-  // 通过 /v3/meta/agent-fixed-asset/list-with-detail 一次拿到 asset 详情。
+  // Returns the bindings of asset_type=chat_memory in meta_agent_fixed_assets under this agent.
+  // Get the asset details in one go via /v3/meta/agent-fixed-asset/list-with-detail.
   //
-  // 权限（产品定义："固定资产" = 我 owner 的 agent 的绑定资产）：
-  //   1. agent.owner_user_id === me → 可见自己 agent 借入的所有 asset
+  // Permissions (product definition: "Fixed Assets" = assets bound to my owner's agent):
+  //    1. agent.owner_user_id === me → can see all assets borrowed by my agent
   //   2. agent.owner_user_id !== me → 403 NOT_YOUR_AGENT
-  //   3. 无 caller 身份 → 401
+  //    3. No caller identity → 401
   api.post(
     "/chat-memory/agent-fixed",
     validatePanelMetaHeaders(deps),
@@ -191,7 +191,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
       const meUserId = await resolveCallerUserId(deps, ctx);
       if (!meUserId) return respondControlError(c, 401, "INVALID_USER_KEY");
 
-      // 查 agent 拿 owner 决定过滤策略
+      // Check agent to get owner to decide filtering strategy
       const agentEnv = await deps.metaKernel.invoke(
         "agent/get",
         { agent_id: agentId },
@@ -206,19 +206,19 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
         return respondControlError(c, 403, "NOT_YOUR_AGENT");
       }
 
-      // 展示策略：返回全部物理绑定（apply_visibility_filter=false），前端根据
-      // scope + owner 灰化"其他人已切私密"的条目：
-      //   - 记忆内容/详情：不允许查看（前端展示占位）
-      //   - 解绑操作：允许（清理脏 binding 的入口）
-      // 若用 filter=true 会直接把已私密条目从 items 里剔除 → 使用者永远无法
-      // 知晓/清理这些残留绑定；filter=false + 前端标记是"感知 + 可清理"的更好体验。
-      // 分页注意：list-with-detail 默认 limit=20（DEFAULT_PAGINATION），排序
-      // priority DESC, created_at DESC。当 agent 绑定资产较多（skill/wiki/code_graph/
-      // chat_memory 混排）时，priority 较低的 chat_memory 绑定会被排到 20 名之外而
-      // 被整页截断 → 固定资产记忆 tab 丢失记忆块。这里做翻页聚合（对齐
-      // MetadataClient.getAgentFixedAssets 的 FA_PAGE_SIZE 循环模式），把该 agent 的
-      // 全部固定资产绑定拉回来再过滤，避免"拍上限"导致 skill 一多仍会丢。
-      // list-with-detail 返回的 items（AgentAssetView）不带 owner_user_id
+      // Display strategy: return all physically bound (apply_visibility_filter=false), frontend based on
+      // scope + owner gray out entries of "others have switched to private":
+      //   - Memory content/details: not allowed to view (frontend display placeholder)
+      //   - Unbind operation: allow (entry point for cleaning dirty bindings
+      // If filter=true it will directly remove private items from items → users can never
+      // Know/clean these residual bindings; filter=false + frontend marking as "perception + cleanable" is a better experience.
+      // Pagination note: list-with-detail defaults to limit=20 (DEFAULT_PAGINATION), sorting
+      // priority DESC, created_at DESC. When agent binds many assets (skill/wiki/code_graph/
+      // when chat_memory is mixed, the chat_memory binding with lower priority will be ranked outside 20
+      // Truncating the entire page makes the fixed-asset memory tab lose memory blocks. Here we do pagination aggregation (align
+      // MetadataClient.getAgentFixedAssets FA_PAGE_SIZE loop mode), set the agent's
+      // Bind all fixed assets back first and then filter, to avoid "capping the limit" causing skills to be lost as they accumulate.
+      // items returned by list-with-detail (AgentAssetView) do not include owner_user_id
       interface FixedAssetDetailRaw {
         asset_id: string;
         asset_type: string;
@@ -268,11 +268,11 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
             it.status !== "failed",
         );
 
-      // 拿真实 owner_user_id 和 updated_at（list-with-detail 不返这两个字段）
+      // Get real owner_user_id and updated_at (these two fields are not returned in list-with-detail)
       const out: MemoryBlockOut[] = await Promise.all(
         items.map(async (it) => {
           let ownerUserId = "";
-          let updatedAt = it.created_at; // 兜底：asset/get 失败时用 created_at
+          let updatedAt = it.created_at; // Fallback: use created_at when asset/get fails
           try {
             const aEnv = await deps.metaKernel.invoke(
               "asset/get",
@@ -285,7 +285,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
               updatedAt = a.updated_at || it.created_at;
             }
           } catch {
-            /* fallback 空 */
+            /* fallback empty */
           }
           return {
             id: it.asset_id,
@@ -293,9 +293,9 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
             summary: buildSummary(),
             uploaded_by_user_id: ownerUserId,
             updated_at_ms: toMs(updatedAt),
-            // 透传给前端做灰化：team 正常显示，private 灰化 + 打"已被 owner 设为私密"标签
+            // Pass through to frontend for graying out: team displays normally, private is grayed out + tagged as "Set as private by owner"
             scope: it.visibility === "private" ? "private" : "team",
-            // TEMP：本地测试展示用；生产应改为懒加载
+            // TEMP: For local testing display; should be lazy-loaded in production
             layer_counts: emptyLayers(),
             agent_id: agentId,
           };
@@ -308,14 +308,14 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
     },
   );
 
-  // ── 4.3b 我的资产分配 tab（新语义）─────────────────────────
+  // ── 4.3b My Assets Allocation tab (new semantics)─────────────────────────
   //
   // POST /chat-memory/my-agents  body: { team_id }
   //
-  // 产品语义：一个 agent = 一块记忆，"我的资产分配"tab 显示我 owner 的所有 agent，
-  // 每个 agent 上有"团队可见"开关（scope）。这里返回每个 agent 对应的 chat_memory
-  // 块视图（block.id = chat_memory-{team}-{agent}，title = agent.name，
-  // scope 来自该 agent 自有 chat_memory 的 visibility）。
+  // Product semantics: one agent = one memory, the "My Asset Allocation" tab displays all agents owned by me,
+  // Each agent has a "Team Visible" switch (scope). Here we return the block view corresponding to each agent's chat_memory
+  // block (block.id = chat_memory-{team}-{agent}, title = agent.name,
+  // scope comes from the visibility of the agent's own chat_memory).
   api.post(
     "/chat-memory/my-agents",
     validatePanelMetaHeaders(deps),
@@ -328,9 +328,9 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
       const meUserId = await resolveCallerUserId(deps, ctx);
       if (!meUserId) return respondControlError(c, 401, "INVALID_USER_KEY");
 
-      // 拉 team 下所有 agent，然后面板层按 owner=me 过滤
-      // （tdai /v3/meta/agent/list 传 team_id 时会忽略 owner_user_id，需自己过滤）
-      // 分页拉全量：单页 20 条截断会让团队 agent > 20 时"我的 Agent"列表显示不全
+      // Pull all agents from the team, then filter by owner=me in the panel layer
+      // (tdai /v3/meta/agent/list ignores owner_user_id when team_id is passed, so you need to filter it yourself)
+      // Pull the full list with pagination: truncating to 20 per page will cause the "My Agents" list to be incomplete when the team has more than 20 agents
       let agentListError: MetaEnvelope<unknown> | null = null;
       const agents = (
         await fetchAllMetaListItems<AgentRaw & { name: string; description?: string }>(
@@ -345,7 +345,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
       ).filter((a) => a.owner_user_id === meUserId);
       if (agentListError) return respondEnvelope(c, agentListError);
 
-      // 每个 agent 对应一块记忆：查 chat_memory asset（若已 auto-mint）拿到 visibility
+      // Each agent corresponds to a block of memory: check the chat_memory asset (if already auto-minted) to get the visibility
       const out: MemoryBlockOut[] = await Promise.all(
         agents.map(async (a) => {
           const assetId = `chat_memory-${teamId}-${a.agent_id}`;
@@ -363,11 +363,11 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
               updated_at_ms = toMs(asset.updated_at);
             }
           } catch {
-            /* asset 不存在 → 保留 private + 0 */
+            /* asset does not exist → keep private + 0 */
           }
           return {
             id: assetId,
-            title: a.name, // ← 用 agent name 作为块标题，符合"一 agent 一块记忆"
+            title: a.name, // ← Use agent name as block title, consistent with "one agent, one block memory"
             summary: buildSummary(),
             uploaded_by_user_id: meUserId,
             updated_at_ms,
@@ -384,18 +384,18 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
     },
   );
 
-  // 4.3 我的资产 tab
+  // 4.3 My Assets tab
   api.post("/chat-memory/mine", validatePanelMetaHeaders(deps), async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
     const teamId = requiredTeamId(body);
     if (!teamId) return respondControlError(c, 400, "MISSING_TEAM_ID");
 
-    // caller = 当前 user_key 对应的 user_id（走 auth/verify 反查，不信任前端传参）
+    // caller = the user_id corresponding to the current user_key (looked up via auth/verify reverse lookup, frontend-provided parameters are not trusted)
     const meUserId = await resolveCallerUserId(deps, ctx);
     if (!meUserId) return respondControlError(c, 401, "INVALID_USER_KEY");
 
-    // 分页拉全量：单页 20 条截断会让"我的资产"超过 20 条时列表显示不全
+    // Paginate to full: truncating 20 items per page will cause the "My Assets" list to be incomplete when there are more than 20 items
     let listError: MetaEnvelope<unknown> | null = null;
     const items = (
       await fetchAllMetaListItems<AssetRaw>(
@@ -417,7 +417,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
         summary: buildSummary(),
         uploaded_by_user_id: a.owner_user_id,
         updated_at_ms: toMs(a.updated_at),
-        // TEMP：本地测试展示用；生产应改为懒加载或前端点击时按需拉
+        // TEMP: For local testing display; in production, change to lazy loading or pull on demand when clicked by the frontend
         layer_counts: emptyLayers(),
         scope: (a.visibility === "private" ? "private" : "team") as
           | "team"
@@ -427,13 +427,13 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
     return respondEnvelope(c, okEnvelope(c, { items: out, total: out.length }));
   });
 
-  // 4.7 创建 UserAsset
+  // 4.7 Create UserAsset
   //
-  // tdai asset/create schema 要求 asset_id + owner_user_id 必填（不会从 header 反查），
-  // 所以面板层要：
-  //   1. auth/verify 拿 caller user_id
-  //   2. 用 newExternalAssetId('chat_memory') 生成 mem-xxx id
-  //   3. 再 asset/create
+  // tdai asset/create schema requires asset_id + owner_user_id to be required (cannot be looked up from header),
+  // so the panel layer needs to:
+  //   1. auth/verify to get caller user_id
+  //   2. generate mem-xxx id with newExternalAssetId('chat_memory')
+  //   3. then asset/create
   api.post("/chat-memory/create", validatePanelMetaHeaders(deps), async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -447,7 +447,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
     const description =
       typeof body?.description === "string" ? body.description : undefined;
 
-    // 反查 caller user_id
+    // Reverse lookup caller user_id
     const meUserId = await resolveCallerUserId(deps, ctx);
     if (!meUserId) return respondControlError(c, 401, "INVALID_USER_KEY");
 
@@ -481,17 +481,17 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
     );
   });
 
-  // ── 4.10 导入历史对话到 agent 记忆池 ──────────────────────
+  // ── 4.10 Import historical conversations into the agent memory pool ──────────────────────
   //
   // POST /chat-memory/import  body: { team_id, agent_id, session_id?, messages: [{role, content, ts?}] }
   //
-  // 语义："把这段历史对话作为 L0 塞进选定 agent 的记忆池"，让 tdai pipeline 后续
-  // 自动蒸馏出 L1/L2/L3。**不建新 asset** —— 该 agent 的 chat_memory asset 已由
-  // ensureChatMemoryAsset 自动登记，本接口只写数据面 L0。
+  // Semantics: "Insert this historical conversation as L0 into the selected agent's memory pool", allowing the tdai pipeline to proceed subsequently
+  // Automatically distill L1/L2/L3. **No new asset** —— the agent's chat_memory asset has been
+  // ensureChatMemoryAsset auto-registration, this interface only writes data plane L0.
   //
-  // 权限：agent.owner = me（只能往自己的 agent 导入）
+  // Permissions: agent.owner = me (can only import into your own agent)
   //
-  // 走 tdai /v3/conversation/add：
+  // go tdai /v3/conversation/add:
   //   body: { team_id, user_id (=agent.owner), agent_id, session_id, messages }
   api.post("/chat-memory/import", validatePanelMetaHeaders(deps), async (c) => {
     const ctx = buildCtx(c);
@@ -504,12 +504,12 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
     if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
       return respondControlError(c, 400, "MISSING_MESSAGES");
     }
-    // tdai conversationAddRequestSchema 上限 100，超了内核会挡回来 → 面板层也 100
+    // tdai conversationAddRequestSchema limit 100, exceeding it will be blocked by the kernel → panel layer also 100
     if (rawMessages.length > 100) {
       return respondControlError(c, 400, "TOO_MANY_MESSAGES");
     }
 
-    // 规范化 messages
+    // Normalize messages
     interface Msg {
       role: string;
       content: string;
@@ -532,7 +532,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
       return respondControlError(c, 400, "NO_VALID_MESSAGES");
     }
 
-    // 权限：agent.owner = me
+    // Permission: agent.owner = me
     const meUserId = await resolveCallerUserId(deps, ctx);
     if (!meUserId) return respondControlError(c, 401, "INVALID_USER_KEY");
     const agentEnv = await deps.metaKernel.invoke(
@@ -550,13 +550,13 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
     if (agent.owner_user_id !== meUserId)
       return respondControlError(c, 403, "NOT_YOUR_AGENT");
 
-    // session_id 兜底：调用方可传，或生成一个 imported-{ts}
+    // session_id fallback: can be passed by the caller, or generated as imported-{ts}
     const sessionId =
       typeof body?.session_id === "string" && body.session_id.trim()
         ? body.session_id.trim()
         : `imported-${Date.now().toString(36)}`;
 
-    // 走数据面 conversation/add；user_id 用 agent.owner_user_id（数据面按 owner 隔离）
+    // go to data plane conversation/add; user_id uses agent.owner_user_id (data plane isolated by owner)
     const cred = toKernelCredentials(ctx, { timeoutMs: 15_000 });
     const addEnv = await deps.kernelHttp.postEnvelope<{
       accepted_ids?: string[];
@@ -587,13 +587,13 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
     );
   });
 
-  // 4.8 改 scope
+  // 4.8 Change scope
   //
-  // 双层校验：
-  //   1. 面板层：asset_type === 'chat_memory'（防止 chat-memory 路由被用于修改
-  //      其它类型 asset 的 visibility，这条路由是 chat-memory 专用）
-  //   2. tdai 层：`updateAssetForCaller` 走 `assertCallerIsAssetOwner`，非 owner
-  //      直接 permission_denied
+  // Dual validation:
+  //   1. Panel layer: asset_type === 'chat_memory' (to prevent the chat-memory route from being used to modify
+  //       the visibility of other types of assets, this route is dedicated to chat-memory)
+  //   2. tdai layer: `updateAssetForCaller` goes through `assertCallerIsAssetOwner`, non-owner
+  //       directly permission_denied
   api.post(
     "/chat-memory/patch-scope",
     validatePanelMetaHeaders(deps),
@@ -610,7 +610,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
             : undefined;
       if (!scope) return respondControlError(c, 400, "INVALID_SCOPE");
 
-      // 校验目标 asset 是 chat_memory
+      // Verify that the target asset is chat_memory
       const preEnv = await deps.metaKernel.invoke(
         "asset/get",
         { asset_id: blockId },
@@ -632,12 +632,12 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
       );
       if (env.code !== 0) return respondEnvelope(c, env);
       const asset = env.data as AssetRaw;
-      // 切私密后：不再由 backend 主动 prune 其它 agent 的绑定
-      //   1. 内核权限模型要求 caller = agent.owner 才能 set；owner 本人只能 set 自己的 agent
-      //   2. 保留脏 binding 也无害：下游 injection / memory-bridge 会在读侧调
-      //      apply_visibility_filter=true 过滤掉 canBindAsset=false 的项；
-      //      详情页也会一并过滤，不会被展示
-      //   3. 前端在切私密按钮弹 confirm 提示用户"其他 agent 已绑定会不能再用"
+      // After making private: no longer prune bindings of other agents proactively by backend
+      //   1. Kernel permission model requires caller = agent.owner to set; owner can only set their own agent
+      //   2. Keeping dirty bindings is harmless: downstream injection / memory-bridge will call on the read side
+      //      apply_visibility_filter=true filters out items where canBindAsset=false;
+      //      Details page will also be filtered and will not be displayed
+      //   3. Frontend shows a confirm prompt to the user when switching to the private button, stating "Other agents have been bound and cannot be used"
       return respondEnvelope(
         c,
         okEnvelope(c, {
@@ -649,7 +649,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
     },
   );
 
-  // 4.5a 批量设置固定 memory（原子校验 + 单次 set，避免多次 allocate 并发覆盖）
+  // 4.5a Batch set fixed memory (atomic check + single set, avoiding multiple allocate concurrent overwrites)
   api.post(
     "/chat-memory/set-agent-fixed",
     validatePanelMetaHeaders(deps),
@@ -714,8 +714,8 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
         }
       }
 
-      // 分页拉全量：内核 DEFAULT_PAGINATION=20，不传 limit 只拿前 20 条，
-      // 下面 set 是全量替换 → ≥21 条时老绑定会被静默清掉。
+      // Pagination to fetch full data: kernel DEFAULT_PAGINATION=20, without passing limit only fetch the first 20 items,
+      // The following set is a full replacement → when there are ≥21 items, the old binding will be silently cleared.
       let bindListError: MetaEnvelope<unknown> | null = null;
       const existing = await fetchAllMetaListItems<FixedAssetRaw>(
         deps,
@@ -779,7 +779,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
     },
   );
 
-  // 4.5 分配（借入）+ ≤ 2 校验
+  // 4.5 Allocation (Borrowing) + ≤ 2 Validation
   api.post(
     "/chat-memory/allocate",
     validatePanelMetaHeaders(deps),
@@ -793,7 +793,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
       if (!agentId) return respondControlError(c, 400, "MISSING_AGENT_ID");
       if (!teamId) return respondControlError(c, 400, "MISSING_TEAM_ID");
 
-      // 校验 asset 存在 + type + team 一致
+      // Verify asset exists + type + team are consistent
       const assetEnv = await deps.metaKernel.invoke(
         "asset/get",
         { asset_id: blockId },
@@ -811,7 +811,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
         return respondControlError(c, 400, "TEAM_MISMATCH");
       }
 
-      // 校验 agent 存在 + 同 team
+      // Verify agent exists + same team
       const agentEnv = await deps.metaKernel.invoke(
         "agent/get",
         { agent_id: agentId },
@@ -826,8 +826,8 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
         return respondControlError(c, 400, "AGENT_NOT_IN_TEAM");
       }
 
-      // 权限校验（普通用户视角）：只能给"自己 owner 的 agent"借入资产
-      // 目标 asset 必须是 visibility=team（团队已共享），或者是自己 owner 的（自留自用也 OK）
+      // Permission check (normal user perspective): can only borrow assets from "owners of their own agents"
+      // The target asset must be visibility=team (shared by the team), or owned by themselves (self-use is also OK)
       const meUserId = await resolveCallerUserId(deps, ctx);
       if (!meUserId) return respondControlError(c, 401, "INVALID_USER_KEY");
       if (agent.owner_user_id !== meUserId) {
@@ -837,19 +837,19 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
         return respondControlError(c, 403, "ASSET_NOT_SHARED");
       }
 
-      // 禁止把 agent 自己的 chat_memory 再分配回自己；自有记忆由 auto-mint 固定存在，
-      // 分配入口只用于把其它 agent 的共享记忆借入到当前 agent。
+      // Prohibit reassigning agent's own chat_memory back to itself; its own memory is fixedly stored by auto-mint,
+      // The allocation entry is only used to borrow shared memory from other agents into the current agent.
       const selfChatMemoryId = `chat_memory-${teamId}-${agentId}`;
       if (blockId === selfChatMemoryId) {
         return respondControlError(
           c,
           400,
-          "不能把该 Agent 自己的记忆再分配给自己。",
+          "Cannot reassign this Agent's own memory to itself.",
         );
       }
 
-      // 拉现有绑定（分页拉全量，理由同 4.4 借入：set 是全量替换，
-      // 单页 20 条截断会让第 21+ 条绑定被静默清掉，imported 计数也会失真）
+      // Pull existing bindings (pull all in full pagination, reason same as 4.4 borrowing: set is a full replacement,
+      // single-page 20-item truncation will silently clear bindings from the 21st onwards, and the imported count will also be distorted)
       let bindListError: MetaEnvelope<unknown> | null = null;
       const bindings = await fetchAllMetaListItems<FixedAssetRaw>(
         deps,
@@ -865,11 +865,11 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
         return respondControlError(
           c,
           409,
-          "这条记忆已经分配给该 Agent，无需重复分配。",
+          "This memory has been assigned to the Agent and does not need to be reassigned.",
         );
       }
 
-      // 借入 ≤ 2 校验：非自有 chat_memory 计数
+      // Borrow ≤ 2 validation: non-owned chat_memory count
       const imported = bindings.filter(
         (b) =>
           b.asset_type === "chat_memory" && b.asset_id !== selfChatMemoryId,
@@ -878,7 +878,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
         return respondControlError(c, 400, "IMPORT_LIMIT_EXCEEDED");
       }
 
-      // 组合：list → append → set（tdai 无 append 端点）
+      // Combination: list → append → set (tdai has no append endpoint)
       const newBindings = [
         ...bindings.map((b) => ({
           asset_id: b.asset_id,
@@ -892,7 +892,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
           asset_type: "chat_memory",
           injection_mode: "summary",
           priority: 50,
-          created_by: agent.owner_user_id, // 用 agent owner 作为绑定的 created_by
+          created_by: agent.owner_user_id, // using agent owner as the bound created_by
         },
       ];
       const setEnv = await deps.metaKernel.invoke(
@@ -912,7 +912,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
     },
   );
 
-  // 4.6 解绑
+  // 4.6 Unbind
   api.post("/chat-memory/unbind", validatePanelMetaHeaders(deps), async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -923,13 +923,13 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
     if (!agentId) return respondControlError(c, 400, "MISSING_AGENT_ID");
     if (!teamId) return respondControlError(c, 400, "MISSING_TEAM_ID");
 
-    // 禁止解绑 agent 的"自有" chat_memory（由 auto-mint 建的）
+    // Prohibit unbinding the agent's "own" chat_memory (created by auto-mint)
     const selfChatMemoryId = `chat_memory-${teamId}-${agentId}`;
     if (blockId === selfChatMemoryId) {
       return respondControlError(c, 400, "CANNOT_UNBIND_SELF_CHAT_MEMORY");
     }
 
-    // 权限校验（普通用户视角）：只能解绑"自己 owner 的 agent"上的借入
+    // Permission check (normal user perspective): can only unbind the borrowed agent on "their own owner's" agent
     const meUserId = await resolveCallerUserId(deps, ctx);
     if (!meUserId) return respondControlError(c, 401, "INVALID_USER_KEY");
     const agentEnv = await deps.metaKernel.invoke(
@@ -947,7 +947,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
       return respondControlError(c, 403, "NOT_YOUR_AGENT");
     }
 
-    // 校验 asset 是 chat_memory（防止此路由被用作通用 fixed-asset unbind 入口）
+    // Verify that asset is chat_memory (to prevent this route from being used as a general fixed-asset unbind entry)
     const assetEnv = await deps.metaKernel.invoke(
       "asset/get",
       { asset_id: blockId },
@@ -962,11 +962,11 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
       return respondControlError(c, 400, "NOT_CHAT_MEMORY");
     }
 
-    // 拉 agent 的绑定：过滤时既要移除本次目标，也要**顺便过滤 canBindAsset=false
-    // 的历史脏 binding**（例如别人已把资产切私密但绑定未清），否则下一步 set 全量
-    // 重写会触发内核 asset_not_bindable 409。这里用 list-with-detail 一次拉齐
-    // 每条 binding 对应 asset 的 visibility，本地做过滤，避免 N 次 asset/get。
-    // 分页拉全量：set 是全量替换，单页 20 条截断会让第 21+ 条绑定被静默清掉。
+    // Fetch the agent's bindings: besides the current target, also filter out stale bindings
+    // where canBindAsset=false (e.g., someone made the asset private but never cleared the
+    // binding); otherwise the next full rewrite triggers kernel asset_not_bindable 409.
+    // Here list-with-detail pulls every binding at once and filters locally by each one's
+    // asset visibility, avoiding N asset/get calls. Fetch pages fully: set replaces everything, so a 20-row page would not silently drop bindings 21+.
     let bindListError: MetaEnvelope<unknown> | null = null;
     interface BindingWithDetail {
       asset_id: string;
@@ -988,15 +988,15 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
     );
     if (bindListError) return respondEnvelope(c, bindListError);
 
-    // 若 blockId 不在 filter 后 items 里，说明要么本来就没绑定，要么内核判定 caller 不能 bind
-    // 都视为"当前实际可解的绑定不含 blockId" → 404 便于 UI 语义清晰
-    // 但也要处理"binding 存在但因私密被 filter 掉"的场景 —— 该场景下也应允许解绑，
-    // 需要用不带 filter 的 list 二次确认原始绑定存在。
+    // If blockId is not in the items after filtering, it means it was not bound in the first place, or the kernel determined that caller cannot bind
+    // Both cases are treated as "the current actually resolvable bindings do not contain blockId" → 404 for clear UI semantics
+    // But also handle the scenario where "binding exists but was filtered out due to privacy" — in this scenario, unbinding should also be allowed,
+    // and need to confirm the original binding exists using a list without filter.
     const targetInFilteredList = detailBindings.some(
       (b) => b.asset_id === blockId,
     );
     if (!targetInFilteredList) {
-      // 二次确认同样分页拉全量：目标绑定若排在 21+，单页 list 会漏掉而误判 404
+      // Confirmation pagination also fetches the full list: if the target binding is ranked 21+, a single-page list will miss it and falsely judge a 404
       let rawListError: MetaEnvelope<unknown> | null = null;
       const raw = await fetchAllMetaListItems<FixedAssetRaw>(
         deps,
@@ -1010,11 +1010,11 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
       if (rawListError) return respondEnvelope(c, rawListError);
       const exists = raw.some((b) => b.asset_id === blockId);
       if (!exists) return respondControlError(c, 404, "BINDING_NOT_FOUND");
-      // 存在但因 visibility 被 filter 掉 —— 属于"要清理的脏 binding"，允许继续
+      // Exists but filtered out due to visibility —— belongs to "dirty bindings to be cleaned up", allow to continue
     }
 
-    // set 用 apply_visibility_filter=true 过滤后的 remaining（不包含目标 blockId），
-    // 保证 canBindAsset 全部 pass。
+    // set remaining filtered by apply_visibility_filter=true (excluding the target blockId),
+    // to ensure all canBindAsset pass.
     const remaining = detailBindings.filter((b) => b.asset_id !== blockId);
     const setEnv = await deps.metaKernel.invoke(
       "agent-fixed-asset/set",
@@ -1037,19 +1037,19 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
     );
   });
 
-  // ── 4.4 分层懒加载 ─────────────────────────────────────────
+  // ── 4.4 Layered Lazy Loading ─────────────────────────────────────────
   //
   // POST /chat-memory/layer  body: { block_id, layer, limit?, offset? }
   //   layer ∈ 'L0' | 'L1' | 'L2' | 'L3'
   //
-  // 从 asset_id 反解出 team_id/agent_id，调 tdai 数据面（不是 /v3/meta/*）：
+  // Reverse-engineer team_id/agent_id from asset_id, call the tdai data plane (not /v3/meta/*):
   //   L0 → /v3/conversation/query
   //   L1 → /v3/atomic/query
   //   L2 → /v3/scenario/ls
   //   L3 → /v3/core/read
   //
-  // 只支持系统自动登记的 chat_memory-{team}-{agent}（可反解 agent_id）；
-  // 用户自建 UserAsset（mem-xxx）没有关联的 agent，直接返空。
+  // Only supports system auto-registered chat_memory-{team}-{agent} (agent_id can be reverse-resolved);
+  // User-built UserAsset (mem-xxx) has no associated agent, return empty directly.
   api.post("/chat-memory/layer", validatePanelMetaHeaders(deps), async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -1062,13 +1062,13 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
         : 50;
     const offset =
       typeof body?.offset === "number" && body.offset >= 0 ? body.offset : 0;
-    // before_ts: L0 游标分页参数（ISO8601）。第二页起由前端传「最后一条消息的 created_at」，
-    // 后端转换为 time_end（-1ms 排他）传给内核 /v3/conversation/query，offset 归零。
-    // 这样 VDB 只需 filter recorded_at_ms < cursor 即可，不需要 skip 大量记录。
+    // before_ts: L0 cursor pagination parameter (ISO8601). Starting from the second page, the frontend passes the "created_at of the last message",
+    // the backend converts it to time_end (-1ms exclusive) and passes it to the kernel /v3/conversation/query, with offset reset to zero.
+    // This way, VDB only needs to filter recorded_at_ms < cursor, without skipping a large number of records.
     const beforeTs =
       typeof body?.before_ts === "string" ? body.before_ts.trim() : undefined;
-    // time_start / time_end：详情页时间筛选器（ISO8601），仅作用于按时间存储的 L0 / L1；
-    // L2（scenario/ls）与 L3（core/read）是聚合产物，内核无时间维度，忽略该筛选。
+    // time_start / time_end: detail page time filter (ISO8601), only applies to L0 / L1 stored by time;
+    // L2 (scenario/ls) and L3 (core/read) are aggregation products, the kernel has no time dimension, ignore this filter.
     const timeStart = normalizeTimeInput(body?.time_start);
     const timeEnd = normalizeTimeInput(body?.time_end);
 
@@ -1077,27 +1077,27 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
       return respondControlError(c, 400, "INVALID_LAYER");
     const layer = layerRaw as "L0" | "L1" | "L2" | "L3";
 
-    // 反解 team_id / agent_id
+    // Invert team_id / agent_id
     const parsed = parseChatMemoryAssetId(blockId);
     if (!parsed) {
-      // 用户自建 UserAsset —— 没有关联 agent，无 layer 数据可拉，直接返空
+      // User-created UserAsset —— No associated agent, no layer data to fetch, return empty directly
       return respondEnvelope(
         c,
         okEnvelope(c, { layer, items: [], total: 0, limit, offset }),
       );
     }
 
-    // 数据面调用需要额外传 team_id / agent_id / user_id / session_id
+    // Data plane calls require additional team_id / agent_id / user_id / session_id
     const meUserId = await resolveCallerUserId(deps, ctx);
     if (!meUserId) return respondControlError(c, 401, "INVALID_USER_KEY");
 
-    // ── ACL 校验：防止知道 asset_id 就能读私密内容 ─────────────
-    // 允许读的条件（任一即可）：
-    //   a) caller 是 asset 的 owner（自留自用）
-    //   b) asset.visibility='team'（团队已共享）
-    //   c) asset 已被绑定到 caller 名下某个 agent（借入借关系）
+    // ── ACL check: prevent reading private content by knowing asset_id ─────────────
+    // Conditions for allowing read (any one):
+    //   a) caller is the asset's owner (self-use)
+    //   b) asset.visibility='team' (team has shared it)
+    //   c) asset is bound to some agent under caller's name (borrowed relationship)
     //
-    // asset 元数据从 asset/get 拿；c 需遍历 caller 的 agent 的 fixed-list。
+    // asset metadata is fetched from asset/get; c needs to iterate over the fixed-list of the caller's agent.
     const assetEnv = await deps.metaKernel.invoke(
       "asset/get",
       { asset_id: blockId },
@@ -1112,9 +1112,9 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
       return respondControlError(c, 400, "NOT_CHAT_MEMORY");
     }
 
-    // 读权限（owner / team-shared / borrowed 任一即可）—— 抽到
-    // authorizeChatMemoryRead 复用，与 /chat-memory/search 共享同一套 ACL，避免
-    // 两处逻辑分叉导致的权限口径不一致。
+    // Read permission (owner / team-shared / borrowed, any one) - extracted
+    // authorizeChatMemoryRead reused, shares the same ACL with /chat-memory/search to avoid
+    // Inconsistent permission criteria caused by two logical branches.
     const canRead = await authorizeChatMemoryRead(
       deps,
       ctx,
@@ -1124,13 +1124,13 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
     );
     if (!canRead) return respondControlError(c, 403, "ASSET_NOT_ACCESSIBLE");
 
-    // chat_memory 数据是 asset owner 写入（用其 user_id 隔离），caller 未必是 owner
-    // （借入场景）。用 asset.owner_user_id 作为数据面 user_id。
+    // chat_memory data is written by asset owner (isolated by its user_id), and caller may not be the owner
+    // (in borrowing scenarios). Use asset.owner_user_id as the data-plane user_id.
     const ownerUserId = asset.owner_user_id;
 
     const cred = toKernelCredentials(ctx, { timeoutMs: 15_000 });
 
-    // v3 严格 isolation：session_id 必填。管理面聚合场景传 'default'
+    // v3 strict isolation: session_id is required. 'default' is passed for management plane aggregation scenarios
     const idFields = {
       team_id: parsed.teamId,
       agent_id: parsed.agentId,
@@ -1140,18 +1140,18 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
 
     try {
       if (layer === "L0") {
-        // 关键：不传 session_id，tdai 会跨 session 聚合返 (team,user,agent) 全部消息
-        // tdai 返 { messages: [...], total } 而不是 { items: [...] }
+        // Key: do not pass session_id, tdai aggregates and returns all messages (team,user,agent) across sessions
+        // tdai returns { messages: [...], total } instead of { items: [...] }
         const { session_id: _drop, ...noSid } = idFields;
         void _drop;
 
-        // 游标分页：before_ts → time_end（-1ms 排他）。
-        // 内核 /v3/conversation/query 的 time_end 是 recorded_at_ms <= timeEndMs（含等），
-        // 游标语义需要排他（< beforeTs），否则最后一条会被重复返回。
-        // 减 1ms 把含等转为不含等。毫秒精度足够（同一 ms 的重复极少且前端有 id 去重兜底）。
+        // Cursor pagination: before_ts → time_end (-1ms exclusive).
+        // The kernel /v3/conversation/query time_end is recorded_at_ms <= timeEndMs (inclusive),
+        // but the cursor semantics need to be exclusive (< beforeTs), otherwise the last item would be returned repeatedly.
+        // Subtracting 1ms converts the inclusive condition to an exclusive one. Millisecond precision is sufficient (duplicates within the same ms are extremely rare and the frontend has id deduplication as a fallback).
         const l0Query: Record<string, unknown> = { ...noSid };
         if (timeStart) l0Query.time_start = timeStart;
-        // 游标上界（before_ts）与筛选上界（time_end）取更早者（交集）：翻页不能越出用户选定的时间范围。
+        // The upper bound of the cursor (before_ts) and the filter upper bound (time_end) take the earlier one (intersection): pagination cannot exceed the user's selected time range.
         let l0TimeEnd = timeEnd;
         if (beforeTs) {
           const d = new Date(beforeTs);
@@ -1159,7 +1159,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
             const cursorEnd = new Date(d.getTime() - 1).toISOString();
             l0TimeEnd =
               !l0TimeEnd || cursorEnd < l0TimeEnd ? cursorEnd : l0TimeEnd;
-            l0Query.offset = 0; // 游标模式下 offset 归零
+            l0Query.offset = 0; // In cursor mode, offset is reset to zero
           }
         } else {
           l0Query.offset = offset;
@@ -1176,9 +1176,9 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
           messages?: Array<Record<string, unknown>>;
           total?: number;
         } | null) ?? { messages: [] };
-        // 范围过大探测：total > 0 且 offset 仍在总量内，但本页返回为空 —— TCVDB 分页查询在超出
-        // 可支撑窗口时会静默返回空集（见 MemoryCore tcvdb.ts），该组合不可能是"真的没有数据"，
-        // 只能是查询被 VDB 拒绝，提示用户缩短筛选的时间范围。
+        // Range too large detection: total > 0 and offset still within total, but this page returns empty —— TCVDB pagination query when exceeding
+        // When supporting the window, silently return an empty set (see MemoryCore tcvdb.ts), this combination cannot be "truly no data"
+        // Only when the query is rejected by VDB, prompt the user to shorten the time range of the filter.
         if (
           isRangeTooLarge(data.total ?? 0, (data.messages ?? []).length, offset)
         ) {
@@ -1198,9 +1198,9 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
                   : JSON.stringify(m.content ?? ""),
               tags: m.role ? [String(m.role)] : [],
               refs: [],
-              // L0 时间来源（v3 内核实际返回）：
-              //   - timestamp（ISO 字符串）—— 内核 conversation/query 的标准字段
-              //   - recorded_at_ms / timestamp 数值 ms —— 部分老数据/内部字段
+              // L0 Time source (v3 kernel actual return):
+              //   - timestamp (ISO string) —— standard field of kernel conversation/query
+              //   - recorded_at_ms / timestamp numeric ms —— some old data/internal fields
               created_at:
                 (typeof m.timestamp === "string" && m.timestamp) ||
                 msToIso(m.recorded_at_ms) ||
@@ -1227,7 +1227,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
           items?: Array<Record<string, unknown>>;
           total?: number;
         } | null) ?? { items: [] };
-        // 同 L0：total > 0 但本页为空 = 筛选范围过大，VDB 无法支撑本次查询。
+        // Same as L0: total > 0 but this page is empty = filter range is too large, VDB cannot support this query.
         if (
           isRangeTooLarge(data.total ?? 0, (data.items ?? []).length, offset)
         ) {
@@ -1243,9 +1243,9 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
               body: r.content ?? "",
               tags: r.tags ?? [],
               refs: [],
-              // L1 时间来源（v3 内核实际返回）：
-              //   - created_at（ISO 字符串）—— 内核 atomic/query 的标准字段
-              //   - created_time_ms（数值 ms） / timestamp_str —— 老数据兼容
+              // L1 Time source (v3 kernel actual return):
+              //   - created_at (ISO string) —— standard field returned by kernel atomic/query
+              //   - created_time_ms (numeric ms) / timestamp_str —— legacy data compatibility
               created_at:
                 (typeof r.created_at === "string" && r.created_at) ||
                 msToIso(r.created_time_ms) ||
@@ -1307,8 +1307,8 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
           );
         }
 
-        // scenario/ls 只返回 L2 标题列表；具体 Markdown 原文由前端点击单条后
-        // 再带 path 回到本接口触发 scenario/read，避免一次性打开全部 md。
+        // scenario/ls only returns the L2 title list; the specific Markdown original is handled by the frontend after clicking a single item
+        // Also pass path back to this interface to trigger scenario/read, avoiding opening all md at once.
         const env = await deps.kernelHttp.postEnvelope<{
           entries?: unknown[];
           total?: number;
@@ -1326,7 +1326,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
             items: entries.map((r) => {
               const path =
                 typeof r.path === "string" ? r.path : String(r.id ?? "");
-              // L2 时间来源（scenario/ls）：updated_at / modified_at / updated_time_ms
+              // L2 Time Source (scenario/ls): updated_at / modified_at / updated_time_ms
               const t =
                 (typeof r.updated_at === "string" && r.updated_at) ||
                 (typeof r.modified_at === "string" && r.modified_at) ||
@@ -1395,13 +1395,13 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
   // ==========================================================================
   // POST /chat-memory/clear  body: { memory_ids: string[] }
   //
-  // 一键清空若干 chat_memory 的**全部内容**，但保留资产本身：asset_id、
-  // Team/Agent 归属、Agent 绑定、ACL、Owner、名称、可见性全部不变，清空后
-  // Agent 继续用原 memory_id 写入，不需要重建。
+  // One-click clear the **entire content** of several chat_memory, but preserve the assets themselves: asset_id,
+  // Team/Agent ownership, Agent binding, ACL, Owner, name, visibility remain unchanged, after clearing
+  // Agent continues to write with the original memory_id, no rebuild needed.
   //
-  // 权限：仅资产 Owner。面板只做「必须是 chat_memory 且caller 是 owner」的
-  // 快速前置拦截（给出可读错误码），最终权威校验在内核
-  // `/v3/chat-memory/clear`（那边同样是 Owner-only，且任一 id 不合法整批拒绝）。
+  // Permission: only Asset Owner. The panel only does "must be chat_memory and caller is owner"
+  // Fast pre-interception (provides readable error code), final authoritative validation in kernel
+  // `/v3/chat-memory/clear` (that side is also Owner-only, and the entire batch is rejected if any id is invalid).
   //==========================================================================
   api.post("/chat-memory/clear", validatePanelMetaHeaders(deps), async (c) => {
     const ctx = buildCtx(c);
@@ -1411,7 +1411,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
     if (!Array.isArray(rawIds) || rawIds.length === 0) {
       return respondControlError(c, 400, "MISSING_MEMORY_IDS");
     }
-    // 去重 + 丢空串；上限与内核 CHAT_MEMORY_CLEAR_MAX 对齐。
+    // Deduplicate and discard empty strings; align the limit with the kernel CHAT_MEMORY_CLEAR_MAX.
     const memoryIds = [
       ...new Set(
         rawIds
@@ -1429,8 +1429,8 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
     const meUserId = await resolveCallerUserId(deps, ctx);
     if (!meUserId) return respondControlError(c, 401, "INVALID_USER_KEY");
 
-    // 前置整批校验：任一 id 不存在 / 非 chat_memory / 非 owner → 整批拒绝，
-    // 一条都不清。与内核语义一致，避免"清了一半才报错"。
+    // Pre-check the entire batch: if any id does not exist / is not chat_memory / is not owner → reject the entire batch,
+    // do not clear any one. Consistent with kernel semantics, to avoid "reporting an error after clearing half".
     for (const memoryId of memoryIds) {
       const assetEnv = await deps.metaKernel.invoke(
         "asset/get",
@@ -1471,12 +1471,12 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
   // POST /chat-memory/layer-delete
   //   body: { block_id, layer: 'L0' | 'L1', message_ids?, session_ids?, ids? }
   //
-  // 详情页列表的批量删除入口：
-  //   L0 → /v3/conversation/delete （message_ids 最多 5000 / session_ids 最多 100）
-  //   L1 → /v3/atomic/delete       （ids 最多 5000）
+  // Batch delete entry for the detail page list:
+  //   L0 → /v3/conversation/delete （message_ids up to 5000 / session_ids up to 100）
+  //   L1 → /v3/atomic/delete       （ids up to 5000）
   //
-  // 权限：仅资产 Owner —— 读可以借入（见 /chat-memory/layer 的 ACL），
-  // 但删除内容只允许 Owner，避免借入方清掉别人的记忆。
+  // Permissions: only the asset Owner — read can be borrowed (see the ACL in /chat-memory/layer),
+  // but deletion is only allowed for the Owner, to prevent borrowers from clearing others' memories.
   // ==========================================================================
   api.post(
     "/chat-memory/layer-delete",
@@ -1494,7 +1494,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
       const layer = layerRaw as "L0" | "L1";
 
       const parsed = parseChatMemoryAssetId(blockId);
-      // 用户自建 UserAsset（mem-xxx）没有关联 agent，没有数据面内容可删。
+      // User-built UserAsset (mem-xxx) is not associated with an agent, and there is no data plane content to delete.
       if (!parsed) return respondControlError(c, 400, "NOT_AGENT_MEMORY");
 
       const meUserId = await resolveCallerUserId(deps, ctx);
@@ -1515,7 +1515,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
       if (asset.owner_user_id !== meUserId)
         return respondControlError(c, 403, "NOT_ASSET_OWNER");
 
-      // 数据面按 asset owner 的 user_id 隔离（与 /chat-memory/layer 保持一致）。
+      // Data plane is isolated by asset owner's user_id (consistent with /chat-memory/layer).
       const idFields = {
         team_id: parsed.teamId,
         agent_id: parsed.agentId,
@@ -1540,8 +1540,8 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
           if (messageIds.length === 0 && sessionIds.length === 0) {
             return respondControlError(c, 400, "MISSING_IDS");
           }
-          // 不传 session_id：按 (team, user, agent) 跨 session 生效，
-          // 与 /chat-memory/layer 读L0 的聚合口径一致。
+          // No session_id passed: takes effect across sessions based on (team, user, agent),
+          // consistent with the aggregation criteria of /chat-memory/layer reading L0.
           const { session_id: _drop, ...noSid } = idFields;
           void _drop;
           const env = await deps.kernelHttp.postEnvelope<{
@@ -1579,12 +1579,12 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
   // POST /chat-memory/layer-update
   //   body: { block_id, layer: 'L1'|'L2'|'L3', id?, content, summary? }
   //
-  // 编辑单层记忆内容（Owner-only —— 与 layer-delete / clear 同口径：读可以借入，
-  // 但修改内容只允许资产 Owner，避免借入方改掉别人的记忆）：
-  //   L1 → /v3/atomic/update   { id, content }         （id = 记录主键 record_id）
-  //   L2 → /v3/scenario/write  { path, content, summary? }（path = 文件路径；content
-  //        先剥掉 META 头，内核会用现有 META 自动重建）
-  //   L3 → /v3/core/write      { content }              （内核自动 strip scene 导航）
+  // Edit single-layer memory content (Owner-only —— same scope as layer-delete / clear: reads can be borrowed in,
+  // but content modification is only allowed by the asset Owner, to prevent the borrower from altering others' memories):
+  //   L1 → /v3/atomic/update   { id, content }         (id = record primary key record_id)
+  //   L2 → /v3/scenario/write  { path, content, summary? } (path = file path; content
+  //         strips the META header first, and the kernel automatically rebuilds it using the existing META)
+  //   L3 → /v3/core/write      { content }              (kernel automatically strips scene navigation)
   // ==========================================================================
   api.post(
     "/chat-memory/layer-update",
@@ -1605,12 +1605,12 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
         return respondControlError(c, 400, "INVALID_LAYER");
       const layer = layerRaw as "L1" | "L2" | "L3";
       if (content === null) return respondControlError(c, 400, "MISSING_CONTENT");
-      // L1（记录主键）/ L2（文件路径）都需要定位单条；L3 是整份 persona，无需 id。
+      // L1 (records primary key) / L2 (file path) both need to locate a single record; L3 is the entire persona, no id needed.
       if ((layer === "L1" || layer === "L2") && !itemId)
         return respondControlError(c, 400, "MISSING_ITEM_ID");
 
       const parsed = parseChatMemoryAssetId(blockId);
-      // 用户自建 UserAsset（mem-xxx）没有关联 agent，没有数据面内容可改。
+      // User-built UserAsset (mem-xxx) is not associated with an agent, and there is no data plane content to modify.
       if (!parsed) return respondControlError(c, 400, "NOT_AGENT_MEMORY");
 
       const meUserId = await resolveCallerUserId(deps, ctx);
@@ -1631,7 +1631,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
       if (asset.owner_user_id !== meUserId)
         return respondControlError(c, 403, "NOT_ASSET_OWNER");
 
-      // 数据面按 asset owner 的 user_id 隔离（与 /chat-memory/layer 一致）。
+      // Data plane is isolated by asset owner's user_id (consistent with /chat-memory/layer).
       const idFields = {
         team_id: parsed.teamId,
         agent_id: parsed.agentId,
@@ -1683,11 +1683,11 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
   // POST /chat-memory/search
   //   body: { block_id, layer: 'L0'|'L1', query, limit?, type? }
   //
-  // 分层语义 / 关键字检索（agent 维度跨 session 召回）：
-  //   L0 → 内核 /v3/conversation/search（对话消息，返回 messages 带 score）
-  //   L1 → 内核 /v3/atomic/search（原子记忆，返回 items 带 score）
-  // 权限：读权限（owner / team-shared / borrowed，与 /chat-memory/layer 一致，
-  // 搜索属于读操作）。统一返回 { items, total }，item 附带 score（相关度）。
+  // Layered semantic / keyword retrieval (agent dimension cross-session recall):
+  //   L0 → kernel /v3/conversation/search (conversation messages, returns messages with score)
+  //   L1 → kernel /v3/atomic/search (atomic memory, returns items with score)
+  // Permission: read permission (owner / team-shared / borrowed, consistent with /chat-memory/layer,
+  // search is a read operation). Unified return { items, total }, item includes score (relevance).
   // ==========================================================================
   api.post("/chat-memory/search", validatePanelMetaHeaders(deps), async (c) => {
     const ctx = buildCtx(c);
@@ -1695,7 +1695,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
     const blockId = requiredBlockId(body);
     const layerRaw =
       typeof body?.layer === "string" ? body.layer.toUpperCase() : "L1";
-    // 目前只支持 L0（对话）/ L1（原子记忆）；其余一律按 L1 处理。
+    // Currently only L0 (conversation) / L1 (atomic memory) are supported; all others are treated as L1.
     const layer: "L0" | "L1" = layerRaw === "L0" ? "L0" : "L1";
     const query = typeof body?.query === "string" ? body.query.trim() : "";
     const rawLimit = typeof body?.limit === "number" ? body.limit : 30;
@@ -1709,7 +1709,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
     if (!query) return respondControlError(c, 400, "MISSING_QUERY");
 
     const parsed = parseChatMemoryAssetId(blockId);
-    // 自建 UserAsset 无关联 agent → 无 L1 数据可搜，直接返空（与 layer 语义一致）。
+    // Self-built UserAsset with no associated agent → no L1 data to search, return empty directly (consistent with layer semantics).
     if (!parsed)
       return respondEnvelope(c, okEnvelope(c, { items: [], total: 0 }));
 
@@ -1747,8 +1747,8 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
     const cred = toKernelCredentials(ctx, { timeoutMs: 30_000 });
     try {
       if (layer === "L0") {
-        // L0：对话消息检索。内核返回 { messages }，映射为统一的 { items }。
-        // 不传 session_id（全局跨 session 召回，与 /chat-memory/layer 读 L0 一致）。
+        // L0: Dialogue message retrieval. The kernel returns { messages }, mapped to a unified { items }.
+        // No session_id is passed (global cross-session retrieval, consistent with reading L0 from /chat-memory/layer).
         const { session_id: _drop, ...noSid } = idFields;
         void _drop;
         const env = await deps.kernelHttp.postEnvelope<{
@@ -1781,7 +1781,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
         );
       }
 
-      // L1：原子记忆检索
+      // L1: Atomic Memory Retrieval
       const env = await deps.kernelHttp.postEnvelope<{ items?: unknown[] }>(
         "/v3/atomic/search",
         { ...idFields, query, limit, ...(type ? { type } : {}) },
@@ -1793,7 +1793,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
           items: [],
         };
       const items = (data.items ?? []).map((r) => ({
-        // 搜索结果 id 即 L1 记录主键（可直接用于 /chat-memory/layer-update）。
+        // The search result id is the L1 record primary key (can be used directly for /chat-memory/layer-update).
         id: (r.id ?? r.record_id ?? "") as string,
         title: (r.type ?? "atomic") as string,
         body: (r.content ?? "") as string,
@@ -1820,8 +1820,8 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
 }
 
 /**
- * 从 chat_memory-{team_id}-{agent_id} 解出 team_id / agent_id
- * 依赖 agent id 以 `agt` 开头这一稳定前缀。
+ * Extract team_id / agent_id from chat_memory-{team_id}-{agent_id}
+ * Rely on the stable prefix starting with `agt` for the agent id.
  */ function parseChatMemoryAssetId(
   assetId: string,
 ): { teamId: string; agentId: string } | null {
@@ -1838,7 +1838,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
 }
 
 // ============================================================================
-// 辅助
+// Helper
 // ============================================================================
 
 function buildCtx(c: import("hono").Context): MetaCallContext {
@@ -1872,21 +1872,21 @@ function requiredBlockId(body: Record<string, unknown>): string | null {
   return typeof t === "string" && t.trim() ? t.trim() : null;
 }
 
-// ── 批量删除上限（与内核 MemoryCore/src/gateway/v2-schemas.ts 保持一致）──
-/** /chat-memory/clear 单次可清空的 memory 数。 */
+// ── Batch delete limit (consistent with MemoryCore/src/gateway/v2-schemas.ts) ──
+/** Number of memory entries that can be cleared in a single /chat-memory/clear operation. */
 const MAX_CLEAR_MEMORY_IDS = 100;
-/** L0 批量删除：message_ids 上限。 */
+/** L0 Batch delete: message_ids limit. */
 const MAX_L0_DELETE_MESSAGE_IDS = 5000;
-/** L0 批量删除：session_ids 上限。 */
+/** L0 Batch delete: session_ids limit. */
 const MAX_L0_DELETE_SESSION_IDS = 100;
-/** L1 批量删除：ids 上限。 */
+/** L1 Batch delete: id limit. */
 const MAX_L1_DELETE_IDS = 5000;
 
 /**
- * 归一化前端传来的 id 列表：只留非空字符串、去重、保持原顺序。
+ * Normalize the id list sent from the frontend: keep only non-empty strings, remove duplicates, and maintain the original order.
  *
- * @returns 归一化后的数组；超过 max 时返回 null（由调用方转成 400）。
- *          非数组 / 缺省视为"未选择"，返回空数组。
+ * @returns The normalized array; returns null if it exceeds max (converted to 400 by the caller).
+ *           Non-array / missing defaults to "not selected", returning an empty array.
  */
 function normalizeIdList(raw: unknown, max: number): string[] | null {
   if (!Array.isArray(raw)) return [];
@@ -1926,15 +1926,15 @@ function emptyLayers(): MemoryBlockOut["layer_counts"] {
 }
 
 function buildSummary(): string {
-  return "0 条 L1 · 0 条 L2 · 0 条 L3";
+  return "0 L1 · 0 L2 · 0 L3";
 }
 
 /**
- * 去掉 scenario markdown 的 META 头。
- * `scenario/read` 返回的 content 带 `-----META-START-----...-----META-END-----`
- * 头（created / updated / summary 等系统字段），而 `scenario/write` 期望正文
- * **不含** META（内核会用现有 META 自动重建）。编辑写回前先剥掉 META，避免
- * META 被当成正文再包一层导致嵌套。
+ * Remove the META header from scenario markdown.
+ * `scenario/read` returns content with `-----META-START-----...-----META-END-----`
+ * headers (created / updated / summary and other system fields), while `scenario/write`
+ * expects the body
+ * to **not** contain META (the kernel will automatically rebuild it using the existing META). Strip META before writing back to avoid META being treated as body content and wrapped again, causing nesting.
  */
 function stripScenarioMeta(content: string): string {
   return content
@@ -1944,7 +1944,7 @@ function stripScenarioMeta(content: string): string {
 
 function stripL3SceneTail(content: string): string {
   const withFooter = content.search(
-    /\n---\s*\n\s*> \*\*最后更新\*\*[\s\S]*?\n---\s*\n## 🗺️ Scene Navigation/,
+    /\n---\s*\n\s*> \*\*Last Updated\*\*[\s\S]*?\n---\s*\n## 🗺️ Scene Navigation/,
   );
   if (withFooter >= 0) return content.slice(0, withFooter).trimEnd();
   const sceneIndex = content.search(
@@ -1961,10 +1961,10 @@ function toMs(iso: string | undefined): number {
 }
 
 /**
- * 内核 chat_memory L0/L1 层用毫秒时间戳存 (recorded_at_ms / created_time_ms)；
- * 前端展示需要 ISO 字符串（可用 Date.toLocaleString 呈现），此处统一转换。
- * 只接受"看起来像 ms epoch"的数值（> 10^12，约 2001-09 以后），其余返 undefined
- * 让 caller fallback 到别的字段（如 timestamp_str / updated_at）。
+ * The kernel chat_memory L0/L1 layers store (recorded_at_ms / created_time_ms) using millisecond timestamps;
+ * The frontend display requires an ISO string (can be presented using Date.toLocaleString), and this is uniformly converted here.
+ * Only accept values that "look like ms epoch" (greater than 10^12, after approximately 2001-09), and return undefined for the rest
+ * Let the caller fallback to other fields (such as timestamp_str / updated_at).
  */
 function msToIso(v: unknown): string | undefined {
   if (typeof v !== "number" || !Number.isFinite(v) || v < 1e12)
@@ -1981,8 +1981,8 @@ function okEnvelope<T>(c: import("hono").Context, data: T): MetaEnvelope<T> {
 }
 
 /**
- * 通过 auth/verify 反查 caller 的 user_id。
- * envelope.data.user.user_id 为空或非法都返 null。
+ * Look up the caller's user_id by reverse-referencing auth/verify.
+ * Return null if envelope.data.user.user_id is empty or invalid.
  */
 async function resolveCallerUserId(
   deps: PanelDeps,
@@ -2005,9 +2005,9 @@ async function resolveCallerUserId(
 }
 
 /**
- * 校验 user 是否是 team 成员。
- * 走 tdai `/v3/meta/team-member/get`（存在→成员；404→非成员）。
- * 内核抛异常时保守返 false（拒绝），避免 fail-open。
+ * Verify whether user is a member of the team.
+ * Call tdai `/v3/meta/team-member/get` (exists → member; 404 → non-member).
+ * Conservatively return false (reject) when the kernel throws an exception (avoid fail-open).
  */
 async function isTeamMember(
   deps: PanelDeps,
@@ -2030,12 +2030,12 @@ async function isTeamMember(
 }
 
 /**
- * chat_memory 资产的**读权限**判定（owner / team-shared / borrowed 任一即可）：
- *   a) caller 是 asset 的 owner（自留自用）
- *   b) asset.visibility='team' 且 caller ∈ team（团队已共享；外 team 用户即便知道
- *      asset_id 也不算可读，防止越权读取 chat_memory 内容）
- *   c) asset 已被绑定到 caller 名下某个 agent（借入关系）
- * 供 /chat-memory/layer 与 /chat-memory/search 复用，保证读口径一致。
+ * chat_memory asset's **read permission** determination (any of owner / team-shared / borrowed is sufficient):
+ *   a) caller is the asset's owner (self-retained and self-used)
+ *   b) asset.visibility='team' and caller ∈ team (team has shared it; external team users, even if they know
+ *      asset_id, are not considered readable, to prevent unauthorized reading of chat_memory content)
+ *   c) asset has been bound to one of caller's agents (borrowing relationship)
+ * Reused by /chat-memory/layer and /chat-memory/search to ensure consistent read criteria.
  */
 async function authorizeChatMemoryRead(
   deps: PanelDeps,
@@ -2048,9 +2048,9 @@ async function authorizeChatMemoryRead(
   if (asset.visibility === "team") {
     if (await isTeamMember(deps, ctx, asset.team_id, meUserId)) return true;
   }
-  // 借入判定：遍历 caller 在本 team 下 owner 的 agent，看有没有绑定过该 asset。
+  // Inheritance check: iterate through the agents owned by caller in this team, and check if any have been bound to this asset.
   try {
-    // 分页拉全量：单页 20 条截断会让借入判定漏掉排在 21+ 的 agent，误判无权限
+    // Paginate to full data: truncating single page of 20 items causes borrowing determination to miss agents ranked 21+, leading to false permission denial
     const myAgents = (
       await fetchAllMetaListItems<AgentRaw>(
         deps,
@@ -2060,8 +2060,8 @@ async function authorizeChatMemoryRead(
       )
     ).filter((a) => a.owner_user_id === meUserId);
     for (const a of myAgents) {
-      // 分页拉全量：该 asset 若排在 agent 绑定 21+，单页 list 会漏掉而误判无权限。
-      // 出错时与原来一致（continue 跳过该 agent），不阻断其余 agent 的判定。
+      // Pagination to fetch full list: if this asset is ranked 21+ in agent binding, the single-page list will miss it and incorrectly judge no permission.
+      // On error, it remains consistent with the original (continue to skip this agent), without blocking the judgment of other agents.
       const bindings = await fetchAllMetaListItems<FixedAssetRaw>(
         deps,
         ctx,
@@ -2076,5 +2076,5 @@ async function authorizeChatMemoryRead(
   return false;
 }
 
-// countBindings 已随 team-assets 的 N+1 优化下线；未来若右侧详情面板要按需拉
-// 单条绑定数，走独立 endpoint（body: {team_id, block_id}）实现，别再放回列表循环。
+// countBindings has been removed with the N+1 optimization of team-assets; in the future, if the right-side detail panel needs to be fetched on demand
+// Single binding count, implemented via an independent endpoint (body: {team_id, block_id}), don't put it back into the list loop.

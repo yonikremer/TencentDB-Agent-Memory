@@ -20,12 +20,12 @@ export interface PanelDeps {
   instanceRegistry: InstanceRegistry;
   kernelHttp: KernelHttpPort;
   metaKernel: MetaKernelPort;
-  /** 按请求 instanceId 构造 KS 客户端（x-tdai-service-id = instanceId）。 */
+  /** Construct KS client by request instanceId (x-tdai-service-id = instanceId). */
   knowledgeClientFactory: (instanceId: string) => KnowledgeClientPort;
   skillKernel: SkillKernelPort;
-  /** Knowledge 抽取任务内存态：create 时 stash owner key，callback ready 时取出注册 meta asset。 */
+  /** Knowledge extraction task memory state: stash owner key on create, retrieve registered meta asset on callback ready. */
   knowledgeTaskRegistry: KnowledgeTaskRegistry;
-  /** Wiki ingest 细粒度进度（KS ingest_progress 回调写入；wiki/get 聚合读出）。 */
+  /** Wiki ingest fine-grained progress (written by KS ingest_progress callback; aggregated read by wiki/get). */
   ingestProgressStore: IngestProgressStore;
 }
 

@@ -1,4 +1,4 @@
-/** 领域错误。HTTP 层据此映射状态码。 */
+/** Domain error. The HTTP layer maps status codes based on this. */
 export class DomainError extends Error {
   constructor(
     message: string,
@@ -29,15 +29,15 @@ export class ConflictError extends DomainError {
 }
 
 /**
- * Core 上游错误的统一映射。skill-client 把 core 业务码（40001/40301/40401/...）
- * 翻译成本地 DomainError 子类，service / route 不必再判码。
+ * Unified mapping of upstream errors from Core. skill-client maps core business codes (40001/40301/40401/...)
+ Translate into a local DomainError subclass, no need to check codes in service / route.
  */
 export class CoreUpstreamError extends DomainError {
   constructor(
     code: string,
     httpStatus: number,
     message: string,
-    /** core 原始业务码，便于排查；不直接返给前端。 */
+    /** core original business code, for troubleshooting; not returned directly to the frontend. */
     readonly upstreamCode?: number,
   ) {
     super(message, code, httpStatus);

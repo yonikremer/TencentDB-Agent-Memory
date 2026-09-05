@@ -1,9 +1,9 @@
 /**
- * /api/v1/knowledge/code-graph/* —— Panel Code-Graph 业务路由（stateless）。
+ * /api/v1/knowledge/code-graph/* —— Panel Code-Graph business routing (stateless).
  *
- * 实现冻结契约 docs/api/knowledge-panel-api.md §2.0 Code 最小端点集，透传
- * HttpKnowledgeClient → KS /v3/code-graph/*。查询端点（search/explore）统一
- * 返回 KS 的 { text, isError } 文本块。
+ * Implement frozen contract docs/api/knowledge-panel-api.md §2.0 Code minimal endpoint set, pass through
+ * HttpKnowledgeClient → KS /v3/code-graph/*. Query endpoints (search/explore) uniformly
+ * return KS's { text, isError } text blocks.
  */
 import type { Hono } from 'hono';
 import { validatePanelMetaHeaders } from '../../middleware/validate-panel-headers.js';
@@ -27,7 +27,7 @@ import {
 export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): void {
   const mw = validatePanelMetaHeaders(deps);
 
-  // C2 list — @deprecated 面板 UI 已改用 team-assets / my-assets
+  // C2 list — @deprecated Panel UI has been switched to team-assets / my-assets
   api.post('/knowledge/code-graph/list', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -44,7 +44,7 @@ export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): vo
     return runKs(c, () => kc.codeGraphList(teamId, opts));
   });
 
-  // C1 create — team 门控；KS create 后自动 build，meta 在 ready callback 登记
+  // C1 create — team gate; KS create automatically builds, meta registered in ready callback
   api.post('/knowledge/code-graph/create', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -59,8 +59,8 @@ export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): vo
     const kc = deps.knowledgeClientFactory(ctx.instanceId);
     try {
       const detail = await kc.codeGraphCreate(teamId, repoUrl, branch, gate.userId, repoName);
-      // stash owner key 供 status-callback ready 时以 owner 身份注册 meta asset
-      // （callback 是 S2S、无 user_key；详见 knowledge-task-registry.ts）
+      // stash owner key for status-callback ready to register meta asset as owner
+      // (callback is S2S, no user_key; see knowledge-task-registry.ts)
       if (ctx.userKey) {
         deps.knowledgeTaskRegistry.record({
           knowledge_id: detail.code_graph_id,
@@ -85,7 +85,7 @@ export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): vo
     }
   });
 
-  // C3b register-meta — code ready 后 owner 登记 meta（create 时不写 meta）
+  // C3b register-meta — code ready after owner registers meta (do not write meta on create)
   api.post('/knowledge/code-graph/register-meta', mw, async (c) => {
     const ctx = buildCtx(c);
     const log = deps.logger;
@@ -131,7 +131,7 @@ export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): vo
     return respondEnvelope(c, okEnvelope(c, { registered: true, code_graph_id: cgId }));
   });
 
-  // C3 get — id-only（构建中无 meta 时 owner 可读）
+  // C3 get — id-only (owner readable when no meta in build)
   api.post('/knowledge/code-graph/get', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -155,7 +155,7 @@ export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): vo
     return runKs(c, () => kc.codeGraphSync(cgId));
   });
 
-  // C5 delete — 删三处：KS + entity_knowledge 明细 + meta_asset（见 §0.6）
+  // C5 delete — Delete three: KS + entity_knowledge details + meta_asset (see §0.6)
   api.post('/knowledge/code-graph/delete', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
