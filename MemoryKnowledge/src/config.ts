@@ -7,11 +7,13 @@
  */
 import { homedir } from "node:os";
 import 'dotenv/config';
+import { expandLeadingTilde } from "./platform-paths.js";
 
-/** Expand leading ~/ to the user's home directory. */
-function expandHome(filepath: string): string {
-  if (filepath.startsWith("~/")) {
-    return `${homedir()}${filepath.slice(1)}`;
+/** Expand leading ~/ (or ~\, or bare ~) to the user's home directory. */
+export function expandHome(filepath: string): string {
+  if (!filepath) return filepath;
+  if (filepath === "~" || filepath.startsWith("~/") || filepath.startsWith("~\\")) {
+    return expandLeadingTilde(filepath, homedir());
   }
   return filepath;
 }

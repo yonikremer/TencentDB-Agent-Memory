@@ -11,6 +11,7 @@
 
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from "fs";
 import { join, basename, relative } from "path";
+import { isPathInside } from "../../platform-paths.js";
 import Graph from "graphology";
 import type DatabaseType from "better-sqlite3";
 import pLimit, { type LimitFunction } from "p-limit";
@@ -304,7 +305,7 @@ function resolveTarget(
   const rawLower = raw.toLowerCase();
   for (const id of nodeIds) {
     if (id.toLowerCase() === rawLower) return id;
-    const idBasename = id.split("/").pop() ?? id;
+    const idBasename = id.split(/[\/]/).pop() ?? id;
     if (slugify(idBasename) === target) return id;
   }
   // Fallback: match by page title slug (when wikilink references page title rather than filename).
@@ -1039,9 +1040,10 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
     if (!state) return null;
 
     // Supports raw/ prefix: read directly from project root
-    if (relPath.startsWith("raw/")) {
+    if (relPath.startsWith("raw/") || relPath.startsWith("raw\\")) {
+      const rawBase = join(state.path, "raw");
       const fullPath = join(state.path, relPath);
-      if (!fullPath.startsWith(join(state.path, "raw"))) return null; // Path traversal protection
+      if (!isPathInside(rawBase, fullPath) && fullPath !== rawBase) return null; // Path traversal protection
       try { return readFileSync(fullPath, "utf-8"); } catch {}
       if (!relPath.endsWith(".md")) {
         try { return readFileSync(fullPath + ".md", "utf-8"); } catch {}
@@ -1053,10 +1055,10 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
     //   "wiki/concepts/l0-ingest.md" -> full relPath
     //   "concepts/l0-ingest.md"      -> remove wiki/ prefix
     //   "concepts/l0-ingest"         -> id format (without .md)
-    const cleanPath = relPath.replace(/^wiki\//, "");
+    const cleanPath = relPath.replace(/^wiki[\/]/, "").replace(/\\/g, "/");
     const base = join(state.path, "wiki");
     let fullPath = join(base, cleanPath);
-    if (!fullPath.startsWith(base)) return null;
+    if (!isPathInside(base, fullPath) && fullPath !== base) return null;
     // Try directly first, then append .md
     try { return readFileSync(fullPath, "utf-8"); } catch {}
     if (!cleanPath.endsWith(".md")) {

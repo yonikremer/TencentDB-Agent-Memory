@@ -34,8 +34,9 @@ function resolveStorageKey(prefix: string, relativePath: string): string | null 
     .replace(/^\.\//, "")
     .replace(/\/+/g, "/");
 
-  // Block absolute paths and parent traversal
+  // Block absolute paths (POSIX /, Windows drive C:/, UNC) and parent traversal
   if (normalized.startsWith("/") || normalized.startsWith("..")) return null;
+  if (/^[a-zA-Z]:[\\/]/.test(normalized)) return null;
 
   // After join, verify the result still starts with prefix
   const key = `${prefix}${normalized}`;

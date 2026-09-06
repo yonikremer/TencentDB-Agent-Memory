@@ -11,6 +11,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
+import { expandLeadingTilde, resolveHomeDir } from "../utils/platform-paths.js";
 import { getEnv } from "../utils/env.js";
 import { parseConfig as parseMemoryConfig } from "../config.js";
 import type { MemoryTdaiConfig } from "../config.js";
@@ -432,8 +433,7 @@ export function loadGatewayConfig(overrides?: Partial<GatewayConfig>): GatewayCo
   // Data config (expand leading ~ to $HOME so Node.js fs/path can resolve it)
   const dataConfig = obj(fileConfig, "data");
   const rawBaseDir = env("TDAI_DATA_DIR") ?? str(dataConfig, "baseDir") ?? resolveDefaultDataDir();
-  const home = getEnv("HOME") ?? getEnv("USERPROFILE") ?? "/tmp";
-  const baseDir = rawBaseDir.startsWith("~/") ? path.join(home, rawBaseDir.slice(2)) : rawBaseDir;
+  const baseDir = expandLeadingTilde(rawBaseDir, resolveHomeDir());
 
   // LLM config
   //
@@ -782,7 +782,7 @@ function resolveConfigPath(): string | null {
 }
 
 function resolveDefaultDataDir(): string {
-  const home = getEnv("HOME") ?? getEnv("USERPROFILE") ?? "/tmp";
+  const home = getEnv("HOME") ?? getEnv("USERPROFILE") ?? resolveHomeDir();
 
   // New canonical location: everything related to standalone/Hermes-mode TDAI
   // is collected under ~/.memory-tencentdb/ to avoid scattering top-level dirs

@@ -24,7 +24,7 @@ class ScopedStorageBackend implements IStorageBackend {
   }
 
   private key(key: string): string {
-    if (typeof key !== "string" || key.includes("\0") || key.startsWith("/") || key.startsWith("\\")) {
+    if (typeof key !== "string" || key.includes("\0") || key.startsWith("/") || key.startsWith("\\") || /^[a-zA-Z]:[\\/]/.test(key)) {
       throw new Error(`Invalid scoped storage key: ${JSON.stringify(key)}`);
     }
     const normalized = key.replace(/^\/+/, "").replace(/\\+/g, "/").replace(/\/+/g, "/");

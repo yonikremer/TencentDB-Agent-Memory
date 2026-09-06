@@ -281,9 +281,11 @@ function openSqliteDb(dbPath: string): any {
   const path = _require("node:path");
   const fs = _require("node:fs");
   const fromEnv = process.env.PROXY_DB_PATH;
+  const expandTilde = (p: string): string =>
+    p === "~" ? os.homedir() : (p.startsWith("~/") || p.startsWith("~\\") ? path.join(os.homedir(), p.slice(2)) : p);
   const resolved =
     fromEnv && fromEnv.trim().length > 0
-      ? fromEnv.trim()
+      ? expandTilde(fromEnv.trim())
       : path.join(os.homedir(), ".tdai-memory-proxy", "proxy.db");
   fs.mkdirSync(path.dirname(resolved), { recursive: true, mode: 0o700 });
   return new Database(resolved);

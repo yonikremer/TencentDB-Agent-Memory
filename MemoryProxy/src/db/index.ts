@@ -15,6 +15,7 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
+import { expandLeadingTilde } from "../common/platform-paths.js";
 
 import type Database from "better-sqlite3";
 
@@ -30,7 +31,7 @@ let _dbInitFailed = false;
 /** Resolve the DB file path. Caller must ensure parent dir exists. */
 export function resolveDbPath(): string {
   const fromEnv = process.env.PROXY_DB_PATH;
-  if (fromEnv && fromEnv.trim().length > 0) return fromEnv.trim();
+  if (fromEnv && fromEnv.trim().length > 0) return expandLeadingTilde(fromEnv.trim());
   return path.join(os.homedir(), ".tdai-memory-proxy", "proxy.db");
 }
 

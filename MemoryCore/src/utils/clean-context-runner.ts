@@ -24,28 +24,39 @@ import type { Logger } from "../core/types.js";
  *
  * Previously imported from `openclaw/plugin-sdk` as `resolvePreferredOpenClawTmpDir`,
  * but that export was removed in openclaw 2026.2.23+. This local implementation
- * provides equivalent behavior:
- *   1. Try `/tmp/openclaw` (if writable)
- *   2. Fall back to `os.tmpdir()/openclaw-<uid>`
+ * provides equivalent behavior on every platform:
+ *   1. Try `os.tmpdir()/openclaw` (platform-generic: %TEMP% on Windows)
+ *   2. Try legacy `/tmp/openclaw` on POSIX (back-compat with existing installs)
+ *   3. Fall back to `os.tmpdir()/openclaw-<uid>`
  */
 function resolveOpenClawTmpDir(): string {
-  const POSIX_DIR = "/tmp/openclaw";
+  const primary = path.join(os.tmpdir(), "openclaw");
   try {
-    if (fsSync.existsSync(POSIX_DIR)) {
-      fsSync.accessSync(POSIX_DIR, fsSync.constants.W_OK | fsSync.constants.X_OK);
-      return POSIX_DIR;
-    }
-    // Try to create it
-    fsSync.mkdirSync(POSIX_DIR, { recursive: true, mode: 0o700 });
-    return POSIX_DIR;
-  } catch {
-    // Fall back to os.tmpdir()
-    const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
-    const suffix = uid === undefined ? "openclaw" : `openclaw-${uid}`;
-    const fallback = path.join(os.tmpdir(), suffix);
-    fsSync.mkdirSync(fallback, { recursive: true });
-    return fallback;
+    fsSync.mkdirSync(primary, { recursive: true });
+    fsSync.accessSync(primary, fsSync.constants.W_OK | fsSync.constants.X_OK);
+    return primary;
+  } catch { /* fall through to legacy / per-uid fallbacks */ }
+  if (process.platform !== "win32") {
+    try {
+      const legacy = "/tmp/openclaw";
+      if (fsSync.existsSync(legacy)) {
+        fsSync.accessSync(legacy, fsSync.constants.W_OK | fsSync.constants.X_OK);
+        return legacy;
+      }
+      fsSync.mkdirSync(legacy, { recursive: true, mode: 0o700 });
+      return legacy;
+    } catch { /* fall through */ }
   }
+  const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  const suffix = uid === undefined ? "openclaw" : `openclaw-${uid}`;
+  const fallback = path.join(os.tmpdir(), suffix);
+  fsSync.mkdirSync(fallback, { recursive: true });
+  return fallback;
+}
+
+/** Sanitize an id used as an fs path segment (mkdtemp prefix). */
+export function sanitizeTmpSegment(s: string): string {
+  return String(s ?? "").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 64) || "task";
 }
 
 const TAG = "[memory-tdai] [runner]";
@@ -357,7 +368,7 @@ export class CleanContextRunner {
     this.logger?.debug?.(`${TAG} run() start: taskId=${params.taskId}, timeout=${params.timeoutMs ?? 120_000}ms, tools=${this.options.enableTools ? "enabled" : "disabled"}, workspaceDir=${params.workspaceDir ?? "(default)"}`);
 
     const tmpDir = await fs.mkdtemp(
-      path.join(resolveOpenClawTmpDir(), `memory-tdai-${params.taskId}-`),
+      path.join(resolveOpenClawTmpDir(), `memory-tdai-${sanitizeTmpSegment(params.taskId)}-`),
     );
     const cleanWorkspace = params.workspaceDir ?? await getCleanWorkspaceDir();
     this.logger?.debug?.(`${TAG} run() tmpDir=${tmpDir}, cleanWorkspace=${cleanWorkspace}`);

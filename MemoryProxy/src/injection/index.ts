@@ -101,7 +101,9 @@ export {
 // ── Pipeline Factory ──────────────────────────────────────────────────────────
 
 import os from "os";
+import path from "node:path";
 import type { ProxyConfig } from "../types.js";
+import { resolveHomeDir } from "../common/platform-paths.js";
 import { InjectionPipeline } from "./pipeline.js";
 import { HookRegistryImpl } from "./registry.js";
 import { OpenAIAdapter } from "./adapters/openai.js";
@@ -212,8 +214,8 @@ export function ensureBindingRepoPersistent(config: ProxyConfig): void {
   const store = getSessionStore();
   if (store.getBindingRepo()) return; // already present (storage/redis was activated)
 
-  const home = process.env.HOME || process.env.USERPROFILE || "/tmp";
-  const defaultFsRoot = `${home}/.memory-tencentdb/proxy-state`;
+  const home = process.env.HOME || process.env.USERPROFILE || resolveHomeDir();
+  const defaultFsRoot = path.join(home, ".memory-tencentdb", "proxy-state");
   const fsRoot = process.env.PROXY_DATA_DIR || config.storage?.fs?.fsRoot || defaultFsRoot;
 
   try {

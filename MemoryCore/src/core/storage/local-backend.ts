@@ -65,12 +65,14 @@ export class LocalStorageBackend implements IStorageBackend {
     if (key.includes("\0")) {
       throw new Error("Storage key must not contain NUL character");
     }
-    if (key.startsWith("/") || key.startsWith("\\")) {
+    // Reject absolute paths on any platform: POSIX (/), Windows drive (C:/, C:\\), UNC (\\\\).
+    if (key.startsWith("/") || key.startsWith("\\") || /^[a-zA-Z]:[\\/]/.test(key) || key.startsWith("\\\\")) {
       throw new Error(`Storage key must be relative, got absolute: ${key}`);
     }
 
-    // Normalize key separators to OS path separators
-    const normalized = key.split("/").join(sep);
+    // Normalize BOTH separators to OS path separators (storage keys always
+    // use "/", but callers on Windows may pass "\\").
+    const normalized = key.replace(/[\\/]+/g, sep);
 
     // Compute the absolute resolved path; resolve() collapses ".." segments.
     const absRoot = resolve(this.rootDir);
@@ -79,8 +81,15 @@ export class LocalStorageBackend implements IStorageBackend {
     // Ensure the resolved path stays inside rootDir. Append sep so that
     // a key like "../rootDir2/foo" (which resolves to a sibling directory
     // whose name happens to start with rootDir's name) is also rejected.
-    const rootWithSep = absRoot.endsWith(sep) ? absRoot : absRoot + sep;
-    if (absResolved !== absRoot && !absResolved.startsWith(rootWithSep)) {
+    // Windows FS is case-insensitive — compare lowercased there.
+    const inside = process.platform === "win32"
+      ? (absResolved.toLowerCase() === absRoot.toLowerCase() ||
+        absResolved.toLowerCase().startsWith(absRoot.toLowerCase() + sep))
+      : (() => {
+        const rootWithSep = absRoot.endsWith(sep) ? absRoot : absRoot + sep;
+        return absResolved === absRoot || absResolved.startsWith(rootWithSep);
+      })();
+    if (!inside) {
       throw new Error(`Path traversal rejected: key "${key}" escapes rootDir`);
     }
 

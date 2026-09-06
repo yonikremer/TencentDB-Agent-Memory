@@ -418,7 +418,10 @@ export function canonicalizePagePath(llmPath: string, content: string): string {
     if (slug) return `wiki/${dirForType(type)}/${slug}.md`;
   }
 
-  const segments = llmPath.split("/");
+  // LLM output is a POSIX-style wiki path, but models on Windows hosts may
+  // emit backslashes — normalize first so both parse identically.
+  const posixPath = llmPath.replace(/\\/g, "/");
+  const segments = posixPath.split("/");
   const fileName = segments[segments.length - 1];
   if (segments.length >= 3) {
     const dirSeg = segments[1];
@@ -426,5 +429,5 @@ export function canonicalizePagePath(llmPath: string, content: string): string {
     const middle = segments.slice(2, -1);
     return ["wiki", canonicalDir, ...middle, fileName].join("/");
   }
-  return llmPath;
+  return posixPath;
 }
