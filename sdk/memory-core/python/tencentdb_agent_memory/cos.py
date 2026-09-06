@@ -36,9 +36,16 @@ logger = logging.getLogger(__name__)
 
 def _parse_cos_url(cos_url: str) -> tuple[str, str]:
     """Parse CosUrl like ``https://bucket.cos.region.myqcloud.com`` → (bucket, region)."""
-    host = urlparse(cos_url).hostname or ""
-    # Pattern: {bucket}.cos.{region}.myqcloud.com
+    try:
+        host = urlparse(cos_url).hostname or ""
+    except Exception:
+        host = ""
+    # Pattern: {bucket}.cos.{region}.myqcloud.com (public)
     m = re.match(r"^(.+?)\.cos\.(.+?)\.myqcloud\.com$", host)
+    if m:
+        return m.group(1), m.group(2)
+    # Pattern: {bucket}.cos-internal.{region}.tencentcos.cn (internal/VPC)
+    m = re.match(r"^(.+?)\.cos-internal\.(.+?)\.tencentcos\.cn$", host)
     if m:
         return m.group(1), m.group(2)
     raise TDAMError(

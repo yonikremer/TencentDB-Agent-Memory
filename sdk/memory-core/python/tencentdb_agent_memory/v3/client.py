@@ -139,13 +139,13 @@ class _IsolationCtx:
     def resolve_session_for_write(self, override: Optional[str]) -> str:
         """Write path specific: ``add_conversation`` must get a non-empty session_id.
 
-        raise ``ValueError`` —— avoid silently merging writes without a session on the server
+        raise ``ParamError`` —— avoid silently merging writes without a session on the server
         bucket, mixing with other callers' data. Read paths (query/search/count/
         delete）still goes through ``resolve_session``, allowing a default for cross-session aggregation.
         """
         sid = override or self.session_id
         if not sid:
-            raise ValueError(
+            raise ParamError(
                 "v3 MemoryClient.add_conversation requires session_id: "
                 "pass it in the constructor or per call. "
                 "Reads (query/search/count) may omit it to aggregate across sessions."
@@ -211,9 +211,9 @@ class MemoryClient:
         Pass ``session_id=None`` or ``task_id=None`` to explicitly clear a bound
         value. Omitting either argument keeps the current value.
         """
-        new_team = team_id or self._iso.team_id
-        new_agent = agent_id or self._iso.agent_id
-        new_user = user_id or self._iso.user_id
+        new_team = self._iso.team_id if team_id is None else team_id
+        new_agent = self._iso.agent_id if agent_id is None else agent_id
+        new_user = self._iso.user_id if user_id is None else user_id
         new_session = self._iso.session_id if session_id is _UNSET else session_id
         new_task = self._iso.task_id if task_id is _UNSET else task_id
         _validate_construction(new_team, new_agent, new_user)
@@ -613,9 +613,9 @@ class AsyncMemoryClient:
         task_id: Any = _UNSET,
     ) -> "AsyncMemoryClient":
         """Clone this client; pass ``None`` to clear a bound session/task."""
-        new_team = team_id or self._iso.team_id
-        new_agent = agent_id or self._iso.agent_id
-        new_user = user_id or self._iso.user_id
+        new_team = self._iso.team_id if team_id is None else team_id
+        new_agent = self._iso.agent_id if agent_id is None else agent_id
+        new_user = self._iso.user_id if user_id is None else user_id
         new_session = self._iso.session_id if session_id is _UNSET else session_id
         new_task = self._iso.task_id if task_id is _UNSET else task_id
         _validate_construction(new_team, new_agent, new_user)

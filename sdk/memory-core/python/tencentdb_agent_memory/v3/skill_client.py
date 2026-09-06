@@ -69,6 +69,17 @@ def _validate_extract(messages: List[Dict[str, Any]], isolation: Dict[str, Any])
         raise ParamError(f"extract requires non-empty {', '.join(missing)}")
 
 
+def _validate_conversation_add(messages: List[Dict[str, Any]], isolation: Dict[str, Any]) -> None:
+    if not isinstance(messages, list) or not messages:
+        raise ParamError("conversation_add requires at least one message")
+    missing = [
+        field for field in ("session_id", "user_id", "team_id", "agent_id")
+        if not isinstance(isolation.get(field), str) or not isolation[field].strip()
+    ]
+    if missing:
+        raise ParamError(f"conversation_add requires non-empty {', '.join(missing)}")
+
+
 def _validate_force_archive(isolation: Dict[str, Any]) -> None:
     """All five isolation fields (incl. ``space_id``) are required by
     ``forceArchiveRequestSchema``."""
@@ -608,6 +619,7 @@ class SkillClient:
             "task_id": task_id,
             "messages": messages,
         })
+        _validate_conversation_add(messages, body)
         return self._stub.post(f"{_V3}/conversation/add", body)
 
     def conversation_force_archive(
@@ -1061,6 +1073,7 @@ class AsyncSkillClient:
             "task_id": task_id,
             "messages": messages,
         })
+        _validate_conversation_add(messages, body)
         return await self._stub.post(f"{_V3}/conversation/add", body)
 
     async def conversation_force_archive(

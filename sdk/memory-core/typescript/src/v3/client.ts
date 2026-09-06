@@ -234,11 +234,11 @@ export class MemoryClient {
     // Accepts both session_ids (recommended) and the deprecated singular session_id, normalized to an array.
     const sessionIds = normalizeDeleteIds("session_ids", params.session_ids, 100);
     const legacySingle = params.session_id;
-    if (legacySingle !== undefined && !legacySingle) {
+    if (legacySingle !== undefined && (typeof legacySingle !== "string" || !legacySingle.trim())) {
       throw new ParamError("session_id must be a non-empty string");
     }
     const mergedSessions = legacySingle
-      ? [...new Set([...(sessionIds ?? []), legacySingle])]
+      ? [...new Set([...(sessionIds ?? []), (legacySingle as string).trim()])]
       : sessionIds;
 
     if (!messageIds?.length && !mergedSessions?.length) {

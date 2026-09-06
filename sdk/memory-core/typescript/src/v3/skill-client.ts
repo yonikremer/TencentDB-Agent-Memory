@@ -260,14 +260,20 @@ export class SkillClient {
    * `SkillDetail` shape as `get` (40401 when the name doesn't exist).
    */
   getByName(params: SkillGetByNameRequest): Promise<SkillDetail> {
+    // NOTE: isolation ids are intentionally NOT merged from constructor
+    // defaults here (unlike CRUD endpoints) — pass them explicitly per call,
+    // matching the Python SDK and the method docs.
     const body = stripUndefined({
-      ...this.ids(params),
+      team_id: params.team_id,
+      agent_id: params.agent_id,
+      user_id: params.user_id,
+      task_id: params.task_id,
       skill_name: params.skill_name,
       version: params.version,
       include_content: params.include_content,
       include_manifest: params.include_manifest,
     });
-    validateRequiredStrings(body, ["team_id", "agent_id"], "getByName");
+    validateRequiredStrings(body, ["team_id", "agent_id", "skill_name"], "getByName");
     return this.http.post(`${V3}/get-by-name`, body);
   }
 

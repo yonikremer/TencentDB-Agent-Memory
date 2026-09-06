@@ -42,11 +42,19 @@ class MemoryGenerationLogClient:
             "end_time": end_time, "limit": limit, "cursor": cursor,
         }))
 
-    def get(self, log_id: str) -> Dict[str, Any]:
-        return self._get(f"{_ROOT}/get", {"log_id": _required("log_id", log_id)})
+    def get(self, log_id: Optional[str] = None, *, memory_id: Optional[str] = None, layer: Optional[str] = None) -> Dict[str, Any]:
+        if log_id is not None:
+            if memory_id is not None:
+                raise ParamError("provide exactly one of log_id or memory_id")
+            return self._get(f"{_ROOT}/get", {"log_id": _required("log_id", log_id)})
+        if memory_id is not None:
+            if not isinstance(layer, str) or not layer.strip():
+                raise ParamError("layer is required with memory_id")
+            return self._get(f"{_ROOT}/get", {"memory_id": _required("memory_id", memory_id), "layer": layer})
+        raise ParamError("provide exactly one of log_id or memory_id")
 
     def get_by_memory_id(self, memory_id: str, layer: str) -> Dict[str, Any]:
-        return self._get(f"{_ROOT}/get", {"memory_id": _required("memory_id", memory_id), "layer": layer})
+        return self.get(memory_id=memory_id, layer=layer)
 
     def close(self) -> None:
         self._stub.close()
@@ -74,11 +82,19 @@ class AsyncMemoryGenerationLogClient:
             "end_time": end_time, "limit": limit, "cursor": cursor,
         }))
 
-    async def get(self, log_id: str) -> Dict[str, Any]:
-        return await self._get(f"{_ROOT}/get", {"log_id": _required("log_id", log_id)})
+    async def get(self, log_id: Optional[str] = None, *, memory_id: Optional[str] = None, layer: Optional[str] = None) -> Dict[str, Any]:
+        if log_id is not None:
+            if memory_id is not None:
+                raise ParamError("provide exactly one of log_id or memory_id")
+            return await self._get(f"{_ROOT}/get", {"log_id": _required("log_id", log_id)})
+        if memory_id is not None:
+            if not isinstance(layer, str) or not layer.strip():
+                raise ParamError("layer is required with memory_id")
+            return await self._get(f"{_ROOT}/get", {"memory_id": _required("memory_id", memory_id), "layer": layer})
+        raise ParamError("provide exactly one of log_id or memory_id")
 
     async def get_by_memory_id(self, memory_id: str, layer: str) -> Dict[str, Any]:
-        return await self._get(f"{_ROOT}/get", {"memory_id": _required("memory_id", memory_id), "layer": layer})
+        return await self.get(memory_id=memory_id, layer=layer)
 
     async def close(self) -> None:
         await self._stub.close()  # type: ignore[misc]

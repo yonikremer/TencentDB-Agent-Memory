@@ -96,8 +96,10 @@ class HttpStub(Stub):
                 details=details,
             )
         result: dict = data.get("data", {})
+        if result is None:
+            result = {}
         trace_id = resp.headers.get("x-trace-id")
-        if trace_id:
+        if trace_id and isinstance(result, dict):
             result["trace_id"] = trace_id
         return result
 
@@ -156,8 +158,10 @@ class AsyncHttpStub:
                 details=details,
             )
         result: dict = data.get("data", {})
+        if result is None:
+            result = {}
         trace_id = resp.headers.get("x-trace-id")
-        if trace_id:
+        if trace_id and isinstance(result, dict):
             result["trace_id"] = trace_id
         return result
 

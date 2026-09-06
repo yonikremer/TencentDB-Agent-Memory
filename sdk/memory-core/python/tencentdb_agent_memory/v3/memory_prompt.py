@@ -21,6 +21,8 @@ def _required(name: str, value: str) -> str:
 
 
 def _ids(values: Iterable[str], name: str) -> List[str]:
+    if isinstance(values, str) or not isinstance(values, (list, tuple)):
+        raise ParamError(f"{name} must be a non-empty list of non-empty strings")
     result = list(dict.fromkeys(values))
     if not result or any(not isinstance(item, str) or not item.strip() for item in result):
         raise ParamError(f"{name} must be a non-empty list of non-empty strings")
@@ -110,6 +112,10 @@ class MemoryPromptClient:
         team, agent = team_id or self._team_id, agent_id or self._agent_id
         if agent and not team:
             raise ParamError("team_id is required with agent_id")
+        if target_type == "instance" and (team or agent):
+            raise ParamError("instance target cannot include team_id or agent_id")
+        if target_type == "team" and agent:
+            raise ParamError("team target cannot include agent_id")
         return self._get(f"{_ROOT}/setting/list", _strip_none({
             "memory_prompt_id": memory_prompt_id, "target_type": target_type,
             "team_id": team, "agent_id": agent, "layer": layer,
@@ -192,6 +198,11 @@ class AsyncMemoryPromptClient:
         agent = kwargs.pop("agent_id", None) or self._agent_id
         if agent and not team:
             raise ParamError("team_id is required with agent_id")
+        target_type = kwargs.get("target_type")
+        if target_type == "instance" and (team or agent):
+            raise ParamError("instance target cannot include team_id or agent_id")
+        if target_type == "team" and agent:
+            raise ParamError("team target cannot include agent_id")
         return await self._get(f"{_ROOT}/setting/list", _strip_none({**kwargs, "team_id": team, "agent_id": agent}))
 
     async def list_setting_logs(self, **kwargs: Any) -> Dict[str, Any]:
