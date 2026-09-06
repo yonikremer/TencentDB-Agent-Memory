@@ -224,15 +224,48 @@ first chat, hardest place to debug).
 ### 2.3 Team + agents + task
 
 ```bash
-# team (owner = your user_id)
-POST /v3/meta/team/create {"name":"research","owner_user_id":"<you>"}
-# → team_id
-# one shared agent + one private agent per researcher (owner = each user)
-POST /v3/meta/agent/create {"team_id":"<team>","owner_user_id":"<uid>","name":"lit-review"}
-# → agent_id
-# one task per project, members = the researchers on it
-POST /v3/meta/task/create {"team_id":"<team>","creator_user_id":"<you>","name":"project-x","user_ids":[...]}
+GW=http://127.0.0.1:8420; SID=default
+ME=<your user_id>; KEY=<your user_key>  # admin key from step 2.1
+H1="x-tdai-service-id: $SID"; H2="x-tdai-user-key: $KEY"
+
+# 0. who am I (do this first — every id below depends on it)
+curl -s -X POST -H "$H1" $GW/v3/meta/auth/verify -d '{"user_key":"'"$KEY"'"}'
+# → data.user.user_id must equal $ME
+
+# 1. team (owner = your user_id)
+curl -s -X POST -H "Content-Type: application/json" -H "$H1" -H "$H2" \
+  $GW/v3/meta/team/create -d '{"name":"research","owner_user_id":"'"$ME"'"}'
+# → data.team_id  (save as TEAM)
+
+# 2. members — repeat per researcher. Get their user_id first:
+#    auth/verify with THEIR user_key, or user/list -d '{"team_id":"..."}'.
+curl -s -X POST -H "Content-Type: application/json" -H "$H1" -H "$H2" \
+  $GW/v3/meta/team-member/add \
+  -d '{"team_id":"'"$TEAM"'","user_id":"<uid>","role":"member"}'
+# role ∈ admin|member|reviewer. → code 0. Self-add and owner-demote are rejected.
+
+# 3. agents — one shared + one private per researcher (owner = each user)
+curl -s -X POST -H "Content-Type: application/json" -H "$H1" -H "$H2" \
+  $GW/v3/meta/agent/create \
+  -d '{"team_id":"'"$TEAM"'","owner_user_id":"<uid>","name":"lit-review"}'
+# → data.agent_id  (visibility defaults to team)
+
+# 4. one task per project …
+curl -s -X POST -H "Content-Type: application/json" -H "$H1" -H "$H2" \
+  $GW/v3/meta/task/create \
+  -d '{"team_id":"'"$TEAM"'","creator_user_id":"'"$ME"'","title":"project-x"}'
+# → data.task_id  (field is TITLE, not name; there is NO user_ids field)
+
+# 5. … members join via task-agent/link (repeat per agent)
+curl -s -X POST -H "Content-Type: application/json" -H "$H1" -H "$H2" \
+  $GW/v3/meta/task-agent/link -d '{"task_id":"'"$TASK"'","agent_id":"'"$AGENT"'"}'
+# → code 0
 ```
+
+> Auth rule for every `/v3/meta/*` call: **both** headers
+> `x-tdai-service-id` **and** `x-tdai-user-key`. One missing = 400/401.
+> Destroy is plural: `team/delete` takes `{"team_ids":[...]}` (cascades to
+> members/agents/tasks/assets), `agent/delete` takes `{"agent_ids":[...]}`.
 
 Recommended shape (follows §0.5): **1 shared agent** holding only
 team-shared wiki/skills — no private chat expected there — +
@@ -259,9 +292,87 @@ Easiest = Panel web → Wiki page (no curl):
 3. **Ingest** button (LLM distills pages; billed to KEY_A). Poll to `ready`.
 4. Allocate wiki to agent(s): Agent assets tab → allocate (injection `tool`).
 
-API equivalent: `POST :8421/v3/wiki/create` → `/raw/write` → `/ingest`
-(header `x-tdai-service-id`, body `team_id`), then `POST :8420`
-`/v3/meta/asset/create` (`asset_id` = `wiki_id`) + `agent-fixed-asset/set`.
+API equivalent (all POST, header `x-tdai-service-id: default` only — no user key on KS):
+
+```bash
+KS=http://127.0.0.1:8421; SID=default; TEAM=<team_id>; WNAME=research-shared
+H="x-tdai-service-id: $SID"
+
+# 2.1 create (idempotent on same team+name) → data.wiki_id (save as WIKI)
+curl -s -X POST -H "Content-Type: application/json" -H "$H" \
+  $KS/v3/wiki/create -d '{"team_id":"'"$TEAM"'","name":"'"$WNAME"'"}'
+
+# 2.2 add files — plain filenames, no '..', no leading '/'
+# limits per call: ≤10 files, ≤512 KB/file, ≤5 MB total. Big corpus = batches.
+curl -s -X POST -H "Content-Type: application/json" -H "$H" \
+  $KS/v3/wiki/raw/write -d @- <<EOF
+{"team_id":"$TEAM","wiki_id":"$WIKI","files":[
+  {"filename":"notes.md","content":"# Topic\n\nBody text here.\n"},
+  {"filename":"docs/extra.md","content":"# More\n\nSubdir paths allowed.\n"}
+]}
+EOF
+# → data.items[].filename. 400 "traversal detected" on a plain name =
+# stale KS binary (Windows sep bug, fixed on feat/server_team) — pull + restart KS.
+
+# list what is staged:
+curl -s -X POST -H "Content-Type: application/json" -H "$H" \
+  $KS/v3/wiki/raw/ls -d '{"wiki_id":"'"$WIKI"'"}'
+# → data.items[].filename
+
+# 2.3 ingest — async, returns 202 pending. Empty wiki → 400 (upload first).
+curl -s -X POST -H "Content-Type: application/json" -H "$H" \
+  $KS/v3/wiki/ingest -d '{"wiki_id":"'"$WIKI"'"}'
+
+# poll to ready (2s interval; busy → 409 means an ingest is already running):
+for i in $(seq 1 150); do
+  S=$(curl -s -X POST -H "Content-Type: application/json" -H "$H" \
+    $KS/v3/wiki/get -d '{"wiki_id":"'"$WIKI"'"}');
+  echo "$S" | grep -o '"status":"[^"]*"' | head -1;
+  echo "$S" | grep -q '"status":"ready"' && break
+  echo "$S" | grep -q '"status":"failed"' && break
+  sleep 2
+done
+# failed + sync_error naming the LLM provider = KEY_A/BASE_URL problem (step 1.3).
+
+# query it:
+curl -s -X POST -H "Content-Type: application/json" -H "$H" \
+  $KS/v3/wiki/search -d '{"wiki_id":"'"$WIKI"'","query":"<a term>","limit":5}'
+```
+
+### 2.4 Share the wiki with the team (register → allocate → verify)
+
+A wiki is invisible to agents until it is a **team asset** bound to an agent.
+Three calls, in order:
+
+```bash
+GW=http://127.0.0.1:8420; PANEL=http://127.0.0.1:8123; SID=default
+ME=<your user_id>; KEY=<your user_key>; TEAM=<team_id>; WIKI=<wiki_id>; AGENT=<agent_id>
+
+# 1. register as team-visible asset (asset_id MUST equal wiki_id)
+curl -s -X POST -H "Content-Type: application/json" \
+  -H "x-tdai-service-id: $SID" -H "x-tdai-user-key: $KEY" \
+  $GW/v3/meta/asset/create -d '{"asset_id":"'"$WIKI"'","team_id":"'"$TEAM"'",\
+"asset_type":"llm_wiki","name":"research-shared","owner_user_id":"'"$ME"'",\
+"source_type":"uploaded","visibility":"team"}'
+# → code 0. visibility team = every team member can read it.
+
+# 2. allocate to the agent(s) — repeat per agent (shared + each private one
+#    that should recall it). Panel header names use capital X-Tdai-* here.
+curl -s -X POST -H "Content-Type: application/json" \
+  -H "X-Tdai-Service-Id: $SID" -H "X-Tdai-User-Key: $KEY" \
+  $PANEL/api/v1/knowledge/allocate \
+  -d '{"team_id":"'"$TEAM"'","knowledge_id":"'"$WIKI"'","agent_id":"'"$AGENT"'"}'
+# → data.allocated true. 404 KNOWLEDGE_NOT_FOUND = step 1 skipped.
+
+# 3. verify the bind (injection_mode tool = agent can search it at runtime)
+curl -s -X POST -H "Content-Type: application/json" \
+  -H "x-tdai-service-id: $SID" -H "x-tdai-user-key: $KEY" \
+  $GW/v3/meta/agent-fixed-asset/list -d '{"agent_id":"'"$AGENT"'"}' \
+  | grep -o '"asset_id":"[^"]*"'
+# → must include "asset_id":"<your wiki_id>". Empty = allocate skipped —
+# the proxy answers with no knowledge and NO error, so check explicitly.
+# Unshare: POST $PANEL/api/v1/knowledge/unbind {"knowledge_id","agent_id"}.
+```
 
 > Code repos go the same way via code-graph (`/v3/code-graph/create` +
 > `/sync`): **public HTTPS repos only**, no local paths. CLI helper:
@@ -294,23 +405,73 @@ Creating a skill auto-registers its asset and binds it to the owner agent.
 shared agent → toggle **Shared** (Agent assets tab). Every teammate's
 Claude Code session then follows the `SKILL.md` playbook automatically.
 
-**API path (bulk):** per skill folder, with your `user_key`:
+**API path (bulk):** per skill folder. Auth differs from meta routes:
+`Authorization: Bearer <user_key>` + `x-tdai-service-id` (NOT the
+`x-tdai-user-key` header — that gives 401).
 
 ```bash
-POST :8420/v3/skill/create  (headers x-tdai-service-id, x-tdai-user-key)
-{"team_id":"<team>","agent_id":"<shared-agent>","name":"<skill-name, ≤64 chars>",
- "content":"<full SKILL.md text>",
- "resources":[{"path":"<rel-path>","content":"<text>"}]}
-# limits: body ≤ 1 MiB, ≤ 100 resources
+GW=http://127.0.0.1:8420; SID=default
+ME=<your user_id>; KEY=<your user_key>; TEAM=<team_id>; AGENT=<shared-agent_id>
+BH="Authorization: Bearer $KEY"; H="x-tdai-service-id: $SID"
+
+# 3. create — content MUST start with frontmatter carrying name+description.
+# name: ^[a-z0-9][a-z0-9-]*$, ≤64 chars. body ≤50k chars, ≤100 resources, ≤1 MiB.
+cat > /tmp/skill.json <<EOF
+{"user_id":"$ME","team_id":"$TEAM","agent_id":"$AGENT","name":"lit-review",
+ "content":"---\nname: lit-review\ndescription: How we do lit reviews.\n---\n\n# Lit review\n\n1. Search wiki first.\n",
+ "resources":[{"path":"checklist.md","content":"- [ ] cite sources\n","encoding":"utf-8"}]}
+EOF
+curl -s -X POST -H "Content-Type: application/json" -H "$H" -H "$BH" \
+  $GW/v3/skill/create -d @/tmp/skill.json
+# → code 0 + data.skill_id. 42203 = frontmatter missing/invalid.
+
+# read back:
+curl -s -X POST -H "Content-Type: application/json" -H "$H" -H "$BH" \
+  $GW/v3/skill/get \
+  -d '{"user_id":"'"$ME"'","team_id":"'"$TEAM"'","skill_id":"<skl-…>","include_content":true}'
+
+# list one agent's skills:
+curl -s -X POST -H "Content-Type: application/json" -H "$H" -H "$BH" \
+  $GW/v3/skill/list -d '{"user_id":"'"$ME"'","team_id":"'"$TEAM"'",\
+"filters":{"owner_agent_id":"'"$AGENT"'"},"pagination":{"limit":20,"offset":0}}'
+
+# delete = archive (needs owner agent + current version from get/list):
+curl -s -X POST -H "Content-Type: application/json" -H "$H" -H "$BH" \
+  $GW/v3/skill/delete -d '{"user_id":"'"$ME"'","team_id":"'"$TEAM"'",\
+"agent_id":"'"$AGENT"'","skill_id":"<skl-…>","expected_version":1}'
+# → data.archived true
 ```
 
-Expect `code 0` + `skill_id`. Skill appears under Panel → Agent assets
-of the shared agent; flip Shared/Private there.
+### 3.1 Share the skill with the team (fork, not ACL)
 
-**✅ Verify:** `POST /v3/skill/get-by-name` (or Panel Skills page)
-returns the skill; a Claude Code chat on the shared agent that matches
-the skill scenario follows it. Note: `agents/asset-import.ts` imports
-**chat histories**, not `SKILL.md` folders — don't use it for this.
+Runtime injection filters by `owner_agent_id`, so `acl/grant` does NOT
+mount a skill on anyone. Sharing = **fork**: re-create the same content
+with `agent_id` = each target agent (same name allowed across agents;
+duplicate under the SAME agent is rejected):
+
+```bash
+# 1. read source (content + manifest from the get call above)
+# 2. create under the teammate's agent, tagging lineage:
+curl -s -X POST -H "Content-Type: application/json" -H "$H" -H "$BH" \
+  $GW/v3/skill/create -d '{"user_id":"'"$ME"'","team_id":"'"$TEAM"'",\
+"agent_id":"<teammate-agent_id>","name":"lit-review",\
+"content":"<same SKILL.md text>",\
+"metadata":{"forked_from":{"skill_id":"<source skl-…>","name":"lit-review"}}}'
+# → new skill_id with owner_agent_id = teammate agent. Copy resources[] too
+# (read each via files/read {path}, add to the create body) or the fork
+# loses its attachments.
+
+# 3. verify — teammate agent lists it:
+curl -s -X POST -H "Content-Type: application/json" -H "$H" -H "$BH" \
+  $GW/v3/skill/list -d '{"user_id":"'"$ME"'","team_id":"'"$TEAM"'",\
+"filters":{"owner_agent_id":"<teammate-agent_id>"},"pagination":{"limit":20,"offset":0}}' \
+  | grep -o '"name":"[^"]*"' | head
+```
+
+**✅ Verify:** the forked `skill_id` shows under the target agent's list
+(or Panel → Agent assets); a chat on that agent matching the scenario
+follows it. Note: `agents/asset-import.ts` imports **chat histories**,
+not `SKILL.md` folders — don't use it for this.
 
 ## 4. Researcher machines (Claude Code + OWN chat key)
 
