@@ -131,4 +131,17 @@ describe("guide section 3: wiki create -> files -> ingest", () => {
     expect(ok.status).toBe(202);
     expect(ok.json.data.wiki_id).toBe(wikiId);
   });
+
+  it("poll wiki/get reaches ready (stubbed LLM worker)", async () => {
+    let detail: any = null;
+    for (let i = 0; i < 100; i++) {
+      const g = await post("/v3/wiki/get", { wiki_id: wikiId });
+      expect(g.json.code).toBe(0);
+      detail = g.json.data;
+      if (detail.status === "ready" || detail.status === "failed") break;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    expect(detail.status).toBe("ready");
+    expect(detail.page_count).toBe(1);
+  });
 });
