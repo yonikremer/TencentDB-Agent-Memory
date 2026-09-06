@@ -11,7 +11,7 @@
 import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import type { LimitFunction } from "p-limit";
-import { createLlmClient, type LlmClient, type RawLlmConfig } from "./llm.js";
+import { createLlmClient, normalizeLlmConfig, type LlmClient, type RawLlmConfig } from "./llm.js";
 import { loadTemplate } from "./template.js";
 import {
   buildSystemPrompt,
@@ -129,7 +129,7 @@ export async function extractSource(
   const sourceName = basename(sourcePath);
   if (!sourceText.trim()) throw new Error(`Source file is empty: ${sourceName}`);
 
-  const llm = options.llm ?? createLlmClient(llmConfig);
+  const llm = options.llm ?? createLlmClient(normalizeLlmConfig(llmConfig));
   const template = loadTemplate(projectPath);
   const systemPrompt = buildSystemPrompt(template);
   const mode = options.mode ?? "two-stage";
@@ -314,7 +314,7 @@ export async function ingestSource(
 ): Promise<string[]> {
   const existingPages = scanExistingPages(projectPath);
   const candidates = await extractSource(projectPath, sourcePath, llmConfig, existingPages, options);
-  const llm = options.llm ?? createLlmClient(llmConfig);
+  const llm = options.llm ?? createLlmClient(normalizeLlmConfig(llmConfig));
   const sourceName = basename(sourcePath);
   const { written } = await commitCandidates(
     projectPath,
@@ -418,7 +418,10 @@ export function canonicalizePagePath(llmPath: string, content: string): string {
     if (slug) return `wiki/${dirForType(type)}/${slug}.md`;
   }
 
-  const segments = llmPath.split("/");
+  // LLM output is a POSIX-style wiki path, but models on Windows hosts may
+  // emit backslashes — normalize first so both parse identically.
+  const posixPath = llmPath.replace(/\\/g, "/");
+  const segments = posixPath.split("/");
   const fileName = segments[segments.length - 1];
   if (segments.length >= 3) {
     const dirSeg = segments[1];
@@ -426,5 +429,5 @@ export function canonicalizePagePath(llmPath: string, content: string): string {
     const middle = segments.slice(2, -1);
     return ["wiki", canonicalDir, ...middle, fileName].join("/");
   }
-  return llmPath;
+  return posixPath;
 }

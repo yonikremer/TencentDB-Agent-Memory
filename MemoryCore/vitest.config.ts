@@ -1,6 +1,18 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      // The installed `openclaw` exports map has no bare `./plugin-sdk` entry;
+      // src/offload/index.ts still `await import("openclaw/plugin-sdk" as any)`
+      // inside a try/catch. Vite statically resolves literal dynamic imports and
+      // would hard-fail at transform time, so alias the specifier to a test stub.
+      "openclaw/plugin-sdk": fileURLToPath(
+        new URL("./__tests__/mocks/openclaw-plugin-sdk.ts", import.meta.url),
+      ),
+    },
+  },
   test: {
     environment: "node",
     pool: "forks",

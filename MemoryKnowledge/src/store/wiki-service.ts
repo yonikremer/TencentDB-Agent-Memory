@@ -12,7 +12,7 @@
  *   lib layer cascadeDeleteWikiPagesWithRefs for reference cascading.
  */
 
-import { join, resolve, normalize } from "node:path";
+import { join, resolve, normalize, sep } from "node:path";
 import {
   rmSync,
   mkdirSync,
@@ -908,7 +908,7 @@ export class WikiService {
     // (such as KNOWLEDGE_DATA_DIR=./data).
     const base = resolve(sourcesDir);
     const safe = resolve(base, normalized);
-    const dirWithSep = base.endsWith("/") ? base : base + "/";
+    const dirWithSep = base.endsWith(sep) ? base : base + sep;
     if (safe !== base && !safe.startsWith(dirWithSep)) return null;
     return safe;
   }
@@ -929,7 +929,7 @@ export class WikiService {
 
     // Resolve into absolute path to prevent comparison failure when projectPath is relative.
     const wikiDir = resolve(projectPath, "wiki");
-    const wikiDirSep = wikiDir.endsWith("/") ? wikiDir : wikiDir + "/";
+    const wikiDirSep = wikiDir.endsWith(sep) ? wikiDir : wikiDir + sep;
 
     // Try original name first, then try appending .md extension.
     const candidates = cleanRef.endsWith(".md") ? [cleanRef] : [cleanRef + ".md", cleanRef];
@@ -954,7 +954,7 @@ export class WikiService {
   /** Converts wiki/.../page.md absolute path back to ref (e.g. "concepts/redis"). */
   private absToPageRef(projectPath: string, abs: string): string {
     const wikiDir = resolve(projectPath, "wiki");
-    const prefix = wikiDir.endsWith("/") ? wikiDir : wikiDir + "/";
+    const prefix = wikiDir.endsWith(sep) ? wikiDir : wikiDir + sep;
     if (!abs.startsWith(prefix)) return abs;
     return abs.slice(prefix.length).replace(/\.md$/, "");
   }

@@ -1,8 +1,10 @@
 /**
  * llm.ts — OpenAI-compatible chat invocation wrapper (wiki ingest dedicated).
  *
- * Reuses the repository's existing Vercel AI SDK (`ai` + `@ai-sdk/openai`), calling standard
- * `/chat/completions` (compatibility: "compatible"), compatible with various OpenAI-compatible backends.
+ * Reuses the repository's existing Vercel AI SDK (`ai` + `@ai-sdk/openai`) and calls standard
+ * `/chat/completions`. The client is created with `baseURL` (plus apiKey) only; in @ai-sdk/openai
+ * 3.x a custom baseURL uses the OpenAI-compatible chat-completions model by default, so no
+ * explicit `compatibility` flag is needed (that option no longer exists in the installed SDK).
  *
  * The actual shape of llmConfig is passed from upper module.ts, with field names:
  *   { provider, apiKey, model, customEndpoint, maxContextSize }
@@ -100,7 +102,6 @@ export function createLlmClient(config: NormalizedLlmConfig): LlmClient {
       : createOpenAI({
           apiKey: config.apiKey,
           baseURL: config.baseUrl,
-          compatibility: "compatible",
         });
 
   return {

@@ -239,6 +239,11 @@ export async function deleteKnowledgeCascade(
 // ── meta list pagination + authentication + KS join ─────────────────────────────
 
 const META_LIST_PAGE = 100;
+// Defensive cap: if the backend omits `total` and keeps returning a full page for
+// every offset (or ignores `offset` entirely), we must still terminate instead of
+// looping until OOM. A short final page is the primary no-total termination signal;
+// this cap is the last-resort guard.
+const META_LIST_MAX_PAGES = 1000;
 const FILTERED_ASSET_STATUSES = new Set(['archived', 'deprecated', 'failed']);
 
 export interface KnowledgeAssetMetaRaw {
@@ -275,7 +280,7 @@ export async function fetchAllMetaListItems<T>(
 ): Promise<T[]> {
   const all: T[] = [];
   let offset = 0;
-  for (;;) {
+  for (let page = 0; page < META_LIST_MAX_PAGES; page++) {
     const env = await deps.metaKernel.invoke(action, { ...body, limit: META_LIST_PAGE, offset }, ctx);
     if (env.code !== 0) {
       onError?.(env);
@@ -294,6 +299,8 @@ export async function fetchAllMetaListItems<T>(
       break;
     }
     if (typeof total === 'number' && offset + batch.length >= total) break;
+    // No `total` field: a short page is the only termination signal.
+    if (typeof total !== 'number' && batch.length < META_LIST_PAGE) break;
     offset += META_LIST_PAGE;
   }
   return all;

@@ -24,14 +24,23 @@ export class FsStorage implements ProxyStorage {
   private resolve(key: string): string {
     if (!key || key.length === 0) throw new Error(`[fs-storage] invalid empty key`);
     if (isAbsolute(key)) throw new Error(`[fs-storage] absolute path not allowed: ${key}`);
+    // Reject any raw `..` path segment BEFORE normalizing: normalize() collapses
+    // embedded traversal (e.g. "ok/../escape" -> "escape") and would hide it.
+    if (key.split(/[\\/]+/).includes("..")) {
+      throw new Error(`[fs-storage] path traversal not allowed: ${key}`);
+    }
     const normalized = normalize(key);
-    if (normalized.startsWith("..") || normalized.split(sep).includes("..")) {
+    if (normalized.startsWith("..")) {
       throw new Error(`[fs-storage] path traversal not allowed: ${key}`);
     }
     const full = join(this.root, normalized);
     // Double check: the resolved path must stay inside root.
+    // Boundary-aware (".." prefix alone would false-positive "..foo") and
+    // case-insensitive on Windows (FS preserves case but ignores it).
     const rel = relative(this.root, full);
-    if (rel.startsWith("..") || isAbsolute(rel)) {
+    const escaped = rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel) || /^[a-zA-Z]:[\\/]/.test(rel);
+    const escapedWin = process.platform === "win32" && (rel.toLowerCase() === ".." || rel.toLowerCase().startsWith(`..${sep}`));
+    if (escaped || escapedWin) {
       throw new Error(`[fs-storage] path escapes root: ${key}`);
     }
     return full;

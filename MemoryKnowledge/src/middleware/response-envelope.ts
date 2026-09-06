@@ -37,15 +37,14 @@ export function accessLog(): MiddlewareHandler {
     const requestId = c.req.header("x-request-id") || crypto.randomUUID();
     c.set("requestId", requestId);
 
-    // Cache request body (body can only be read once, used for logging on failure)
-    // Hono's bodyCache expects Promise (c.req.json()/text() calls .then() on cached value)
+    // Read the request body once for logging. Hono's c.req.text() caches the raw
+    // text internally, so a later c.req.text() returns the cached value directly
+    // and c.req.json() re-parses it. No manual bodyCache assignment is needed.
     let reqBody: unknown = undefined;
     if (c.req.method === 'POST' || c.req.method === 'PUT') {
       try {
         const raw = await c.req.text();
         reqBody = raw ? JSON.parse(raw) : undefined;
-        c.req.bodyCache.text = Promise.resolve(raw);
-        if (reqBody) c.req.bodyCache.json = Promise.resolve(reqBody);
       } catch {
         // Non-JSON body, ignore
       }
