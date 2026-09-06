@@ -12,7 +12,7 @@
  *   lib layer cascadeDeleteWikiPagesWithRefs for reference cascading.
  */
 
-import { join, resolve, normalize, sep } from "node:path";
+import { join, resolve, normalize, sep, dirname } from "node:path";
 import {
   rmSync,
   mkdirSync,
@@ -501,7 +501,7 @@ export class WikiService {
     const safe = this.resolveRawPath(sourcesDir, filename);
     if (!safe) return "invalid_path";
 
-    mkdirSync(sourcesDir, { recursive: true });
+    mkdirSync(dirname(safe), { recursive: true });
     writeFileSync(safe, content, "utf-8");
     this.registerSources(serviceId, teamId, wikiId, [{ filename, content, size }], userId);
     return { filename, size };
@@ -555,6 +555,7 @@ export class WikiService {
     const written: Plan[] = [];
     try {
       for (const p of plans) {
+        mkdirSync(dirname(p.safePath), { recursive: true });
         writeFileSync(p.safePath, p.content, "utf-8");
         written.push(p);
       }
