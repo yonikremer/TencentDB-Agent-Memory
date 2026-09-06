@@ -5,13 +5,18 @@ import { ParamError, TDAMError } from "../errors.js";
 import type { HttpTransportOptions } from "../http.js";
 import type { ApiResponseEnvelope } from "../types.js";
 
+export interface V3HttpTransportOptions extends Omit<HttpTransportOptions, "apiKey"> {
+  /** Optional Bearer token — KS standalone needs none; gateway clients must pass one. */
+  apiKey?: string;
+}
+
 export class V3HttpTransport {
   private readonly endpoint: string;
   private readonly headers: Record<string, string>;
   private readonly timeout: number;
   private readonly dispatcher?: Agent;
 
-  constructor(opts: HttpTransportOptions) {
+  constructor(opts: V3HttpTransportOptions) {
     let endpoint: URL;
     try {
       endpoint = new URL(opts.endpoint);
@@ -21,7 +26,6 @@ export class V3HttpTransport {
     if (endpoint.protocol !== "http:" && endpoint.protocol !== "https:") {
       throw new ParamError("endpoint must be a valid HTTP(S) URL");
     }
-    if (!opts.apiKey?.trim()) throw new ParamError("apiKey must be provided");
     if (!opts.serviceId?.trim()) throw new ParamError("serviceId must be provided");
     const timeout = opts.timeout ?? 30_000;
     if (!Number.isFinite(timeout) || timeout <= 0) {
@@ -31,10 +35,10 @@ export class V3HttpTransport {
     this.endpoint = opts.endpoint.replace(/\/+$/, "");
     this.timeout = timeout;
     this.headers = {
-      Authorization: `Bearer ${opts.apiKey}`,
       "x-tdai-service-id": opts.serviceId,
       "Content-Type": "application/json",
     };
+    if (opts.apiKey?.trim()) this.headers.Authorization = `Bearer ${opts.apiKey.trim()}`;
     if (opts.userKey) this.headers["x-tdai-user-key"] = opts.userKey;
     if (opts.rejectUnauthorized === false) {
       this.dispatcher = new Agent({ connect: { rejectUnauthorized: false } });
@@ -45,13 +49,22 @@ export class V3HttpTransport {
     path: string,
     body: Record<string, unknown> = {},
   ): Promise<T & { trace_id?: string }> {
+    return this.request<T>("POST", path, body);
+  }
+
+  /** GET — only KS auto-sync/status uses it; envelope handling identical to POST. */
+  async get<T = unknown>(path: string): Promise<T & { trace_id?: string }> {
+    return this.request<T>("GET", path);
+  }
+
+  private async request<T>(method: string, path: string, body?: Record<string, unknown>): Promise<T & { trace_id?: string }> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeout);
     try {
       const fetchOptions: RequestInit & { dispatcher?: Agent } = {
-        method: "POST",
+        method,
         headers: this.headers,
-        body: JSON.stringify(body),
+        body: body === undefined ? undefined : JSON.stringify(body),
         signal: controller.signal,
       };
       if (this.dispatcher) fetchOptions.dispatcher = this.dispatcher;

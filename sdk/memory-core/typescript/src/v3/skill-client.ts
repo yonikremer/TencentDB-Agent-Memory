@@ -104,6 +104,7 @@ export class SkillClient {
       return;
     }
     const cfg = configOrTransport;
+    if (!cfg.apiKey?.trim()) throw new ParamError("SkillClient requires apiKey (gateway Bearer)");
     this.http = new V3HttpTransport({
       endpoint: cfg.endpoint,
       apiKey: cfg.apiKey,

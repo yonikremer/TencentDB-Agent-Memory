@@ -171,7 +171,58 @@ meta.delete_knowledge(["wiki-docs", "cg-repo-1"], team_id="team-1")
 | `delete_knowledge(ids, team_id=None)` | `POST /v3/knowledge/delete` | batch delete (≤100) |
 | `list_knowledge(p)` | `POST /v3/knowledge/list` | list by team_id, optional type filter / batch id lookup |
 
-> Note: these are **management-plane CRUD** (metadata only). Actually searching wiki content, reading pages, or syncing repos is the Knowledge Service data-plane's job (`service_url` → `:8421`), not this client.
+> Note: these are **management-plane CRUD** (metadata only). Actually searching wiki content, reading pages, or syncing repos is the Knowledge Service data-plane's job (`service_url` → `:8421`) — see `WikiClient` below.
+
+## End-to-end: users → teams → skills + wikis → share
+
+All seven actions in one script (gateway `:8420` + Knowledge Service `:8421`):
+
+```python
+from tencentdb_agent_memory.v3 import MetadataClient, SkillClient, WikiClient
+
+meta = MetadataClient(endpoint="http://127.0.0.1:8420", api_key="verify-token", service_id="sid")
+skills = SkillClient(endpoint="http://127.0.0.1:8420", api_key="verify-token", service_id="sid")
+wiki = WikiClient(endpoint="http://127.0.0.1:8421", service_id="sid")  # KS needs no api_key
+
+u = meta.create_user({"username": "alice"})                    # 1. create user
+t = meta.create_team({"name": "t1", "owner_user_id": u["user_id"]})  # 2. create team
+meta.add_team_member({"team_id": t["team_id"], "user_id": u["user_id"]})  # 3. add user to team
+sk = skills.create(name="tips", content="---\\nname: tips\\n---\\n# t\\n")  # 4a. skill
+w = wiki.create(team_id=t["team_id"], name="docs")               # 4b. wiki
+wiki.raw_write(team_id=t["team_id"], wiki_id=w["wiki_id"], files=[{"filename": "a.md", "content": "# hi"}])  # 5. sources
+wiki.ingest(wiki_id=w["wiki_id"])                                 # 6. ingest (poll get() to ready)
+meta.share_asset_with_team(w["wiki_id"])                          # 7a. share wiki within its team (asset_id == wiki_id)
+meta.share_asset_with_team(sk["skill_id"])                        # 7b. share skill within its team (asset auto-registered on create)
+# Restricted sharing: meta.grant_acl({"asset_id": ..., "subject_type": "team_role", ...}); allocate: meta.set_agent_fixed_assets(...)
+```
+
+## WikiClient (Knowledge Service `/v3/wiki/*`)
+
+`WikiClient` / `AsyncWikiClient` wrap the 15 KS endpoints: `create / get / list /
+delete / update_meta / ingest`, `raw_{ls,read,write,rm}`, `page_{ls,read,write,rm}`,
+`graph / search`. Team-scoped writes carry `team_id`; id-only reads address by
+`wiki_id`. Auth is `x-tdai-service-id` (+ optional Bearer).
+
+## OpsClient (Knowledge Service ops plane)
+
+`OpsClient` / `AsyncOpsClient` cover per-instance LLM routing + scheduler admin:
+
+```python
+from tencentdb_agent_memory.v3 import OpsClient
+
+ops = OpsClient(endpoint="http://127.0.0.1:8421", service_id="sid")
+ops.llm_binding_set({"mode": "proxy", "api_key": "sk-...", "proxy_base_url": "http://proxy"})
+# BYO instead: ops.llm_binding_set({"mode": "byo", "api_key": "sk-...", "base_url": "https://api..."})
+print(ops.llm_binding_status())  # {bound, mode, enabled} — never contains api_key
+print(ops.llm_binding_list())    # all instances (no service-id needed server-side)
+print(ops.auto_sync_status())    # GET — {running, activeSyncs, queueLength, scanning, config}
+print(ops.auto_sync_trigger())   # POST — {triggered} (false when disabled server-side)
+```
+
+Validation mirrors the server: bad `mode`, `proxy` without `proxy_base_url`,
+`byo` without `base_url` raise `ParamError` before any request. First set for an
+instance requires `api_key` server-side — omit it only when updating an
+already-bound instance.
 
 ## Error Handling
 

@@ -23,4 +23,6 @@ export interface MemoryClientConfig {
  */
 export interface Transport {
   post<T>(path: string, body?: Record<string, unknown>): Promise<T>;
+  /** Optional GET — only KS auto-sync/status uses it; clients needing GET fail fast without it. */
+  get?<T>(path: string): Promise<T>;
 }

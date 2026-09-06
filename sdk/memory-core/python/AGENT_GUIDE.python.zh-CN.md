@@ -241,7 +241,7 @@ meta.create_knowledge({
 meta.list_knowledge({"team_id": "team-1", "type": "wiki"})
 ```
 
-注意：`MetadataClient` 只管元数据 CRUD；真正搜 wiki 内容、读页面、同步仓库要调 Knowledge Service 数据面（`service_url` 指向的 `:8421`），那是另一组接口，不在本 SDK 范围内。
+注意：`MetadataClient` 只管元数据 CRUD；真正写源文件、ingest、搜 wiki 内容、读页面用 `WikiClient`（Knowledge Service 数据面，`endpoint` 指向 `service_url` 的 `:8421`，一般不需要 `api_key`）：`create → raw_write → ingest → get 轮询到 ready`，分享用 `meta.share_asset_with_team(wiki_id / skill_id)`（`asset_id` 与 `wiki_id / skill_id` 对齐）。
 
 ---
 

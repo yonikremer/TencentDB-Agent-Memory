@@ -18,6 +18,7 @@ def _validate_transport_options(
     api_key: str,
     service_id: str,
     timeout: float,
+    require_api_key: bool = True,
 ) -> None:
     if not endpoint or not endpoint.strip():
         raise ParamError("endpoint must be provided")
@@ -27,7 +28,7 @@ def _validate_transport_options(
         raise ParamError("endpoint must be a valid HTTP(S) URL") from exc
     if parsed.scheme not in ("http", "https") or not parsed.host:
         raise ParamError("endpoint must be a valid HTTP(S) URL")
-    if not api_key or not api_key.strip():
+    if require_api_key and (not api_key or not api_key.strip()):
         raise ParamError("api_key must be provided")
     if not service_id or not service_id.strip():
         raise ParamError("service_id must be provided")
@@ -83,15 +84,17 @@ class HttpStub(Stub):
         verify: bool = True,
         user_key: Optional[str] = None,
         client: Optional[httpx.Client] = None,
+        require_api_key: bool = True,
     ) -> None:
-        _validate_transport_options(endpoint, api_key, service_id, timeout)
+        _validate_transport_options(endpoint, api_key, service_id, timeout, require_api_key)
         self.endpoint = endpoint.rstrip("/")
         self.client = client or httpx.Client(timeout=timeout, verify=verify)
         self.headers: Dict[str, str] = {
-            "Authorization": f"Bearer {api_key}",
             "x-tdai-service-id": service_id,
             "Content-Type": "application/json",
         }
+        if api_key and api_key.strip():
+            self.headers["Authorization"] = f"Bearer {api_key.strip()}"
         if user_key:
             self.headers["x-tdai-user-key"] = user_key
 
@@ -99,6 +102,15 @@ class HttpStub(Stub):
         resp = self.client.post(
             url=f"{self.endpoint}{path}",
             json=body,
+            headers=self.headers,
+            timeout=timeout or self.client.timeout,
+        )
+        logger.debug("Response %s %s", path, resp.text)
+        return _decode_response(resp)
+
+    def get(self, path: str, timeout: Optional[float] = None) -> dict:
+        resp = self.client.get(
+            url=f"{self.endpoint}{path}",
             headers=self.headers,
             timeout=timeout or self.client.timeout,
         )
@@ -122,15 +134,17 @@ class AsyncHttpStub:
         verify: bool = True,
         user_key: Optional[str] = None,
         client: Optional[httpx.AsyncClient] = None,
+        require_api_key: bool = True,
     ) -> None:
-        _validate_transport_options(endpoint, api_key, service_id, timeout)
+        _validate_transport_options(endpoint, api_key, service_id, timeout, require_api_key)
         self.endpoint = endpoint.rstrip("/")
         self.client = client or httpx.AsyncClient(timeout=timeout, verify=verify)
         self.headers: Dict[str, str] = {
-            "Authorization": f"Bearer {api_key}",
             "x-tdai-service-id": service_id,
             "Content-Type": "application/json",
         }
+        if api_key and api_key.strip():
+            self.headers["Authorization"] = f"Bearer {api_key.strip()}"
         if user_key:
             self.headers["x-tdai-user-key"] = user_key
 
@@ -138,6 +152,15 @@ class AsyncHttpStub:
         resp = await self.client.post(
             url=f"{self.endpoint}{path}",
             json=body,
+            headers=self.headers,
+            timeout=timeout or self.client.timeout,
+        )
+        logger.debug("Response %s %s", path, resp.text)
+        return _decode_response(resp)
+
+    async def get(self, path: str, timeout: Optional[float] = None) -> dict:
+        resp = await self.client.get(
+            url=f"{self.endpoint}{path}",
             headers=self.headers,
             timeout=timeout or self.client.timeout,
         )

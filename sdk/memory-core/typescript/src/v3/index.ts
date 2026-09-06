@@ -87,6 +87,19 @@ export type {
   SkillVersionsRequest,
 } from "./skill-types.js";
 export { MetadataClient, type MetadataClientConfig } from "./metadata-client.js";
+export { WikiClient } from "./wiki-client.js";
+export { OpsClient } from "./ops-client.js";
+export type {
+  OpsClientConfig, LlmBindingMode, LlmBindingSetRequest, LlmBindingSetResult,
+  LlmBindingStatus, LlmBindingListItem, LlmBindingListResult,
+  AutoSyncStatusResult, AutoSyncTriggerResult,
+} from "./ops-types.js";
+export type {
+  WikiClientConfig, WikiDetail, WikiListResult, WikiIngestResult,
+  WikiRawFile, RawFileEntry, WikiRawWriteItem, WikiRawReadItem, WikiRawRmResult,
+  PageEntry, WikiPageItem, WikiPageReadItem, WikiPageWriteResultItem, WikiPageRmResult,
+  WikiGraphData, WikiSearchHit, WikiSearchResult, WikiBatchDeleteResult, WikiStatus,
+} from "./wiki-types.js";
 export type {
   UserStatus,
   UserType,

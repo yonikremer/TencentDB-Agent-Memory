@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional, Union
 from .._http import Stub
 from .._v3_http import AsyncHttpStub, HttpStub
 from ..errors import ParamError
+from ._common import check_visibility
 
 _V3 = "/v3/meta"
 _V3_KNOWLEDGE = "/v3/knowledge"
@@ -257,6 +258,18 @@ class _MetadataMethodsMixin:
 
     def _touch_asset_usage(self, asset_id: str) -> Dict[str, Any]:
         return self._stub.post(f"{_V3}/asset/touch-usage", {"asset_id": asset_id})
+
+    def _set_asset_visibility(self, asset_id: str, visibility: str) -> Dict[str, Any]:
+        if not asset_id or not asset_id.strip():
+            raise ParamError("asset_id must be provided")
+        return self._stub.post(f"{_V3}/asset/update", {"asset_id": asset_id, "visibility": check_visibility(visibility)})
+
+    def _share_asset_with_team(self, asset_id: str) -> Dict[str, Any]:
+        """Share within the asset's own team (visibility=team, the team-pool
+        convention read by asset/list-accessible). Cross-team/restricted
+        sharing needs grant_acl; pushing to an agent needs
+        set_agent_fixed_assets."""
+        return self._set_asset_visibility(asset_id, "team")
 
     # ── AgentFixedAsset ──
 
@@ -542,6 +555,13 @@ class MetadataClient(_MetadataMethodsMixin):
     def touch_asset_usage(self, asset_id: str) -> Dict[str, Any]:
         return self._touch_asset_usage(asset_id)
 
+    def set_asset_visibility(self, asset_id: str, visibility: str) -> Dict[str, Any]:
+        return self._set_asset_visibility(asset_id, visibility)
+
+    def share_asset_with_team(self, asset_id: str) -> Dict[str, Any]:
+        """Share an asset within its own team (skill_id / wiki_id == asset_id)."""
+        return self._share_asset_with_team(asset_id)
+
     # ── AgentFixedAsset ──
 
     def set_agent_fixed_assets(self, agent_id: str, bindings: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -810,6 +830,12 @@ class AsyncMetadataClient(_MetadataMethodsMixin):
 
     async def touch_asset_usage(self, asset_id: str) -> Dict[str, Any]:
         return await self._touch_asset_usage(asset_id)
+
+    async def set_asset_visibility(self, asset_id: str, visibility: str) -> Dict[str, Any]:
+        return await self._set_asset_visibility(asset_id, visibility)
+
+    async def share_asset_with_team(self, asset_id: str) -> Dict[str, Any]:
+        return await self._share_asset_with_team(asset_id)
 
     async def set_agent_fixed_assets(self, agent_id: str, bindings: List[Dict[str, Any]]) -> Dict[str, Any]:
         return await self._set_agent_fixed_assets(agent_id, bindings)

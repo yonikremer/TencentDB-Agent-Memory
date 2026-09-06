@@ -25,6 +25,7 @@ import type {
   AppendParticipationLogRequest,
   ListParticipationLogsRequest,
   AssetEntity,
+  AssetVisibility,
   FixedAssetBindingEntity,
   AclEntity,
   BatchDeleteResult,
@@ -251,6 +252,9 @@ export class MetadataClient {
     return this.http.post(`${V3}/asset/list-accessible`, body(p));
   }
   touchAssetUsage(assetId: string): Promise<{ ok: true }> { return this.http.post(`${V3}/asset/touch-usage`, { asset_id: assetId }); }
+  /** Share within the asset's own team (visibility=team — the team-pool convention read by asset/list-accessible). Restricted/cross-team sharing needs grantAcl; allocating to an agent needs setAgentFixedAssets. */
+  setAssetVisibility(assetId: string, visibility: AssetVisibility): Promise<AssetEntity> { return this.http.post(`${V3}/asset/update`, { asset_id: assetId, visibility }); }
+  shareAssetWithTeam(assetId: string): Promise<AssetEntity> { return this.setAssetVisibility(assetId, "team"); }
 
   // ── AgentFixedAsset ──
   setAgentFixedAssets(agentId: string, bindings: FixedAssetBindingInput[]): Promise<{ ok: true }> { return this.http.post(`${V3}/agent-fixed-asset/set`, { agent_id: agentId, bindings }); }

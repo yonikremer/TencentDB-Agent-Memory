@@ -141,6 +141,57 @@ await meta.deleteKnowledge(["wiki-docs", "cg-repo-1"], "team-1");
 Return types: `KnowledgeEntity` / `KnowledgeListResult { items, total }` /
 `BatchDeleteResult { deleted_ids, failed }`.
 
+## End-to-end: users → teams → skills + wikis → share
+
+All seven actions in one script (gateway `:8420` + Knowledge Service `:8421`):
+
+```typescript
+import { MetadataClient, SkillClient, WikiClient } from "@tencentdb-agent-memory/memory-sdk-ts-v2";
+
+const meta = new MetadataClient({ endpoint: "http://127.0.0.1:8420", apiKey: "verify-token", serviceId: "sid" });
+const skills = new SkillClient({ endpoint: "http://127.0.0.1:8420", apiKey: "verify-token", serviceId: "sid" });
+const wiki = new WikiClient({ endpoint: "http://127.0.0.1:8421", serviceId: "sid" }); // KS needs no apiKey
+
+const u = await meta.createUser({ username: "alice" });           // 1. create user
+const t = await meta.createTeam({ name: "t1", owner_user_id: u.user_id }); // 2. create team
+await meta.addTeamMember({ team_id: t.team_id, user_id: u.user_id }); // 3. add user to team
+const sk = await skills.create({ team_id: t.team_id, user_id: u.user_id, name: "tips", content: "---\nname: tips\n---\n# t\n" }); // 4a. skill
+const w = await wiki.create({ team_id: t.team_id, name: "docs" }); // 4b. wiki
+await wiki.rawWrite(t.team_id, w.wiki_id, [{ filename: "a.md", content: "# hi" }]); // 5. add sources
+await wiki.ingest(w.wiki_id); // 6. ingest (202; poll get() to ready)
+await meta.shareAssetWithTeam(w.wiki_id); // 7a. share wiki within its team (asset_id === wiki_id)
+await meta.shareAssetWithTeam(sk.skill_id); // 7b. share skill within its team (asset auto-registered on create)
+// Restricted sharing: meta.grantAcl({ asset_id, subject_type: "team_role", ... }); allocate to agent: meta.setAgentFixedAssets(...)
+```
+
+## WikiClient (Knowledge Service `/v3/wiki/*`)
+
+`WikiClient` wraps the 15 KS endpoints: `create / get / list / delete /
+updateMeta / ingest`, `raw/{ls,read,write,rm}`, `page/{ls,read,write,rm}`,
+`graph / search`. Team-scoped writes carry `team_id`; id-only reads address by
+`wiki_id`. Auth is `x-tdai-service-id` (+ optional Bearer).
+
+## OpsClient (Knowledge Service ops plane)
+
+`OpsClient` covers per-instance LLM routing + scheduler admin:
+
+```typescript
+import { OpsClient } from "@tencentdb-agent-memory/memory-sdk-ts-v2";
+
+const ops = new OpsClient({ endpoint: "http://127.0.0.1:8421", serviceId: "sid" });
+await ops.llmBindingSet({ mode: "proxy", api_key: "sk-...", proxy_base_url: "http://proxy" });
+// BYO instead: await ops.llmBindingSet({ mode: "byo", api_key: "sk-...", base_url: "https://api..." });
+console.log(await ops.llmBindingStatus()); // { bound, mode, enabled } — never contains api_key
+console.log(await ops.llmBindingList()); // all instances (no service-id needed server-side)
+console.log(await ops.autoSyncStatus()); // GET — { running, activeSyncs, queueLength, scanning, config }
+console.log(await ops.autoSyncTrigger()); // POST — { triggered } (false when disabled server-side)
+```
+
+Validation mirrors the server: bad `mode`, `proxy` without `proxy_base_url`,
+`byo` without `base_url` throw client-side before any request. First set for an
+instance requires `api_key` server-side — omit it only when updating an
+already-bound instance.
+
 ## Error Handling
 
 All non-zero `code` responses throw `TDAMError`:

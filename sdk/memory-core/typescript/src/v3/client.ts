@@ -136,6 +136,7 @@ export class MemoryClient {
     }
 
     const cfg = configOrTransport;
+    if (!cfg.apiKey?.trim()) throw new ParamError("v3 MemoryClient requires apiKey (gateway Bearer)");
     this.http = new V3HttpTransport({
       endpoint: cfg.endpoint,
       apiKey: cfg.apiKey,
