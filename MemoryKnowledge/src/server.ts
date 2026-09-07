@@ -23,6 +23,7 @@ import { createKnowledgeModule } from "./module.js";
 import { createWikiRoutes } from "./routes/wiki.js";
 import { createCodeGraphRoutes } from "./routes/code-graph.js";
 import { createToolsRoutes } from "./routes/tools.js";
+import { createGrantsRoutes } from "./routes/grants.js";
 import { createHealthRoutes } from "./routes/health.js";
 import { createLlmBindingRoutes } from "./routes/llm-binding.js";
 import { createAutoSyncRoutes } from "./routes/auto-sync.js";
@@ -72,6 +73,12 @@ export function createApp() {
     cgService: knowledgeModule.cgService,
     instancePool: knowledgeModule.instancePool,
     publicBaseUrl: config.publicBaseUrl,
+  }));
+
+  // grants/set + grants/clear — org-hierarchy-sync share mirror (Panel/admin plane)
+  api.route("/grants", createGrantsRoutes({
+    wikiService: knowledgeModule.wikiService,
+    cgService: knowledgeModule.cgService,
   }));
 
   // tools/list + tools/call — Agent self-discovery HTTP endpoints

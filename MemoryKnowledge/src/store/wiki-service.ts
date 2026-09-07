@@ -30,6 +30,9 @@ import type {
   WikiRow,
   ListOpts,
   CountOpts,
+  GrantType,
+  GrantRow,
+  SetGrantInput,
 } from "./types.js";
 import { BuildQueue } from "./build-queue.js";
 import {
@@ -305,6 +308,32 @@ export class WikiService {
 
   list(serviceId: string, teamId: string, opts?: ListOpts): WikiRow[] {
     return this.store.listWikis(serviceId, teamId, opts);
+  }
+
+  // ── Grants (org-hierarchy sync) ──
+  setGrants(serviceId: string, wikiId: string, grants: SetGrantInput[]): GrantRow[] {
+    return this.store.setWikiGrants(serviceId, wikiId, grants);
+  }
+
+  clearGrants(serviceId: string, wikiId: string, teamIds?: string[]): number {
+    return this.store.clearWikiGrants(serviceId, wikiId, teamIds);
+  }
+
+  listGrants(serviceId: string, wikiId: string): GrantRow[] {
+    return this.store.listWikiGrants(serviceId, wikiId);
+  }
+
+  /**
+   * Effective capability of a requester team: owner team is implicit owner
+   * (outranks explicit rows); absent requester = legacy owner-team context.
+   * Null when the resource does not exist under this service.
+   */
+  accessRole(serviceId: string, wikiId: string, requesterTeamId?: string): "owner" | GrantType | null {
+    if (!requesterTeamId) return "owner";
+    const row = this.store.getWikiById(serviceId, wikiId);
+    if (!row) return null;
+    if (row.team_id === requesterTeamId) return "owner";
+    return this.store.getWikiGrantRole(serviceId, wikiId, requesterTeamId);
   }
 
   count(serviceId: string, teamId: string, opts?: CountOpts): number {

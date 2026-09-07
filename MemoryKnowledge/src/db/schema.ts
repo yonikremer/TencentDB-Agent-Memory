@@ -10,7 +10,7 @@
  * Soft-delete via `deleted_at` + partial unique index (WHERE deleted_at IS NULL).
  */
 
-import { sqliteTable, text, integer, uniqueIndex, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, uniqueIndex, index, primaryKey } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 // ───────────────────────── knowledge_code_graph ─────────────────────────
@@ -85,6 +85,30 @@ export const knowledgeWiki = sqliteTable(
       .where(sql`deleted_at IS NULL`),
     index("idx_kwiki_team_status").on(table.serviceId, table.teamId, table.status),
   ],
+);
+
+// ───────────────────────── knowledge grant tables (org-hierarchy sync) ──
+// Panel mirrors kernel shares here: a wiki / code-graph is visible to its
+// owning team OR any granted team (list-union). grant_type: owner|editor|viewer.
+
+export const knowledgeWikiGrant = sqliteTable(
+  "knowledge_wiki_grant",
+  {
+    wikiId: text("wiki_id").notNull(),
+    teamId: text("team_id").notNull(),
+    grantType: text("grant_type").notNull().default("viewer"),
+  },
+  (table) => [primaryKey({ columns: [table.wikiId, table.teamId] })],
+);
+
+export const knowledgeCodeGraphGrant = sqliteTable(
+  "knowledge_code_graph_grant",
+  {
+    codeGraphId: text("code_graph_id").notNull(),
+    teamId: text("team_id").notNull(),
+    grantType: text("grant_type").notNull().default("viewer"),
+  },
+  (table) => [primaryKey({ columns: [table.codeGraphId, table.teamId] })],
 );
 
 // ───────────────────────── knowledge_wiki_audit ─────────────────────────

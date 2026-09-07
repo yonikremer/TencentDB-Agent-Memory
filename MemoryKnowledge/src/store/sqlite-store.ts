@@ -13,13 +13,15 @@
  *   - Status state machine + restart recovery.
  */
 
-import { eq, and, isNull, desc, sql, type SQL } from "drizzle-orm";
+import { eq, and, or, exists, inArray, isNull, desc, sql, type SQL } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import {
   knowledgeCodeGraph,
   knowledgeWiki,
   knowledgeWikiAudit,
   knowledgeCodeGraphAudit,
+  knowledgeWikiGrant,
+  knowledgeCodeGraphGrant,
   CODE_DATA_VERSION,
   WIKI_DATA_VERSION,
 } from "../db/schema.js";
@@ -40,6 +42,9 @@ import type {
   CreateResult,
   ListOpts,
   CountOpts,
+  GrantType,
+  GrantRow,
+  SetGrantInput,
   SyncedCodeGraphRef,
   SyncedWikiRef,
 } from "./types.js";
@@ -169,7 +174,7 @@ export class SqliteKnowledgeStore implements IKnowledgeStore {
   listCodeGraphs(serviceId: string, teamId: string, opts?: ListOpts): CodeGraphRow[] {
     const conditions: SQL[] = [
       eq(knowledgeCodeGraph.serviceId, serviceId),
-      eq(knowledgeCodeGraph.teamId, teamId),
+      this.codeGraphsVisibleTo(teamId) as SQL,
     ];
     if (opts?.syncStatus) {
       conditions.push(eq(knowledgeCodeGraph.status, opts.syncStatus));
@@ -188,7 +193,7 @@ export class SqliteKnowledgeStore implements IKnowledgeStore {
   countCodeGraphs(serviceId: string, teamId: string, opts?: CountOpts): number {
     const conditions: SQL[] = [
       eq(knowledgeCodeGraph.serviceId, serviceId),
-      eq(knowledgeCodeGraph.teamId, teamId),
+      this.codeGraphsVisibleTo(teamId) as SQL,
     ];
     if (opts?.syncStatus) {
       conditions.push(eq(knowledgeCodeGraph.status, opts.syncStatus));
@@ -238,7 +243,93 @@ export class SqliteKnowledgeStore implements IKnowledgeStore {
         ),
       )
       .run();
+    if (result.changes > 0) {
+      this.db
+        .delete(knowledgeCodeGraphGrant)
+        .where(eq(knowledgeCodeGraphGrant.codeGraphId, codeGraphId))
+        .run();
+    }
     return result.changes > 0;
+  }
+
+  // ── Code-Graph grants (org-hierarchy sync) ──
+  private assertGrantType(value: unknown): asserts value is GrantType {
+    if (value !== "viewer" && value !== "editor" && value !== "owner") {
+      throw new Error(`invalid grant_type: ${String(value)}`);
+    }
+  }
+
+  /** Owner-team visibility OR an explicit grant row. */
+  private codeGraphsVisibleTo(teamId: string) {
+    return or(
+      eq(knowledgeCodeGraph.teamId, teamId),
+      exists(
+        this.db
+          .select({ one: sql<number>`1` })
+          .from(knowledgeCodeGraphGrant)
+          .where(
+            and(
+              eq(knowledgeCodeGraphGrant.codeGraphId, knowledgeCodeGraph.codeGraphId),
+              eq(knowledgeCodeGraphGrant.teamId, teamId),
+            ),
+          ),
+      ),
+    );
+  }
+
+  setCodeGraphGrants(serviceId: string, codeGraphId: string, grants: SetGrantInput[]): GrantRow[] {
+    if (!this.getCodeGraphById(serviceId, codeGraphId)) return [];
+    for (const g of grants) {
+      const grantType = g.grant_type ?? "viewer";
+      this.assertGrantType(grantType);
+      this.db
+        .insert(knowledgeCodeGraphGrant)
+        .values({ codeGraphId, teamId: g.team_id, grantType })
+        .onConflictDoUpdate({
+          target: [knowledgeCodeGraphGrant.codeGraphId, knowledgeCodeGraphGrant.teamId],
+          set: { grantType },
+        })
+        .run();
+    }
+    return this.listCodeGraphGrants(serviceId, codeGraphId);
+  }
+
+  clearCodeGraphGrants(serviceId: string, codeGraphId: string, teamIds?: string[]): number {
+    if (!this.getCodeGraphById(serviceId, codeGraphId)) return 0;
+    const conds = [eq(knowledgeCodeGraphGrant.codeGraphId, codeGraphId)];
+    if (teamIds) conds.push(inArray(knowledgeCodeGraphGrant.teamId, teamIds));
+    return this.db.delete(knowledgeCodeGraphGrant).where(and(...conds)).run().changes;
+  }
+
+  listCodeGraphGrants(serviceId: string, codeGraphId: string): GrantRow[] {
+    const rows = this.db
+      .select({ teamId: knowledgeCodeGraphGrant.teamId, grantType: knowledgeCodeGraphGrant.grantType })
+      .from(knowledgeCodeGraphGrant)
+      .innerJoin(knowledgeCodeGraph, eq(knowledgeCodeGraph.codeGraphId, knowledgeCodeGraphGrant.codeGraphId))
+      .where(
+        and(
+          eq(knowledgeCodeGraphGrant.codeGraphId, codeGraphId),
+          eq(knowledgeCodeGraph.serviceId, serviceId),
+        ),
+      )
+      .all();
+    return rows.map((r) => ({ team_id: r.teamId, grant_type: (r.grantType ?? "viewer") as GrantType }));
+  }
+
+  getCodeGraphGrantRole(serviceId: string, codeGraphId: string, teamId: string): GrantType | null {
+    const row = this.db
+      .select({ grantType: knowledgeCodeGraphGrant.grantType })
+      .from(knowledgeCodeGraphGrant)
+      .innerJoin(knowledgeCodeGraph, eq(knowledgeCodeGraph.codeGraphId, knowledgeCodeGraphGrant.codeGraphId))
+      .where(
+        and(
+          eq(knowledgeCodeGraphGrant.codeGraphId, codeGraphId),
+          eq(knowledgeCodeGraphGrant.teamId, teamId),
+          eq(knowledgeCodeGraph.serviceId, serviceId),
+        ),
+      )
+      .get();
+    return row ? ((row.grantType ?? "viewer") as GrantType) : null;
   }
 
   /** Update code-graph metadata (repo_name, summary). memory mismatch → null. */
@@ -361,7 +452,7 @@ export class SqliteKnowledgeStore implements IKnowledgeStore {
   listWikis(serviceId: string, teamId: string, opts?: ListOpts): WikiRow[] {
     const conditions: SQL[] = [
       eq(knowledgeWiki.serviceId, serviceId),
-      eq(knowledgeWiki.teamId, teamId),
+      this.wikisVisibleTo(teamId) as SQL,
     ];
     if (opts?.syncStatus) {
       conditions.push(eq(knowledgeWiki.status, opts.syncStatus));
@@ -380,7 +471,7 @@ export class SqliteKnowledgeStore implements IKnowledgeStore {
   countWikis(serviceId: string, teamId: string, opts?: CountOpts): number {
     const conditions: SQL[] = [
       eq(knowledgeWiki.serviceId, serviceId),
-      eq(knowledgeWiki.teamId, teamId),
+      this.wikisVisibleTo(teamId) as SQL,
     ];
     if (opts?.syncStatus) {
       conditions.push(eq(knowledgeWiki.status, opts.syncStatus));
@@ -428,7 +519,84 @@ export class SqliteKnowledgeStore implements IKnowledgeStore {
         ),
       )
       .run();
+    if (result.changes > 0) {
+      this.db.delete(knowledgeWikiGrant).where(eq(knowledgeWikiGrant.wikiId, wikiId)).run();
+    }
     return result.changes > 0;
+  }
+
+  // ── Wiki grants (org-hierarchy sync) ──
+  /** Owner-team visibility OR an explicit grant row. */
+  private wikisVisibleTo(teamId: string) {
+    return or(
+      eq(knowledgeWiki.teamId, teamId),
+      exists(
+        this.db
+          .select({ one: sql<number>`1` })
+          .from(knowledgeWikiGrant)
+          .where(
+            and(
+              eq(knowledgeWikiGrant.wikiId, knowledgeWiki.wikiId),
+              eq(knowledgeWikiGrant.teamId, teamId),
+            ),
+          ),
+      ),
+    );
+  }
+
+  setWikiGrants(serviceId: string, wikiId: string, grants: SetGrantInput[]): GrantRow[] {
+    if (!this.getWikiById(serviceId, wikiId)) return [];
+    for (const g of grants) {
+      const grantType = g.grant_type ?? "viewer";
+      this.assertGrantType(grantType);
+      this.db
+        .insert(knowledgeWikiGrant)
+        .values({ wikiId, teamId: g.team_id, grantType })
+        .onConflictDoUpdate({
+          target: [knowledgeWikiGrant.wikiId, knowledgeWikiGrant.teamId],
+          set: { grantType },
+        })
+        .run();
+    }
+    return this.listWikiGrants(serviceId, wikiId);
+  }
+
+  clearWikiGrants(serviceId: string, wikiId: string, teamIds?: string[]): number {
+    if (!this.getWikiById(serviceId, wikiId)) return 0;
+    const conds = [eq(knowledgeWikiGrant.wikiId, wikiId)];
+    if (teamIds) conds.push(inArray(knowledgeWikiGrant.teamId, teamIds));
+    return this.db.delete(knowledgeWikiGrant).where(and(...conds)).run().changes;
+  }
+
+  listWikiGrants(serviceId: string, wikiId: string): GrantRow[] {
+    const rows = this.db
+      .select({ teamId: knowledgeWikiGrant.teamId, grantType: knowledgeWikiGrant.grantType })
+      .from(knowledgeWikiGrant)
+      .innerJoin(knowledgeWiki, eq(knowledgeWiki.wikiId, knowledgeWikiGrant.wikiId))
+      .where(
+        and(
+          eq(knowledgeWikiGrant.wikiId, wikiId),
+          eq(knowledgeWiki.serviceId, serviceId),
+        ),
+      )
+      .all();
+    return rows.map((r) => ({ team_id: r.teamId, grant_type: (r.grantType ?? "viewer") as GrantType }));
+  }
+
+  getWikiGrantRole(serviceId: string, wikiId: string, teamId: string): GrantType | null {
+    const row = this.db
+      .select({ grantType: knowledgeWikiGrant.grantType })
+      .from(knowledgeWikiGrant)
+      .innerJoin(knowledgeWiki, eq(knowledgeWiki.wikiId, knowledgeWikiGrant.wikiId))
+      .where(
+        and(
+          eq(knowledgeWikiGrant.wikiId, wikiId),
+          eq(knowledgeWikiGrant.teamId, teamId),
+          eq(knowledgeWiki.serviceId, serviceId),
+        ),
+      )
+      .get();
+    return row ? ((row.grantType ?? "viewer") as GrantType) : null;
   }
 
   /** Update wiki metadata (name, summary). memory mismatch → null. */

@@ -198,6 +198,21 @@ export interface SyncedWikiRef {
   team_id: string;
 }
 
+// ───────────────────────── Grants (org-hierarchy sync) ─────────────────────────
+
+/** Grant capability: viewer < editor < owner. Owning team is implicit owner. */
+export type GrantType = "viewer" | "editor" | "owner";
+
+export interface GrantRow {
+  team_id: string;
+  grant_type: GrantType;
+}
+
+export interface SetGrantInput {
+  team_id: string;
+  grant_type?: GrantType;
+}
+
 // ───────────────────────── Store interface ─────────────────────────
 
 /**
@@ -214,6 +229,11 @@ export interface IKnowledgeStore {
   getCodeGraphById(serviceId: string, codeGraphId: string): CodeGraphRow | null;
   listCodeGraphs(serviceId: string, teamId: string, opts?: ListOpts): CodeGraphRow[];
   countCodeGraphs(serviceId: string, teamId: string, opts?: CountOpts): number;
+  // ── Code-Graph grants (org-hierarchy sync) ──
+  setCodeGraphGrants(serviceId: string, codeGraphId: string, grants: SetGrantInput[]): GrantRow[];
+  clearCodeGraphGrants(serviceId: string, codeGraphId: string, teamIds?: string[]): number;
+  listCodeGraphGrants(serviceId: string, codeGraphId: string): GrantRow[];
+  getCodeGraphGrantRole(serviceId: string, codeGraphId: string, teamId: string): GrantType | null;
   updateCodeGraphStatus(serviceId: string, codeGraphId: string, patch: CodeGraphStatusPatch): void;
   deleteCodeGraph(serviceId: string, teamId: string, codeGraphId: string): boolean;
   updateCodeGraphMeta(serviceId: string, codeGraphId: string, patch: CodeGraphMetaPatch): CodeGraphRow | null;
@@ -224,6 +244,11 @@ export interface IKnowledgeStore {
   getWikiById(serviceId: string, wikiId: string): WikiRow | null;
   listWikis(serviceId: string, teamId: string, opts?: ListOpts): WikiRow[];
   countWikis(serviceId: string, teamId: string, opts?: CountOpts): number;
+  // ── Wiki grants (org-hierarchy sync) ──
+  setWikiGrants(serviceId: string, wikiId: string, grants: SetGrantInput[]): GrantRow[];
+  clearWikiGrants(serviceId: string, wikiId: string, teamIds?: string[]): number;
+  listWikiGrants(serviceId: string, wikiId: string): GrantRow[];
+  getWikiGrantRole(serviceId: string, wikiId: string, teamId: string): GrantType | null;
   updateWikiStatus(serviceId: string, wikiId: string, patch: WikiStatusPatch): void;
   deleteWiki(serviceId: string, teamId: string, wikiId: string): boolean;
   updateWikiMeta(serviceId: string, wikiId: string, patch: WikiMetaPatch): WikiRow | null;

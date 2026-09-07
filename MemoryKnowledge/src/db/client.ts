@@ -150,6 +150,22 @@ export function migrate(_db: Db, raw: Database.Database): void {
       enabled        INTEGER NOT NULL DEFAULT 1,
       updated_at     TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS knowledge_wiki_grant (
+      wiki_id    TEXT NOT NULL,
+      team_id    TEXT NOT NULL,
+      grant_type TEXT NOT NULL DEFAULT 'viewer',
+      PRIMARY KEY (wiki_id, team_id)
+    );
+
+    -- column named code_graph_id for consistency with knowledge_code_graph;
+    -- DESIGN.md calls it knowledge_id, same meaning.
+    CREATE TABLE IF NOT EXISTS knowledge_code_graph_grant (
+      code_graph_id TEXT NOT NULL,
+      team_id       TEXT NOT NULL,
+      grant_type    TEXT NOT NULL DEFAULT 'viewer',
+      PRIMARY KEY (code_graph_id, team_id)
+    );
   `);
 
   // Column migrations — SQLite ALTER TABLE ADD COLUMN is not idempotent,
