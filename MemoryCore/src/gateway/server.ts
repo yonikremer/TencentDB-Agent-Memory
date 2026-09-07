@@ -1640,8 +1640,7 @@ export class TdaiGateway {
    */
   private async startGroupySync(): Promise<void> {
     try {
-      const { loadGroupyConfig } = await import("../metadata/groupy/sync-config.js");
-      const config = loadGroupyConfig();
+      const config = this.config.groupy;
       if (!config.enabled) return;
       const { GroupyScheduler } = await import("../metadata/groupy/scheduler.js");
       const { recomputeGroupyShares } = await import("../metadata/groupy/grant-service.js");

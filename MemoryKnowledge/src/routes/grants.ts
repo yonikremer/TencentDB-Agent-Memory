@@ -112,5 +112,25 @@ export function createGrantsRoutes(deps: GrantsRouteDeps): Hono {
     return c.json(wrapOk({ kind, knowledge_id: knowledgeId, cleared }));
   });
 
+  // ── POST /grants/list ──
+  app.post("/list", async (c) => {
+    const body = await c.req.json<Record<string, unknown>>();
+    const serviceId = c.req.header("x-tdai-service-id");
+    if (!isValidIdSegment(serviceId)) return c.json(wrapError(400, "x-tdai-service-id header is required"), 400);
+    const kind = body.kind;
+    if (kind !== "wiki" && kind !== "code-graph") {
+      return c.json(wrapError(400, "kind must be 'wiki' or 'code-graph'"), 400);
+    }
+    const knowledgeId = body.knowledge_id;
+    if (!isValidIdSegment(knowledgeId)) return c.json(wrapError(400, "knowledge_id is required"), 400);
+    if (!resourceExists(kind, serviceId as string, knowledgeId as string)) {
+      return c.json(wrapError(404, notFound(kind)), 404);
+    }
+    const grants = kind === "wiki"
+      ? wikiService.listGrants(serviceId as string, knowledgeId as string)
+      : cgService.listGrants(serviceId as string, knowledgeId as string);
+    return c.json(wrapOk({ kind, knowledge_id: knowledgeId, grants }));
+  });
+
   return app;
 }

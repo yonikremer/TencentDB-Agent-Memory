@@ -69,6 +69,7 @@ import type {
 import { DEFAULT_PAGINATION } from "../pagination.js";
 import { buildChatMemoryAssetId } from "../utils/chat-memory-asset.js";
 import { DuplicateUserKeyError } from "./interface.js";
+import type { IMetadataStore } from "./interface.js";
 
 const require = createRequire(import.meta.url);
 function requireNodeSqlite(): typeof import("node:sqlite") {
@@ -348,6 +349,7 @@ export class SqliteMetadataStore implements IMetadataStore {
       CREATE TABLE IF NOT EXISTS meta_groupy_shares (
         asset_id TEXT PRIMARY KEY,
         node_ids_json TEXT NOT NULL DEFAULT '[]',
+        grant_types_json TEXT NOT NULL DEFAULT '{}',
         prev_visibility TEXT NOT NULL DEFAULT 'team',
         updated_at TEXT NOT NULL
       );
@@ -359,6 +361,7 @@ export class SqliteMetadataStore implements IMetadataStore {
     `);
     this.migrateUserTypeColumn();
     this.migrateLegacyUserKeys();
+    this.migrateGroupySharesColumn();
   }
 
   private migrateUserTypeColumn(): void {
@@ -1842,11 +1845,11 @@ export class SqliteMetadataStore implements IMetadataStore {
        VALUES (?,?,?,?,?,?,?,?)`,
       entity.id,
       entity.started_at,
-      entity.finished_at,
+      entity.finished_at ?? null,
       entity.status,
       entity.nodes_seen,
       entity.members_seen,
-      entity.error,
+      entity.error ?? null,
       entity.snapshot_json,
     );
     return entity;
@@ -1867,15 +1870,25 @@ export class SqliteMetadataStore implements IMetadataStore {
     };
   }
 
+  private migrateGroupySharesColumn(): void {
+    // Pre-grant_types DBs: add the column idempotently.
+    const cols = this.all<{ name: string }>("SELECT name FROM pragma_table_info('meta_groupy_shares')");
+    if (!cols.some((c) => c.name === "grant_types_json")) {
+      this.db.exec("ALTER TABLE meta_groupy_shares ADD COLUMN grant_types_json TEXT NOT NULL DEFAULT '{}'");
+    }
+  }
+
   upsertGroupyShare(share: UpsertGroupyShareInput): GroupyShareEntity {
     const now = nowIso();
     this.run(
-      `INSERT INTO meta_groupy_shares (asset_id, node_ids_json, prev_visibility, updated_at)
-       VALUES (?,?,?,?)
+      `INSERT INTO meta_groupy_shares (asset_id, node_ids_json, grant_types_json, prev_visibility, updated_at)
+       VALUES (?,?,?,?,?)
        ON CONFLICT(asset_id) DO UPDATE SET node_ids_json = excluded.node_ids_json,
+         grant_types_json = excluded.grant_types_json,
          prev_visibility = excluded.prev_visibility, updated_at = excluded.updated_at`,
       share.asset_id,
       JSON.stringify([...share.node_ids]),
+      JSON.stringify({ ...(share.grant_types ?? {}) }),
       share.prev_visibility,
       now,
     );
@@ -1890,9 +1903,19 @@ export class SqliteMetadataStore implements IMetadataStore {
       const parsed: unknown = JSON.parse(String(row.node_ids_json ?? "[]"));
       if (Array.isArray(parsed)) nodeIds = parsed.filter((x): x is string => typeof x === "string");
     } catch { /* corrupt JSON reads as empty */ }
+    let grantTypes: Record<string, string> = {};
+    try {
+      const parsed: unknown = JSON.parse(String(row.grant_types_json ?? "{}"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+          if (typeof v === "string") grantTypes[k] = v;
+        }
+      }
+    } catch { /* corrupt JSON reads as empty */ }
     return {
       asset_id: String(row.asset_id),
       node_ids: nodeIds,
+      grant_types: grantTypes,
       prev_visibility: String(row.prev_visibility ?? "team"),
       updated_at: String(row.updated_at),
     };

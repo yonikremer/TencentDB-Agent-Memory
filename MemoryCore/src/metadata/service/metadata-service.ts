@@ -19,6 +19,7 @@ import {
   checkPermission,
   canBindAsset,
   roleDefaultCovers,
+  matchRestrictedWhitelist,
   type PermCheckResult,
   type PermCheckLogger,
 } from "./permission-checker.js";
@@ -1519,22 +1520,26 @@ export class MetadataService {
       return { allowed: true, reason: "owner" };
     }
 
-    // Org-sync (P2): restricted assets are a pure ACL whitelist. An explicit
-    // user/agent allow-row grants access WITHOUT home-team membership, so a
-    // share to a matrix node reaches users outside the asset's home team.
+    // Org-sync (P2): restricted assets are a pure ACL whitelist, evaluated in
+    // permission-checker.matchRestrictedWhitelist. An explicit user/agent
+    // allow-row grants access WITHOUT home-team membership, so a share to a
+    // matrix node reaches users outside the asset's home team. Agent rows only
+    // match when the caller owns the agent (no impersonation by agent_id).
     // (Team admins keep the role-default bypass below; team_role subjects
     // still require home membership via the fallthrough path.)
     if (asset.visibility === "restricted") {
       const whitelist = await this.allAclRecords(params.asset_id);
-      const hit = whitelist.find(
-        (acl) =>
-          acl.permission === params.action &&
-          acl.effect === "allow" &&
-          ((acl.subject_type === "user" && acl.subject_id === userId) ||
-            (acl.subject_type === "agent" &&
-              !!params.agent_id &&
-              acl.subject_id === params.agent_id)),
-      );
+      let agentId: string | undefined;
+      if (params.agent_id) {
+        const agent = await this.store.getAgentById(params.agent_id);
+        if (agent && agent.owner_user_id === userId) agentId = agent.agent_id;
+      }
+      const hit = matchRestrictedWhitelist({
+        userId,
+        agentId,
+        action: params.action,
+        aclRecords: whitelist,
+      });
       if (hit) return { allowed: true, reason: `acl:${hit.id}` };
     }
 
@@ -1743,7 +1748,9 @@ export class MetadataService {
    * The sync itself bypasses this via createTeam (not the ForCaller path).
    */
   private async assertTeamIdNotGroupyManaged(teamId: string): Promise<void> {
-    const nodes = await this.store.listGroupyNodes();
+    // Archived nodes count too: their (archived) mirror teams still exist, so
+    // the id stays reserved even after the org node is gone.
+    const nodes = await this.store.listGroupyNodes(true);
     if (nodes.some((n) => n.node_id === teamId)) {
       throw new MetadataError("groupy_managed_id", `team id is managed by groupy sync: ${teamId}`);
     }

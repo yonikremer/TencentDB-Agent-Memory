@@ -120,6 +120,10 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
     return this.post('/v3/grants/clear', teamIds ? { kind, knowledge_id: knowledgeId, team_ids: teamIds } : { kind, knowledge_id: knowledgeId });
   }
 
+  async grantsList(kind: 'wiki' | 'code-graph', knowledgeId: string): Promise<GrantMirrorResult> {
+    return this.post('/v3/grants/list', { kind, knowledge_id: knowledgeId });
+  }
+
   //═══════════════ Wiki · raw file layer ═══════════════
 
   async wikiRawLs(wikiId: string): Promise<{ items: RawFileEntry[] }> {

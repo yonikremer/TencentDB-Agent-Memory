@@ -165,6 +165,37 @@ describe("applyAssetShare", () => {
     expect(subjects).toContain(`user:${outsider.user_id}:read`);
   });
 
+  it("grant persists grant_type per node and caps subtree fan-out", async () => {
+    const res = await applyAssetShare(ctx.service, {
+      asset_id: "ast-skill", node_id: "120data_branch", action: "grant",
+      grant_type: "editor", ctx: ctx.adminCtx,
+    });
+    expect(res.grant_type).toBe("editor");
+    expect((await ctx.store.getGroupyShare("ast-skill"))?.grant_types).toEqual({
+      "120data_branch": "editor",
+    });
+    await expect(applyAssetShare(ctx.service, {
+      asset_id: "ast-skill", node_id: "120data_branch", action: "grant", ctx: ctx.adminCtx,
+      maxTeams: 1,
+    })).rejects.toThrowError(expect.objectContaining({ code: "groupy_subtree_too_large" }));
+    await expect(applyAssetShare(ctx.service, {
+      asset_id: "ast-skill", node_id: "120data_branch", action: "grant",
+      grant_type: "super", ctx: ctx.adminCtx,
+    })).rejects.toThrowError(expect.objectContaining({ code: "invalid_grant_type" }));
+  });
+
+  it("agent rows do not impersonate: stranger with another agent_id is denied", async () => {
+    await applyAssetShare(ctx.service, {
+      asset_id: "ast-skill", node_id: "120data_branch", action: "grant", ctx: ctx.adminCtx,
+    });
+    const stranger = await ctx.service.createNormalUser({ username: "stranger2" });
+    const denied = await ctx.service.checkAssetPermission({
+      user_id: stranger.user_id, asset_id: "ast-skill",
+      action: "read", agent_id: ctx.ids.aliceAgent,
+    });
+    expect(denied.allowed).toBe(false);
+  });
+
   it("non-owner non-admin caller is rejected", async () => {
     const stranger = await ctx.service.createNormalUser({ username: "stranger" });
     const strangerCtx: V3AuthContext = { token: "", userId: stranger.user_id, isAdmin: false, isSystemAdmin: false };

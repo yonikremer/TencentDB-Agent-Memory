@@ -201,13 +201,17 @@ export class CodeGraphService {
 
   /**
    * Effective capability of a requester team: owner team is implicit owner
-   * (outranks explicit rows); absent requester = legacy owner-team context.
-   * Null when the resource does not exist under this service.
+   * (outranks explicit rows). Absent requester = legacy owner-team context,
+   * EXCEPT on shared resources (any grant rows) which require an explicit
+   * team ("team_required") — otherwise a viewer could omit team_id and act
+   * as owner. Null when the resource does not exist under this service.
    */
-  accessRole(serviceId: string, codeGraphId: string, requesterTeamId?: string): "owner" | GrantType | null {
-    if (!requesterTeamId) return "owner";
+  accessRoleStrict(serviceId: string, codeGraphId: string, requesterTeamId?: string): "owner" | GrantType | "team_required" | null {
     const row = this.store.getCodeGraphById(serviceId, codeGraphId);
     if (!row) return null;
+    if (!requesterTeamId) {
+      return this.store.listCodeGraphGrants(serviceId, codeGraphId).length > 0 ? "team_required" : "owner";
+    }
     if (row.team_id === requesterTeamId) return "owner";
     return this.store.getCodeGraphGrantRole(serviceId, codeGraphId, requesterTeamId);
   }

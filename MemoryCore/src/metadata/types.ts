@@ -486,8 +486,18 @@ export interface RecordGroupyRunInput {
 export interface GroupyShareEntity {
   asset_id: string;
   node_ids: string[];
+  /** Per-node KS capability; absent nodes read as viewer. */
+  grant_types: Record<string, string>;
   prev_visibility: string;
   updated_at: string;
+}
+
+export interface UpsertGroupyShareInput {
+  asset_id: string;
+  node_ids: string[];
+  /** Per-node KS capability (viewer|editor|owner); nodes absent here read as viewer. */
+  grant_types?: Record<string, string>;
+  prev_visibility: string;
 }
 
 export interface UpsertGroupyShareInput {

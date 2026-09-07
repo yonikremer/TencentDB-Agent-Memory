@@ -1387,9 +1387,15 @@ export class MongoMetadataStore implements IMetadataStore {
 
   async upsertGroupyShare(share: UpsertGroupyShareInput): Promise<GroupyShareEntity> {
     const now = nowIso();
+    const existing = await this.col("meta_groupy_shares").findOne(
+      { asset_id: share.asset_id } as Document,
+      PROJECT_NO_ID,
+    );
+    const prior = existing as unknown as GroupyShareEntity | null;
     const doc: GroupyShareEntity = {
       asset_id: share.asset_id,
       node_ids: [...share.node_ids],
+      grant_types: { ...(share.grant_types ?? prior?.grant_types ?? {}) },
       prev_visibility: share.prev_visibility,
       updated_at: now,
     };

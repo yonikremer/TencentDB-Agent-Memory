@@ -6,6 +6,11 @@
  * Home-team members are always included; archived nodes auto-revoke on the
  * nightly recompute. Groupy-shared assets are sync-owned: recompute rewrites
  * the derived row set (manual rows added mid-share are not preserved).
+ *
+ * grant_type (viewer|editor|owner, default viewer) is a KS-level concept:
+ * the kernel stores it per shared node so the Panel KS mirror (and the
+ * nightly mirror-sync) carries the same type end to end. Kernel ACL rows
+ * themselves are always read (users) / read+use (agents).
  */
 
 import type { MetadataService } from "../service/metadata-service.js";
@@ -14,6 +19,12 @@ import type { V3AuthContext } from "../router/auth.js";
 import { ensureGroupyUser, GROUPY_SYNC_OWNER_USERNAME } from "./sync-service.js";
 import { computeMembershipClosure, subtreeNodeIds, type GroupyGraphSnapshot } from "./closure.js";
 import type { AclEntity, AssetEntity } from "../types.js";
+
+/** Fail-safe default: shares larger than this are a misconfigured node. */
+export const MAX_SHARE_TEAMS = 1000;
+
+export const GRANT_TYPES = ["viewer", "editor", "owner"] as const;
+export type ShareGrantType = (typeof GRANT_TYPES)[number];
 
 export interface ShareTargets {
   userIds: Set<string>;
@@ -25,6 +36,10 @@ export interface AssetShareRequest {
   node_id: string;
   action: "grant" | "revoke";
   ctx: V3AuthContext;
+  /** KS capability carried end to end (default viewer). */
+  grant_type?: string;
+  /** Test seam; production cap guards org-wide fan-out per share. */
+  maxTeams?: number;
 }
 
 export interface AssetShareResult {
@@ -33,6 +48,8 @@ export interface AssetShareResult {
   nodes: string[];
   /** Subtree teams affected by this action (mirror target for the KS rows). */
   teams: string[];
+  /** Effective KS capability for the acted node. */
+  grant_type: ShareGrantType;
   users: number;
   agents: number;
 }
@@ -119,18 +136,29 @@ export async function expandShareTargets(
   return { userIds, agentIds };
 }
 
-function desiredRowKeys(targets: ShareTargets): Set<string> {
-  const keys = new Set<string>();
-  for (const u of targets.userIds) keys.add(`user:${u}:read`);
-  for (const a of targets.agentIds) {
-    keys.add(`agent:${a}:read`);
-    keys.add(`agent:${a}:use`);
-  }
-  return keys;
+interface DesiredAclRow {
+  subject_type: "user" | "agent";
+  subject_id: string;
+  permission: "read" | "use";
 }
 
-function rowKey(r: AclEntity): string {
-  return `${r.subject_type}:${r.subject_id}:${r.permission}`;
+function desiredRows(targets: ShareTargets): DesiredAclRow[] {
+  const rows: DesiredAclRow[] = [];
+  for (const u of targets.userIds) rows.push({ subject_type: "user", subject_id: u, permission: "read" });
+  for (const a of targets.agentIds) {
+    rows.push({ subject_type: "agent", subject_id: a, permission: "read" });
+    rows.push({ subject_type: "agent", subject_id: a, permission: "use" });
+  }
+  return rows;
+}
+
+function sameRow(want: DesiredAclRow, r: AclEntity): boolean {
+  return (
+    r.effect === "allow" &&
+    r.subject_type === want.subject_type &&
+    r.subject_id === want.subject_id &&
+    r.permission === want.permission
+  );
 }
 
 async function allAssetAcl(service: MetadataService, assetId: string): Promise<AclEntity[]> {
@@ -153,24 +181,20 @@ async function rewriteAcl(
   targets: ShareTargets,
   grantedBy: string,
 ): Promise<void> {
-  const desired = desiredRowKeys(targets);
+  const desired = desiredRows(targets);
   const existing = await allAssetAcl(service, assetId);
   for (const row of existing) {
-    if (row.effect === "allow" && !desired.has(rowKey(row))) {
+    if (row.effect === "allow" && !desired.some((w) => sameRow(w, row))) {
       await service.rawStore.revokeAcl(row.id);
     }
   }
-  const kept = new Set(
-    existing.filter((r) => r.effect === "allow" && desired.has(rowKey(r))).map(rowKey),
-  );
-  for (const key of desired) {
-    if (kept.has(key)) continue;
-    const [subjectType, subjectId, permission] = key.split(":");
+  for (const want of desired) {
+    if (existing.some((r) => sameRow(want, r))) continue;
     await service.grantAcl({
       asset_id: assetId,
-      subject_type: subjectType as "user" | "agent",
-      subject_id: subjectId,
-      permission: permission as "read" | "use",
+      subject_type: want.subject_type,
+      subject_id: want.subject_id,
+      permission: want.permission,
       granted_by: grantedBy,
     });
   }
@@ -186,6 +210,14 @@ async function assertCanShare(service: MetadataService, asset: AssetEntity, ctx:
   throw new MetadataError("permission_denied", `share requires asset owner, home-team admin, or system admin`);
 }
 
+function resolveGrantType(raw: string | undefined): ShareGrantType {
+  const value = raw ?? "viewer";
+  if (!(GRANT_TYPES as readonly string[]).includes(value)) {
+    throw new MetadataError("invalid_grant_type", `grant_type must be viewer|editor|owner: ${value}`);
+  }
+  return value as ShareGrantType;
+}
+
 /** Instant share/revoke path (PLAN P2 + kernel asset-grant route). */
 export async function applyAssetShare(
   service: MetadataService,
@@ -194,6 +226,7 @@ export async function applyAssetShare(
   const asset = await service.getAssetById(req.asset_id);
   if (!asset) throw new MetadataError("asset_not_found", `asset not found: ${req.asset_id}`);
   const caller = await assertCanShare(service, asset, req.ctx);
+  const grantType = resolveGrantType(req.grant_type);
   const store = service.rawStore;
   const graph = await buildGraphFromStore(service);
   if (!graph.has(req.node_id)) {
@@ -203,6 +236,7 @@ export async function applyAssetShare(
     (await store.listGroupyNodes(true)).filter((n) => n.archived).map((n) => n.node_id),
   );
   const share = await store.getGroupyShare(req.asset_id);
+  const storedTypes: Record<string, string> = { ...(share?.grant_types ?? {}) };
   let nodes: string[];
   if (req.action === "grant") {
     if (archived.has(req.node_id)) {
@@ -210,8 +244,10 @@ export async function applyAssetShare(
     }
     nodes = [...new Set([...(share?.node_ids ?? []), req.node_id])]
       .filter((n) => graph.has(n) && !archived.has(n));
+    storedTypes[req.node_id] = grantType;
   } else {
     nodes = (share?.node_ids ?? []).filter((n) => n !== req.node_id);
+    delete storedTypes[req.node_id];
   }
   const closure = computeMembershipClosure(graph);
   // Affected teams for the KS mirror: granted subtrees on grant, the dropped
@@ -224,6 +260,13 @@ export async function applyAssetShare(
   } else {
     for (const t of subtreeNodeIds(graph, req.node_id)) affected.add(t);
   }
+  const maxTeams = req.maxTeams ?? MAX_SHARE_TEAMS;
+  if (affected.size > maxTeams) {
+    throw new MetadataError(
+      "groupy_subtree_too_large",
+      `share subtree ${affected.size} teams exceeds limit ${maxTeams} for node ${req.node_id}`,
+    );
+  }
   const subtree = new Set<string>();
   for (const n of nodes) {
     for (const t of subtreeNodeIds(graph, n)) subtree.add(t);
@@ -231,23 +274,24 @@ export async function applyAssetShare(
   const targets = await expandShareTargets(service, closure, subtree, asset.team_id);
   await includeAssetOwner(service, targets, asset.owner_user_id);
   await rewriteAcl(service, asset.asset_id, targets, caller);
-  let visibility = asset.visibility;
+  let visibility: AssetEntity["visibility"] = asset.visibility;
   if (nodes.length > 0) {
     visibility = "restricted";
     await store.upsertGroupyShare({
       asset_id: asset.asset_id,
       node_ids: nodes,
+      grant_types: storedTypes,
       prev_visibility: share?.prev_visibility ?? asset.visibility,
     });
   } else {
     await store.deleteGroupyShare(asset.asset_id);
-    visibility = share?.prev_visibility ?? "team";
+    visibility = (share?.prev_visibility ?? "team") as AssetEntity["visibility"];
   }
   if (visibility !== asset.visibility) {
     await service.updateAsset(asset.asset_id, { visibility });
   }
   return {
-    asset_id: asset.asset_id, visibility, nodes, teams: [...affected],
+    asset_id: asset.asset_id, visibility, nodes, teams: [...affected], grant_type: grantType,
     users: targets.userIds.size, agents: targets.agentIds.size,
   };
 }
@@ -300,8 +344,13 @@ export async function recomputeGroupyShares(input: RecomputeInput): Promise<{ re
         await service.updateAsset(share.asset_id, { visibility: share.prev_visibility as AssetEntity["visibility"] });
       }
     } else if (live.length !== share.node_ids.length) {
+      const grantTypes: Record<string, string> = {};
+      for (const n of live) {
+        if (share.grant_types?.[n]) grantTypes[n] = share.grant_types[n];
+      }
       await store.upsertGroupyShare({
-        asset_id: share.asset_id, node_ids: live, prev_visibility: share.prev_visibility,
+        asset_id: share.asset_id, node_ids: live, grant_types: grantTypes,
+        prev_visibility: share.prev_visibility,
       });
     }
   }

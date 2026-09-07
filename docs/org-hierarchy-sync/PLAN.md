@@ -155,6 +155,16 @@ P5 after P1–P4 green; real-adapter swap gated on user's groupy facts (§13 DES
 - [x] P4 Panel routes + KS mirror + orphans + `GROUPY_*` in `.env.example`
 - [x] P5 `GROUPY_ENABLED=false` default (no boot wiring fires; all suites green)
 
+## Review fixes (2026-09-08, code-review + security-review subagents)
+
+- KS shared-resource mutations require `team_id` (`team_required` 403); tools/list+call
+  team-scoped; `grants/list` added; Panel `/groupy/mirror-sync` heals KS rows.
+- Kernel restricted whitelist moved into permission-checker (`matchRestrictedWhitelist`)
+  with caller-owns-agent enforcement; groupy id validation + fan-out caps.
+- Kernel stores per-node `grant_type` (Panel owns it end to end); `GROUPY_*`
+  centralized in gateway config; Panel `/asset/grant` open to authenticated
+  callers (kernel authz decides).
+
 Deviations from the plan (all covered by tests):
 
 - Panel routes are POST-only by Panel convention (`/groupy/status|tree|orphans`).

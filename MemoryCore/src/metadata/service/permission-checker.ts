@@ -142,6 +142,28 @@ export function checkPermission(ctx: PermCheckContext): PermCheckResult {
  * Whether role default permission covers this action (service uses this to determine if lazy-loading ACL is needed).
  * Returning true means no ACL table lookup needed.
  */
+export interface WhitelistMatchInput {
+  userId: string;
+  agentId?: string;
+  action: Permission;
+  aclRecords: AclEntity[];
+}
+
+/**
+ * Restricted-visibility whitelist (org-sync P2): explicit user/agent
+ * allow-rows grant access without home-team membership. Callers must verify
+ * agent ownership before passing agentId (no impersonation by agent_id).
+ */
+export function matchRestrictedWhitelist(input: WhitelistMatchInput): AclEntity | undefined {
+  return input.aclRecords.find(
+    (acl) =>
+      acl.permission === input.action &&
+      acl.effect === "allow" &&
+      ((acl.subject_type === "user" && acl.subject_id === input.userId) ||
+        (acl.subject_type === "agent" && !!input.agentId && acl.subject_id === input.agentId)),
+  );
+}
+
 export function roleDefaultCovers(role: TeamMemberEntity["role"], action: Permission): boolean {
   const defaults = role === "admin" ? ADMIN_ACTIONS : MEMBER_ACTIONS;
   return defaults.includes(action);

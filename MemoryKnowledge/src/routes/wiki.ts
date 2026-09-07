@@ -81,7 +81,10 @@ export function createWikiRoutes(deps: WikiRouteDeps): Hono {
 
     const ingestReqTeam = extractRequesterTeam(body);
     if (ingestReqTeam.invalid) return c.json(wrapError(400, "team_id is invalid"), 400);
-    const ingestRole = wikiService.accessRole(serviceId, wikiId, ingestReqTeam.team);
+    const ingestRole = wikiService.accessRoleStrict(serviceId, wikiId, ingestReqTeam.team);
+    if (ingestRole === "team_required") {
+      return c.json(wrapError(403, "team_id required for shared resource"), 403);
+    }
     if (ingestRole !== "owner" && ingestRole !== "editor") {
       return c.json(wrapError(403, "grant_type 'viewer' cannot trigger ingest (requires editor)"), 403);
     }
@@ -124,8 +127,12 @@ export function createWikiRoutes(deps: WikiRouteDeps): Hono {
         result.failed.push({ id, reason: "not found" });
         continue;
       }
-      if (wikiService.accessRole(serviceId, id, extractRequesterTeam(body).team) !== "owner") {
-        result.failed.push({ id, reason: "forbidden: requires owner grant" });
+      const delRole = wikiService.accessRoleStrict(serviceId, id, extractRequesterTeam(body).team);
+      if (delRole !== "owner") {
+        result.failed.push({
+          id,
+          reason: delRole === "team_required" ? "team_id required for shared resource" : "forbidden: requires owner grant",
+        });
         continue;
       }
       const ok = wikiService.delete(serviceId, row.team_id, id);
@@ -159,8 +166,11 @@ export function createWikiRoutes(deps: WikiRouteDeps): Hono {
 
     const metaReqTeam = extractRequesterTeam(body);
     if (metaReqTeam.invalid) return c.json(wrapError(400, "team_id is invalid"), 400);
-    const metaRole = wikiService.accessRole(serviceId, wikiId, metaReqTeam.team);
+    const metaRole = wikiService.accessRoleStrict(serviceId, wikiId, metaReqTeam.team);
     if (metaRole === null) return c.json(wrapError(404, "wiki not found"), 404);
+    if (metaRole === "team_required") {
+      return c.json(wrapError(403, "team_id required for shared resource"), 403);
+    }
     if (metaRole !== "owner" && metaRole !== "editor") {
       return c.json(wrapError(403, "grant_type 'viewer' cannot edit metadata (requires editor)"), 403);
     }

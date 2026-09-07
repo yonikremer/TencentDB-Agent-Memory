@@ -189,6 +189,7 @@ export interface KnowledgeClientPort {
     knowledgeId: string,
     teamIds?: string[],
   ): Promise<GrantClearResult>;
+  grantsList(kind: 'wiki' | 'code-graph', knowledgeId: string): Promise<GrantMirrorResult>;
   wikiUpdateMeta(wikiId: string, patch: { name?: string; summary?: string | null }): Promise<WikiDetail>;
 
   //Wiki — raw file layer (ls/read asset ids only; write/rm with IdFields)

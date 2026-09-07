@@ -635,10 +635,14 @@ export function runMetadataStoreContract(
         expect(latest?.error).toBe("boom");
       });
 
-      it("upsertGroupyShare / get / list / delete", async () => {
+      it("upsertGroupyShare / get / list / delete (grant_types round-trip)", async () => {
         expect(await store.getGroupyShare("ast-1")).toBeNull();
-        await store.upsertGroupyShare({ asset_id: "ast-1", node_ids: ["n1", "n2"], prev_visibility: "team" });
+        await store.upsertGroupyShare({
+          asset_id: "ast-1", node_ids: ["n1", "n2"], prev_visibility: "team",
+          grant_types: { n1: "editor" },
+        });
         expect((await store.getGroupyShare("ast-1"))?.node_ids).toEqual(["n1", "n2"]);
+        expect((await store.getGroupyShare("ast-1"))?.grant_types).toEqual({ n1: "editor" });
         await store.upsertGroupyShare({ asset_id: "ast-1", node_ids: ["n2"], prev_visibility: "team" });
         expect((await store.listGroupyShares()).map((s) => s.asset_id)).toEqual(["ast-1"]);
         await store.deleteGroupyShare("ast-1");

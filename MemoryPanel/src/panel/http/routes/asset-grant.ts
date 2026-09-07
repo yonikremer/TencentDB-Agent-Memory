@@ -14,16 +14,20 @@ import type { Hono } from 'hono';
 import type { PanelDeps } from '../../panel-deps.js';
 import { validatePanelMetaHeaders } from '../middleware/validate-panel-headers.js';
 import { respondControlError, respondEnvelope } from '../envelope.js';
-import { buildCtx, readJson, str, okEnvelope, isCallerSystemAdmin } from './knowledge/common.js';
+import { buildCtx, readJson, str, okEnvelope, resolveCallerUserId } from './knowledge/common.js';
+import { knowledgeKindForAssetType } from '../../domain/asset-id.js';
 
-const GRANT_TYPES = ['viewer', 'editor', 'owner'];
+const GRANT_TYPES = ['viewer', 'editor', 'owner'] as const;
+type GrantTypeParam = (typeof GRANT_TYPES)[number];
 
 export function registerAssetGrantRoutes(api: Hono, deps: PanelDeps): void {
   const mw = validatePanelMetaHeaders(deps);
 
   api.post('/asset/grant', mw, async (c) => {
     const ctx = buildCtx(c);
-    if (!(await isCallerSystemAdmin(deps, ctx))) return respondControlError(c, 403, 'FORBIDDEN');
+    // Any authenticated caller may attempt; the kernel enforces owner /
+    // home-team-admin / system-admin (DESIGN §6). Missing identity → 401.
+    if (!(await resolveCallerUserId(deps, ctx))) return respondControlError(c, 401, 'UNAUTHORIZED');
     const body = await readJson(c);
     const assetId = str(body, 'asset_id');
     const nodeId = str(body, 'node_id');
@@ -31,7 +35,7 @@ export function registerAssetGrantRoutes(api: Hono, deps: PanelDeps): void {
     const grantType = str(body, 'grant_type') ?? 'viewer';
     if (!assetId || !nodeId) return respondControlError(c, 400, 'MISSING_PARAM');
     if (action !== 'grant' && action !== 'revoke') return respondControlError(c, 400, 'BAD_ACTION');
-    if (!GRANT_TYPES.includes(grantType)) return respondControlError(c, 400, 'BAD_GRANT_TYPE');
+    if (!(GRANT_TYPES as readonly string[]).includes(grantType)) return respondControlError(c, 400, 'BAD_GRANT_TYPE');
 
     const callKernel = (act: string, payload: Record<string, unknown>) =>
       deps.metaKernel.invoke(act, payload, ctx).catch(() => null);
@@ -42,7 +46,7 @@ export function registerAssetGrantRoutes(api: Hono, deps: PanelDeps): void {
     const asset = assetEnv.data as { asset_id: string; team_id: string; asset_type: string } | null;
     if (!asset) return respondControlError(c, 404, 'ASSET_NOT_FOUND');
 
-    const grantEnv = await callKernel('groupy/asset-grant', { asset_id: assetId, node_id: nodeId, action });
+    const grantEnv = await callKernel('groupy/asset-grant', { asset_id: assetId, node_id: nodeId, action, grant_type: grantType });
     if (!grantEnv) return respondControlError(c, 502, 'KERNEL_UNREACHABLE');
     if (grantEnv.code !== 0) return respondEnvelope(c, grantEnv);
     const grant = grantEnv.data as { visibility: string; nodes: string[]; teams: string[] } | null;
@@ -50,10 +54,7 @@ export function registerAssetGrantRoutes(api: Hono, deps: PanelDeps): void {
 
     // KS mirror (wiki/code-graph only): kernel asset types map 1:1, and the
     // kernel asset_id doubles as the KS knowledge_id (see allocate flow).
-    const kind =
-      asset.asset_type === 'llm_wiki' ? 'wiki'
-      : asset.asset_type === 'code_graph' ? 'code-graph'
-      : null;
+    const kind = knowledgeKindForAssetType(asset.asset_type);
     let mirror: unknown = null;
     if (kind) {
       const kc = deps.knowledgeClientFactory(ctx.instanceId);

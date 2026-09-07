@@ -140,7 +140,12 @@ knowledge_code_graph_grant(knowledge_id TEXT NOT NULL, team_id TEXT NOT NULL,
 | `owner`  | editor + delete asset, rename/re-home, change grants (incl. grant_type) |
 
 Default for new grants: `viewer`. `grants/set` accepts `grant_type`; `grants/clear` removes rows.
-Kernel-side parallel for skills/chat-memory already exists as ACL `permission` values (read = viewer, write = editor, manage = owner) — no kernel schema change; Panel mirror maps kernel ACL permission → KS `grant_type` so both planes stay consistent.
+Kernel-side parallel for skills/chat-memory already exists as ACL `permission` values, but the
+instant share path does NOT map them: Panel owns `grant_type` end to end (request → kernel
+per-node store → KS mirror). Kernel ACL rows are always read (users) / read+use (agents).
+Trust boundary: KS has no user identity — grants routes are control-plane only (Panel/admin
+callers via service header). Direct KS access already reads service-scoped rows, so the routes
+add no new read capability; they only affect team listing visibility.
 
 Listing semantics change: wiki/code-graph visible to team T if `owner.team_id = T` **or** `EXISTS grant(row, T)`.
 Get-by-id keeps existing service-scoped behavior (audit in implant phase).
@@ -172,8 +177,9 @@ GROUPY_MOCK_FILE=           # JSON fixture for dev/testing outside corpnet; when
    Grants whose node was archived are revoked and recorded in the sync summary.
 5. **Persist run** — `groupy_run` with status + last-good snapshot JSON. On failure: 3 retries 30 min apart,
    then give up, keep last-good, admin alert (Panel status page / log error).
-6. **Notify** — sync summary exposed via `/v3/meta/groupy/summary`; Panel reads it (on its own schedule)
-   to recompute the KS grant mirror (see §6).
+6. **Notify** — sync summary exposed via `/v3/meta/groupy/summary`; Panel reads shares+tree
+   (on its own schedule, via `/api/v1/groupy/mirror-sync`) to recompute the KS grant mirror (see §6).
+   Kernel nightly recompute heals kernel ACL; mirror-sync heals the KS rows with stored grant_types.
 
 ## 6. Sharing an asset to a node (instant path)
 
@@ -197,13 +203,36 @@ after org changes.
 
 ## 7. API surface
 
-### Kernel (new, admin-only, authz via existing meta auth + api keys)
+### Kernel (new, admin-only, authz via existing meta auth + api keys; POST-only like all /v3/meta routes)
 ```
-POST /v3/meta/groupy/sync      # manual trigger; body: {} ; returns run summary (async → 202 + run id or sync)
-GET  /v3/meta/groupy/status    # last run, last-good timestamp, health
-GET  /v3/meta/groupy/tree      # graph (nodes+edges) for Panel mirror/UI breadcrumbs
-GET  /v3/meta/groupy/summary   # last sync summary incl. archived nodes, revoked grants
+POST /v3/meta/groupy/sync         # manual trigger; body: {} ; returns run summary
+POST /v3/meta/groupy/status       # last run, last-good timestamp, health
+POST /v3/meta/groupy/tree         # graph (nodes+edges) for Panel mirror/UI breadcrumbs
+POST /v3/meta/groupy/summary      # last sync summary incl. archived nodes, revoked grants
+POST /v3/meta/groupy/asset-grant  # {asset_id, node_id, action, grant_type?} instant share (owner/home-admin/sysadmin)
+POST /v3/meta/groupy/shares       # share registry (asset → nodes + per-node grant_type) for Panel orphans/mirror
 ```
+
+### Panel (admin; header validation as existing routes, POST-only by Panel convention)
+```
+POST /api/v1/groupy/sync            # forwards to kernel; returns status
+POST /api/v1/groupy/status
+POST /api/v1/asset/grant            # {asset_id, node_id, action, grant_type?} — any authenticated caller (kernel authz)
+POST /api/v1/groupy/orphans         # assets whose granted node was archived
+POST /api/v1/groupy/tree            # for future UI (phase 2)
+POST /api/v1/groupy/mirror-sync     # heal KS rows from kernel shares+tree (manual/devops cron)
+```
+
+### KS (control plane only: Panel/admin callers, service-scoped by x-tdai-service-id)
+```
+POST /v3/grants/set   # {kind: 'wiki'|'code-graph', knowledge_id, grants: [{team_id, grant_type?}]}  (default viewer)
+POST /v3/grants/clear # {kind, knowledge_id, team_ids[]?}  (all rows when team_ids omitted)
+POST /v3/grants/list  # {kind, knowledge_id} → current rows (for mirror-sync diff)
+```
+List/tools queries transparently union owner + grants (no new request fields).
+Team-scoped reads take an optional `team_id`: granted teams see tools,
+ungranted teams 404; absent `team_id` keeps legacy open behavior. Mutations
+on shared resources REQUIRE `team_id` (viewer omitting it cannot act as owner).
 
 ### Panel (admin; header validation as existing routes, POST-only by Panel convention)
 ```
@@ -237,6 +266,12 @@ List/tools queries transparently union owner + grants (no new request fields).
 - Kernel sync + share endpoints: existing meta auth (admin + api keys), same envelope/error conventions.
 - `GROUPY_TOKEN` never logged; requests over corpnet TLS.
 - ACL grant writes go through the existing permission-checker path — no bypass added.
+- Restricted-visibility READ path is a pure ACL whitelist (`matchRestrictedWhitelist` in
+  permission-checker.ts): explicit user/agent rows grant access without home-team membership.
+  Agent rows match only when the caller owns the agent (no impersonation by agent_id).
+- Groupy ids are validated (`[A-Za-z0-9_-]{1,200}`, fail-closed) before becoming team_ids;
+  walk (5000 nodes), share subtrees (1000 teams) and node members (5000) are capped.
+- Team-create squat guard covers archived node ids too.
 - Mock adapter only active when `GROUPY_MOCK_FILE` set (explicit opt-in; never in prod default).
 
 ## 10. Testing strategy

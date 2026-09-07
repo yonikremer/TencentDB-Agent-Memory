@@ -19,6 +19,7 @@ import { createKnowledgeModule } from "../../module.js";
 import { createWikiRoutes } from "../wiki.js";
 import { createCodeGraphRoutes } from "../code-graph.js";
 import { createGrantsRoutes } from "../grants.js";
+import { createToolsRoutes } from "../tools.js";
 
 const SVC = "svc-grants-1";
 const TEAM_A = "team-grants-a";
@@ -58,6 +59,10 @@ beforeAll(async () => {
     cgService: mod.cgService, instancePool: mod.instancePool, publicBaseUrl: "",
   }));
   api.route("/grants", createGrantsRoutes({ wikiService: mod.wikiService, cgService: mod.cgService }));
+  api.route("/tools", createToolsRoutes({
+    wikiService: mod.wikiService, wikiMgr: mod.wikiMgr,
+    cgService: mod.cgService, instancePool: mod.instancePool,
+  }));
   app.route("/v3", api);
   server = serve({ fetch: app.fetch, port: 0, hostname: "127.0.0.1" });
   await new Promise<void>((resolve) => server.on("listening", () => resolve()));
@@ -146,6 +151,39 @@ describe("wiki grants", () => {
     expect(clear.json.data.cleared).toBe(2);
     expect((await post("/v3/wiki/list", { team_id: TEAM_B })).json.data.total).toBe(0);
     expect((await post("/v3/wiki/list", { team_id: TEAM_A })).json.data.total).toBe(1);
+  });
+
+  it("shared mutations require team_id; unshared keep legacy behavior", async () => {
+    const c = await post("/v3/wiki/create", { team_id: TEAM_A, name: "legacy-wiki" });
+    const legacyId = c.json.data.wiki_id;
+    await post("/v3/wiki/raw/write", {
+      team_id: TEAM_A, wiki_id: legacyId, files: [{ filename: "n.md", content: "# T\n\nx\n" }],
+    });
+    // unshared: no team → legacy owner caps
+    expect((await post("/v3/wiki/ingest", { wiki_id: legacyId })).status).toBe(202);
+    // shared: no team → 403 even for owner-team callers
+    await post("/v3/grants/set", {
+      kind: "wiki", knowledge_id: legacyId, grants: [{ team_id: TEAM_B }],
+    });
+    expect((await post("/v3/wiki/ingest", { wiki_id: legacyId })).status).toBe(403);
+    expect((await post("/v3/wiki/update-meta", { wiki_id: legacyId, summary: "x" })).status).toBe(403);
+    const del = await post("/v3/wiki/delete", { wiki_ids: [legacyId] });
+    expect(del.json.data.deleted_ids).toEqual([]);
+    // owner team explicit → allowed again
+    expect((await post("/v3/wiki/ingest", { wiki_id: legacyId, team_id: TEAM_A })).status).toBe(202);
+  });
+
+  it("tools/list is team-scoped when team_id given", async () => {
+    const c = await post("/v3/wiki/create", { team_id: TEAM_A, name: "tools-wiki" });
+    const toolsId = c.json.data.wiki_id;
+    await post("/v3/grants/set", {
+      kind: "wiki", knowledge_id: toolsId, grants: [{ team_id: TEAM_B }],
+    });
+    expect((await post("/v3/tools/list", { knowledge_id: toolsId })).json.code).toBe(0);
+    expect((await post("/v3/tools/list", { knowledge_id: toolsId, team_id: TEAM_B })).json.code).toBe(0);
+    expect((await post("/v3/tools/list", { knowledge_id: toolsId, team_id: TEAM_C })).status).toBe(404);
+    const gl = await post("/v3/grants/list", { kind: "wiki", knowledge_id: toolsId });
+    expect(gl.json.data.grants).toEqual([{ team_id: TEAM_B, grant_type: "viewer" }]);
   });
 
   it("validation: bad kind / grant_type / unknown id", async () => {

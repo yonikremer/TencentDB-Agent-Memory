@@ -402,6 +402,7 @@ export const assetGrantSchema = z.object({
   asset_id: nonEmpty,
   node_id: nonEmpty,
   action: z.enum(["grant", "revoke"]),
+  grant_type: z.enum(["viewer", "editor", "owner"]).optional(),
 });
 export const groupySharesSchema = z.object({});
 

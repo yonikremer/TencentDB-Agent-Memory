@@ -11,6 +11,9 @@
 
 import { GroupyClient, type GroupyNodeData } from "./groupy-client.js";
 
+/** Fail-safe: a single node beyond this is a malformed/cyclic feed. */
+export const MAX_NODE_MEMBERS = 5000;
+
 export class HttpGroupyClient extends GroupyClient {
   private readonly root: string;
 
@@ -21,6 +24,10 @@ export class HttpGroupyClient extends GroupyClient {
   ) {
     super();
     if (!baseUrl) throw new Error("groupy http client requires GROUPY_BASE_URL");
+    // SSRF guard: corpnet HTTPS/HTTP only, no file/unix-socket schemes.
+    if (!/^https?:\/\//.test(baseUrl)) {
+      throw new Error("GROUPY_BASE_URL must start with http:// or https://");
+    }
     this.root = baseUrl.replace(/\/+$/, "");
   }
 
@@ -58,6 +65,9 @@ export function normalizeGroupyNode(body: unknown): GroupyNodeData {
     : b.id;
   if (!Array.isArray(b.members)) {
     throw new Error(`groupy node malformed: ${b.id}: missing members[]`);
+  }
+  if (b.members.length > MAX_NODE_MEMBERS) {
+    throw new Error(`groupy node malformed: ${b.id}: members exceed ${MAX_NODE_MEMBERS}`);
   }
   const members = (b.members as Array<Record<string, unknown>>).map((m) => {
     if (typeof m?.id !== "string" || (m.kind !== "user" && m.kind !== "org")) {

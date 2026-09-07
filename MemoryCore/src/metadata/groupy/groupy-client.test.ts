@@ -51,6 +51,18 @@ describe("walkGroupyGraph", () => {
     const client = new StubClient(new Map());
     await expect(walkGroupyGraph(client, ["missing"])).rejects.toThrow("node_not_found");
   });
+
+  it("rejects invalid ids and enforces maxNodes", async () => {
+    const evil = new StubClient(new Map());
+    await expect(walkGroupyGraph(evil, ["a/b"])).rejects.toThrow("groupy id invalid");
+    const big = new Map<string, GroupyNodeData>();
+    for (let i = 0; i < 5; i++) {
+      big.set(`n${i}`, { id: `n${i}`, name: "N", display_name: "N",
+        members: i < 4 ? [{ id: `n${i + 1}`, kind: "org" }] : [] });
+    }
+    await expect(walkGroupyGraph(new StubClient(big), ["n0"], { maxNodes: 3 }))
+      .rejects.toThrow("exceeds max nodes");
+  });
 });
 
 describe("MockGroupyClient", () => {

@@ -37,6 +37,7 @@ let adminId = "";
 let yonikId = "";
 let fixturePath = "";
 const ksCalls: Array<{ method: string; kind: string; id: string; arg: unknown }> = [];
+const ksState = new Map<string, Array<{ team_id: string; grant_type: string }>>();
 const WIKI = "wiki-grant00";
 const SKILL = "skill-grant00";
 
@@ -119,8 +120,23 @@ beforeAll(async () => {
           return ok(await scheduler.getTree());
         case "groupy/shares":
           return ok(await store.listGroupyShares());
-        case "groupy/asset-grant":
-          return ok(await svc.applyAssetShareForCaller(body as any, adminCtx as any));
+        case "groupy/asset-grant": {
+          const keyUser = await svc.rawStore.getUserByKey(String((_ctx as any)?.userKey ?? ""));
+          const keyRow = keyUser ? await svc.getUserById(keyUser.user_id) : null;
+          const callerCtx = {
+            token: "", userId: keyRow?.user_id, isAdmin: false,
+            isSystemAdmin: keyRow?.user_type === "system_admin",
+          };
+          try {
+            return ok(await svc.applyAssetShareForCaller(body as any, callerCtx as any));
+          } catch (err) {
+            const code = (err as { code?: string }).code ?? "";
+            const status = code === "permission_denied" ? 403
+              : /not_found$/.test(code) ? 404
+              : 400;
+            return { code: status, message: code, request_id: "t", data: null };
+          }
+        }
         default:
           return { code: 400, message: `unsupported in test: ${action}`, request_id: "t", data: null };
       }
@@ -129,11 +145,33 @@ beforeAll(async () => {
   const fakeKs = {
     async grantsSet(kind: string, id: string, grants: unknown) {
       ksCalls.push({ method: "set", kind, id, arg: grants });
-      return { kind, knowledge_id: id, grants };
+      const rows = (grants as Array<{ team_id: string; grant_type?: string }>)
+        .map((g) => ({ team_id: g.team_id, grant_type: g.grant_type ?? "viewer" }));
+      const key = `${kind}:${id}`;
+      const cur = ksState.get(key) ?? [];
+      for (const row of rows) {
+        const ix = cur.findIndex((r) => r.team_id === row.team_id);
+        if (ix >= 0) cur[ix] = row;
+        else cur.push(row);
+      }
+      ksState.set(key, cur);
+      return { kind, knowledge_id: id, grants: rows };
     },
     async grantsClear(kind: string, id: string, teamIds?: string[]) {
       ksCalls.push({ method: "clear", kind, id, arg: teamIds });
-      return { kind, knowledge_id: id, cleared: (teamIds ?? []).length };
+      const key = `${kind}:${id}`;
+      if (!teamIds) {
+        const n = (ksState.get(key) ?? []).length;
+        ksState.delete(key);
+        return { kind, knowledge_id: id, cleared: n };
+      }
+      const cur = (ksState.get(key) ?? []).filter((r) => !teamIds.includes(r.team_id));
+      const n = (ksState.get(key) ?? []).length - cur.length;
+      ksState.set(key, cur);
+      return { kind, knowledge_id: id, cleared: n };
+    },
+    async grantsList(kind: string, id: string) {
+      return { kind, knowledge_id: id, grants: ksState.get(`${kind}:${id}`) ?? [] };
     },
   } as unknown as KnowledgeClientPort;
   const deps = {
@@ -203,6 +241,40 @@ describe("panel asset grant (instant share)", () => {
     expect(r.json.data.ks_mirror).toBeNull();
     expect(ksCalls).toHaveLength(0);
     await post("/api/v1/asset/grant", { asset_id: SKILL, node_id: "123teamB", action: "revoke" });
+  });
+
+  it("invalid identity gets 401", async () => {
+    const r = await post("/api/v1/asset/grant", {
+      asset_id: WIKI, node_id: "120data_branch", action: "grant",
+    }, "bogus-key");
+    expect(r.status).toBe(401);
+  });
+
+  it("kernel stores per-node grant_type for the mirror", async () => {
+    await post("/api/v1/asset/grant", {
+      asset_id: WIKI, node_id: "120data_branch", action: "grant", grant_type: "editor",
+    });
+    expect((await svc.rawStore.getGroupyShare(WIKI))?.grant_types).toEqual({
+      "120data_branch": "editor",
+    });
+    await post("/api/v1/asset/grant", { asset_id: WIKI, node_id: "120data_branch", action: "revoke" });
+  });
+
+  it("mirror-sync heals drifted KS rows with stored types", async () => {
+    await post("/api/v1/asset/grant", {
+      asset_id: WIKI, node_id: "120data_branch", action: "grant", grant_type: "editor",
+    });
+    // simulate drift: drop a team row, add a stale one, downgrade a type
+    ksState.set(`wiki:${WIKI}`, [
+      { team_id: "123teamA", grant_type: "viewer" },
+      { team_id: "stale-team", grant_type: "viewer" },
+    ]);
+    const r = await post("/api/v1/groupy/mirror-sync", {});
+    expect(r.json.code).toBe(0);
+    const rows = ksState.get(`wiki:${WIKI}`) ?? [];
+    expect(rows.map((g) => g.team_id).sort()).toEqual(["120data_branch", "123teamA"].sort());
+    expect(new Set(rows.map((g) => g.grant_type))).toEqual(new Set(["editor"]));
+    await post("/api/v1/asset/grant", { asset_id: WIKI, node_id: "120data_branch", action: "revoke" });
   });
 
   it("non-admin caller gets 403", async () => {

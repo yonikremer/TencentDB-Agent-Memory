@@ -260,8 +260,11 @@ export function createCodeGraphRoutes(deps: CodeGraphRouteDeps): Hono {
 
     const cgReqTeam = extractRequesterTeam(body);
     if (cgReqTeam.invalid) return c.json(wrapError(400, "team_id is invalid"), 400);
-    const cgRole = cgService.accessRole(serviceId, cgId, cgReqTeam.team);
+    const cgRole = cgService.accessRoleStrict(serviceId, cgId, cgReqTeam.team);
     if (cgRole === null) return c.json(wrapError(404, "code graph not found"), 404);
+    if (cgRole === "team_required") {
+      return c.json(wrapError(403, "team_id required for shared resource"), 403);
+    }
     if (cgRole !== "owner" && cgRole !== "editor") {
       return c.json(wrapError(403, "grant_type 'viewer' cannot edit metadata (requires editor)"), 403);
     }
@@ -284,7 +287,10 @@ export function createCodeGraphRoutes(deps: CodeGraphRouteDeps): Hono {
 
     const syncReqTeam = extractRequesterTeam(body);
     if (syncReqTeam.invalid) return c.json(wrapError(400, "team_id is invalid"), 400);
-    const syncRole = cgService.accessRole(serviceId, cgId, syncReqTeam.team);
+    const syncRole = cgService.accessRoleStrict(serviceId, cgId, syncReqTeam.team);
+    if (syncRole === "team_required") {
+      return c.json(wrapError(403, "team_id required for shared resource"), 403);
+    }
     if (syncRole !== "owner" && syncRole !== "editor") {
       return c.json(wrapError(403, "grant_type 'viewer' cannot trigger sync (requires editor)"), 403);
     }
@@ -321,8 +327,12 @@ export function createCodeGraphRoutes(deps: CodeGraphRouteDeps): Hono {
         result.failed.push({ id, reason: "not found" });
         continue;
       }
-      if (cgService.accessRole(serviceId, id, extractRequesterTeam(body).team) !== "owner") {
-        result.failed.push({ id, reason: "forbidden: requires owner grant" });
+      const delRole = cgService.accessRoleStrict(serviceId, id, extractRequesterTeam(body).team);
+      if (delRole !== "owner") {
+        result.failed.push({
+          id,
+          reason: delRole === "team_required" ? "team_id required for shared resource" : "forbidden: requires owner grant",
+        });
         continue;
       }
       const ok = cgService.delete(serviceId, row.team_id, id);
