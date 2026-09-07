@@ -60,6 +60,8 @@ import type {
   RecordGroupyRunInput,
   GroupyUserMapEntity,
   UpsertGroupyUserMapInput,
+  GroupyShareEntity,
+  UpsertGroupyShareInput,
   ConfigParamEntity,
   UpsertConfigParamInput,
   ListConfigParamsFilter,
@@ -342,6 +344,12 @@ export class SqliteMetadataStore implements IMetadataStore {
         members_seen INTEGER NOT NULL DEFAULT 0,
         error TEXT,
         snapshot_json TEXT NOT NULL DEFAULT ''
+      );
+      CREATE TABLE IF NOT EXISTS meta_groupy_shares (
+        asset_id TEXT PRIMARY KEY,
+        node_ids_json TEXT NOT NULL DEFAULT '[]',
+        prev_visibility TEXT NOT NULL DEFAULT 'team',
+        updated_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS meta_groupy_user_map (
         groupy_id TEXT PRIMARY KEY,
@@ -1857,6 +1865,46 @@ export class SqliteMetadataStore implements IMetadataStore {
       error: row.error == null ? null : String(row.error),
       snapshot_json: String(row.snapshot_json ?? ""),
     };
+  }
+
+  upsertGroupyShare(share: UpsertGroupyShareInput): GroupyShareEntity {
+    const now = nowIso();
+    this.run(
+      `INSERT INTO meta_groupy_shares (asset_id, node_ids_json, prev_visibility, updated_at)
+       VALUES (?,?,?,?)
+       ON CONFLICT(asset_id) DO UPDATE SET node_ids_json = excluded.node_ids_json,
+         prev_visibility = excluded.prev_visibility, updated_at = excluded.updated_at`,
+      share.asset_id,
+      JSON.stringify([...share.node_ids]),
+      share.prev_visibility,
+      now,
+    );
+    return this.getGroupyShare(share.asset_id)!;
+  }
+
+  getGroupyShare(assetId: string): GroupyShareEntity | null {
+    const row = this.get<Row>("SELECT * FROM meta_groupy_shares WHERE asset_id = ?", assetId);
+    if (!row) return null;
+    let nodeIds: string[] = [];
+    try {
+      const parsed: unknown = JSON.parse(String(row.node_ids_json ?? "[]"));
+      if (Array.isArray(parsed)) nodeIds = parsed.filter((x): x is string => typeof x === "string");
+    } catch { /* corrupt JSON reads as empty */ }
+    return {
+      asset_id: String(row.asset_id),
+      node_ids: nodeIds,
+      prev_visibility: String(row.prev_visibility ?? "team"),
+      updated_at: String(row.updated_at),
+    };
+  }
+
+  listGroupyShares(): GroupyShareEntity[] {
+    const rows = this.all("SELECT asset_id FROM meta_groupy_shares ORDER BY asset_id");
+    return rows.map((r) => this.getGroupyShare(String(r.asset_id))!);
+  }
+
+  deleteGroupyShare(assetId: string): void {
+    this.run("DELETE FROM meta_groupy_shares WHERE asset_id = ?", assetId);
   }
 
   listGroupyRuns(limit = 50): GroupyRunEntity[] {

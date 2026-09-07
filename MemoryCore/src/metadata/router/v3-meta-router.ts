@@ -343,6 +343,9 @@ const routeTable: Record<string, Handler> = {
     if (!sched) throw new MetadataError("groupy_disabled", "groupy sync is not enabled (GROUPY_ENABLED/GROUPY_ROOTS)");
     return sched.getSummary();
   }),
+  [`${V3_PREFIX}/groupy/asset-grant`]: bind(S.assetGrantSchema, (d, c, s) =>
+    s.applyAssetShareForCaller(d, c),
+  ),
 };
 
 /** Registered v3 route paths (for testing / docs). */
@@ -380,6 +383,8 @@ function mapErrorCode(code: string): number {
     case "user_inactive":
       return 403;
     case "user_key_not_found":
+      return 404;
+    case "groupy_node_archived":
       return 404;
     case "groupy_disabled":
       return 503;

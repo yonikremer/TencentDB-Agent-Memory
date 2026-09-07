@@ -635,6 +635,16 @@ export function runMetadataStoreContract(
         expect(latest?.error).toBe("boom");
       });
 
+      it("upsertGroupyShare / get / list / delete", async () => {
+        expect(await store.getGroupyShare("ast-1")).toBeNull();
+        await store.upsertGroupyShare({ asset_id: "ast-1", node_ids: ["n1", "n2"], prev_visibility: "team" });
+        expect((await store.getGroupyShare("ast-1"))?.node_ids).toEqual(["n1", "n2"]);
+        await store.upsertGroupyShare({ asset_id: "ast-1", node_ids: ["n2"], prev_visibility: "team" });
+        expect((await store.listGroupyShares()).map((s) => s.asset_id)).toEqual(["ast-1"]);
+        await store.deleteGroupyShare("ast-1");
+        expect(await store.getGroupyShare("ast-1")).toBeNull();
+      });
+
       it("listGroupyRuns returns newest-first with limit", async () => {
         for (const id of ["r1", "r2", "r3"]) {
           await store.recordGroupyRun({

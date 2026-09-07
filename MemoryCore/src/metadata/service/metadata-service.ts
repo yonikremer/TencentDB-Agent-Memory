@@ -14,6 +14,7 @@
 
 import { DuplicateUserKeyError, type IMetadataStore } from "../store/interface.js";
 import type { GroupyScheduler } from "../groupy/scheduler.js";
+import { applyAssetShare as applyGroupyAssetShare } from "../groupy/grant-service.js";
 import {
   checkPermission,
   canBindAsset,
@@ -1518,6 +1519,25 @@ export class MetadataService {
       return { allowed: true, reason: "owner" };
     }
 
+    // Org-sync (P2): restricted assets are a pure ACL whitelist. An explicit
+    // user/agent allow-row grants access WITHOUT home-team membership, so a
+    // share to a matrix node reaches users outside the asset's home team.
+    // (Team admins keep the role-default bypass below; team_role subjects
+    // still require home membership via the fallthrough path.)
+    if (asset.visibility === "restricted") {
+      const whitelist = await this.allAclRecords(params.asset_id);
+      const hit = whitelist.find(
+        (acl) =>
+          acl.permission === params.action &&
+          acl.effect === "allow" &&
+          ((acl.subject_type === "user" && acl.subject_id === userId) ||
+            (acl.subject_type === "agent" &&
+              !!params.agent_id &&
+              acl.subject_id === params.agent_id)),
+      );
+      if (hit) return { allowed: true, reason: `acl:${hit.id}` };
+    }
+
     const membership = await this.store.getTeamMember(asset.team_id, userId);
 
     // Run through with empty ACL first: if role default matches, allow immediately, no table lookup needed
@@ -1989,6 +2009,17 @@ export class MetadataService {
   ): Promise<void> {
     await this.assertCallerIsAgentOwnerOrTeamAdmin(ctx, agentId);
     return this.setAgentFixedAssets(agentId, bindings);
+  }
+
+  /**
+   * Org-sync instant share/revoke (PLAN P2): caller must be asset owner,
+   * asset home-team admin, or system admin. Delegates to groupy/grant-service.
+   */
+  async applyAssetShareForCaller(
+    input: { asset_id: string; node_id: string; action: "grant" | "revoke" },
+    ctx: V3AuthContext,
+  ): Promise<import("../groupy/grant-service.js").AssetShareResult> {
+    return applyGroupyAssetShare(this, { ...input, ctx });
   }
 
   async grantAclForCaller(input: GrantAclInput, ctx: V3AuthContext): Promise<AclEntity> {

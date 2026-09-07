@@ -64,6 +64,8 @@ import type {
   RecordGroupyRunInput,
   GroupyUserMapEntity,
   UpsertGroupyUserMapInput,
+  GroupyShareEntity,
+  UpsertGroupyShareInput,
   ConfigParamEntity,
   UpsertConfigParamInput,
   ListConfigParamsFilter,
@@ -272,6 +274,7 @@ export class MongoMetadataStore implements IMetadataStore {
     await this.ensureIndex("meta_groupy_runs", { id: 1 }, { unique: true });
     await this.ensureIndex("meta_groupy_runs", { started_at: -1 });
     await this.ensureIndex("meta_groupy_user_map", { groupy_id: 1 }, { unique: true });
+    await this.ensureIndex("meta_groupy_shares", { asset_id: 1 }, { unique: true });
 
     await this.migrateLegacyUserKeys();
   }
@@ -1380,6 +1383,42 @@ export class MongoMetadataStore implements IMetadataStore {
       .limit(1)
       .toArray();
     return (docs[0] as unknown as GroupyRunEntity) ?? null;
+  }
+
+  async upsertGroupyShare(share: UpsertGroupyShareInput): Promise<GroupyShareEntity> {
+    const now = nowIso();
+    const doc: GroupyShareEntity = {
+      asset_id: share.asset_id,
+      node_ids: [...share.node_ids],
+      prev_visibility: share.prev_visibility,
+      updated_at: now,
+    };
+    await this.col("meta_groupy_shares").updateOne(
+      { asset_id: share.asset_id } as Document,
+      { $set: doc },
+      { upsert: true },
+    );
+    return doc;
+  }
+
+  async getGroupyShare(assetId: string): Promise<GroupyShareEntity | null> {
+    const doc = await this.col("meta_groupy_shares").findOne(
+      { asset_id: assetId } as Document,
+      PROJECT_NO_ID,
+    );
+    return (doc as unknown as GroupyShareEntity) ?? null;
+  }
+
+  async listGroupyShares(): Promise<GroupyShareEntity[]> {
+    const docs = await this.col("meta_groupy_shares")
+      .find({}, PROJECT_NO_ID)
+      .sort({ asset_id: 1 })
+      .toArray();
+    return docs as unknown as GroupyShareEntity[];
+  }
+
+  async deleteGroupyShare(assetId: string): Promise<void> {
+    await this.col("meta_groupy_shares").deleteOne({ asset_id: assetId } as Document);
   }
 
   async listGroupyRuns(limit = 50): Promise<GroupyRunEntity[]> {

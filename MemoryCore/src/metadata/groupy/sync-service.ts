@@ -266,7 +266,7 @@ export async function runGroupySync(opts: GroupySyncOptions): Promise<GroupySync
  * username lookup (covers SSO-created accounts), else auto-create flagged
  * with source=groupy in metadata_json.
  */
-async function ensureGroupyUser(
+export async function ensureGroupyUser(
   service: MetadataService,
   groupyId: string,
 ): Promise<{ userId: string; created: boolean }> {

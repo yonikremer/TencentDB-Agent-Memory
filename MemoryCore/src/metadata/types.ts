@@ -483,6 +483,19 @@ export interface RecordGroupyRunInput {
   snapshot_json: string;
 }
 
+export interface GroupyShareEntity {
+  asset_id: string;
+  node_ids: string[];
+  prev_visibility: string;
+  updated_at: string;
+}
+
+export interface UpsertGroupyShareInput {
+  asset_id: string;
+  node_ids: string[];
+  prev_visibility: string;
+}
+
 export interface GroupyUserMapEntity {
   groupy_id: string;
   username: string;

@@ -34,6 +34,8 @@ import type {
   RecordGroupyRunInput,
   GroupyUserMapEntity,
   UpsertGroupyUserMapInput,
+  GroupyShareEntity,
+  UpsertGroupyShareInput,
   CreateUserInput,
   CreateUserKeyInput,
   CreateTeamInput,
@@ -209,6 +211,10 @@ export interface IMetadataStore {
   recordGroupyRun(run: RecordGroupyRunInput): MaybePromise<GroupyRunEntity>;
   getLatestGroupyRun(): MaybePromise<GroupyRunEntity | null>;
   listGroupyRuns(limit?: number): MaybePromise<GroupyRunEntity[]>;
+  upsertGroupyShare(share: UpsertGroupyShareInput): MaybePromise<GroupyShareEntity>;
+  getGroupyShare(assetId: string): MaybePromise<GroupyShareEntity | null>;
+  listGroupyShares(): MaybePromise<GroupyShareEntity[]>;
+  deleteGroupyShare(assetId: string): MaybePromise<void>;
   upsertGroupyUserMap(entry: UpsertGroupyUserMapInput): MaybePromise<GroupyUserMapEntity>;
   getGroupyUserMap(groupyId: string): MaybePromise<GroupyUserMapEntity | null>;
 

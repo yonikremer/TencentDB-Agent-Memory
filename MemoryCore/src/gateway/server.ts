@@ -1644,9 +1644,17 @@ export class TdaiGateway {
       const config = loadGroupyConfig();
       if (!config.enabled) return;
       const { GroupyScheduler } = await import("../metadata/groupy/scheduler.js");
+      const { recomputeGroupyShares } = await import("../metadata/groupy/grant-service.js");
       const instanceId = this.config.instanceId ?? "default";
       const svc = await this.ensureMetadataService(instanceId);
-      const scheduler = new GroupyScheduler({ service: svc, config, logger: this.logger });
+      const scheduler = new GroupyScheduler({
+        service: svc,
+        config,
+        logger: this.logger,
+        onMembershipApplied: (c) => recomputeGroupyShares({
+          service: c.service, graph: c.graph, closure: c.closure, archivedNodes: c.archivedNodes,
+        }),
+      });
       svc.setGroupyScheduler(scheduler);
       scheduler.start();
       this.logger.info?.(`[groupy-sync] enabled, roots=${config.roots.join(",")}`);

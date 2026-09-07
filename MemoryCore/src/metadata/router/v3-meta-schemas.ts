@@ -398,6 +398,11 @@ export const groupySyncSchema = z.object({});
 export const groupyStatusSchema = z.object({});
 export const groupyTreeSchema = z.object({});
 export const groupySummarySchema = z.object({});
+export const assetGrantSchema = z.object({
+  asset_id: nonEmpty,
+  node_id: nonEmpty,
+  action: z.enum(["grant", "revoke"]),
+});
 
 export const V3_SCHEMAS = {
   "/v3/meta/user/create": userCreateSchema,
@@ -459,6 +464,7 @@ export const V3_SCHEMAS = {
   "/v3/meta/groupy/status": groupyStatusSchema,
   "/v3/meta/groupy/tree": groupyTreeSchema,
   "/v3/meta/groupy/summary": groupySummarySchema,
+  "/v3/meta/groupy/asset-grant": assetGrantSchema,
 } as const;
 
 export type V3Route = keyof typeof V3_SCHEMAS;
