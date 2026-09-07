@@ -205,13 +205,13 @@ GET  /v3/meta/groupy/tree      # graph (nodes+edges) for Panel mirror/UI breadcr
 GET  /v3/meta/groupy/summary   # last sync summary incl. archived nodes, revoked grants
 ```
 
-### Panel (admin; header validation as existing routes)
+### Panel (admin; header validation as existing routes, POST-only by Panel convention)
 ```
 POST /api/v1/groupy/sync            # forwards to kernel; returns status
-GET  /api/v1/groupy/status
+POST /api/v1/groupy/status
 POST /api/v1/asset/grant            # {asset_id, node_id, action} — skills, wikis, code-graph, chat-memory
-GET  /api/v1/groupy/orphans         # assets whose granted node was archived
-GET  /api/v1/groupy/tree            # for future UI (phase 2)
+POST /api/v1/groupy/orphans         # assets whose granted node was archived
+POST /api/v1/groupy/tree            # for future UI (phase 2)
 ```
 
 ### KS (admin/panel, service-scoped by x-tdai-service-id)

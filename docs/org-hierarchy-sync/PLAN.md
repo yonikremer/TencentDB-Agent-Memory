@@ -13,7 +13,7 @@ No implementation yet — this plan is the contract for later phases.
 ## P0 — Foundations (docs, scaffolding) ✅ doc-only, done when merged
 
 - [x] `docs/org-hierarchy-sync/DESIGN.md`, `docs/org-hierarchy-sync/PLAN.md` (this file)
-- [ ] Confirm repo test-convention locations (MemoryCore vitest root `npx vitest run`; MemoryKnowledge `pnpm test`; find existing `*.test.ts` colocation before writing tests)
+- [x] Confirm repo test-convention locations (MemoryCore colocated `*.test.ts` via root vitest; MemoryKnowledge `routes/__tests__` via `pnpm test`; MemoryPanel `tests/` via root vitest)
 
 **Acceptance:** branch exists; docs committed; no code changes.
 
@@ -146,6 +146,24 @@ P0 ──▶ P1 ──▶ P2 ──▶ P4 (needs P3 for mirror writes)
               └── P3 ───┘
 P5 after P1–P4 green; real-adapter swap gated on user's groupy facts (§13 DESIGN).
 ```
+
+## Implementation status (2026-09-07, branch feat/org-hirarchy-sync)
+
+- [x] P1 kernel sync engine (commits `8c62933` + hook seam)
+- [x] P2 grant expansion + `groupy/asset-grant` + `groupy/shares` routes
+- [x] P3 KS grants + list-union + enforcement + migration `0000_amused_phalanx`
+- [x] P4 Panel routes + KS mirror + orphans + `GROUPY_*` in `.env.example`
+- [x] P5 `GROUPY_ENABLED=false` default (no boot wiring fires; all suites green)
+
+Deviations from the plan (all covered by tests):
+
+- Panel routes are POST-only by Panel convention (`/groupy/status|tree|orphans`).
+- P2 instant path is a dedicated kernel route (`/v3/meta/groupy/asset-grant`)
+  instead of multi-call `acl/grant` + `asset/update` (atomic, single auth).
+- `knowledge_code_graph_grant` key column is `code_graph_id` (DESIGN said
+  `knowledge_id`; same meaning, consistent with sibling tables).
+- `applyAssetShare` returns affected subtree `teams[]` so the Panel KS mirror
+  cannot drift from a concurrent org change mid-request.
 
 ## Out of scope (later phases)
 
