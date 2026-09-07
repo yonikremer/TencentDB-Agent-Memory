@@ -77,15 +77,19 @@ No implementation yet — this plan is the contract for later phases.
 ## P3 — KS: grant tables + list-union
 
 ### Files
-- **(M)** `MemoryKnowledge/src/db/schema.ts`, `MemoryKnowledge/src/db/client.ts` — DDL for grant tables
-- **(M)** `MemoryKnowledge/src/store/types.ts`, `MemoryKnowledge/src/store/sqlite-store.ts` — `setGrants/clearGrants/listByTeamUnion` for wiki + code-graph
+- **(M)** `MemoryKnowledge/src/db/schema.ts`, `MemoryKnowledge/src/db/client.ts` — DDL for grant tables incl. `grant_type` (owner|editor|viewer, default viewer)
+- **(M)** `MemoryKnowledge/src/store/types.ts`, `MemoryKnowledge/src/store/sqlite-store.ts` — `setGrants/clearGrants/listByTeamUnion` for wiki + code-graph, grant_type persisted/returned
 - **(M)** `MemoryKnowledge/src/store/wiki-service.ts`, `MemoryKnowledge/src/store/code-graph-service.ts` — pass-through
 - **(N)** `MemoryKnowledge/src/routes/grants.ts` — `POST /v3/grants/set|clear` (service-scoped, admin)
 - **(M)** `MemoryKnowledge/src/routes/wiki.ts`, `MemoryKnowledge/src/routes/tools.ts` — union filter in list/tools
 - **(M)** `MemoryKnowledge/src/middleware/response-envelope.ts` or `api-helpers.ts` as needed for grants validation
 
 ### Acceptance
-1. `pnpm db:generate` migration output includes both tables.
+1. `pnpm db:generate` migration output includes both tables with `grant_type`.
+2. Wiki visible to owner team and to each granted team; invisible to non-granted team.
+3. Grant-type enforcement: viewer cannot trigger ingest/update (403), editor can, owner can delete; owner-team implicit `owner` outranks explicit grants.
+4. `grants/set` with `grant_type` persists + defaults to viewer; `grants/clear` removes rows; tools list drops tool immediately.
+5. `pnpm test` (MemoryKnowledge) green.
 2. Wiki visible to owner team and to each granted team; invisible to non-granted team.
 3. `grants/clear` removes rows; tools list drops tool immediately.
 4. `pnpm test` (MemoryKnowledge) green.
@@ -105,6 +109,7 @@ No implementation yet — this plan is the contract for later phases.
 
 ### Behavior
 - Grant flow synchronous: kernel ACL write + KS mirror in one request (seconds). Revoke symmetric.
+- Grant route accepts `grant_type` (default viewer) for wiki/code-graph; skill/chat-memory map to kernel ACL permission (read/write/manage).
 - Orphans endpoint = assets whose granted node was archived (from kernel summary).
 - No durable Panel state added (mirror is computed on demand from kernel tree/grant state).
 

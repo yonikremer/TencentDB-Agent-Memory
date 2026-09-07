@@ -48,7 +48,7 @@ Nodes themselves are stable (ids persist 3–7 years). Every node and every user
 | Assets | Meta assets (`asset/*`): `asset_id, team_id, asset_type (skill|wiki|code-graph|chat_memory), owner_user_id, visibility ∈ {private, team, restricted, agent, task}`. A skill is a team-scoped asset (see `utils/env-config.ts`). |
 | ACL | `acl/*` rows: `subject_type ∈ {user, team_role, agent}`, `effect`, `permission`. `restricted` visibility = explicit ACL only (owner + team admins bypass). See `metadata/service/permission-checker.ts`. |
 | KS scoping | Wikis/code graphs keyed `(service_id, team_id, name)`; listing strictly filters `team_id` (`listWikis(serviceId, teamId)` in `store/sqlite-store.ts`); no cross-team visibility logic; get-by-id scoped by `service_id` only. |
-| Panel | Hono backend; talks to kernel via `metaKernel.invoke`; to KS via `http-knowledge-client`; **no durable store** (`knowledge-task-registry` is in-memory, documented corner). |
+| Panel | Hono backend; talks to kernel via `metaKernel.invoke`; to KS via `http-knowledge-client`; **no durable store** (`knowledge-task-registry` is in-memory, documented corner).
 | Kernel optional deps | Precedent: ClickHouse/Redis/etc. are optional, env-gated backends — groupy sync follows this pattern. |
 
 ## 3. Architecture overview
@@ -122,9 +122,25 @@ Materializations (existing tables reused):
 New tables (drizzle migration, registers with existing DDL in `db/client.ts`):
 
 ```sql
-knowledge_wiki_grant      (wiki_id TEXT NOT NULL, team_id TEXT NOT NULL, PRIMARY KEY(wiki_id, team_id))
-knowledge_code_graph_grant(knowledge_id TEXT NOT NULL, team_id TEXT NOT NULL, PRIMARY KEY(knowledge_id, team_id))
+knowledge_wiki_grant      (wiki_id TEXT NOT NULL, team_id TEXT NOT NULL,
+                           grant_type TEXT NOT NULL DEFAULT 'viewer',  -- owner | editor | viewer
+                           PRIMARY KEY(wiki_id, team_id))
+knowledge_code_graph_grant(knowledge_id TEXT NOT NULL, team_id TEXT NOT NULL,
+                           grant_type TEXT NOT NULL DEFAULT 'viewer',  -- owner | editor | viewer
+                           PRIMARY KEY(knowledge_id, team_id))
 ```
+
+
+**Grant-type semantics** (enforced at KS routes; owning team of the asset is implicit `owner` and outranks explicit grants):
+
+| grant_type | wiki / code-graph capability |
+|---|---|
+| `viewer` | list + retrieve (search / tools) only |
+| `editor` | viewer + trigger ingest/update/replace (async builds), edit metadata |
+| `owner`  | editor + delete asset, rename/re-home, change grants (incl. grant_type) |
+
+Default for new grants: `viewer`. `grants/set` accepts `grant_type`; `grants/clear` removes rows.
+Kernel-side parallel for skills/chat-memory already exists as ACL `permission` values (read = viewer, write = editor, manage = owner) — no kernel schema change; Panel mirror maps kernel ACL permission → KS `grant_type` so both planes stay consistent.
 
 Listing semantics change: wiki/code-graph visible to team T if `owner.team_id = T` **or** `EXISTS grant(row, T)`.
 Get-by-id keeps existing service-scoped behavior (audit in implant phase).
@@ -169,7 +185,7 @@ Caller must be asset owner, asset home-team admin, or platform admin.
    `visibility=restricted` and rewrite ACL rows (owner, home-team members, expanded users+agents).
    Home-team members are always included — flipping to restricted never blinds the home team.
 2. **KS mirror (wiki/code-graph only)**: Panel upserts/removes grant rows for every **subtree team** of the
-   node (`knowledge_wiki_grant` / `knowledge_code_graph_grant`) via `http-knowledge-client`.
+   node (`knowledge_wiki_grant` / `knowledge_code_graph_grant`) via `http-knowledge-client`, carrying `grant_type` (default `viewer`, mapped from kernel ACL permission where present).
 3. All of this happens **synchronously in the request** — a few seconds. Revoke is symmetric.
 4. Nightly sync re-derives the same state from scratch, so minor drift (people moved since grant day) is
    healed within 24 h — consistent with the product SLA.
@@ -200,8 +216,8 @@ GET  /api/v1/groupy/tree            # for future UI (phase 2)
 
 ### KS (admin/panel, service-scoped by x-tdai-service-id)
 ```
-POST /v3/grants/set   # {kind: 'wiki'|'code-graph', knowledge_id, team_ids[]}
-POST /v3/grants/clear # {kind, knowledge_id}
+POST /v3/grants/set   # {kind: 'wiki'|'code-graph', knowledge_id, grants: [{team_id, grant_type?}]}  (default viewer)
+POST /v3/grants/clear # {kind, knowledge_id, team_ids[]?}  (all rows when team_ids omitted)
 ```
 List/tools queries transparently union owner + grants (no new request fields).
 
@@ -211,6 +227,7 @@ List/tools queries transparently union owner + grants (no new request fields).
 - **Partial failure mid-run**: diff is idempotent; re-run reconciles.
 - **Content never deleted**: node archive keeps teams' assets; team delete is NOT called for groupy nodes.
 - **Person leaves org**: membership rows → `removed`; user record and owned content untouched.
+   Grant rows keep `grant_type` across recomputes; only membership/revocation changes.
 - **Team id squatting**: kernel team-create validates against active groupy node ids.
 - **Duplicate identities**: reconcile strictly by username; auto-create only when missing.
 - **No silent data-loss on grants**: archive/revoke produces an Orphan list, surfaced in Panel.
@@ -226,6 +243,7 @@ List/tools queries transparently union owner + grants (no new request fields).
 
 - **Unit**: closure computation (matrix multi-parent cases, cycles, heads), diff algorithm (create/archive/
   remove/move), ACL expansion (user+agent rows, home-team preservation).
+- **Grant types**: viewer/editor/owner enforcement at KS (view vs ingest vs delete), grant_type default, owner-team precedence over explicit grants.
 - **Adapter**: mock client from fixture JSON (works outside corpnet); contract test for fetchNode shape.
 - **KS**: grant table migration, list union (owner + grant), revoke removes rows, tools list refreshed.
 - **Integration (kernel)**: nightly-style run against fixture → team/member rows in store; instant grant path
@@ -275,3 +293,4 @@ List/tools queries transparently union owner + grants (no new request fields).
 12. Asset types shareable: skills, wikis, code-graph, chat-memory. *(R4Q4)*
 13. API-first surface; UI phase 2. *(R4Q5)*
 14. Failure: 3 retries/30 min → give up, last-good retained, alert. *(R2Q7)*
+15. KS grant rows carry `grant_type` = owner | editor | viewer (default viewer); owner team implicit owner; skills via kernel ACL permission parity. *(R5)*
