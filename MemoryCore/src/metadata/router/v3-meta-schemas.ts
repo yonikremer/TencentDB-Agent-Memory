@@ -403,6 +403,7 @@ export const assetGrantSchema = z.object({
   node_id: nonEmpty,
   action: z.enum(["grant", "revoke"]),
 });
+export const groupySharesSchema = z.object({});
 
 export const V3_SCHEMAS = {
   "/v3/meta/user/create": userCreateSchema,
@@ -465,6 +466,7 @@ export const V3_SCHEMAS = {
   "/v3/meta/groupy/tree": groupyTreeSchema,
   "/v3/meta/groupy/summary": groupySummarySchema,
   "/v3/meta/groupy/asset-grant": assetGrantSchema,
+  "/v3/meta/groupy/shares": groupySharesSchema,
 } as const;
 
 export type V3Route = keyof typeof V3_SCHEMAS;

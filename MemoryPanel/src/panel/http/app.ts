@@ -34,6 +34,8 @@ export function buildPanelApp(deps: PanelDeps): Hono {
   // Agent lifecycle business routing: /agent/delete-cascade cascades to clear skills at the control level before archiving
   registerAgentLifecycleRoutes(api, deps);
   registerKnowledgeRoutes(api, deps);
+  registerGroupyRoutes(api, deps);
+  registerAssetGrantRoutes(api, deps);
   app.route(API_PREFIX, api);
 
   app.onError((err, c) => {

@@ -102,6 +102,24 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
     return this.post('/v3/wiki/list', { team_id: teamId, ...opts });
   }
 
+  //═══════════════ Grants mirror (org-hierarchy sync) ═══════════════
+
+  async grantsSet(
+    kind: 'wiki' | 'code-graph',
+    knowledgeId: string,
+    grants: Array<{ team_id: string; grant_type?: string }>,
+  ): Promise<GrantMirrorResult> {
+    return this.post('/v3/grants/set', { kind, knowledge_id: knowledgeId, grants });
+  }
+
+  async grantsClear(
+    kind: 'wiki' | 'code-graph',
+    knowledgeId: string,
+    teamIds?: string[],
+  ): Promise<GrantClearResult> {
+    return this.post('/v3/grants/clear', teamIds ? { kind, knowledge_id: knowledgeId, team_ids: teamIds } : { kind, knowledge_id: knowledgeId });
+  }
+
   //═══════════════ Wiki · raw file layer ═══════════════
 
   async wikiRawLs(wikiId: string): Promise<{ items: RawFileEntry[] }> {

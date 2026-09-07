@@ -346,6 +346,10 @@ const routeTable: Record<string, Handler> = {
   [`${V3_PREFIX}/groupy/asset-grant`]: bind(S.assetGrantSchema, (d, c, s) =>
     s.applyAssetShareForCaller(d, c),
   ),
+  [`${V3_PREFIX}/groupy/shares`]: bind(S.groupySharesSchema, async (_d, c, s) => {
+    s.assertCanManageUsers(c);
+    return s.rawStore.listGroupyShares();
+  }),
 };
 
 /** Registered v3 route paths (for testing / docs). */

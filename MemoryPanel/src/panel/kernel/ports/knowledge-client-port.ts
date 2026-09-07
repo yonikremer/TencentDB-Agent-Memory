@@ -35,6 +35,23 @@ export interface WikiListResult {
   total: number;
 }
 
+export interface GrantMirrorRow {
+  team_id: string;
+  grant_type: string;
+}
+
+export interface GrantMirrorResult {
+  kind: string;
+  knowledge_id: string;
+  grants: GrantMirrorRow[];
+}
+
+export interface GrantClearResult {
+  kind: string;
+  knowledge_id: string;
+  cleared: number;
+}
+
 export interface WikiIngestResult {
   wiki_id: string;
   status: string;
@@ -160,6 +177,18 @@ export interface KnowledgeClientPort {
   wikiIngest(wikiId: string): Promise<WikiIngestResult>;
   wikiDelete(wikiIds: string[]): Promise<BatchDeleteResult>;
   wikiList(teamId: string, opts?: { status?: string; limit?: number; offset?: number }): Promise<WikiListResult>;
+
+  //Grants mirror (org-hierarchy sync): Panel writes KS rows per subtree team.
+  grantsSet(
+    kind: 'wiki' | 'code-graph',
+    knowledgeId: string,
+    grants: Array<{ team_id: string; grant_type?: string }>,
+  ): Promise<GrantMirrorResult>;
+  grantsClear(
+    kind: 'wiki' | 'code-graph',
+    knowledgeId: string,
+    teamIds?: string[],
+  ): Promise<GrantClearResult>;
   wikiUpdateMeta(wikiId: string, patch: { name?: string; summary?: string | null }): Promise<WikiDetail>;
 
   //Wiki — raw file layer (ls/read asset ids only; write/rm with IdFields)

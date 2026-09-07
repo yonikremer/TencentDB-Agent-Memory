@@ -31,6 +31,8 @@ export interface AssetShareResult {
   asset_id: string;
   visibility: string;
   nodes: string[];
+  /** Subtree teams affected by this action (mirror target for the KS rows). */
+  teams: string[];
   users: number;
   agents: number;
 }
@@ -212,6 +214,16 @@ export async function applyAssetShare(
     nodes = (share?.node_ids ?? []).filter((n) => n !== req.node_id);
   }
   const closure = computeMembershipClosure(graph);
+  // Affected teams for the KS mirror: granted subtrees on grant, the dropped
+  // node's subtree on revoke (nodes is empty after a full revoke).
+  const affected = new Set<string>();
+  if (req.action === "grant") {
+    for (const n of nodes) {
+      for (const t of subtreeNodeIds(graph, n)) affected.add(t);
+    }
+  } else {
+    for (const t of subtreeNodeIds(graph, req.node_id)) affected.add(t);
+  }
   const subtree = new Set<string>();
   for (const n of nodes) {
     for (const t of subtreeNodeIds(graph, n)) subtree.add(t);
@@ -235,7 +247,7 @@ export async function applyAssetShare(
     await service.updateAsset(asset.asset_id, { visibility });
   }
   return {
-    asset_id: asset.asset_id, visibility, nodes,
+    asset_id: asset.asset_id, visibility, nodes, teams: [...affected],
     users: targets.userIds.size, agents: targets.agentIds.size,
   };
 }
