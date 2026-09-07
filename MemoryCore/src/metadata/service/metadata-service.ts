@@ -13,6 +13,7 @@
  */
 
 import { DuplicateUserKeyError, type IMetadataStore } from "../store/interface.js";
+import type { GroupyScheduler } from "../groupy/scheduler.js";
 import {
   checkPermission,
   canBindAsset,
@@ -340,6 +341,17 @@ export class MetadataService {
     const user = await this.getUserById(userId);
     if (!user) throw new MetadataError("user_not_found", `user not found: ${userId}`);
     return user;
+  }
+
+  /** Org-sync control plane (optional env-gated module; set by gateway boot). */
+  private _groupyScheduler?: import("../groupy/scheduler.js").GroupyScheduler;
+
+  setGroupyScheduler(sched: import("../groupy/scheduler.js").GroupyScheduler): void {
+    this._groupyScheduler = sched;
+  }
+
+  get groupyScheduler(): import("../groupy/scheduler.js").GroupyScheduler | undefined {
+    return this._groupyScheduler;
   }
 
   get rawStore(): IMetadataStore {
@@ -1701,7 +1713,20 @@ export class MetadataService {
   // ============================================================
   async createTeamForCaller(input: CreateTeamInput, ctx: V3AuthContext): Promise<TeamEntity> {
     this.assertCallerIsResourceOwner(ctx, input.owner_user_id);
+    if (input.team_id) await this.assertTeamIdNotGroupyManaged(input.team_id);
     return this.createTeam(input);
+  }
+
+  /**
+   * Org-sync squat guard (PLAN P1.7): team ids matching an active groupy node
+   * are owned by the sync — manual creation would collide with the mirror.
+   * The sync itself bypasses this via createTeam (not the ForCaller path).
+   */
+  private async assertTeamIdNotGroupyManaged(teamId: string): Promise<void> {
+    const nodes = await this.store.listGroupyNodes();
+    if (nodes.some((n) => n.node_id === teamId)) {
+      throw new MetadataError("groupy_managed_id", `team id is managed by groupy sync: ${teamId}`);
+    }
   }
 
   async updateTeamForCaller(

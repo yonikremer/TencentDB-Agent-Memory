@@ -393,6 +393,12 @@ export const configUserSetSchema = z.object({
   params: z.record(z.string().min(1), z.string()),
 });
 
+// ── Groupy org-sync (P1; admin-only, empty bodies) ──
+export const groupySyncSchema = z.object({});
+export const groupyStatusSchema = z.object({});
+export const groupyTreeSchema = z.object({});
+export const groupySummarySchema = z.object({});
+
 export const V3_SCHEMAS = {
   "/v3/meta/user/create": userCreateSchema,
   "/v3/meta/user/create-with-key": userCreateWithKeySchema,
@@ -449,6 +455,10 @@ export const V3_SCHEMAS = {
   "/v3/meta/instance-quota/get": instanceQuotaGetSchema,
   "/v3/meta/config/user/get": configUserGetSchema,
   "/v3/meta/config/user/set": configUserSetSchema,
+  "/v3/meta/groupy/sync": groupySyncSchema,
+  "/v3/meta/groupy/status": groupyStatusSchema,
+  "/v3/meta/groupy/tree": groupyTreeSchema,
+  "/v3/meta/groupy/summary": groupySummarySchema,
 } as const;
 
 export type V3Route = keyof typeof V3_SCHEMAS;

@@ -1,5 +1,5 @@
 /**
- * v3 metadata routing (/v3/meta/*, 55 APIs).
+ * v3 metadata routing (/v3/meta/*, 59 APIs).
  *
  * Corresponds to design doc §7 + implementation plan M3.3. Mirrors v2-router dispatch pattern:
  *   - POST only, prefix /v3/meta
@@ -79,6 +79,15 @@ function orNotFound<T>(entity: T | null, code: string, id: string): T {
 }
 
 const OK = { ok: true } as const;
+
+/** Groupy control-plane facade; throws groupy_disabled (503) unless wired + enabled. */
+function requireGroupy(svc: MetadataService): import("../groupy/scheduler.js").GroupyScheduler {
+  const sched = svc.groupyScheduler;
+  if (!sched || !sched.enabled) {
+    throw new MetadataError("groupy_disabled", "groupy sync is not enabled (GROUPY_ENABLED/GROUPY_ROOTS)");
+  }
+  return sched;
+}
 
 // ── Route table (55 APIs) ──
 const routeTable: Record<string, Handler> = {
@@ -310,6 +319,30 @@ const routeTable: Record<string, Handler> = {
     s.assertCallerIsOwner(d.user_id, c.userId!);
     return s.configParams.setUserConfigForCaller(d);
   }),
+
+  // Groupy org-sync (admin-only; DESIGN docs/org-hierarchy-sync)
+  [`${V3_PREFIX}/groupy/sync`]: bind(S.groupySyncSchema, async (_d, c, s) => {
+    s.assertCanManageUsers(c);
+    return requireGroupy(s).runNow();
+  }),
+  [`${V3_PREFIX}/groupy/status`]: bind(S.groupyStatusSchema, async (_d, c, s) => {
+    s.assertCanManageUsers(c);
+    const sched = s.groupyScheduler;
+    if (!sched) throw new MetadataError("groupy_disabled", "groupy sync is not enabled (GROUPY_ENABLED/GROUPY_ROOTS)");
+    return sched.getStatus();
+  }),
+  [`${V3_PREFIX}/groupy/tree`]: bind(S.groupyTreeSchema, async (_d, c, s) => {
+    s.assertCanManageUsers(c);
+    const sched = s.groupyScheduler;
+    if (!sched) throw new MetadataError("groupy_disabled", "groupy sync is not enabled (GROUPY_ENABLED/GROUPY_ROOTS)");
+    return sched.getTree();
+  }),
+  [`${V3_PREFIX}/groupy/summary`]: bind(S.groupySummarySchema, async (_d, c, s) => {
+    s.assertCanManageUsers(c);
+    const sched = s.groupyScheduler;
+    if (!sched) throw new MetadataError("groupy_disabled", "groupy sync is not enabled (GROUPY_ENABLED/GROUPY_ROOTS)");
+    return sched.getSummary();
+  }),
 };
 
 /** Registered v3 route paths (for testing / docs). */
@@ -333,6 +366,7 @@ function mapErrorCode(code: string): number {
     case "already_initialized":
     case "last_system_admin":
     case "member_already_exists":
+    case "groupy_managed_id":
       return 409;
     case "invalid_credentials":
     case "invalid_password":
@@ -347,6 +381,8 @@ function mapErrorCode(code: string): number {
       return 403;
     case "user_key_not_found":
       return 404;
+    case "groupy_disabled":
+      return 503;
     default:
       return 400;
   }

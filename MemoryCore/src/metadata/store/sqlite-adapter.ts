@@ -53,6 +53,13 @@ import type {
   InstanceUserListFilter,
   AgentFixedAssetCountRow,
   AssetType,
+  GroupyNodeEntity,
+  UpsertGroupyNodeInput,
+  GroupyEdgeEntity,
+  GroupyRunEntity,
+  RecordGroupyRunInput,
+  GroupyUserMapEntity,
+  UpsertGroupyUserMapInput,
   ConfigParamEntity,
   UpsertConfigParamInput,
   ListConfigParamsFilter,
@@ -309,6 +316,38 @@ export class SqliteMetadataStore implements IMetadataStore {
         ON meta_config_params(user_id, module, param_name) WHERE scope = 'user';
       CREATE INDEX IF NOT EXISTS idx_meta_config_params_module
         ON meta_config_params(module);
+
+      CREATE TABLE IF NOT EXISTS meta_groupy_nodes (
+        node_id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        display_name TEXT NOT NULL DEFAULT '',
+        kind TEXT NOT NULL DEFAULT 'org',
+        archived INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS meta_groupy_edges (
+        parent_id TEXT NOT NULL,
+        child_id TEXT NOT NULL,
+        child_kind TEXT NOT NULL,
+        PRIMARY KEY (parent_id, child_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_meta_groupy_edges_child
+        ON meta_groupy_edges(child_id);
+      CREATE TABLE IF NOT EXISTS meta_groupy_runs (
+        id TEXT PRIMARY KEY,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        status TEXT NOT NULL,
+        nodes_seen INTEGER NOT NULL DEFAULT 0,
+        members_seen INTEGER NOT NULL DEFAULT 0,
+        error TEXT,
+        snapshot_json TEXT NOT NULL DEFAULT ''
+      );
+      CREATE TABLE IF NOT EXISTS meta_groupy_user_map (
+        groupy_id TEXT PRIMARY KEY,
+        username TEXT NOT NULL,
+        memory_user_id TEXT
+      );
     `);
     this.migrateUserTypeColumn();
     this.migrateLegacyUserKeys();
@@ -1713,6 +1752,154 @@ export class SqliteMetadataStore implements IMetadataStore {
   }
 
   // ============================================================
+  // ============================================================
+  // Groupy (org-hierarchy sync snapshot)
+  // ============================================================
+  private mapGroupyNode(row: Row): GroupyNodeEntity {
+    return {
+      node_id: String(row.node_id),
+      name: String(row.name),
+      display_name: String(row.display_name ?? ""),
+      kind: (row.kind as GroupyNodeEntity["kind"]) ?? "org",
+      archived: Number(row.archived) === 1,
+      updated_at: String(row.updated_at),
+    };
+  }
+
+  upsertGroupyNode(input: UpsertGroupyNodeInput): GroupyNodeEntity {
+    const now = nowIso();
+    const existing = this.get<Row>("SELECT * FROM meta_groupy_nodes WHERE node_id = ?", input.node_id);
+    const displayName = input.display_name ?? (existing ? String(existing.display_name) : input.name);
+    const kind = input.kind ?? ((existing?.kind as GroupyNodeEntity["kind"] | undefined) ?? "org");
+    const archived = input.archived ?? (existing ? Number(existing.archived) === 1 : false);
+    this.run(
+      `INSERT INTO meta_groupy_nodes (node_id, name, display_name, kind, archived, updated_at)
+       VALUES (?,?,?,?,?,?)
+       ON CONFLICT(node_id) DO UPDATE SET name = excluded.name, display_name = excluded.display_name,
+         kind = excluded.kind, archived = excluded.archived, updated_at = excluded.updated_at`,
+      input.node_id,
+      input.name,
+      displayName,
+      kind,
+      archived ? 1 : 0,
+      now,
+    );
+    return this.mapGroupyNode(this.get<Row>("SELECT * FROM meta_groupy_nodes WHERE node_id = ?", input.node_id)!);
+  }
+
+  listGroupyNodes(includeArchived = false): GroupyNodeEntity[] {
+    const rows = includeArchived
+      ? this.all("SELECT * FROM meta_groupy_nodes ORDER BY node_id")
+      : this.all("SELECT * FROM meta_groupy_nodes WHERE archived = 0 ORDER BY node_id");
+    return rows.map((r) => this.mapGroupyNode(r));
+  }
+
+  replaceGroupyEdges(edges: GroupyEdgeEntity[]): void {
+    this.db.exec("BEGIN");
+    try {
+      this.run("DELETE FROM meta_groupy_edges");
+      for (const e of edges) {
+        this.run("INSERT INTO meta_groupy_edges (parent_id, child_id, child_kind) VALUES (?,?,?)", e.parent_id, e.child_id, e.child_kind);
+      }
+      this.db.exec("COMMIT");
+    } catch (err) {
+      try { this.db.exec("ROLLBACK"); } catch { /* already rolled back */ }
+      throw err;
+    }
+  }
+
+  listGroupyEdges(): GroupyEdgeEntity[] {
+    const rows = this.all("SELECT parent_id, child_id, child_kind FROM meta_groupy_edges ORDER BY parent_id, child_id");
+    return rows.map((r) => ({
+      parent_id: String(r.parent_id),
+      child_id: String(r.child_id),
+      child_kind: r.child_kind as GroupyEdgeEntity["child_kind"],
+    }));
+  }
+
+  recordGroupyRun(run: RecordGroupyRunInput): GroupyRunEntity {
+    const now = nowIso();
+    const entity: GroupyRunEntity = {
+      id: run.id ?? generateId("gr"),
+      started_at: run.started_at ?? now,
+      finished_at: run.finished_at ?? null,
+      status: run.status,
+      nodes_seen: run.nodes_seen,
+      members_seen: run.members_seen,
+      error: run.error ?? null,
+      snapshot_json: run.snapshot_json,
+    };
+    this.run(
+      `INSERT INTO meta_groupy_runs (id, started_at, finished_at, status, nodes_seen, members_seen, error, snapshot_json)
+       VALUES (?,?,?,?,?,?,?,?)`,
+      entity.id,
+      entity.started_at,
+      entity.finished_at,
+      entity.status,
+      entity.nodes_seen,
+      entity.members_seen,
+      entity.error,
+      entity.snapshot_json,
+    );
+    return entity;
+  }
+
+  getLatestGroupyRun(): GroupyRunEntity | null {
+    const row = this.get<Row>("SELECT * FROM meta_groupy_runs ORDER BY started_at DESC, id DESC LIMIT 1");
+    if (!row) return null;
+    return {
+      id: String(row.id),
+      started_at: String(row.started_at),
+      finished_at: row.finished_at == null ? null : String(row.finished_at),
+      status: row.status as GroupyRunEntity["status"],
+      nodes_seen: Number(row.nodes_seen),
+      members_seen: Number(row.members_seen),
+      error: row.error == null ? null : String(row.error),
+      snapshot_json: String(row.snapshot_json ?? ""),
+    };
+  }
+
+  listGroupyRuns(limit = 50): GroupyRunEntity[] {
+    const rows = this.all(
+      "SELECT * FROM meta_groupy_runs ORDER BY started_at DESC, id DESC LIMIT ?",
+      limit,
+    );
+    return rows.map((row) => ({
+      id: String(row.id),
+      started_at: String(row.started_at),
+      finished_at: row.finished_at == null ? null : String(row.finished_at),
+      status: row.status as GroupyRunEntity["status"],
+      nodes_seen: Number(row.nodes_seen),
+      members_seen: Number(row.members_seen),
+      error: row.error == null ? null : String(row.error),
+      snapshot_json: String(row.snapshot_json ?? ""),
+    }));
+  }
+
+  upsertGroupyUserMap(entry: UpsertGroupyUserMapInput): GroupyUserMapEntity {
+    const existing = this.get<Row>("SELECT * FROM meta_groupy_user_map WHERE groupy_id = ?", entry.groupy_id);
+    const memoryUserId = entry.memory_user_id ?? (existing?.memory_user_id == null ? null : String(existing.memory_user_id));
+    this.run(
+      `INSERT INTO meta_groupy_user_map (groupy_id, username, memory_user_id)
+       VALUES (?,?,?)
+       ON CONFLICT(groupy_id) DO UPDATE SET username = excluded.username, memory_user_id = excluded.memory_user_id`,
+      entry.groupy_id,
+      entry.username,
+      memoryUserId,
+    );
+    return { groupy_id: entry.groupy_id, username: entry.username, memory_user_id: memoryUserId };
+  }
+
+  getGroupyUserMap(groupyId: string): GroupyUserMapEntity | null {
+    const row = this.get<Row>("SELECT * FROM meta_groupy_user_map WHERE groupy_id = ?", groupyId);
+    if (!row) return null;
+    return {
+      groupy_id: String(row.groupy_id),
+      username: String(row.username),
+      memory_user_id: row.memory_user_id == null ? null : String(row.memory_user_id),
+    };
+  }
+
   // ConfigParam
   // ============================================================
 
