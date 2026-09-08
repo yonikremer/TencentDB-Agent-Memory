@@ -377,7 +377,7 @@ export const internalListUsersByInstanceSchema = z.object({
   user_ids: optionalUserIdsFilter,
 }).merge(paginationInputSchema);
 
-/** Route → schema mapping (55 public APIs). */
+/** Route → schema mapping (one entry per public API). */
 // ── ConfigParam（v3.2）──
 export const instanceQuotaGetSchema = z.object({});
 
@@ -392,6 +392,19 @@ export const configUserSetSchema = z.object({
   module: nonEmpty,
   params: z.record(z.string().min(1), z.string()),
 });
+
+// ── Groupy org-sync (P1; admin-only, empty bodies) ──
+export const groupySyncSchema = z.object({});
+export const groupyStatusSchema = z.object({});
+export const groupyTreeSchema = z.object({});
+export const groupySummarySchema = z.object({});
+export const assetGrantSchema = z.object({
+  asset_id: nonEmpty,
+  node_id: nonEmpty,
+  action: z.enum(["grant", "revoke"]),
+  grant_type: z.enum(["viewer", "editor", "owner"]).optional(),
+});
+export const groupySharesSchema = z.object({});
 
 export const V3_SCHEMAS = {
   "/v3/meta/user/create": userCreateSchema,
@@ -449,6 +462,12 @@ export const V3_SCHEMAS = {
   "/v3/meta/instance-quota/get": instanceQuotaGetSchema,
   "/v3/meta/config/user/get": configUserGetSchema,
   "/v3/meta/config/user/set": configUserSetSchema,
+  "/v3/meta/groupy/sync": groupySyncSchema,
+  "/v3/meta/groupy/status": groupyStatusSchema,
+  "/v3/meta/groupy/tree": groupyTreeSchema,
+  "/v3/meta/groupy/summary": groupySummarySchema,
+  "/v3/meta/groupy/asset-grant": assetGrantSchema,
+  "/v3/meta/groupy/shares": groupySharesSchema,
 } as const;
 
 export type V3Route = keyof typeof V3_SCHEMAS;

@@ -617,6 +617,9 @@ export class TdaiGateway {
     // correctly skips the local fallback.
     await this.startIntegratedServices();
 
+    // ── Org-hierarchy sync (env-gated; never blocks boot) ──
+    await this.startGroupySync();
+
     // ── Initialize StorageAdapter for v2 API ──
     // In standalone mode, use LocalStorageBackend pointing to dataDir.
     // In service mode, CosStorageBackend was already injected above.
@@ -1629,6 +1632,36 @@ export class TdaiGateway {
    *   SCANNER_INTERVAL_MS=500 — scan interval
    *   WORKER_POLL_MS=200 — worker poll interval
    */
+  /**
+   * Org-hierarchy sync boot (feat/org-hirarchy-sync): env-gated module.
+   * Attaches a GroupyScheduler to the gateway instance service and starts
+   * on-boot sync + nightly GROUPY_CRON ticks. Failures are logged only —
+   * sync must never prevent the gateway from starting.
+   */
+  private async startGroupySync(): Promise<void> {
+    try {
+      const config = this.config.groupy;
+      if (!config.enabled) return;
+      const { GroupyScheduler } = await import("../metadata/groupy/scheduler.js");
+      const { recomputeGroupyShares } = await import("../metadata/groupy/grant-service.js");
+      const instanceId = this.config.instanceId ?? "default";
+      const svc = await this.ensureMetadataService(instanceId);
+      const scheduler = new GroupyScheduler({
+        service: svc,
+        config,
+        logger: this.logger,
+        onMembershipApplied: (c) => recomputeGroupyShares({
+          service: c.service, graph: c.graph, closure: c.closure,
+        }),
+      });
+      svc.setGroupyScheduler(scheduler);
+      scheduler.start();
+      this.logger.info?.(`[groupy-sync] enabled, roots=${config.roots.join(",")}`);
+    } catch (err) {
+      this.logger.warn?.(`[groupy-sync] boot skipped: ${(err as Error).message}`);
+    }
+  }
+
   private async startIntegratedServices(): Promise<void> {
     // Determine backend type from config (env > yaml > auto from deployMode):
     //   - "standalone" → local (in-process Map/setTimeout, zero dependencies)

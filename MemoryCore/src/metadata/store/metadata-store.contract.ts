@@ -591,6 +591,86 @@ export function runMetadataStoreContract(
     });
 
     // ── Delete Cascade (N1) ──
+    describe("Groupy", () => {
+      it("upsertGroupyNode creates + updates; listGroupyNodes filters archived", async () => {
+        await store.upsertGroupyNode({ node_id: "120data_branch", name: "Data", display_name: "Data" });
+        await store.upsertGroupyNode({ node_id: "123teamA", name: "A", display_name: "A" });
+        let nodes = await store.listGroupyNodes();
+        expect(nodes.map((n) => n.node_id).sort()).toEqual(["120data_branch", "123teamA"]);
+        expect(nodes[0].archived).toBe(false);
+        await store.upsertGroupyNode({ node_id: "123teamA", name: "A renamed", archived: true });
+        nodes = await store.listGroupyNodes();
+        expect(nodes.map((n) => n.node_id)).toEqual(["120data_branch"]);
+        const all = await store.listGroupyNodes(true);
+        expect(all.find((n) => n.node_id === "123teamA")?.name).toBe("A renamed");
+      });
+
+      it("replaceGroupyEdges swaps the whole edge set", async () => {
+        await store.replaceGroupyEdges([
+          { parent_id: "p", child_id: "c1", child_kind: "org" },
+          { parent_id: "p", child_id: "u1", child_kind: "user" },
+        ]);
+        let edges = await store.listGroupyEdges();
+        expect(edges).toHaveLength(2);
+        await store.replaceGroupyEdges([{ parent_id: "p", child_id: "c2", child_kind: "org" }]);
+        edges = await store.listGroupyEdges();
+        expect(edges).toEqual([{ parent_id: "p", child_id: "c2", child_kind: "org" }]);
+      });
+
+      it("recordGroupyRun / getLatestGroupyRun returns the newest run", async () => {
+        expect(await store.getLatestGroupyRun()).toBeNull();
+        await store.recordGroupyRun({
+          id: "run-1", started_at: "2026-09-01T00:00:00.000Z",
+          finished_at: "2026-09-01T00:01:00.000Z", status: "ok",
+          nodes_seen: 3, members_seen: 5, snapshot_json: "{}",
+        });
+        await store.recordGroupyRun({
+          id: "run-2", started_at: "2026-09-02T00:00:00.000Z",
+          status: "failed", nodes_seen: 0, members_seen: 0,
+          error: "boom", snapshot_json: "{}",
+        });
+        const latest = await store.getLatestGroupyRun();
+        expect(latest?.id).toBe("run-2");
+        expect(latest?.status).toBe("failed");
+        expect(latest?.error).toBe("boom");
+      });
+
+      it("upsertGroupyShare / get / list / delete (grant_types round-trip)", async () => {
+        expect(await store.getGroupyShare("ast-1")).toBeNull();
+        await store.upsertGroupyShare({
+          asset_id: "ast-1", node_ids: ["n1", "n2"], prev_visibility: "team",
+          grant_types: { n1: "editor" },
+        });
+        expect((await store.getGroupyShare("ast-1"))?.node_ids).toEqual(["n1", "n2"]);
+        expect((await store.getGroupyShare("ast-1"))?.grant_types).toEqual({ n1: "editor" });
+        await store.upsertGroupyShare({ asset_id: "ast-1", node_ids: ["n2"], prev_visibility: "team" });
+        expect((await store.listGroupyShares()).map((s) => s.asset_id)).toEqual(["ast-1"]);
+        await store.deleteGroupyShare("ast-1");
+        expect(await store.getGroupyShare("ast-1")).toBeNull();
+      });
+
+      it("listGroupyRuns returns newest-first with limit", async () => {
+        for (const id of ["r1", "r2", "r3"]) {
+          await store.recordGroupyRun({
+            id, started_at: `2026-09-0${id.slice(1)}T00:00:00.000Z`, status: "ok",
+            nodes_seen: 1, members_seen: 1, snapshot_json: "{}",
+          });
+        }
+        const runs = await store.listGroupyRuns(2);
+        expect(runs.map((r) => r.id)).toEqual(["r3", "r2"]);
+        expect((await store.listGroupyRuns()).length).toBeGreaterThanOrEqual(3);
+      });
+
+      it("upsertGroupyUserMap creates + rebinds; getGroupyUserMap null when missing", async () => {
+        expect(await store.getGroupyUserMap("123yonik")).toBeNull();
+        await store.upsertGroupyUserMap({ groupy_id: "123yonik", username: "123yonik" });
+        const row = await store.getGroupyUserMap("123yonik");
+        expect(row?.memory_user_id ?? null).toBeNull();
+        await store.upsertGroupyUserMap({ groupy_id: "123yonik", username: "123yonik", memory_user_id: "u-1" });
+        expect((await store.getGroupyUserMap("123yonik"))?.memory_user_id).toBe("u-1");
+      });
+    });
+
     describe("Delete Cascade", () => {
       it("deleteUsers cascade clears team_members + ACL", async () => {
         const owner = await store.createUser(uniqueUserInput());

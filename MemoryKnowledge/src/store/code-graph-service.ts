@@ -26,6 +26,9 @@ import type {
   IKnowledgeStore,
   ListOpts,
   CountOpts,
+  GrantType,
+  GrantRow,
+  SetGrantInput,
 } from "./types.js";
 import { BuildQueue } from "./build-queue.js";
 
@@ -181,6 +184,36 @@ export class CodeGraphService {
 
   list(serviceId: string, teamId: string, opts?: ListOpts): CodeGraphRow[] {
     return this.store.listCodeGraphs(serviceId, teamId, opts);
+  }
+
+  // ── Grants (org-hierarchy sync) ──
+  setGrants(serviceId: string, codeGraphId: string, grants: SetGrantInput[]): GrantRow[] {
+    return this.store.setCodeGraphGrants(serviceId, codeGraphId, grants);
+  }
+
+  clearGrants(serviceId: string, codeGraphId: string, teamIds?: string[]): number {
+    return this.store.clearCodeGraphGrants(serviceId, codeGraphId, teamIds);
+  }
+
+  listGrants(serviceId: string, codeGraphId: string): GrantRow[] {
+    return this.store.listCodeGraphGrants(serviceId, codeGraphId);
+  }
+
+  /**
+   * Effective capability of a requester team: owner team is implicit owner
+   * (outranks explicit rows). Absent requester = legacy owner-team context,
+   * EXCEPT on shared resources (any grant rows) which require an explicit
+   * team ("team_required") — otherwise a viewer could omit team_id and act
+   * as owner. Null when the resource does not exist under this service.
+   */
+  accessRoleStrict(serviceId: string, codeGraphId: string, requesterTeamId?: string): "owner" | GrantType | "team_required" | null {
+    const row = this.store.getCodeGraphById(serviceId, codeGraphId);
+    if (!row) return null;
+    if (!requesterTeamId) {
+      return this.store.listCodeGraphGrants(serviceId, codeGraphId).length > 0 ? "team_required" : "owner";
+    }
+    if (row.team_id === requesterTeamId) return "owner";
+    return this.store.getCodeGraphGrantRole(serviceId, codeGraphId, requesterTeamId);
   }
 
   count(serviceId: string, teamId: string, opts?: CountOpts): number {

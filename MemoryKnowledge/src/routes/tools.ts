@@ -17,7 +17,7 @@ import type { WikiService, CodeGraphService } from "../store/index.js";
 import type { CodeGraphInstancePool } from "../module.js";
 import type { WikiSourceManager } from "../engines/wiki/index.js";
 import { executeTool as executeCodeTool } from "../engines/code/index.js";
-import { wrapOk, wrapError, isValidIdSegment } from "../api-helpers.js";
+import { wrapOk, wrapError, isValidIdSegment, extractRequesterTeam } from "../api-helpers.js";
 import { isWikiId, isCodeGraphId } from "../store/ids.js";
 
 export interface ToolsRouteDeps {
@@ -202,7 +202,8 @@ export function createToolsRoutes(deps: ToolsRouteDeps): Hono {
     if (typeof knowledgeId !== "string" || !knowledgeId) {
       return c.json(wrapError(400, "knowledge_id is required"), 400);
     }
-
+    const listGate = extractRequesterTeam(body);
+    if (listGate.invalid) return c.json(wrapError(400, "team_id is invalid"), 400);
     let type: "wiki" | "code-graph";
     let tools: HttpToolDef[];
     let name: string;
@@ -214,6 +215,14 @@ export function createToolsRoutes(deps: ToolsRouteDeps): Hono {
       tools = WIKI_TOOLS;
       const row = wikiService.getById(serviceId, knowledgeId);
       if (!row) return c.json(wrapError(404, "knowledge resource not found"), 404);
+      // Team-scoped read: granted teams (any grant_type) see tools; others 404.
+      // Absent team keeps legacy open behavior (DESIGN get-by-id unchanged).
+      if (listGate.team) {
+        const listRole = wikiService.accessRoleStrict(serviceId, knowledgeId, listGate.team);
+        if (!listRole || listRole === "team_required") {
+          return c.json(wrapError(404, "knowledge resource not found"), 404);
+        }
+      }
       name = row.name;
       summary = row.summary ?? null;
       status = row.status;
@@ -222,6 +231,12 @@ export function createToolsRoutes(deps: ToolsRouteDeps): Hono {
       tools = CODE_GRAPH_TOOLS;
       const row = cgService.getById(serviceId, knowledgeId);
       if (!row) return c.json(wrapError(404, "knowledge resource not found"), 404);
+      if (listGate.team) {
+        const listCgRole = cgService.accessRoleStrict(serviceId, knowledgeId, listGate.team);
+        if (!listCgRole || listCgRole === "team_required") {
+          return c.json(wrapError(404, "knowledge resource not found"), 404);
+        }
+      }
       name = row.repo_name || row.repo_url;
       summary = row.summary ?? null;
       status = row.status;
@@ -255,7 +270,8 @@ export function createToolsRoutes(deps: ToolsRouteDeps): Hono {
     if (typeof knowledgeId !== "string" || !knowledgeId) {
       return c.json(wrapError(400, "knowledge_id is required"), 400);
     }
-    const toolName = body.tool_name;
+    const callGate = extractRequesterTeam(body);
+    if (callGate.invalid) return c.json(wrapError(400, "team_id is invalid"), 400);
     if (typeof toolName !== "string" || !toolName) {
       return c.json(wrapError(400, "tool_name is required"), 400);
     }
@@ -274,6 +290,12 @@ export function createToolsRoutes(deps: ToolsRouteDeps): Hono {
 
       const row = wikiService.getById(serviceId, knowledgeId);
       if (!row) return c.json(wrapError(404, "wiki not found"), 404);
+      if (callGate.team) {
+        const callRole = wikiService.accessRoleStrict(serviceId, knowledgeId, callGate.team);
+        if (!callRole || callRole === "team_required") {
+          return c.json(wrapError(404, "wiki not found"), 404);
+        }
+      }
 
       return executeWikiTool(serviceId, toolName, row, toolParams, wikiService, wikiMgr);
     }
@@ -286,6 +308,12 @@ export function createToolsRoutes(deps: ToolsRouteDeps): Hono {
 
       const row = cgService.getById(serviceId, knowledgeId);
       if (!row) return c.json(wrapError(404, "code graph not found"), 404);
+      if (callGate.team) {
+        const callCgRole = cgService.accessRoleStrict(serviceId, knowledgeId, callGate.team);
+        if (!callCgRole || callCgRole === "team_required") {
+          return c.json(wrapError(404, "code graph not found"), 404);
+        }
+      }
 
       return executeCodeGraphTool(serviceId, toolName, row, toolParams, cgService, instancePool);
     }

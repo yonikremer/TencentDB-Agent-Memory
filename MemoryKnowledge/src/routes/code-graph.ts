@@ -20,6 +20,7 @@ import { executeTool as executeCodeTool } from "../engines/code/index.js";
 import { toCodeGraphToolName, CODEGRAPH_QUERY_TOOL_NAMES } from "./tools.js";
 import {
   extractIdFields,
+  extractRequesterTeam,
   isValidIdSegment,
   wrapOk,
   wrapError,
@@ -257,6 +258,17 @@ export function createCodeGraphRoutes(deps: CodeGraphRouteDeps): Hono {
       return c.json(wrapError(400, "at least one of repo_name/summary must be provided"), 400);
     }
 
+    const cgReqTeam = extractRequesterTeam(body);
+    if (cgReqTeam.invalid) return c.json(wrapError(400, "team_id is invalid"), 400);
+    const cgRole = cgService.accessRoleStrict(serviceId, cgId, cgReqTeam.team);
+    if (cgRole === null) return c.json(wrapError(404, "code graph not found"), 404);
+    if (cgRole === "team_required") {
+      return c.json(wrapError(403, "team_id required for shared resource"), 403);
+    }
+    if (cgRole !== "owner" && cgRole !== "editor") {
+      return c.json(wrapError(403, "grant_type 'viewer' cannot edit metadata (requires editor)"), 403);
+    }
+
     const updated = cgService.updateMeta(serviceId, cgId, patch);
     if (!updated) return c.json(wrapError(404, "code graph not found"), 404);
     return c.json(wrapOk(toCodeGraphDetail(updated)));
@@ -272,6 +284,16 @@ export function createCodeGraphRoutes(deps: CodeGraphRouteDeps): Hono {
 
     const row = cgService.getById(serviceId, cgId);
     if (!row) return c.json(wrapError(404, "code graph not found"), 404);
+
+    const syncReqTeam = extractRequesterTeam(body);
+    if (syncReqTeam.invalid) return c.json(wrapError(400, "team_id is invalid"), 400);
+    const syncRole = cgService.accessRoleStrict(serviceId, cgId, syncReqTeam.team);
+    if (syncRole === "team_required") {
+      return c.json(wrapError(403, "team_id required for shared resource"), 403);
+    }
+    if (syncRole !== "owner" && syncRole !== "editor") {
+      return c.json(wrapError(403, "grant_type 'viewer' cannot trigger sync (requires editor)"), 403);
+    }
 
     const result = cgService.sync(serviceId, row.team_id, cgId, requesterUserId);
     if (result.kind === "not_found") return c.json(wrapError(404, "code graph not found"), 404);
@@ -303,6 +325,14 @@ export function createCodeGraphRoutes(deps: CodeGraphRouteDeps): Hono {
       const row = cgService.getById(serviceId, id);
       if (!row) {
         result.failed.push({ id, reason: "not found" });
+        continue;
+      }
+      const delRole = cgService.accessRoleStrict(serviceId, id, extractRequesterTeam(body).team);
+      if (delRole !== "owner") {
+        result.failed.push({
+          id,
+          reason: delRole === "team_required" ? "team_id required for shared resource" : "forbidden: requires owner grant",
+        });
         continue;
       }
       const ok = cgService.delete(serviceId, row.team_id, id);

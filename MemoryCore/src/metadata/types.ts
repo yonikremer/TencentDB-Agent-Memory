@@ -431,6 +431,94 @@ export interface GrantAclInput {
 }
 
 // ============================
+// Groupy Org-Sync Types (docs/org-hierarchy-sync/DESIGN.md §4.1)
+// ============================
+
+/** groupy node kind: org nodes mirror to teams; user kind reserved for member refs. */
+export type GroupyNodeKind = "user" | "org";
+export type GroupyRunStatus = "ok" | "failed";
+
+export interface GroupyNodeEntity {
+  node_id: string;
+  name: string;
+  display_name: string;
+  kind: GroupyNodeKind;
+  archived: boolean;
+  updated_at: string;
+}
+
+export interface UpsertGroupyNodeInput {
+  node_id: string;
+  name: string;
+  display_name?: string;
+  kind?: GroupyNodeKind;
+  archived?: boolean;
+}
+
+export interface GroupyEdgeEntity {
+  parent_id: string;
+  child_id: string;
+  child_kind: GroupyNodeKind;
+}
+
+export interface GroupyRunEntity {
+  id: string;
+  started_at: string;
+  finished_at?: string | null;
+  status: GroupyRunStatus;
+  nodes_seen: number;
+  members_seen: number;
+  error?: string | null;
+  snapshot_json: string;
+}
+
+export interface RecordGroupyRunInput {
+  id?: string;
+  started_at?: string;
+  finished_at?: string | null;
+  status: GroupyRunStatus;
+  nodes_seen: number;
+  members_seen: number;
+  error?: string | null;
+  snapshot_json: string;
+}
+
+export interface GroupyShareEntity {
+  asset_id: string;
+  node_ids: string[];
+  /** Per-node KS capability; absent nodes read as viewer. */
+  grant_types: Record<string, string>;
+  prev_visibility: string;
+  updated_at: string;
+}
+
+export interface UpsertGroupyShareInput {
+  asset_id: string;
+  node_ids: string[];
+  /** Per-node KS capability (viewer|editor|owner); nodes absent here read as viewer. */
+  grant_types?: Record<string, string>;
+  prev_visibility: string;
+}
+
+export interface UpsertGroupyShareInput {
+  asset_id: string;
+  node_ids: string[];
+  prev_visibility: string;
+}
+
+export interface GroupyUserMapEntity {
+  groupy_id: string;
+  username: string;
+  memory_user_id?: string | null;
+}
+
+export interface UpsertGroupyUserMapInput {
+  groupy_id: string;
+  username: string;
+  memory_user_id?: string | null;
+}
+
+// ============================
 // Filter Types
 // ============================
 

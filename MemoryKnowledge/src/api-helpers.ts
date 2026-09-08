@@ -53,6 +53,14 @@ export interface IdFields {
  * the rest are optional body fields.
  * @returns IdFields or null (when service_id/team_id missing or malformed).
  */
+/** Optional requester team for grant enforcement on id-only mutation routes. */
+export function extractRequesterTeam(body: Record<string, unknown>): { team?: string; invalid: boolean } {
+  const t = body.team_id;
+  if (t === undefined) return { invalid: false };
+  if (!isValidIdSegment(t)) return { invalid: true };
+  return { team: t as string, invalid: false };
+}
+
 export function extractIdFields(
   serviceIdHeader: string | undefined | null,
   body: Record<string, unknown>,

@@ -27,6 +27,15 @@ import type {
   FixedAssetBindingEntity,
   AgentFixedAssetCountRow,
   AclEntity,
+  GroupyNodeEntity,
+  UpsertGroupyNodeInput,
+  GroupyEdgeEntity,
+  GroupyRunEntity,
+  RecordGroupyRunInput,
+  GroupyUserMapEntity,
+  UpsertGroupyUserMapInput,
+  GroupyShareEntity,
+  UpsertGroupyShareInput,
   CreateUserInput,
   CreateUserKeyInput,
   CreateTeamInput,
@@ -193,6 +202,21 @@ export interface IMetadataStore {
   revokeAcl(id: string): MaybePromise<void>;
   listAclByAsset(assetId: string, pagination?: PaginationParams | null): MaybePromise<ListPage<AclEntity>>;
   listAclBySubject(subjectType: string, subjectId: string, pagination?: PaginationParams | null): MaybePromise<ListPage<AclEntity>>;
+
+  // ── Groupy (org-hierarchy sync snapshot; DESIGN docs/org-hierarchy-sync) ──
+  upsertGroupyNode(node: UpsertGroupyNodeInput): MaybePromise<GroupyNodeEntity>;
+  listGroupyNodes(includeArchived?: boolean): MaybePromise<GroupyNodeEntity[]>;
+  replaceGroupyEdges(edges: GroupyEdgeEntity[]): MaybePromise<void>;
+  listGroupyEdges(): MaybePromise<GroupyEdgeEntity[]>;
+  recordGroupyRun(run: RecordGroupyRunInput): MaybePromise<GroupyRunEntity>;
+  getLatestGroupyRun(): MaybePromise<GroupyRunEntity | null>;
+  listGroupyRuns(limit?: number): MaybePromise<GroupyRunEntity[]>;
+  upsertGroupyShare(share: UpsertGroupyShareInput): MaybePromise<GroupyShareEntity>;
+  getGroupyShare(assetId: string): MaybePromise<GroupyShareEntity | null>;
+  listGroupyShares(): MaybePromise<GroupyShareEntity[]>;
+  deleteGroupyShare(assetId: string): MaybePromise<void>;
+  upsertGroupyUserMap(entry: UpsertGroupyUserMapInput): MaybePromise<GroupyUserMapEntity>;
+  getGroupyUserMap(groupyId: string): MaybePromise<GroupyUserMapEntity | null>;
 
   // ── ConfigParam ──
   getConfigParam(

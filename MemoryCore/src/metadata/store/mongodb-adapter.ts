@@ -57,13 +57,22 @@ import type {
   InstanceUserListFilter,
   AgentFixedAssetCountRow,
   AssetType,
+  GroupyNodeEntity,
+  UpsertGroupyNodeInput,
+  GroupyEdgeEntity,
+  GroupyRunEntity,
+  RecordGroupyRunInput,
+  GroupyUserMapEntity,
+  UpsertGroupyUserMapInput,
+  GroupyShareEntity,
+  UpsertGroupyShareInput,
   ConfigParamEntity,
   UpsertConfigParamInput,
   ListConfigParamsFilter,
 } from "../types.js";
 import { DEFAULT_PAGINATION } from "../pagination.js";
 import { buildChatMemoryAssetId } from "../utils/chat-memory-asset.js";
-import { DuplicateUserKeyError } from "./interface.js";
+import { DuplicateUserKeyError, type IMetadataStore } from "./interface.js";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -257,6 +266,15 @@ export class MongoMetadataStore implements IMetadataStore {
       { user_id: 1, module: 1 },
       { partialFilterExpression: { scope: "user" } },
     );
+
+    // ── meta_groupy_* (org-hierarchy sync snapshot) ──
+    await this.ensureIndex("meta_groupy_nodes", { node_id: 1 }, { unique: true });
+    await this.ensureIndex("meta_groupy_edges", { parent_id: 1, child_id: 1 }, { unique: true });
+    await this.ensureIndex("meta_groupy_edges", { child_id: 1 });
+    await this.ensureIndex("meta_groupy_runs", { id: 1 }, { unique: true });
+    await this.ensureIndex("meta_groupy_runs", { started_at: -1 });
+    await this.ensureIndex("meta_groupy_user_map", { groupy_id: 1 }, { unique: true });
+    await this.ensureIndex("meta_groupy_shares", { asset_id: 1 }, { unique: true });
 
     await this.migrateLegacyUserKeys();
   }
@@ -1292,6 +1310,164 @@ export class MongoMetadataStore implements IMetadataStore {
   }
 
   // ============================================================
+  // ============================================================
+  // Groupy (org-hierarchy sync snapshot)
+  // ============================================================
+  async upsertGroupyNode(input: UpsertGroupyNodeInput): Promise<GroupyNodeEntity> {
+    const now = nowIso();
+    const existing = await this.col("meta_groupy_nodes").findOne(
+      { node_id: input.node_id } as Document,
+      PROJECT_NO_ID,
+    );
+    const prior = existing as unknown as GroupyNodeEntity | null;
+    const doc: GroupyNodeEntity = {
+      node_id: input.node_id,
+      name: input.name,
+      display_name: input.display_name ?? prior?.display_name ?? input.name,
+      kind: input.kind ?? prior?.kind ?? "org",
+      archived: input.archived ?? prior?.archived ?? false,
+      updated_at: now,
+    };
+    await this.col("meta_groupy_nodes").updateOne(
+      { node_id: input.node_id } as Document,
+      { $set: doc },
+      { upsert: true },
+    );
+    return doc;
+  }
+
+  async listGroupyNodes(includeArchived = false): Promise<GroupyNodeEntity[]> {
+    const filter: Document = includeArchived ? {} : { archived: false };
+    const docs = await this.col("meta_groupy_nodes")
+      .find(filter, PROJECT_NO_ID)
+      .sort({ node_id: 1 })
+      .toArray();
+    return docs as unknown as GroupyNodeEntity[];
+  }
+
+  async replaceGroupyEdges(edges: GroupyEdgeEntity[]): Promise<void> {
+    // Atomic like the sqlite BEGIN/COMMIT path: a crash must not leave an
+    // empty edge table behind. Falls back to plain writes without replica-set.
+    await this.withTx(async (session) => {
+      const opts = session ? { session } : {};
+      await this.col("meta_groupy_edges").deleteMany({}, opts);
+      if (edges.length > 0) {
+        await this.col("meta_groupy_edges").insertMany(edges as unknown as Document[], opts);
+      }
+    });
+  }
+
+  async listGroupyEdges(): Promise<GroupyEdgeEntity[]> {
+    const docs = await this.col("meta_groupy_edges")
+      .find({}, PROJECT_NO_ID)
+      .sort({ parent_id: 1, child_id: 1 })
+      .toArray();
+    return docs as unknown as GroupyEdgeEntity[];
+  }
+
+  async recordGroupyRun(run: RecordGroupyRunInput): Promise<GroupyRunEntity> {
+    const now = nowIso();
+    const doc: GroupyRunEntity = {
+      id: run.id ?? generateId("gr"),
+      started_at: run.started_at ?? now,
+      finished_at: run.finished_at ?? null,
+      status: run.status,
+      nodes_seen: run.nodes_seen,
+      members_seen: run.members_seen,
+      error: run.error ?? null,
+      snapshot_json: run.snapshot_json,
+    };
+    await this.col("meta_groupy_runs").insertOne(doc as unknown as Document);
+    return doc;
+  }
+
+  async getLatestGroupyRun(): Promise<GroupyRunEntity | null> {
+    const docs = await this.col("meta_groupy_runs")
+      .find({}, PROJECT_NO_ID)
+      .sort({ started_at: -1, id: -1 })
+      .limit(1)
+      .toArray();
+    return (docs[0] as unknown as GroupyRunEntity) ?? null;
+  }
+
+  async upsertGroupyShare(share: UpsertGroupyShareInput): Promise<GroupyShareEntity> {
+    const now = nowIso();
+    const existing = await this.col("meta_groupy_shares").findOne(
+      { asset_id: share.asset_id } as Document,
+      PROJECT_NO_ID,
+    );
+    const prior = existing as unknown as GroupyShareEntity | null;
+    const doc: GroupyShareEntity = {
+      asset_id: share.asset_id,
+      node_ids: [...share.node_ids],
+      grant_types: { ...(share.grant_types ?? prior?.grant_types ?? {}) },
+      prev_visibility: share.prev_visibility,
+      updated_at: now,
+    };
+    await this.col("meta_groupy_shares").updateOne(
+      { asset_id: share.asset_id } as Document,
+      { $set: doc },
+      { upsert: true },
+    );
+    return doc;
+  }
+
+  async getGroupyShare(assetId: string): Promise<GroupyShareEntity | null> {
+    const doc = await this.col("meta_groupy_shares").findOne(
+      { asset_id: assetId } as Document,
+      PROJECT_NO_ID,
+    );
+    return (doc as unknown as GroupyShareEntity) ?? null;
+  }
+
+  async listGroupyShares(): Promise<GroupyShareEntity[]> {
+    const docs = await this.col("meta_groupy_shares")
+      .find({}, PROJECT_NO_ID)
+      .sort({ asset_id: 1 })
+      .toArray();
+    return docs as unknown as GroupyShareEntity[];
+  }
+
+  async deleteGroupyShare(assetId: string): Promise<void> {
+    await this.col("meta_groupy_shares").deleteOne({ asset_id: assetId } as Document);
+  }
+
+  async listGroupyRuns(limit = 50): Promise<GroupyRunEntity[]> {
+    const docs = await this.col("meta_groupy_runs")
+      .find({}, PROJECT_NO_ID)
+      .sort({ started_at: -1, id: -1 })
+      .limit(limit)
+      .toArray();
+    return docs as unknown as GroupyRunEntity[];
+  }
+
+  async upsertGroupyUserMap(entry: UpsertGroupyUserMapInput): Promise<GroupyUserMapEntity> {
+    const existing = await this.col("meta_groupy_user_map").findOne(
+      { groupy_id: entry.groupy_id } as Document,
+      PROJECT_NO_ID,
+    );
+    const prior = existing as unknown as GroupyUserMapEntity | null;
+    const doc: GroupyUserMapEntity = {
+      groupy_id: entry.groupy_id,
+      username: entry.username,
+      memory_user_id: entry.memory_user_id ?? prior?.memory_user_id ?? null,
+    };
+    await this.col("meta_groupy_user_map").updateOne(
+      { groupy_id: entry.groupy_id } as Document,
+      { $set: doc },
+      { upsert: true },
+    );
+    return doc;
+  }
+
+  async getGroupyUserMap(groupyId: string): Promise<GroupyUserMapEntity | null> {
+    const doc = await this.col("meta_groupy_user_map").findOne(
+      { groupy_id: groupyId } as Document,
+      PROJECT_NO_ID,
+    );
+    return (doc as unknown as GroupyUserMapEntity) ?? null;
+  }
+
   // ConfigParam
   // ============================================================
 

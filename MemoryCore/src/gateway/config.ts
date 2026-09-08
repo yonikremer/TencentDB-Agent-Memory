@@ -16,6 +16,7 @@ import { getEnv } from "../utils/env.js";
 import { parseConfig as parseMemoryConfig } from "../config.js";
 import type { MemoryTdaiConfig } from "../config.js";
 import type { StandaloneLLMConfig } from "../adapters/standalone/llm-runner.js";
+import { parseGroupyConfig, type GroupyConfig } from "../metadata/groupy/sync-config.js";
 
 // ============================
 // Gateway config types
@@ -309,6 +310,12 @@ export interface GatewayConfig {
    * env: TDAI_METADATA_*
    */
   metadata: GatewayMetadataConfig;
+  /**
+   * Org-hierarchy sync (env-only; see docs/org-hierarchy-sync/DESIGN.md §4.3).
+   * Parsed centrally here so env ownership stays in gateway config;
+   * shape + parsing live in metadata/groupy/sync-config.ts.
+   */
+  groupy: GroupyConfig;
   /** Offload server executor config (yaml: offload) */
   offload: {
     forceTriggerThreshold: number;
@@ -739,6 +746,7 @@ export function loadGatewayConfig(overrides?: Partial<GatewayConfig>): GatewayCo
     cos,
     observability,
     metadata,
+    groupy: parseGroupyConfig(process.env as Record<string, string | undefined>),
     offload,
     skill: skillFromAnywhere,
   };
