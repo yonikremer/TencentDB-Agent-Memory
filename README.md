@@ -37,6 +37,7 @@ This repo is a fork of [Tencent/TencentDB-Agent-Memory](https://github.com/Tence
 | **Wiki ingestion** | Extraction sees only a one-line metadata listing of existing pages, so docs that assume earlier knowledge lose cross-document facts | **Memory-enabled (retrieval-augmented) ingest, on by default** — each source chunk queries the existing Wiki (same BM25 FTS5 `searchInternal` + `readPage` path as `/v3/search`) and injects the top pages into the extraction prompt. Per-chunk retrieval, degrades gracefully on first ingest or any failure. Tune with `KNOWLEDGE_WIKI_RETRIEVAL_ENABLED` (default `true`), `KNOWLEDGE_WIKI_RETRIEVAL_TOP_K` (`3`), `KNOWLEDGE_WIKI_RETRIEVAL_MAX_CHARS` (`12000`), `KNOWLEDGE_WIKI_RETRIEVAL_QUERY_TERMS` (`24`) |
 | **Language** | Mixed Chinese/English across UI, prompts, CLI, docs | **Fully English** — web UI (`MemoryPanel/web`), API docs, prompt corpus, CLI/shell output, comments, and configs translated; `INSTALL.md` / `CHANGELOG.md` in English (Chinese originals kept as `*_CN.md`). Reusable tooling lives in `scripts/zh-en/`. Chinese matcher examples in `ZH_EN_TRANSLATION_PLAN.md` are intentional test fixtures, not leftovers |
 | **Web UI theme** | Light only | **Dark mode** — header + login toggle, follows system default, persisted across sessions |
+| **Org sync** | Manual teams/memberships only | **groupy org-hierarchy sync** — HR structure mirrored into teams nightly (env-gated, off by default); share any asset to any org node via Panel/API; see [setup §7](./docs/research-team-setup.md#7-org-hierarchy-sync-groupy-optional) |
 
 # Installation
 
@@ -297,6 +298,7 @@ PersonaMem tests whether an Agent can correctly understand and apply user inform
 - [Roadmap](./ROADMAP.md) (what we're building next; Chinese: [ROADMAP_CN.md](./ROADMAP_CN.md))
 - [Data Migration Tool (v2 → v3)](./MemoryCore/scripts/migrate-v2-to-v3/README.md) (if you're on an older release and want to migrate existing data)
 - [Knowledge OpenAPI](./MemoryKnowledge/openapi.yaml)
+- [Org-hierarchy sync design](./docs/org-hierarchy-sync/DESIGN.md) + [implementation plan](./docs/org-hierarchy-sync/PLAN.md) (groupy → teams/memberships, shareable wikis/skills/code-graphs/chat-memory)
 - **API Documentation**:
   - [Memory Core v3 API](./MemoryCore/v3-api-memorycore-doc.md)
   - [Memory Knowledge v3 API](./MemoryKnowledge/v3-api-memoryknowledge-doc.md)

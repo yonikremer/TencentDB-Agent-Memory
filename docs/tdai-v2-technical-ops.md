@@ -198,6 +198,13 @@ Memory exists and is recalled with or without a task — the task just narrows.
 
 ## 9. Open issues / known noise
 
+- **Org-hierarchy sync (groupy) is merged but OFF by default**
+  (`GROUPY_ENABLED=false` → zero behavior change). To enable: set
+  `GROUPY_*` in gateway env (see research-team-setup §7), restart the
+gateway, check `POST /v3/meta/groupy/status` → `healthy: true`. Read/query
+  plane stays legacy-open by design; shared-resource mutations require
+  `team_id`. Full surface: `docs/org-hierarchy-sync/DESIGN.md` §7–§9.
+
 - **`[hook-cache] putMany failed: FOREIGN KEY constraint failed`** during
   prewarm. Non-blocking — the self-heal path repopulates the cache;
   injection still works. Pre-existing; out of scope for the current PRs.
