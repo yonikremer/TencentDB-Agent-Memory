@@ -169,6 +169,63 @@ class _IsolationCtx:
 # ---------------------------------------------------------------------------
 
 
+def _offload_ingest_body(
+    session_id: str,
+    tool_pairs: list[dict[str, Any]],
+    prompt: str | None,
+    recent_messages: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """Shared offload/ingest payload builder (sync + async clients)."""
+    return _strip_none(
+        {
+            "session_id": session_id,
+            "tool_pairs": tool_pairs,
+            "prompt": prompt,
+            "recent_messages": recent_messages,
+        }
+    )
+
+
+def _offload_compact_body(
+    session_id: str,
+    messages: list[dict[str, Any]],
+    ratio: float,
+    total_tokens: int,
+    context_window: int | None,
+    message_tokens: list[int] | None,
+) -> dict[str, Any]:
+    """Shared offload/compact payload builder (sync + async clients)."""
+    return _strip_none(
+        {
+            "session_id": session_id,
+            "messages": messages,
+            "ratio": ratio,
+            "total_tokens": total_tokens,
+            "context_window": context_window,
+            "message_tokens": message_tokens,
+        }
+    )
+
+
+def _offload_mmd_body(session_id: str, limit: int | None) -> dict[str, Any]:
+    """Shared offload/query-mmd payload builder (sync + async clients)."""
+    return _strip_none(
+        {
+            "session_id": session_id,
+            "limit": limit,
+        }
+    )
+
+
+def _sts_kwargs(stub: Stub) -> dict[str, str]:
+    """STS credential kwargs from a transport stub (sync + async read_file)."""
+    return {
+        "endpoint": stub.endpoint,
+        "api_key": stub.headers["Authorization"].removeprefix("Bearer "),
+        "service_id": stub.headers["x-tdai-service-id"],
+    }
+
+
 class MemoryClient:
     """v3 Sync Client — Strict isolation L0–L3 data plane (including count endpoint).
 
@@ -606,14 +663,7 @@ class MemoryClient:
         """``POST /v3/offload/ingest`` — report tool call pairs to trigger async L1 processing."""
         return self._stub.post(
             f"{_V3}/offload/ingest",
-            _strip_none(
-                {
-                    "session_id": session_id,
-                    "tool_pairs": tool_pairs,
-                    "prompt": prompt,
-                    "recent_messages": recent_messages,
-                }
-            ),
+            _offload_ingest_body(session_id, tool_pairs, prompt, recent_messages),
         )
 
     def offload_compact(
@@ -629,15 +679,8 @@ class MemoryClient:
         """``POST /v3/offload/compact`` — server-side context compaction."""
         return self._stub.post(
             f"{_V3}/offload/compact",
-            _strip_none(
-                {
-                    "session_id": session_id,
-                    "messages": messages,
-                    "ratio": ratio,
-                    "total_tokens": total_tokens,
-                    "context_window": context_window,
-                    "message_tokens": message_tokens,
-                }
+            _offload_compact_body(
+                session_id, messages, ratio, total_tokens, context_window, message_tokens
             ),
         )
 
@@ -650,12 +693,7 @@ class MemoryClient:
         """``POST /v3/offload/query-mmd`` — query the session task flow chart (MMD)."""
         return self._stub.post(
             f"{_V3}/offload/query-mmd",
-            _strip_none(
-                {
-                    "session_id": session_id,
-                    "limit": limit,
-                }
-            ),
+            _offload_mmd_body(session_id, limit),
         )
 
     # -- File read (memory pipeline artifacts, via COS) --------------------
@@ -666,11 +704,7 @@ class MemoryClient:
         Reads COS storage directly (unversioned) — no gateway API version involved.
         """
         if self._cos_reader is None:
-            self._sts_manager = StsCredentialManager(
-                endpoint=self._stub.endpoint,
-                api_key=self._stub.headers["Authorization"].removeprefix("Bearer "),
-                service_id=self._stub.headers["x-tdai-service-id"],
-            )
+            self._sts_manager = StsCredentialManager(**_sts_kwargs(self._stub))
             self._cos_reader = MemoryFileReader(self._sts_manager)
         return self._cos_reader.read(path)
 
@@ -684,7 +718,7 @@ class MemoryClient:
     def __enter__(self) -> MemoryClient:
         return self
 
-    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+    def __exit__(self, *exc: Any) -> None:
         self.close()
 
 
@@ -1081,14 +1115,7 @@ class AsyncMemoryClient:
         # type: ignore[reportGeneralTypeIssues]  // Stub.post is sync-typed; the async transport returns a coroutine here.
         return await self._stub.post(
             f"{_V3}/offload/ingest",
-            _strip_none(
-                {
-                    "session_id": session_id,
-                    "tool_pairs": tool_pairs,
-                    "prompt": prompt,
-                    "recent_messages": recent_messages,
-                }
-            ),
+            _offload_ingest_body(session_id, tool_pairs, prompt, recent_messages),
         )
 
     async def offload_compact(
@@ -1105,15 +1132,8 @@ class AsyncMemoryClient:
         # type: ignore[reportGeneralTypeIssues]  // Stub.post is sync-typed; the async transport returns a coroutine here.
         return await self._stub.post(
             f"{_V3}/offload/compact",
-            _strip_none(
-                {
-                    "session_id": session_id,
-                    "messages": messages,
-                    "ratio": ratio,
-                    "total_tokens": total_tokens,
-                    "context_window": context_window,
-                    "message_tokens": message_tokens,
-                }
+            _offload_compact_body(
+                session_id, messages, ratio, total_tokens, context_window, message_tokens
             ),
         )
 
@@ -1127,12 +1147,7 @@ class AsyncMemoryClient:
         # type: ignore[reportGeneralTypeIssues]  // Stub.post is sync-typed; the async transport returns a coroutine here.
         return await self._stub.post(
             f"{_V3}/offload/query-mmd",
-            _strip_none(
-                {
-                    "session_id": session_id,
-                    "limit": limit,
-                }
-            ),
+            _offload_mmd_body(session_id, limit),
         )
 
     # -- File read (memory pipeline artifacts, via COS) --------------------
@@ -1143,11 +1158,7 @@ class AsyncMemoryClient:
         Reads COS storage directly (unversioned) — no gateway API version involved.
         """
         if self._cos_reader is None:
-            self._sts_manager = AsyncStsCredentialManager(
-                endpoint=self._stub.endpoint,
-                api_key=self._stub.headers["Authorization"].removeprefix("Bearer "),
-                service_id=self._stub.headers["x-tdai-service-id"],
-            )
+            self._sts_manager = AsyncStsCredentialManager(**_sts_kwargs(self._stub))
             self._cos_reader = AsyncMemoryFileReader(self._sts_manager)
         return await self._cos_reader.read(path)
 

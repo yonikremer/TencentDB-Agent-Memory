@@ -673,7 +673,7 @@ export function createSkillBridgeHandler(
     }
 
     // Stamp identity. team_id / agent_id / user_id are all required by
-    // the v3 strict-isolation middleware (collectV3Missing in v2-router.ts).
+    // the v3 strict-isolation middleware (collectV3Missing in v3-router.ts).
     //
     // user_id was historically skipped for read paths to avoid filtering
     // team-shared skills, but the v2 gateway now requires it for all /v3/*

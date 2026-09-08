@@ -30,6 +30,12 @@ import type {
   V3IsolationContext,
   V3IsolationOverrides,
   V3MemoryClientConfig,
+  V3OffloadCompactData,
+  V3OffloadCompactRequest,
+  V3OffloadIngestData,
+  V3OffloadIngestRequest,
+  V3OffloadQueryMmdData,
+  V3OffloadQueryMmdRequest,
   V3ScenarioFile,
   V3ScenarioListData,
   V3ScenarioListRequest,
@@ -65,6 +71,7 @@ class IsolationContext {
   }
 
   baseBody(): V3IsolationContext {
+    // SAFETY: stripUndefined returns a plain record holding exactly these isolation fields; the cast bridges the generic helper to the context type.
     return stripUndefined({
       team_id: this.teamId,
       agent_id: this.agentId,
@@ -353,6 +360,7 @@ export class MemoryClient {
   // -- L3 Core ------------------------------------------------------------
 
   readCore(_params: V3CoreReadRequest = {}): Promise<V3CoreFile> {
+    // SAFETY: transport post takes an untyped body record; baseBody already returns the exact isolation shape.
     return this.http.post(`${V3}/core/read`, this.iso.baseBody() as unknown as Record<string, unknown>);
   }
 
@@ -361,6 +369,7 @@ export class MemoryClient {
   }
 
   countCore(): Promise<V3CountData> {
+    // SAFETY: transport post takes an untyped body record; baseBody already returns the exact isolation shape.
     return this.http.post(`${V3}/core/count`, this.iso.baseBody() as unknown as Record<string, unknown>);
   }
 
@@ -392,5 +401,43 @@ export class MemoryClient {
     }
     // Note: does not carry isolation tuple — scope is determined by memory_ids.
     return this.http.post(`${V3}/chat-memory/clear`, { memory_ids: memoryIds });
+  }
+
+  // -- Offload ---------------------------------------------------------------
+
+  /**
+   * `POST /v3/offload/ingest` — report tool call pairs to trigger async L1 processing.
+   */
+  offloadIngest(params: V3OffloadIngestRequest): Promise<V3OffloadIngestData> {
+    return this.http.post(`${V3}/offload/ingest`, stripUndefined({
+      session_id: params.session_id,
+      tool_pairs: params.tool_pairs,
+      prompt: params.prompt,
+      recent_messages: params.recent_messages,
+    }));
+  }
+
+  /**
+   * `POST /v3/offload/compact` — server-side context compaction.
+   */
+  offloadCompact(params: V3OffloadCompactRequest): Promise<V3OffloadCompactData> {
+    return this.http.post(`${V3}/offload/compact`, stripUndefined({
+      session_id: params.session_id,
+      messages: params.messages,
+      ratio: params.ratio,
+      context_window: params.context_window,
+      total_tokens: params.total_tokens,
+      message_tokens: params.message_tokens,
+    }));
+  }
+
+  /**
+   * `POST /v3/offload/query-mmd` — query the session task flow chart (MMD).
+   */
+  offloadQueryMmd(params: V3OffloadQueryMmdRequest): Promise<V3OffloadQueryMmdData> {
+    return this.http.post(`${V3}/offload/query-mmd`, stripUndefined({
+      session_id: params.session_id,
+      limit: params.limit,
+    }));
   }
 }

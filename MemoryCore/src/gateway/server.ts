@@ -63,8 +63,8 @@ import {
 } from "../core/seed/input.js";
 import { executeSeed } from "../core/seed/seed-runtime.js";
 import type { SeedProgress } from "../core/seed/types.js";
-import { handleV2Route, errorEnvelope, makeRequestId } from "./v2-router.js";
-import type { V2RouterDeps } from "./v2-router.js";
+import { handleV3Route, errorEnvelope, makeRequestId } from "./v3-router.js";
+import type { V3RouterDeps } from "./v3-router.js";
 import {
   handleV3MetaRoute,
   V3_PREFIX,
@@ -98,7 +98,7 @@ import {
 } from "../api-trace/index.js";
 import { readApiTraceEnabled } from "../utils/env-config.js";
 import { makeSkillRouteTable } from "./skill-handlers.js";
-import type { SkillRouterDeps as SkillRouterDeps } from "./skill-handlers.js";
+import type { SkillRouterDeps } from "./skill-handlers.js";
 import {
   wireConversationAddHandler,
   RedisSkillAgentTaskQueue,
@@ -120,8 +120,8 @@ import {
 } from "./chat-memory-handlers.js";
 import { makeMemoryPromptRouteTable } from "./memory-prompt-handlers.js";
 import { makeMemoryGenerationLogRouteTable } from "./memory-generation-log-handlers.js";
-import { handleOffloadV2Route } from "../offload_server/router.js";
-import type { OffloadV2Deps } from "../offload_server/router.js";
+import { handleOffloadV3Route } from "../offload_server/router.js";
+import type { OffloadV3Deps } from "../offload_server/router.js";
 import { resolveV3StrictIsolation } from "../utils/env-config.js";
 import { initServerOpikTracer } from "../offload_server/opik-tracer.js";
 import { classifyError } from "./error-handler.js";
@@ -375,21 +375,6 @@ export class TdaiGateway {
       logger: this.logger,
       platform: "gateway",
     });
-
-    // Create core
-    //
-    // ── Skill Asset Linkage Hooks (align standalone/OpenClaw with service mode) ──
-    // In service mode, gateway/server.ts:resolveSkillCore constructs a per-instance SkillCore
-    // and attaches hooks with the same name for each instanceId; the SkillCore in tdai-core
-    // goes through the standalone / OpenClaw embedded / bypass of resolveSkillCore. The two do not interfere
-    // (each SkillCore only calls the hooks attached to itself), ensureSkillAsset / deleteAssets
-    // are idempotent, so even if triggered in combination there is no side effect. See SkillAssetHooks doc.
-    //
-    // in standalone mode instanceId is fixed to "default" (see `this.config.instanceId ?? "default"` in start());
-    // here in the closure we can just take default directly;
-    // in service mode this SkillCore is in fact not reached by v3/skill/*, and the default in the closure
-    // is just a placeholder (no fire means no impact).
-    const gatewayRef = this;
     const skillAssetInstanceId =
       this.config.instanceId ??
       (this.config.deployMode === "service" ? "__unset__" : "default");
@@ -413,14 +398,13 @@ export class TdaiGateway {
         onSkillCreated: async ({ skill_id, team_id, agent_id, name }) => {
           if (!team_id || !agent_id) return; // No tenant context → skip (OpenClaw local scope, etc.)
           const metaSvc =
-            await gatewayRef.ensureMetadataService(skillAssetInstanceId);
+            await this.ensureMetadataService(skillAssetInstanceId);
           await metaSvc.ensureSkillAsset({ skill_id, team_id, agent_id, name });
         },
         // Read-time self-healing: fire-and-forget, swallow exceptions. Backfill orphan skills from history / migration / accidental deletion.
         onSkillAccessed: (skill) => {
           if (!skill.team_id || !skill.owner_agent_id) return;
-          gatewayRef
-            .ensureMetadataService(skillAssetInstanceId)
+          this.ensureMetadataService(skillAssetInstanceId)
             .then((svc) =>
               svc.ensureSkillAsset({
                 skill_id: skill.skill_id,
@@ -430,7 +414,7 @@ export class TdaiGateway {
               }),
             )
             .catch((err: unknown) => {
-              gatewayRef.logger.warn(
+              this.logger.warn(
                 `[skill-asset-sync] ensureSkillAsset(access) failed for ${skill.skill_id}: ` +
                   (err instanceof Error ? err.message : String(err)),
               );
@@ -438,11 +422,10 @@ export class TdaiGateway {
         },
         // Archive cascade: fire-and-forget, swallow exceptions. The second delete will re-trigger the hook, eventually converging.
         onSkillArchived: ({ skill_id, team_id }) => {
-          gatewayRef
-            .ensureMetadataService(skillAssetInstanceId)
+          this.ensureMetadataService(skillAssetInstanceId)
             .then((svc) => svc.deleteAssets([skill_id]))
             .catch((err: unknown) => {
-              gatewayRef.logger.warn(
+              this.logger.warn(
                 `[skill-asset-sync] deleteAssets(archive) failed for ${skill_id}` +
                   ` (team=${team_id ?? "-"}): ` +
                   (err instanceof Error ? err.message : String(err)),
@@ -943,7 +926,7 @@ export class TdaiGateway {
 
       // ── v3 internal metadata (/v3/internal/meta/*, Bearer only) ──
       if (pathname.startsWith(`${V3_INTERNAL_PREFIX}/`)) {
-        if (!this.checkAuthForV2(req, res)) return;
+        if (!this.checkAuthForV3(req, res)) return;
         const handledInternal = await handleInternalMetaRoute(
           req,
           res,
@@ -963,7 +946,7 @@ export class TdaiGateway {
       // ── v3 metadata routes (/v3/meta/*) ──
       // Layer 1: Bearer apiKey gate. Layer 3 (x-tdai-user-key) in handleV3MetaRoute.
       if (pathname.startsWith(`${V3_PREFIX}/`)) {
-        if (!this.checkAuthForV2(req, res)) return;
+        if (!this.checkAuthForV3(req, res)) return;
         const handledV3 = await handleV3MetaRoute(
           req,
           res,
@@ -981,19 +964,19 @@ export class TdaiGateway {
       }
 
       // ── v3 API routes (strict isolation data plane + skill/knowledge/chat-memory) ──
-      // See the comments in v2-router.ts for V3_PREFIX/V3_ALLOWED_SUBPATHS.
+      // See the comments in v3-router.ts for V3_PREFIX/V3_ALLOWED_SUBPATHS.
       //
       // Apply the develop-introduced apiKey gate first so v3 inherits the
-      // optional shared-secret protection. `parseV2Auth` (Bearer +
-      // x-tdai-service-id) still runs inside `handleV2Route`, preserving
+      // optional shared-secret protection. `parseV3Auth` (Bearer +
+      // x-tdai-service-id) still runs inside `handleV3Route`, preserving
       // its existing semantics. When `server.apiKey` is unset, this gate
       // is a no-op (default-open), matching the develop_server_test
       // baseline.
       if (pathname.startsWith("/v3/")) {
-        if (!this.checkAuthForV2(req, res)) return;
+        if (!this.checkAuthForV3(req, res)) return;
       }
 
-      const v2Deps: V2RouterDeps = {
+      const v3Deps: V3RouterDeps = {
         getStore: () => this.core.getVectorStore(),
         getEmbedding: () => this.core.getEmbeddingService(),
         getStorage: () => this.core.getStorage(),
@@ -1014,10 +997,10 @@ export class TdaiGateway {
           this.ensureMetadataService(instanceId),
       };
 
-      // Skill module deps — composed alongside V2RouterDeps so v2-router.ts
-      // doesn't have to widen its interface (and break v2-router.test.ts
+      // Skill module deps — composed alongside V3RouterDeps so v3-router.ts
+      // doesn't have to widen its interface (and break v3-router.test.ts
       // mocks). The skill route table is registered as `extraRouteTable` in
-      // handleV2Route below, and our `mergedDeps` object satisfies BOTH
+      // handleV3Route below, and our `mergedDeps` object satisfies BOTH
       // interfaces simultaneously (TypeScript-wise the cast widens it to
       // `unknown` so each handler reads its own fields).
       const skillDeps: SkillRouterDeps = {
@@ -1040,7 +1023,7 @@ export class TdaiGateway {
         const configProvider = this.configProvider;
         const logger = this.logger;
 
-        v2Deps.resolveStore = async (instanceId: string) => {
+        v3Deps.resolveStore = async (instanceId: string) => {
           const vdbConfig =
             storePool["mode"] === "tcvdb"
               ? await configProvider.resolveVdb(instanceId)
@@ -1049,13 +1032,13 @@ export class TdaiGateway {
           return { store: pooled.store, embedding: pooled.embedding };
         };
 
-        v2Deps.resolveStorage = (instanceId: string) =>
+        v3Deps.resolveStorage = (instanceId: string) =>
           this.resolveStorageForInstance(instanceId);
 
         // Pipeline notify: trigger async L1 extraction when v2 /conversation/add writes L0
         if (this.statefulPipelineManager) {
           const pipelineManager = this.statefulPipelineManager;
-          v2Deps.notifyPipeline = async (
+          v3Deps.notifyPipeline = async (
             instanceId: string,
             sessionId: string,
             rounds: number,
@@ -1075,7 +1058,7 @@ export class TdaiGateway {
 
         // Inject QuotaManager for memory/credit limit checks
         if (this.quotaManager) {
-          v2Deps.quotaManager = this.quotaManager;
+          v3Deps.quotaManager = this.quotaManager;
         }
 
         // ── Skill: per-instance resolver (TcvdbSkillStore + COS storage) ──
@@ -1105,10 +1088,10 @@ export class TdaiGateway {
         };
       }
 
-      // ── Offload V2 routes (async ingest + mmd query) ──
-      const offloadDeps: OffloadV2Deps = {
-        resolveStorage: v2Deps.resolveStorage,
-        getStorage: v2Deps.getStorage ?? (() => undefined),
+      // ── Offload V3 routes (async ingest + mmd query) ──
+      const offloadDeps: OffloadV3Deps = {
+        resolveStorage: v3Deps.resolveStorage,
+        getStorage: v3Deps.getStorage ?? (() => undefined),
         logger: this.logger,
         stateBackend: this.stateBackend,
         config: {
@@ -1118,7 +1101,7 @@ export class TdaiGateway {
           l2Model: "",
         },
       };
-      const offloadHandled = await handleOffloadV2Route(
+      const offloadHandled = await handleOffloadV3Route(
         req,
         res,
         pathname,
@@ -1129,10 +1112,10 @@ export class TdaiGateway {
       );
       if (offloadHandled) return;
 
-      // Compose deps: V2RouterDeps fields + SkillRouterDeps fields. The
+      // Compose deps: V3RouterDeps fields + SkillRouterDeps fields. The
       // route table union of routeTable + makeSkillRouteTable() is what
       // tells the dispatcher which subset of fields each handler reads.
-      const mergedDeps = Object.assign({}, v2Deps, skillDeps);
+      const mergedDeps = Object.assign({}, v3Deps, skillDeps);
 
       // Merge management-plane extra route tables.
       const extraRoutes = {
@@ -1145,20 +1128,20 @@ export class TdaiGateway {
         string,
         (
           body: unknown,
-          auth: import("./v2-schemas.js").V2AuthContext,
+          auth: import("./v3-schemas.js").V3AuthContext,
           requestId: string,
           deps: unknown,
-        ) => Promise<import("./v2-schemas.js").ApiResponseEnvelope>
+        ) => Promise<import("./v3-schemas.js").ApiResponseEnvelope>
       >;
 
-      const handled = await handleV2Route(
+      const handled = await handleV3Route(
         req,
         res,
         pathname,
         method,
         parseJsonBody,
         sendJson,
-        mergedDeps as V2RouterDeps,
+        mergedDeps as V3RouterDeps,
         extraRoutes,
       );
       if (handled) return;
@@ -1240,7 +1223,7 @@ export class TdaiGateway {
    *
    * Caller is responsible for translating `"missing"` / `"invalid"` into the
    * appropriate 401 response (v1 plain-text via {@link checkAuth} or v2
-   * envelope via {@link checkAuthForV2}).
+   * envelope via {@link checkAuthForV3}).
    */
   private verifyAuth(req: http.IncomingMessage): "ok" | "missing" | "invalid" {
     const expected = this.config.server.apiKey;
@@ -1283,10 +1266,10 @@ export class TdaiGateway {
    * v2 standardized error envelope on failure so v2 clients see a consistent
    * `{ code, message, request_id }` shape.
    *
-   * The existing in-router `parseV2Auth` (which checks for non-empty Bearer
+   * The existing in-router `parseV3Auth` (which checks for non-empty Bearer
    * + `x-tdai-service-id`) is layered on top; this gate runs first.
    */
-  private checkAuthForV2(
+  private checkAuthForV3(
     req: http.IncomingMessage,
     res: http.ServerResponse,
   ): boolean {
@@ -1730,7 +1713,7 @@ export class TdaiGateway {
     // Start with the base memory config + inject llm config from gateway settings
     // SAFETY: gateway memory config is a validated superset of the seed plugin config shape; spread into an untyped record for plugin overrides.
     const baseConfig = this.config.memory as unknown as Record<string, unknown>;
-    let pluginConfig: Record<string, unknown> = {
+    const pluginConfig: Record<string, unknown> = {
       ...baseConfig,
       llm: Object.fromEntries([
         ["enabled", true],
@@ -2569,7 +2552,6 @@ export class TdaiGateway {
       return null;
     }
     const queue = this.ensureSkillSharedQueue();
-    const gateway = this;
     const isStandalone = this.config.deployMode !== "service";
 
     this.skillWorkerPool = new SkillWorkerPool({
@@ -2583,7 +2565,7 @@ export class TdaiGateway {
       resolveBuffer: async (
         instanceId: string,
       ): Promise<SkillBufferStorage> => {
-        const storage = await gateway.resolveStorageForInstance(instanceId);
+        const storage = await this.resolveStorageForInstance(instanceId);
         // SkillBufferStorage is lightweight for each new, but the storage adapter is cached
         const { SkillBufferStorage: Cls } = await import(
           "../core/skill/conversation-add/buffer-storage.js"
@@ -2594,31 +2576,31 @@ export class TdaiGateway {
         instanceId: string,
       ): Promise<ISkillExtractor> => {
         if (isStandalone) {
-          const raw = gateway.core.getSkillExtractor();
+          const raw = this.core.getSkillExtractor();
           if (!raw) {
             throw new Error(
               `[skill-worker-pool] standalone SkillExtractor unavailable (instance=${instanceId})`,
             );
           }
-          return createExtractorAdapter(raw, gateway.logger);
+          return createExtractorAdapter(raw, this.logger);
         }
-        const skillCore = await gateway.resolveSkillCoreForInstance(instanceId);
-        const raw = await gateway.buildSkillExtractorForInstance(
+        const skillCore = await this.resolveSkillCoreForInstance(instanceId);
+        const raw = await this.buildSkillExtractorForInstance(
           skillCore,
           instanceId,
         );
-        return createExtractorAdapter(raw, gateway.logger);
+        return createExtractorAdapter(raw, this.logger);
       },
       resolveSink: async (instanceId: string): Promise<SkillCandidatesSink> => {
-        const metadataService = await gateway
-          .ensureMetadataService(instanceId)
-          .catch(() => undefined);
+        const metadataService = await this.ensureMetadataService(
+          instanceId,
+        ).catch(() => undefined);
         const { SkillCoreSink } = await import(
           "../core/skill/conversation-add/skill-core-sink.js"
         );
         return new SkillCoreSink({
           metadata: metadataService,
-          logger: gateway.logger,
+          logger: this.logger,
         });
       },
     });

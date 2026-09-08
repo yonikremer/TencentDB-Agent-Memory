@@ -7,17 +7,17 @@ import type { IStateBackend } from "../core/state/types.js";
 import type { OffloadExecutorConfig } from "./types.js";
 import { defaultOffloadConfig } from "./types.js";
 import {
-  parseV2Auth,
+  parseV3Auth,
   successEnvelope,
   errorEnvelope,
   makeRequestId,
-} from "../gateway/v2-router.js";
+} from "../gateway/v3-router.js";
 import { handleIngest } from "./ingest-handler.js";
 import { handleMmdQuery } from "./mmd-handler.js";
 import { handleCompaction } from "./compact/compaction-handler.js";
 import { MmdQuerySchema } from "./schemas.js";
 
-export interface OffloadV2Deps {
+export interface OffloadV3Deps {
   resolveStorage?: (instanceId: string) => Promise<StorageAdapter | undefined>;
   getStorage: () => StorageAdapter | undefined;
   logger: {
@@ -30,23 +30,23 @@ export interface OffloadV2Deps {
 }
 
 /**
- * Handle offload V2 routes. Returns true if the request was handled.
+ * Handle offload V3 routes. Returns true if the request was handled.
  */
-export async function handleOffloadV2Route(
+export async function handleOffloadV3Route(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   pathname: string,
   method: string,
   parseJsonBody: <T>(req: http.IncomingMessage) => Promise<T>,
   sendJson: (res: http.ServerResponse, status: number, body: unknown) => void,
-  deps: OffloadV2Deps,
+  deps: OffloadV3Deps,
 ): Promise<boolean> {
   if (!pathname.startsWith("/v3/offload/")) return false;
 
   const requestId = makeRequestId();
 
   // Auth
-  const auth = parseV2Auth(req, res, requestId, sendJson);
+  const auth = parseV3Auth(req, res, requestId, sendJson);
   if (!auth) return true; // 401 already sent
 
   // Resolve storage

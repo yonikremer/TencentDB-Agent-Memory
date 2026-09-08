@@ -166,12 +166,7 @@ function parseOpikBase(
   raw: string,
   explicitWorkspace?: string,
 ): { apiBase: string; workspace: string } {
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    throw new Error(`Invalid OPIK_URL: ${raw}`);
-  }
+  const url = new URL(raw);
   if (url.username || url.password)
     throw new Error(
       "OPIK_URL does not allow credentials, please pass the key via environment variables",
@@ -746,12 +741,7 @@ export function buildLargeSessionPlans(
 
 function loadState(path: string, resume: boolean): ImportState {
   if (!resume || !existsSync(path)) return { version: 1, completed: {} };
-  let parsed: Partial<ImportState>;
-  try {
-    parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<ImportState>;
-  } catch {
-    throw new Error(`Invalid breakpoint file (not JSON): ${path}`);
-  }
+  const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<ImportState>;
   if (parsed.version !== 1 || !isRecord(parsed.completed))
     throw new Error(`Unsupported breakpoint file format: ${path}`);
   return parsed as ImportState;
@@ -962,7 +952,7 @@ class MemoryCoreClient {
         l3: { idle: boolean; queued: number; running: number };
       }>("/v3/pipeline/status", {});
       const status = response.data;
-      if (!status) throw new Error("/v2/pipeline/status missing data");
+      if (!status) throw new Error("/v3/pipeline/status missing data");
       const idle =
         mode === "l1"
           ? status.l1.idle

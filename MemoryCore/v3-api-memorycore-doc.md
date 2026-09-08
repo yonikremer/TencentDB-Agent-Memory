@@ -191,7 +191,7 @@ Updates a single L1 memory atom (version auto-increments).
 
 **Response** `data`: `{ id, version, updated_at }`, where `version` is a **string** `"v{n}"` (e.g. `"v2"`).
 
-> ⚠️ Version-type inconsistency: `update` returns a string `"v{n}"`, but `query`/`search` return a **number** (`r.version ?? 0`). The root cause is in code (`generated/types.ts` declares `string "v1"`, but `v2-schemas.ts` overrides it to `number`); one document cannot satisfy both, so the frontend must handle each endpoint separately.
+> ⚠️ Version-type inconsistency: `update` returns a string `"v{n}"`, but `query`/`search` return a **number** (`r.version ?? 0`). The root cause is in code (`generated/types.ts` declares `string "v1"`, but `v3-schemas.ts` overrides it to `number`); one document cannot satisfy both, so the frontend must handle each endpoint separately.
 
 ### POST /v3/atomic/query
 

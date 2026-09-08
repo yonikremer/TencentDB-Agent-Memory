@@ -6,9 +6,9 @@
  * - /v3/offload/* routes via the offload router
  */
 import { describe, it, expect } from "vitest";
-import { handleV2Route } from "./v2-router.js";
-import type { V2RouterDeps } from "./v2-router.js";
-import { handleOffloadV2Route } from "../offload_server/router.js";
+import { handleV3Route } from "./v3-router.js";
+import type { V3RouterDeps } from "./v3-router.js";
+import { handleOffloadV3Route } from "../offload_server/router.js";
 
 function req(pathname: string, headers: Record<string, string> = {}) {
   return {
@@ -31,7 +31,7 @@ function harness() {
   const sendJson = (_res: unknown, status: number, body: unknown) => {
     seen.push({ status, body });
   };
-  const parseJsonBody = async <T>(): Promise<T> => ({} as T);
+  const parseJsonBody = async <T>(): Promise<T> => ({}) as T;
   return { seen, sendJson, parseJsonBody };
 }
 
@@ -41,11 +41,11 @@ const deps = {
   getStorage: () => undefined,
   deployMode: "standalone",
   logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
-} as unknown as V2RouterDeps;
+} as unknown as V3RouterDeps;
 
 async function route(pathname: string, headers: Record<string, string> = {}) {
   const { seen, sendJson, parseJsonBody } = harness();
-  const handled = await handleV2Route(
+  const handled = await handleV3Route(
     req(pathname, headers),
     {} as never,
     pathname,
@@ -110,7 +110,7 @@ describe("v3-only data-plane routing", () => {
 describe("v3 offload routing", () => {
   async function offload(pathname: string, storage?: unknown) {
     const { seen, sendJson, parseJsonBody } = harness();
-    const handled = await handleOffloadV2Route(
+    const handled = await handleOffloadV3Route(
       req(pathname) as never,
       {} as never,
       pathname,
@@ -126,7 +126,11 @@ describe("v3 offload routing", () => {
     return { handled, status: last?.status };
   }
   it("rejects legacy /v2/offload paths", async () => {
-    for (const p of ["/v2/offload/ingest", "/v2/offload/compact", "/v2/offload/query-mmd"]) {
+    for (const p of [
+      "/v2/offload/ingest",
+      "/v2/offload/compact",
+      "/v2/offload/query-mmd",
+    ]) {
       expect((await offload(p)).handled).toBe(false);
     }
   });

@@ -58,7 +58,7 @@ import {
   formatZodError,
   resolveIsolation,
   type ApiResponseEnvelope,
-  type V2AuthContext,
+  type V3AuthContext,
   type ConversationItem,
   type ConversationSearchHit,
   type ConversationAddData,
@@ -77,7 +77,7 @@ import {
   type ScenarioWriteData,
   type CoreFile,
   type CoreWriteData,
-} from "./v2-schemas.js";
+} from "./v3-schemas.js";
 import { stripSceneNavigation } from "../core/scene/scene-navigation.js";
 import {
   buildProfileIsolationScope,
@@ -216,7 +216,7 @@ async function recordAudit(
 // Dependencies injected at mount time
 // ============================
 
-export interface V2RouterDeps {
+export interface V3RouterDeps {
   /** Get the default IMemoryStore (standalone fallback). */
   getStore: () => IMemoryStore | undefined;
   /** Get the default EmbeddingService (standalone fallback). */
@@ -298,7 +298,7 @@ export interface V2RouterDeps {
   // ── Tenancy isolation (three-dim) ──
   //
   // `isolationConfig` is set once at gateway start.  `requestIsolation` and
-  // `requestIsolationMissing` are filled per-request by dispatchV2Request so
+  // `requestIsolationMissing` are filled per-request by dispatchV3Request so
   // each handler can persist (user_id, agent_id, session_id) on writes
   // without changing handler signatures.
 
@@ -370,12 +370,12 @@ export function errorEnvelope(
 // Auth middleware
 // ============================
 
-export function parseV2Auth(
+export function parseV3Auth(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   requestId: string,
   sendJsonFn: (res: http.ServerResponse, status: number, body: unknown) => void,
-): V2AuthContext | null {
+): V3AuthContext | null {
   const authHeader = req.headers["authorization"] ?? "";
   const serviceId = (req.headers["x-tdai-service-id"] as string) ?? "";
 
@@ -403,7 +403,7 @@ export function parseV2Auth(
   return Object.fromEntries([
     ["apiKey", authHeader.slice(7).trim()],
     ["serviceId", serviceId.trim()],
-  ]) as V2AuthContext;
+  ]) as V3AuthContext;
 }
 
 // ============================
@@ -412,8 +412,8 @@ export function parseV2Auth(
 
 /** Resolve store + embedding for a v2 request. Service mode → per-instance; standalone → core singleton. */
 async function resolveStoreForRequest(
-  auth: V2AuthContext,
-  deps: V2RouterDeps,
+  auth: V3AuthContext,
+  deps: V3RouterDeps,
 ): Promise<{
   store: IMemoryStore | undefined;
   embedding: EmbeddingService | undefined;
@@ -428,8 +428,8 @@ async function resolveStoreForRequest(
 
 /** Resolve storage adapter for a v2 request. Service mode → per-instance COS; standalone → core local. */
 async function resolveStorageForRequest(
-  auth: V2AuthContext,
-  deps: V2RouterDeps,
+  auth: V3AuthContext,
+  deps: V3RouterDeps,
 ): Promise<StorageAdapter | undefined> {
   if (deps.resolveStorage) {
     // Service mode: per-instance COS storage is mandatory. Do NOT fallback to local filesystem.
@@ -445,9 +445,9 @@ async function resolveStorageForRequest(
 
 type RouteHandler = (
   body: unknown,
-  auth: V2AuthContext,
+  auth: V3AuthContext,
   requestId: string,
-  deps: V2RouterDeps,
+  deps: V3RouterDeps,
 ) => Promise<ApiResponseEnvelope>;
 
 /**
@@ -485,14 +485,14 @@ const routeTable: Record<string, RouteHandler> = {
   [`${V3_PREFIX}/pipeline/status`]: handlePipelineStatus,
 };
 
-export async function handleV2Route(
+export async function handleV3Route(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   pathname: string,
   method: string,
   parseJsonBody: <T>(req: http.IncomingMessage) => Promise<T>,
   sendJson: (res: http.ServerResponse, status: number, body: unknown) => void,
-  deps: V2RouterDeps,
+  deps: V3RouterDeps,
   /**
    * Optional: extra routes contributed by other modules (e.g.
    * /v3/skill/* from `makeSkillRouteTable()`). Looked up only when the
@@ -505,13 +505,13 @@ export async function handleV2Route(
    * extra modules (skill/*, future namespaces) declare their own deps
    * shape (e.g. `SkillRouterDeps`). The caller is responsible for passing
    * a `deps` object that satisfies the union of every handler set's
-   * requirements; v2-router just forwards it verbatim.
+   * requirements; v3-router just forwards it verbatim.
    */
   extraRouteTable?: Record<
     string,
     (
       body: unknown,
-      auth: V2AuthContext,
+      auth: V3AuthContext,
       requestId: string,
       deps: unknown,
     ) => Promise<ApiResponseEnvelope>
@@ -574,7 +574,7 @@ export async function handleV2Route(
   };
 
   const authStart = Date.now();
-  const auth = parseV2Auth(req, res, requestId, sendJson);
+  const auth = parseV3Auth(req, res, requestId, sendJson);
   if (isSkillPerf) {
     perfMark(
       "parseAuth",
@@ -594,7 +594,7 @@ export async function handleV2Route(
     );
 
     // Wrap deps so handlers use the resolved per-instance resources
-    const resolvedDeps: V2RouterDeps = {
+    const resolvedDeps: V3RouterDeps = {
       ...deps,
       getStore: () => resolved.store,
       getEmbedding: () => resolved.embedding,
@@ -623,7 +623,7 @@ export async function handleV2Route(
     //
     // We only attempt resolution; whether missing fields are fatal is up
     // to each handler (some endpoints don't need isolation at all, e.g.
-    // /v3/pipeline/status). See resolveIsolation() in v2-schemas.
+    // /v3/pipeline/status). See resolveIsolation() in v3-schemas.
     //
     // /v3 strictly validates: must simultaneously provide team_id + agent_id + user_id + session_id,
     // Missing any directly returns 422, and no fallback to legacyCompatMode.
@@ -672,7 +672,7 @@ export async function handleV2Route(
       }
     }
 
-    const depsWithIsolation: V2RouterDeps = {
+    const depsWithIsolation: V3RouterDeps = {
       ...resolvedDeps,
       // /v3 path forcibly overrides isolationConfig.enforce, ensuring handlers internally consistently hit strict branch
       isolationConfig: {
@@ -737,9 +737,9 @@ export async function handleV2Route(
 
 async function handleConversationAdd(
   body: unknown,
-  auth: V2AuthContext,
+  auth: V3AuthContext,
   requestId: string,
-  deps: V2RouterDeps,
+  deps: V3RouterDeps,
 ): Promise<ApiResponseEnvelope> {
   const parsed = conversationAddRequestSchema.safeParse(body);
   if (!parsed.success)
@@ -747,7 +747,7 @@ async function handleConversationAdd(
   const { session_id, messages } = parsed.data;
 
   // Enforce three-dim isolation. user_id / agent_id come from request body
-  // or x-tdai-* headers (resolved in dispatchV2Request).  When the gateway's
+  // or x-tdai-* headers (resolved in dispatchV3Request).  When the gateway's
   // isolationConfig.enforce is on AND legacy_compat_mode is off, missing
   // fields are a 422.
   if (
@@ -834,7 +834,7 @@ async function handleConversationAdd(
       try {
         emb = await embedding.embed(msg.content);
       } catch (e) {
-        console.warn(`[v2-router] L0 embedding failed:`, e);
+        console.warn(`[v3-router] L0 embedding failed:`, e);
       }
     }
 
@@ -928,9 +928,9 @@ async function handleConversationAdd(
 
 async function handleConversationQuery(
   body: unknown,
-  _auth: V2AuthContext,
+  _auth: V3AuthContext,
   requestId: string,
-  deps: V2RouterDeps,
+  deps: V3RouterDeps,
 ): Promise<ApiResponseEnvelope> {
   const parsed = conversationQueryRequestSchema.safeParse(body);
   if (!parsed.success)
@@ -1019,9 +1019,9 @@ async function handleConversationQuery(
 
 async function handleConversationCount(
   body: unknown,
-  _auth: V2AuthContext,
+  _auth: V3AuthContext,
   requestId: string,
-  deps: V2RouterDeps,
+  deps: V3RouterDeps,
 ): Promise<ApiResponseEnvelope> {
   const parsed = conversationCountRequestSchema.safeParse(body);
   if (!parsed.success)
@@ -1068,9 +1068,9 @@ async function handleConversationCount(
 
 async function handleConversationSearch(
   body: unknown,
-  auth: V2AuthContext,
+  auth: V3AuthContext,
   requestId: string,
-  deps: V2RouterDeps,
+  deps: V3RouterDeps,
 ): Promise<ApiResponseEnvelope> {
   const parsed = conversationSearchRequestSchema.safeParse(body);
   if (!parsed.success)
@@ -1171,9 +1171,9 @@ async function handleConversationSearch(
 
 async function handleConversationDelete(
   body: unknown,
-  auth: V2AuthContext,
+  auth: V3AuthContext,
   requestId: string,
-  deps: V2RouterDeps,
+  deps: V3RouterDeps,
 ): Promise<ApiResponseEnvelope> {
   const parsed = conversationDeleteRequestSchema.safeParse(body);
   if (!parsed.success)
@@ -1245,9 +1245,9 @@ async function handleConversationDelete(
 
 async function handleAtomicUpdate(
   body: unknown,
-  _auth: V2AuthContext,
+  _auth: V3AuthContext,
   requestId: string,
-  deps: V2RouterDeps,
+  deps: V3RouterDeps,
 ): Promise<ApiResponseEnvelope> {
   const parsed = atomicUpdateRequestSchema.safeParse(body);
   if (!parsed.success)
@@ -1313,7 +1313,7 @@ async function handleAtomicUpdate(
     try {
       emb = await embedding.embed(content);
     } catch (e) {
-      console.warn(`[v2-router] L1 embedding failed:`, e);
+      console.warn(`[v3-router] L1 embedding failed:`, e);
     }
   }
 
@@ -1338,9 +1338,9 @@ async function handleAtomicUpdate(
 
 async function handleAtomicQuery(
   body: unknown,
-  _auth: V2AuthContext,
+  _auth: V3AuthContext,
   requestId: string,
-  deps: V2RouterDeps,
+  deps: V3RouterDeps,
 ): Promise<ApiResponseEnvelope> {
   const parsed = atomicQueryRequestSchema.safeParse(body);
   if (!parsed.success)
@@ -1420,9 +1420,9 @@ async function handleAtomicQuery(
 
 async function handleAtomicCount(
   body: unknown,
-  _auth: V2AuthContext,
+  _auth: V3AuthContext,
   requestId: string,
-  deps: V2RouterDeps,
+  deps: V3RouterDeps,
 ): Promise<ApiResponseEnvelope> {
   const parsed = atomicCountRequestSchema.safeParse(body);
   if (!parsed.success)
@@ -1447,9 +1447,9 @@ async function handleAtomicCount(
 
 async function handleAtomicSearch(
   body: unknown,
-  auth: V2AuthContext,
+  auth: V3AuthContext,
   requestId: string,
-  deps: V2RouterDeps,
+  deps: V3RouterDeps,
 ): Promise<ApiResponseEnvelope> {
   const parsed = atomicSearchRequestSchema.safeParse(body);
   if (!parsed.success)
@@ -1577,9 +1577,9 @@ async function handleAtomicSearch(
 
 async function handleAtomicDelete(
   body: unknown,
-  auth: V2AuthContext,
+  auth: V3AuthContext,
   requestId: string,
-  deps: V2RouterDeps,
+  deps: V3RouterDeps,
 ): Promise<ApiResponseEnvelope> {
   const parsed = atomicDeleteRequestSchema.safeParse(body);
   if (!parsed.success)
@@ -1669,7 +1669,7 @@ function scopedProfileStorage(
   storage: StorageAdapter,
   isolation?: RequestIsolation,
 ): StorageAdapter {
-  // Direct unit callers may not go through handleV2Route and therefore do not
+  // Direct unit callers may not go through handleV3Route and therefore do not
   // have requestIsolation attached. Keep that legacy path at root; real HTTP
   // requests always resolve to either explicit ids or the `default` bucket.
   if (!isolation) return storage;
@@ -1910,9 +1910,9 @@ async function refreshSceneIndex(
 
 async function handleScenarioLs(
   body: unknown,
-  _auth: V2AuthContext,
+  _auth: V3AuthContext,
   requestId: string,
-  deps: V2RouterDeps,
+  deps: V3RouterDeps,
 ): Promise<ApiResponseEnvelope> {
   const parsed = scenarioListRequestSchema.safeParse(body);
   if (!parsed.success)
@@ -1986,9 +1986,9 @@ async function handleScenarioLs(
 
 async function handleScenarioCount(
   body: unknown,
-  _auth: V2AuthContext,
+  _auth: V3AuthContext,
   requestId: string,
-  deps: V2RouterDeps,
+  deps: V3RouterDeps,
 ): Promise<ApiResponseEnvelope> {
   const parsed = scenarioCountRequestSchema.safeParse(body);
   if (!parsed.success)
@@ -2025,9 +2025,9 @@ async function handleScenarioCount(
 
 async function handleScenarioRead(
   body: unknown,
-  _auth: V2AuthContext,
+  _auth: V3AuthContext,
   requestId: string,
-  deps: V2RouterDeps,
+  deps: V3RouterDeps,
 ): Promise<ApiResponseEnvelope> {
   const parsed = scenarioReadRequestSchema.safeParse(body);
   if (!parsed.success)
@@ -2112,9 +2112,9 @@ async function handleScenarioRead(
 
 async function handleScenarioWrite(
   body: unknown,
-  _auth: V2AuthContext,
+  _auth: V3AuthContext,
   requestId: string,
-  deps: V2RouterDeps,
+  deps: V3RouterDeps,
 ): Promise<ApiResponseEnvelope> {
   const parsed = scenarioWriteRequestSchema.safeParse(body);
   if (!parsed.success)
@@ -2204,9 +2204,9 @@ async function handleScenarioWrite(
 
 async function handleScenarioRm(
   body: unknown,
-  _auth: V2AuthContext,
+  _auth: V3AuthContext,
   requestId: string,
-  deps: V2RouterDeps,
+  deps: V3RouterDeps,
 ): Promise<ApiResponseEnvelope> {
   const parsed = scenarioRmRequestSchema.safeParse(body);
   if (!parsed.success)
@@ -2267,9 +2267,9 @@ async function handleScenarioRm(
 
 async function handleCoreRead(
   _body: unknown,
-  _auth: V2AuthContext,
+  _auth: V3AuthContext,
   requestId: string,
-  deps: V2RouterDeps,
+  deps: V3RouterDeps,
 ): Promise<ApiResponseEnvelope> {
   const baseStorage = deps.getStorage();
   if (!baseStorage)
@@ -2320,9 +2320,9 @@ async function handleCoreRead(
 
 async function handleCoreCount(
   body: unknown,
-  _auth: V2AuthContext,
+  _auth: V3AuthContext,
   requestId: string,
-  deps: V2RouterDeps,
+  deps: V3RouterDeps,
 ): Promise<ApiResponseEnvelope> {
   const parsed = coreCountRequestSchema.safeParse(body);
   if (!parsed.success)
@@ -2350,9 +2350,9 @@ async function handleCoreCount(
 
 async function handleCoreWrite(
   body: unknown,
-  _auth: V2AuthContext,
+  _auth: V3AuthContext,
   requestId: string,
-  deps: V2RouterDeps,
+  deps: V3RouterDeps,
 ): Promise<ApiResponseEnvelope> {
   const parsed = coreWriteRequestSchema.safeParse(body);
   if (!parsed.success)
@@ -2452,9 +2452,9 @@ function emptyLayer(): LayerStatus {
 
 async function handlePipelineStatus(
   _body: unknown,
-  _auth: V2AuthContext,
+  _auth: V3AuthContext,
   requestId: string,
-  deps: V2RouterDeps,
+  deps: V3RouterDeps,
 ): Promise<ApiResponseEnvelope> {
   // Service mode does not expose this endpoint — pretend it's not routed.
   if (deps.deployMode !== "standalone") {
@@ -2544,7 +2544,7 @@ async function handlePipelineStatus(
 /**
  * Format a Date as YYYY-MM-DD in local timezone, matching the convention used by
  * v1 l0-recorder and l1-writer for daily JSONL shard names. Local copy to keep
- * v2-router self-contained (avoids exporting a util just for one call site).
+ * v3-router self-contained (avoids exporting a util just for one call site).
  */
 function formatLocalDateForJsonl(d: Date): string {
   const y = d.getFullYear();

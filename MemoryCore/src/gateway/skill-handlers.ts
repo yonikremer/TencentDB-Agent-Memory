@@ -24,7 +24,7 @@ import { randomUUID } from "node:crypto";
 
 import { ZodError } from "zod";
 
-import { errorEnvelope, successEnvelope } from "./v2-router.js";
+import { errorEnvelope, successEnvelope } from "./v3-router.js";
 import {
   createRequestSchema,
   updateRequestSchema,
@@ -44,7 +44,7 @@ import {
   conversationAddRequestSchema,
   forceArchiveRequestSchema,
 } from "./skill-schemas.js";
-import type { ApiResponseEnvelope, V2AuthContext } from "./v2-schemas.js";
+import type { ApiResponseEnvelope, V3AuthContext } from "./v3-schemas.js";
 import { SkillCoreError, type SkillCore } from "../core/skill/skill-core.js";
 import type { SkillExtractor } from "../core/skill/skill-extractor.js";
 import type { Logger } from "../core/types.js";
@@ -105,10 +105,14 @@ export interface SkillRouterDeps {
    * Layer does this registration; in service mode, the onSkillCreated hook in buildSkillCore does the same
    * Idempotent (repeated calls have no side effects). Both paths are covered, ensuring the frontend control page always sees the skill.
    *
-   * Semantics consistent with `handleConversationAdd` in v2-router using the same dep to automatically register the `chat_memory` asset
-   * (see v2-router.ts:648 and metadata-service.ts:ensureSkillAsset).
+   * Semantics consistent with `handleConversationAdd` in v3-router using the same dep to automatically register the `chat_memory` asset
+   * (see v3-router.ts:648 and metadata-service.ts:ensureSkillAsset).
    */
-  getMetadataService?: (instanceId: string) => Promise<import("../metadata/service/metadata-service.js").MetadataService>;
+  getMetadataService?: (
+    instanceId: string,
+  ) => Promise<
+    import("../metadata/service/metadata-service.js").MetadataService
+  >;
   /**
    * `POST /v3/skill/conversation/add` + `POST /v3/skill/extract`
    * Shared wired result provider. Returns a complete set of { handler, trigger, buffer, ... }:
@@ -118,8 +122,11 @@ export interface SkillRouterDeps {
    * Each tenant holds one copy in Service mode; standalone mode returns a singleton. Resolved by the wiring layer
    * (server.ts) with caching + resolution based on auth.serviceId.
    */
-  resolveConversationAdd?: (instanceId: string) => Promise<
-    import("../core/skill/conversation-add/wire.js").WiredConversationAddHandler | undefined
+  resolveConversationAdd?: (
+    instanceId: string,
+  ) => Promise<
+    | import("../core/skill/conversation-add/wire.js").WiredConversationAddHandler
+    | undefined
   >;
 }
 
@@ -146,7 +153,12 @@ const ERROR_CODE_MAP: Record<string, number> = {
   SKILL_EXPORT_TOO_LARGE: 41301,
 };
 
-function mapCoreError(e: unknown, requestId: string, deps?: SkillRouterDeps, meta?: Record<string, unknown>): ApiResponseEnvelope {
+function mapCoreError(
+  e: unknown,
+  requestId: string,
+  deps?: SkillRouterDeps,
+  meta?: Record<string, unknown>,
+): ApiResponseEnvelope {
   if (e instanceof SkillCoreError) {
     const code = ERROR_CODE_MAP[e.code] ?? 50001;
 
@@ -154,7 +166,7 @@ function mapCoreError(e: unknown, requestId: string, deps?: SkillRouterDeps, met
     if (e.code === "SKILL_VERSION_STALE" && deps) {
       deps.logger.warn(
         `${TAG} version_conflict requestId=${requestId} skill_id=${meta?.skill_id ?? "?"} ` +
-        `expected_version=${meta?.expected_version ?? "?"} detail="${e.message}"`,
+          `expected_version=${meta?.expected_version ?? "?"} detail="${e.message}"`,
       );
     }
 
@@ -162,19 +174,27 @@ function mapCoreError(e: unknown, requestId: string, deps?: SkillRouterDeps, met
     if (e.code === "SKILL_VERSION_STALE") {
       const match = e.message?.match(/head is (\d+)/);
       const currentVersion = match ? Number(match[1]) : undefined;
-      return errorEnvelope(code, e.message, requestId, { current_version: currentVersion });
+      return errorEnvelope(code, e.message, requestId, {
+        current_version: currentVersion,
+      });
     }
 
     // 410 version expired, include latest_version additionally in response to facilitate caller upgrade
     if (e.code === "SKILL_VERSION_EXPIRED") {
       const match = e.message?.match(/latest version v(\d+)/);
       const latestVersion = match ? Number(match[1]) : undefined;
-      return errorEnvelope(code, e.message, requestId, { latest_version: latestVersion });
+      return errorEnvelope(code, e.message, requestId, {
+        latest_version: latestVersion,
+      });
     }
 
     return errorEnvelope(code, e.message, requestId);
   }
-  return errorEnvelope(50001, (e as Error).message ?? "internal error", requestId);
+  return errorEnvelope(
+    50001,
+    (e as Error).message ?? "internal error",
+    requestId,
+  );
 }
 
 function formatZodErr(err: ZodError): string {
@@ -194,12 +214,19 @@ function formatZodErr(err: ZodError): string {
  * store parsing logic.
  */
 async function precheck<T>(
-  schema: { safeParse(b: unknown): { success: true; data: T } | { success: false; error: ZodError } },
+  schema: {
+    safeParse(
+      b: unknown,
+    ): { success: true; data: T } | { success: false; error: ZodError };
+  },
   body: unknown,
-  auth: V2AuthContext,
+  auth: V3AuthContext,
   deps: SkillRouterDeps,
   requestId: string,
-): Promise<{ ok: true; core: SkillCore; data: T } | { ok: false; envelope: ApiResponseEnvelope }> {
+): Promise<
+  | { ok: true; core: SkillCore; data: T }
+  | { ok: false; envelope: ApiResponseEnvelope }
+> {
   let core: SkillCore | undefined;
   if (deps.resolveSkillCore) {
     core = await deps.resolveSkillCore(auth.serviceId);
@@ -207,9 +234,17 @@ async function precheck<T>(
   if (!core) {
     core = deps.getSkillCore();
   }
-  if (!core) return { ok: false, envelope: errorEnvelope(404, "Skill module not enabled", requestId) };
+  if (!core)
+    return {
+      ok: false,
+      envelope: errorEnvelope(404, "Skill module not enabled", requestId),
+    };
   const parsed = schema.safeParse(body);
-  if (!parsed.success) return { ok: false, envelope: errorEnvelope(40001, formatZodErr(parsed.error), requestId) };
+  if (!parsed.success)
+    return {
+      ok: false,
+      envelope: errorEnvelope(40001, formatZodErr(parsed.error), requestId),
+    };
   return { ok: true, core, data: parsed.data };
 }
 
@@ -218,12 +253,19 @@ async function precheck<T>(
  * Keep it to maintain the naming consistency of the existing handler; they can be merged, but keep backward compatibility for now.
  */
 async function precheckWrite<T>(
-  schema: { safeParse(b: unknown): { success: true; data: T } | { success: false; error: ZodError } },
+  schema: {
+    safeParse(
+      b: unknown,
+    ): { success: true; data: T } | { success: false; error: ZodError };
+  },
   body: unknown,
-  auth: V2AuthContext,
+  auth: V3AuthContext,
   deps: SkillRouterDeps,
   requestId: string,
-): Promise<{ ok: true; core: SkillCore; data: T } | { ok: false; envelope: ApiResponseEnvelope }> {
+): Promise<
+  | { ok: true; core: SkillCore; data: T }
+  | { ok: false; envelope: ApiResponseEnvelope }
+> {
   let core: SkillCore | undefined;
   if (deps.resolveSkillCore) {
     core = await deps.resolveSkillCore(auth.serviceId);
@@ -231,9 +273,17 @@ async function precheckWrite<T>(
   if (!core) {
     core = deps.getSkillCore();
   }
-  if (!core) return { ok: false, envelope: errorEnvelope(404, "Skill module not enabled", requestId) };
+  if (!core)
+    return {
+      ok: false,
+      envelope: errorEnvelope(404, "Skill module not enabled", requestId),
+    };
   const parsed = schema.safeParse(body);
-  if (!parsed.success) return { ok: false, envelope: errorEnvelope(40001, formatZodErr(parsed.error), requestId) };
+  if (!parsed.success)
+    return {
+      ok: false,
+      envelope: errorEnvelope(40001, formatZodErr(parsed.error), requestId),
+    };
   return { ok: true, core, data: parsed.data };
 }
 
@@ -245,7 +295,9 @@ function parseMetadata(s: Skill): Record<string, unknown> | undefined {
   if (!raw || raw === "{}" || raw === "") return undefined;
   try {
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : undefined;
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>)
+      : undefined;
   } catch {
     return undefined;
   }
@@ -274,23 +326,62 @@ function toSummary(s: Skill) {
 //  Handlers
 // ═════════════════════════════════════════════════════════════════════
 
-export async function handleCreate(body: unknown, auth: V2AuthContext, requestId: string, deps: SkillRouterDeps): Promise<ApiResponseEnvelope> {
+export async function handleCreate(
+  body: unknown,
+  auth: V3AuthContext,
+  requestId: string,
+  deps: SkillRouterDeps,
+): Promise<ApiResponseEnvelope> {
   const t0 = Date.now();
-  const pre = await precheckWrite(createRequestSchema, body, auth, deps, requestId);
-  if (!pre.ok) { obsLogger.warn("skill.handleCreate.done", { req_id: requestId, code: pre.envelope.code, dur_ms: Date.now() - t0, reason: "precheck" }); return pre.envelope; }
+  const pre = await precheckWrite(
+    createRequestSchema,
+    body,
+    auth,
+    deps,
+    requestId,
+  );
+  if (!pre.ok) {
+    obsLogger.warn("skill.handleCreate.done", {
+      req_id: requestId,
+      code: pre.envelope.code,
+      dur_ms: Date.now() - t0,
+      reason: "precheck",
+    });
+    return pre.envelope;
+  }
 
   // Quota check (like memory's checkMemoryQuota)
   if (deps.quotaManager) {
     const check = await deps.quotaManager.checkMemoryQuota(auth.serviceId, 1);
     if (!check.allowed) {
-      obsLogger.warn("skill.handleCreate.done", { req_id: requestId, code: 4291, dur_ms: Date.now() - t0, reason: "quota", current: check.current, limit: check.limit });
-      return errorEnvelope(4291, `Memory limit exceeded (current=${check.current}, limit=${check.limit})`, requestId);
+      obsLogger.warn("skill.handleCreate.done", {
+        req_id: requestId,
+        code: 4291,
+        dur_ms: Date.now() - t0,
+        reason: "quota",
+        current: check.current,
+        limit: check.limit,
+      });
+      return errorEnvelope(
+        4291,
+        `Memory limit exceeded (current=${check.current}, limit=${check.limit})`,
+        requestId,
+      );
     }
   }
 
   try {
     const r = await pre.core.create(pre.data);
-    try { trace.report("skill.create", { skill_id: r.skill_id, team_id: r.team_id, agent_id: r.owner_agent_id, name: r.name }); } catch { /* noop */ }
+    try {
+      trace.report("skill.create", {
+        skill_id: r.skill_id,
+        team_id: r.team_id,
+        agent_id: r.owner_agent_id,
+        name: r.name,
+      });
+    } catch {
+      /* noop */
+    }
 
     // ── Auto-register skill assets (asset_id === skill_id) + bind to owner agent's fixed-asset ──
     //
@@ -307,7 +398,7 @@ export async function handleCreate(body: unknown, auth: V2AuthContext, requestId
     // Failure strategy:
     //   - throw exception → create request returns error overall. Avoid "skill persisted but asset missing"
     //      of the silent-inconsistency state (users would wonder: "I created it but cannot see it").
-    //   - Consistent with the approach of ensureChatMemoryAsset in v2-router.ts handleConversationAdd.
+    //   - Consistent with the approach of ensureChatMemoryAsset in v3-router.ts handleConversationAdd.
     if (deps.getMetadataService && r.team_id && r.owner_agent_id) {
       try {
         const metaSvc = await deps.getMetadataService(auth.serviceId);
@@ -322,68 +413,222 @@ export async function handleCreate(body: unknown, auth: V2AuthContext, requestId
           `${TAG} ensureSkillAsset failed for ${r.skill_id}: ` +
             (err instanceof Error ? err.message : String(err)),
         );
-        obsLogger.error("skill.handleCreate.done", { req_id: requestId, dur_ms: Date.now() - t0, skill_id: r.skill_id, phase: "ensureSkillAsset" }, err instanceof Error ? err : undefined);
+        obsLogger.error(
+          "skill.handleCreate.done",
+          {
+            req_id: requestId,
+            dur_ms: Date.now() - t0,
+            skill_id: r.skill_id,
+            phase: "ensureSkillAsset",
+          },
+          err instanceof Error ? err : undefined,
+        );
         return mapCoreError(err, requestId, deps, { skill_id: r.skill_id });
       }
     }
 
-    obsLogger.info("skill.handleCreate.done", { req_id: requestId, code: 0, dur_ms: Date.now() - t0, skill_id: r.skill_id, name: r.name, version: r.version });
+    obsLogger.info("skill.handleCreate.done", {
+      req_id: requestId,
+      code: 0,
+      dur_ms: Date.now() - t0,
+      skill_id: r.skill_id,
+      name: r.name,
+      version: r.version,
+    });
     return successEnvelope(toSummary(r), requestId);
-  } catch (e) { obsLogger.error("skill.handleCreate.done", { req_id: requestId, dur_ms: Date.now() - t0 }, e instanceof Error ? e : undefined); return mapCoreError(e, requestId); }
+  } catch (e) {
+    obsLogger.error(
+      "skill.handleCreate.done",
+      { req_id: requestId, dur_ms: Date.now() - t0 },
+      e instanceof Error ? e : undefined,
+    );
+    return mapCoreError(e, requestId);
+  }
 }
 
-export async function handleUpdate(body: unknown, auth: V2AuthContext, requestId: string, deps: SkillRouterDeps): Promise<ApiResponseEnvelope> {
+export async function handleUpdate(
+  body: unknown,
+  auth: V3AuthContext,
+  requestId: string,
+  deps: SkillRouterDeps,
+): Promise<ApiResponseEnvelope> {
   const t0 = Date.now();
-  const pre = await precheckWrite(updateRequestSchema, body, auth, deps, requestId);
-  if (!pre.ok) { obsLogger.warn("skill.handleUpdate.done", { req_id: requestId, code: pre.envelope.code, dur_ms: Date.now() - t0, reason: "precheck" }); return pre.envelope; }
+  const pre = await precheckWrite(
+    updateRequestSchema,
+    body,
+    auth,
+    deps,
+    requestId,
+  );
+  if (!pre.ok) {
+    obsLogger.warn("skill.handleUpdate.done", {
+      req_id: requestId,
+      code: pre.envelope.code,
+      dur_ms: Date.now() - t0,
+      reason: "precheck",
+    });
+    return pre.envelope;
+  }
 
   if (deps.quotaManager) {
     const check = await deps.quotaManager.checkMemoryQuota(auth.serviceId, 1);
     if (!check.allowed) {
-      obsLogger.warn("skill.handleUpdate.done", { req_id: requestId, code: 4291, dur_ms: Date.now() - t0, reason: "quota", current: check.current, limit: check.limit });
-      return errorEnvelope(4291, `Memory limit exceeded (current=${check.current}, limit=${check.limit})`, requestId);
+      obsLogger.warn("skill.handleUpdate.done", {
+        req_id: requestId,
+        code: 4291,
+        dur_ms: Date.now() - t0,
+        reason: "quota",
+        current: check.current,
+        limit: check.limit,
+      });
+      return errorEnvelope(
+        4291,
+        `Memory limit exceeded (current=${check.current}, limit=${check.limit})`,
+        requestId,
+      );
     }
   }
 
   try {
     const r = await pre.core.update(pre.data);
-    try { trace.report("skill.update", { skill_id: r.skill_id, team_id: r.team_id, agent_id: r.owner_agent_id, name: r.name, version: r.version }); } catch { /* noop */ }
-    obsLogger.info("skill.handleUpdate.done", { req_id: requestId, code: 0, dur_ms: Date.now() - t0, skill_id: r.skill_id, name: r.name, version: r.version });
+    try {
+      trace.report("skill.update", {
+        skill_id: r.skill_id,
+        team_id: r.team_id,
+        agent_id: r.owner_agent_id,
+        name: r.name,
+        version: r.version,
+      });
+    } catch {
+      /* noop */
+    }
+    obsLogger.info("skill.handleUpdate.done", {
+      req_id: requestId,
+      code: 0,
+      dur_ms: Date.now() - t0,
+      skill_id: r.skill_id,
+      name: r.name,
+      version: r.version,
+    });
     return successEnvelope(toSummary(r), requestId);
   } catch (e) {
-    obsLogger.error("skill.handleUpdate.done", { req_id: requestId, dur_ms: Date.now() - t0, skill_id: pre.data.skill_id, expected_version: pre.data.expected_version }, e instanceof Error ? e : undefined);
-    return mapCoreError(e, requestId, deps, { skill_id: pre.data.skill_id, expected_version: pre.data.expected_version });
+    obsLogger.error(
+      "skill.handleUpdate.done",
+      {
+        req_id: requestId,
+        dur_ms: Date.now() - t0,
+        skill_id: pre.data.skill_id,
+        expected_version: pre.data.expected_version,
+      },
+      e instanceof Error ? e : undefined,
+    );
+    return mapCoreError(e, requestId, deps, {
+      skill_id: pre.data.skill_id,
+      expected_version: pre.data.expected_version,
+    });
   }
 }
 
-export async function handlePatch(body: unknown, auth: V2AuthContext, requestId: string, deps: SkillRouterDeps): Promise<ApiResponseEnvelope> {
+export async function handlePatch(
+  body: unknown,
+  auth: V3AuthContext,
+  requestId: string,
+  deps: SkillRouterDeps,
+): Promise<ApiResponseEnvelope> {
   const t0 = Date.now();
-  const pre = await precheckWrite(patchRequestSchema, body, auth, deps, requestId);
-  if (!pre.ok) { obsLogger.warn("skill.handlePatch.done", { req_id: requestId, code: pre.envelope.code, dur_ms: Date.now() - t0, reason: "precheck" }); return pre.envelope; }
+  const pre = await precheckWrite(
+    patchRequestSchema,
+    body,
+    auth,
+    deps,
+    requestId,
+  );
+  if (!pre.ok) {
+    obsLogger.warn("skill.handlePatch.done", {
+      req_id: requestId,
+      code: pre.envelope.code,
+      dur_ms: Date.now() - t0,
+      reason: "precheck",
+    });
+    return pre.envelope;
+  }
 
   if (deps.quotaManager) {
     const check = await deps.quotaManager.checkMemoryQuota(auth.serviceId, 1);
     if (!check.allowed) {
-      obsLogger.warn("skill.handlePatch.done", { req_id: requestId, code: 4291, dur_ms: Date.now() - t0, reason: "quota", current: check.current, limit: check.limit });
-      return errorEnvelope(4291, `Memory limit exceeded (current=${check.current}, limit=${check.limit})`, requestId);
+      obsLogger.warn("skill.handlePatch.done", {
+        req_id: requestId,
+        code: 4291,
+        dur_ms: Date.now() - t0,
+        reason: "quota",
+        current: check.current,
+        limit: check.limit,
+      });
+      return errorEnvelope(
+        4291,
+        `Memory limit exceeded (current=${check.current}, limit=${check.limit})`,
+        requestId,
+      );
     }
   }
 
   try {
     const r = await pre.core.patch(pre.data);
-    try { trace.report("skill.patch", { skill_id: r.skill_id, team_id: r.team_id, agent_id: r.owner_agent_id, name: r.name, version: r.version }); } catch { /* noop */ }
-    obsLogger.info("skill.handlePatch.done", { req_id: requestId, code: 0, dur_ms: Date.now() - t0, skill_id: r.skill_id, name: r.name, version: r.version });
+    try {
+      trace.report("skill.patch", {
+        skill_id: r.skill_id,
+        team_id: r.team_id,
+        agent_id: r.owner_agent_id,
+        name: r.name,
+        version: r.version,
+      });
+    } catch {
+      /* noop */
+    }
+    obsLogger.info("skill.handlePatch.done", {
+      req_id: requestId,
+      code: 0,
+      dur_ms: Date.now() - t0,
+      skill_id: r.skill_id,
+      name: r.name,
+      version: r.version,
+    });
     return successEnvelope(toSummary(r), requestId);
   } catch (e) {
-    obsLogger.error("skill.handlePatch.done", { req_id: requestId, dur_ms: Date.now() - t0, skill_id: pre.data.skill_id, expected_version: pre.data.expected_version }, e instanceof Error ? e : undefined);
-    return mapCoreError(e, requestId, deps, { skill_id: pre.data.skill_id, expected_version: pre.data.expected_version });
+    obsLogger.error(
+      "skill.handlePatch.done",
+      {
+        req_id: requestId,
+        dur_ms: Date.now() - t0,
+        skill_id: pre.data.skill_id,
+        expected_version: pre.data.expected_version,
+      },
+      e instanceof Error ? e : undefined,
+    );
+    return mapCoreError(e, requestId, deps, {
+      skill_id: pre.data.skill_id,
+      expected_version: pre.data.expected_version,
+    });
   }
 }
 
-export async function handleDelete(body: unknown, _auth: V2AuthContext, requestId: string, deps: SkillRouterDeps): Promise<ApiResponseEnvelope> {
+export async function handleDelete(
+  body: unknown,
+  _auth: V3AuthContext,
+  requestId: string,
+  deps: SkillRouterDeps,
+): Promise<ApiResponseEnvelope> {
   const t0 = Date.now();
   const pre = await precheck(deleteRequestSchema, body, _auth, deps, requestId);
-  if (!pre.ok) { obsLogger.warn("skill.handleDelete.done", { req_id: requestId, code: pre.envelope.code, dur_ms: Date.now() - t0, reason: "precheck" }); return pre.envelope; }
+  if (!pre.ok) {
+    obsLogger.warn("skill.handleDelete.done", {
+      req_id: requestId,
+      code: pre.envelope.code,
+      dur_ms: Date.now() - t0,
+      reason: "precheck",
+    });
+    return pre.envelope;
+  }
   try {
     const r = await pre.core.delete(pre.data);
 
@@ -419,12 +664,33 @@ export async function handleDelete(body: unknown, _auth: V2AuthContext, requestI
         agent_id: pre.data.agent_id,
         asset_synced: assetSynced,
       });
-    } catch { /* noop */ }
-    obsLogger.info("skill.handleDelete.done", { req_id: requestId, code: 0, dur_ms: Date.now() - t0, skill_id: r.skill_id, archived: r.archived, asset_synced: assetSynced });
+    } catch {
+      /* noop */
+    }
+    obsLogger.info("skill.handleDelete.done", {
+      req_id: requestId,
+      code: 0,
+      dur_ms: Date.now() - t0,
+      skill_id: r.skill_id,
+      archived: r.archived,
+      asset_synced: assetSynced,
+    });
     return successEnvelope(r, requestId);
   } catch (e) {
-    obsLogger.error("skill.handleDelete.done", { req_id: requestId, dur_ms: Date.now() - t0, skill_id: pre.data.skill_id, expected_version: pre.data.expected_version }, e instanceof Error ? e : undefined);
-    return mapCoreError(e, requestId, deps, { skill_id: pre.data.skill_id, expected_version: pre.data.expected_version });
+    obsLogger.error(
+      "skill.handleDelete.done",
+      {
+        req_id: requestId,
+        dur_ms: Date.now() - t0,
+        skill_id: pre.data.skill_id,
+        expected_version: pre.data.expected_version,
+      },
+      e instanceof Error ? e : undefined,
+    );
+    return mapCoreError(e, requestId, deps, {
+      skill_id: pre.data.skill_id,
+      expected_version: pre.data.expected_version,
+    });
   }
 }
 
@@ -440,10 +706,29 @@ export async function handleDelete(body: unknown, _auth: V2AuthContext, requestI
  * Not found → 40401 SKILL_NOT_FOUND (aligned with get, the agent perspective cannot tell whether it is "no such name
  * or no such id", unify one error code).
  */
-export async function handleGetByName(body: unknown, _auth: V2AuthContext, requestId: string, deps: SkillRouterDeps): Promise<ApiResponseEnvelope> {
+export async function handleGetByName(
+  body: unknown,
+  _auth: V3AuthContext,
+  requestId: string,
+  deps: SkillRouterDeps,
+): Promise<ApiResponseEnvelope> {
   const t0 = Date.now();
-  const pre = await precheck(getByNameRequestSchema, body, _auth, deps, requestId);
-  if (!pre.ok) { obsLogger.warn("skill.handleGetByName.done", { req_id: requestId, code: pre.envelope.code, dur_ms: Date.now() - t0, reason: "precheck" }); return pre.envelope; }
+  const pre = await precheck(
+    getByNameRequestSchema,
+    body,
+    _auth,
+    deps,
+    requestId,
+  );
+  if (!pre.ok) {
+    obsLogger.warn("skill.handleGetByName.done", {
+      req_id: requestId,
+      code: pre.envelope.code,
+      dur_ms: Date.now() - t0,
+      reason: "precheck",
+    });
+    return pre.envelope;
+  }
   try {
     // Use name as prefix to fetch 1-2 candidates (prefix LIKE will match neighbors with the same prefix,
     // explicitly perform an exact-match once; do not use limit=1 so that the exact match is stable).
@@ -456,12 +741,20 @@ export async function handleGetByName(body: unknown, _auth: V2AuthContext, reque
     const hit = listed.items.find((s) => s.name === pre.data.skill_name);
     if (!hit) {
       obsLogger.info("skill.handleGetByName.done", {
-        req_id: requestId, code: 40401, dur_ms: Date.now() - t0,
-        team_id: pre.data.team_id, agent_id: pre.data.agent_id, skill_name: pre.data.skill_name,
+        req_id: requestId,
+        code: 40401,
+        dur_ms: Date.now() - t0,
+        team_id: pre.data.team_id,
+        agent_id: pre.data.agent_id,
+        skill_name: pre.data.skill_name,
         reason: "not_found",
       });
       // Same path as handleGet SKILL_NOT_FOUND:errorEnvelope(40401, ...)
-      return errorEnvelope(40401, `SKILL_NOT_FOUND: no skill named "${pre.data.skill_name}" for agent ${pre.data.agent_id}`, requestId);
+      return errorEnvelope(
+        40401,
+        `SKILL_NOT_FOUND: no skill named "${pre.data.skill_name}" for agent ${pre.data.agent_id}`,
+        requestId,
+      );
     }
 
     // Reuse handleGet body: construct get input to go through core.get, ensuring identical behavior
@@ -486,25 +779,46 @@ export async function handleGetByName(body: unknown, _auth: V2AuthContext, reque
       ...(includeManifest ? { manifest: row.manifest } : {}),
     };
     obsLogger.info("skill.handleGetByName.done", {
-      req_id: requestId, code: 0, dur_ms: Date.now() - t0,
-      skill_id: row.skill_id, version: row.version,
+      req_id: requestId,
+      code: 0,
+      dur_ms: Date.now() - t0,
+      skill_id: row.skill_id,
+      version: row.version,
       content_len: row.content?.length ?? 0,
       manifest_n: row.manifest?.length ?? 0,
     });
     return successEnvelope(data, requestId);
   } catch (e) {
-    obsLogger.error("skill.handleGetByName.done", {
-      req_id: requestId, dur_ms: Date.now() - t0,
-      skill_name: pre.data.skill_name,
-    }, e instanceof Error ? e : undefined);
+    obsLogger.error(
+      "skill.handleGetByName.done",
+      {
+        req_id: requestId,
+        dur_ms: Date.now() - t0,
+        skill_name: pre.data.skill_name,
+      },
+      e instanceof Error ? e : undefined,
+    );
     return mapCoreError(e, requestId);
   }
 }
 
-export async function handleGet(body: unknown, _auth: V2AuthContext, requestId: string, deps: SkillRouterDeps): Promise<ApiResponseEnvelope> {
+export async function handleGet(
+  body: unknown,
+  _auth: V3AuthContext,
+  requestId: string,
+  deps: SkillRouterDeps,
+): Promise<ApiResponseEnvelope> {
   const t0 = Date.now();
   const pre = await precheck(getRequestSchema, body, _auth, deps, requestId);
-  if (!pre.ok) { obsLogger.warn("skill.handleGet.done", { req_id: requestId, code: pre.envelope.code, dur_ms: Date.now() - t0, reason: "precheck" }); return pre.envelope; }
+  if (!pre.ok) {
+    obsLogger.warn("skill.handleGet.done", {
+      req_id: requestId,
+      code: pre.envelope.code,
+      dur_ms: Date.now() - t0,
+      reason: "precheck",
+    });
+    return pre.envelope;
+  }
   try {
     const row = await pre.core.get(pre.data);
     const includeContent = pre.data.include_content ?? true;
@@ -518,160 +832,444 @@ export async function handleGet(body: unknown, _auth: V2AuthContext, requestId: 
       ...(includeContent ? { content: row.content } : {}),
       ...(includeManifest ? { manifest: row.manifest } : {}),
     };
-    obsLogger.info("skill.handleGet.done", { req_id: requestId, code: 0, dur_ms: Date.now() - t0, skill_id: row.skill_id,
+    obsLogger.info("skill.handleGet.done", {
+      req_id: requestId,
+      code: 0,
+      dur_ms: Date.now() - t0,
+      skill_id: row.skill_id,
       version: row.version,
       content_len: row.content?.length ?? 0,
-      manifest_n: row.manifest?.length ?? 0, });
+      manifest_n: row.manifest?.length ?? 0,
+    });
     return successEnvelope(data, requestId);
-  } catch (e) { obsLogger.error("skill.handleGet.done", { req_id: requestId, dur_ms: Date.now() - t0, skill_id: pre.data.skill_id }, e instanceof Error ? e : undefined); return mapCoreError(e, requestId); }
+  } catch (e) {
+    obsLogger.error(
+      "skill.handleGet.done",
+      {
+        req_id: requestId,
+        dur_ms: Date.now() - t0,
+        skill_id: pre.data.skill_id,
+      },
+      e instanceof Error ? e : undefined,
+    );
+    return mapCoreError(e, requestId);
+  }
 }
 
-export async function handleList(body: unknown, _auth: V2AuthContext, requestId: string, deps: SkillRouterDeps): Promise<ApiResponseEnvelope> {
+export async function handleList(
+  body: unknown,
+  _auth: V3AuthContext,
+  requestId: string,
+  deps: SkillRouterDeps,
+): Promise<ApiResponseEnvelope> {
   const t0 = Date.now();
   const pre = await precheck(listRequestSchema, body, _auth, deps, requestId);
-  if (!pre.ok) { obsLogger.warn("skill.handleList.done", { req_id: requestId, code: pre.envelope.code, dur_ms: Date.now() - t0, reason: "precheck" }); return pre.envelope; }
+  if (!pre.ok) {
+    obsLogger.warn("skill.handleList.done", {
+      req_id: requestId,
+      code: pre.envelope.code,
+      dur_ms: Date.now() - t0,
+      reason: "precheck",
+    });
+    return pre.envelope;
+  }
   try {
     // Archive semantics: `filters.status` accepts an explicit `['archived']` / `['active','archived']`，
     // used only by the admin console "Recycle Bin" view. When status is omitted, only active is returned by default (see
     // SqliteSkillStore.listSkills / TcvdbSkillStore.listSkills defaults).
     // Normal business callers **should not** request archived explicitly - it is already invisible to the read/write APIs.
     const r = await pre.core.list(pre.data);
-    obsLogger.info("skill.handleList.done", { req_id: requestId, code: 0, dur_ms: Date.now() - t0, items: r.items.length, total: r.total });
-    return successEnvelope({ items: r.items.map(toSummary), total: r.total }, requestId);
-  } catch (e) { obsLogger.error("skill.handleList.done", { req_id: requestId, dur_ms: Date.now() - t0 }, e instanceof Error ? e : undefined); return mapCoreError(e, requestId); }
+    obsLogger.info("skill.handleList.done", {
+      req_id: requestId,
+      code: 0,
+      dur_ms: Date.now() - t0,
+      items: r.items.length,
+      total: r.total,
+    });
+    return successEnvelope(
+      { items: r.items.map(toSummary), total: r.total },
+      requestId,
+    );
+  } catch (e) {
+    obsLogger.error(
+      "skill.handleList.done",
+      { req_id: requestId, dur_ms: Date.now() - t0 },
+      e instanceof Error ? e : undefined,
+    );
+    return mapCoreError(e, requestId);
+  }
 }
 
-export async function handleSearch(body: unknown, _auth: V2AuthContext, requestId: string, deps: SkillRouterDeps): Promise<ApiResponseEnvelope> {
+export async function handleSearch(
+  body: unknown,
+  _auth: V3AuthContext,
+  requestId: string,
+  deps: SkillRouterDeps,
+): Promise<ApiResponseEnvelope> {
   const t0 = Date.now();
   const pre = await precheck(searchRequestSchema, body, _auth, deps, requestId);
-  if (!pre.ok) { obsLogger.warn("skill.handleSearch.done", { req_id: requestId, code: pre.envelope.code, dur_ms: Date.now() - t0, reason: "precheck" }); return pre.envelope; }
+  if (!pre.ok) {
+    obsLogger.warn("skill.handleSearch.done", {
+      req_id: requestId,
+      code: pre.envelope.code,
+      dur_ms: Date.now() - t0,
+      reason: "precheck",
+    });
+    return pre.envelope;
+  }
   try {
     // scope="team" → strip agent_id so store does team-wide search (no owner filter).
     // The v3 isolation middleware already verified team_id + agent_id + user_id are present.
     const { scope, ...data } = pre.data;
-    const searchInput = scope === "team"
-      ? { ...data, agent_id: undefined }
-      : data;
+    const searchInput =
+      scope === "team" ? { ...data, agent_id: undefined } : data;
     const hits = await pre.core.search(searchInput);
     const items = hits.map((h) => ({
       ...toSummary(h.skill),
       score: h.score,
       // FTS5 snippet may be empty (content too short); fallback to description.
-      snippet: h.snippet && h.snippet.length > 0 ? h.snippet : h.skill.description,
+      snippet:
+        h.snippet && h.snippet.length > 0 ? h.snippet : h.skill.description,
     }));
-    obsLogger.info("skill.handleSearch.done", { req_id: requestId, code: 0, dur_ms: Date.now() - t0, items: items.length, scope: pre.data.scope ?? "agent" });
+    obsLogger.info("skill.handleSearch.done", {
+      req_id: requestId,
+      code: 0,
+      dur_ms: Date.now() - t0,
+      items: items.length,
+      scope: pre.data.scope ?? "agent",
+    });
     return successEnvelope({ items }, requestId);
-  } catch (e) { obsLogger.error("skill.handleSearch.done", { req_id: requestId, dur_ms: Date.now() - t0 }, e instanceof Error ? e : undefined); return mapCoreError(e, requestId); }
+  } catch (e) {
+    obsLogger.error(
+      "skill.handleSearch.done",
+      { req_id: requestId, dur_ms: Date.now() - t0 },
+      e instanceof Error ? e : undefined,
+    );
+    return mapCoreError(e, requestId);
+  }
 }
 
-export async function handleVersions(body: unknown, _auth: V2AuthContext, requestId: string, deps: SkillRouterDeps): Promise<ApiResponseEnvelope> {
+export async function handleVersions(
+  body: unknown,
+  _auth: V3AuthContext,
+  requestId: string,
+  deps: SkillRouterDeps,
+): Promise<ApiResponseEnvelope> {
   const t0 = Date.now();
-  const pre = await precheck(versionsRequestSchema, body, _auth, deps, requestId);
-  if (!pre.ok) { obsLogger.warn("skill.handleVersions.done", { req_id: requestId, code: pre.envelope.code, dur_ms: Date.now() - t0, reason: "precheck" }); return pre.envelope; }
+  const pre = await precheck(
+    versionsRequestSchema,
+    body,
+    _auth,
+    deps,
+    requestId,
+  );
+  if (!pre.ok) {
+    obsLogger.warn("skill.handleVersions.done", {
+      req_id: requestId,
+      code: pre.envelope.code,
+      dur_ms: Date.now() - t0,
+      reason: "precheck",
+    });
+    return pre.envelope;
+  }
   try {
     const r = await pre.core.listVersions(pre.data);
     if (r.total === 0) {
-      obsLogger.warn("skill.handleVersions.done", { req_id: requestId, code: 40401, dur_ms: Date.now() - t0, skill_id: pre.data.skill_id, reason: "not_found" });
+      obsLogger.warn("skill.handleVersions.done", {
+        req_id: requestId,
+        code: 40401,
+        dur_ms: Date.now() - t0,
+        skill_id: pre.data.skill_id,
+        reason: "not_found",
+      });
       return errorEnvelope(40401, "skill not found", requestId);
     }
     const items = r.items.map((s) => ({
       ...toSummary(s),
       is_expired: (s as Skill & { is_expired: boolean }).is_expired ?? false,
     }));
-    obsLogger.info("skill.handleVersions.done", { req_id: requestId, code: 0, dur_ms: Date.now() - t0, skill_id: pre.data.skill_id, items: items.length, total: r.total });
+    obsLogger.info("skill.handleVersions.done", {
+      req_id: requestId,
+      code: 0,
+      dur_ms: Date.now() - t0,
+      skill_id: pre.data.skill_id,
+      items: items.length,
+      total: r.total,
+    });
     return successEnvelope({ items, total: r.total }, requestId);
-  } catch (e) { obsLogger.error("skill.handleVersions.done", { req_id: requestId, dur_ms: Date.now() - t0, skill_id: pre.data.skill_id }, e instanceof Error ? e : undefined); return mapCoreError(e, requestId); }
+  } catch (e) {
+    obsLogger.error(
+      "skill.handleVersions.done",
+      {
+        req_id: requestId,
+        dur_ms: Date.now() - t0,
+        skill_id: pre.data.skill_id,
+      },
+      e instanceof Error ? e : undefined,
+    );
+    return mapCoreError(e, requestId);
+  }
 }
 
-export async function handleFilesWrite(body: unknown, auth: V2AuthContext, requestId: string, deps: SkillRouterDeps): Promise<ApiResponseEnvelope> {
+export async function handleFilesWrite(
+  body: unknown,
+  auth: V3AuthContext,
+  requestId: string,
+  deps: SkillRouterDeps,
+): Promise<ApiResponseEnvelope> {
   const t0 = Date.now();
-  const pre = await precheckWrite(filesWriteRequestSchema, body, auth, deps, requestId);
-  if (!pre.ok) { obsLogger.warn("skill.handleFilesWrite.done", { req_id: requestId, code: pre.envelope.code, dur_ms: Date.now() - t0, reason: "precheck" }); return pre.envelope; }
+  const pre = await precheckWrite(
+    filesWriteRequestSchema,
+    body,
+    auth,
+    deps,
+    requestId,
+  );
+  if (!pre.ok) {
+    obsLogger.warn("skill.handleFilesWrite.done", {
+      req_id: requestId,
+      code: pre.envelope.code,
+      dur_ms: Date.now() - t0,
+      reason: "precheck",
+    });
+    return pre.envelope;
+  }
 
   if (deps.quotaManager) {
     const check = await deps.quotaManager.checkMemoryQuota(auth.serviceId, 1);
     if (!check.allowed) {
-      obsLogger.warn("skill.handleFilesWrite.done", { req_id: requestId, code: 4291, dur_ms: Date.now() - t0, reason: "quota", current: check.current, limit: check.limit });
-      return errorEnvelope(4291, `Memory limit exceeded (current=${check.current}, limit=${check.limit})`, requestId);
+      obsLogger.warn("skill.handleFilesWrite.done", {
+        req_id: requestId,
+        code: 4291,
+        dur_ms: Date.now() - t0,
+        reason: "quota",
+        current: check.current,
+        limit: check.limit,
+      });
+      return errorEnvelope(
+        4291,
+        `Memory limit exceeded (current=${check.current}, limit=${check.limit})`,
+        requestId,
+      );
     }
   }
 
   try {
     const r = await pre.core.writeFiles(pre.data);
-    obsLogger.info("skill.handleFilesWrite.done", { req_id: requestId, code: 0, dur_ms: Date.now() - t0, skill_id: r.skill_id, version: r.version, files: pre.data.files.length });
+    obsLogger.info("skill.handleFilesWrite.done", {
+      req_id: requestId,
+      code: 0,
+      dur_ms: Date.now() - t0,
+      skill_id: r.skill_id,
+      version: r.version,
+      files: pre.data.files.length,
+    });
     return successEnvelope(toSummary(r), requestId);
   } catch (e) {
-    obsLogger.error("skill.handleFilesWrite.done", { req_id: requestId, dur_ms: Date.now() - t0, skill_id: pre.data.skill_id, expected_version: pre.data.expected_version }, e instanceof Error ? e : undefined);
-    return mapCoreError(e, requestId, deps, { skill_id: pre.data.skill_id, expected_version: pre.data.expected_version });
+    obsLogger.error(
+      "skill.handleFilesWrite.done",
+      {
+        req_id: requestId,
+        dur_ms: Date.now() - t0,
+        skill_id: pre.data.skill_id,
+        expected_version: pre.data.expected_version,
+      },
+      e instanceof Error ? e : undefined,
+    );
+    return mapCoreError(e, requestId, deps, {
+      skill_id: pre.data.skill_id,
+      expected_version: pre.data.expected_version,
+    });
   }
 }
 
-export async function handleFilesRemove(body: unknown, auth: V2AuthContext, requestId: string, deps: SkillRouterDeps): Promise<ApiResponseEnvelope> {
+export async function handleFilesRemove(
+  body: unknown,
+  auth: V3AuthContext,
+  requestId: string,
+  deps: SkillRouterDeps,
+): Promise<ApiResponseEnvelope> {
   const t0 = Date.now();
-  const pre = await precheckWrite(filesRemoveRequestSchema, body, auth, deps, requestId);
-  if (!pre.ok) { obsLogger.warn("skill.handleFilesRemove.done", { req_id: requestId, code: pre.envelope.code, dur_ms: Date.now() - t0, reason: "precheck" }); return pre.envelope; }
+  const pre = await precheckWrite(
+    filesRemoveRequestSchema,
+    body,
+    auth,
+    deps,
+    requestId,
+  );
+  if (!pre.ok) {
+    obsLogger.warn("skill.handleFilesRemove.done", {
+      req_id: requestId,
+      code: pre.envelope.code,
+      dur_ms: Date.now() - t0,
+      reason: "precheck",
+    });
+    return pre.envelope;
+  }
 
   if (deps.quotaManager) {
     const check = await deps.quotaManager.checkMemoryQuota(auth.serviceId, 1);
     if (!check.allowed) {
-      obsLogger.warn("skill.handleFilesRemove.done", { req_id: requestId, code: 4291, dur_ms: Date.now() - t0, reason: "quota", current: check.current, limit: check.limit });
-      return errorEnvelope(4291, `Memory limit exceeded (current=${check.current}, limit=${check.limit})`, requestId);
+      obsLogger.warn("skill.handleFilesRemove.done", {
+        req_id: requestId,
+        code: 4291,
+        dur_ms: Date.now() - t0,
+        reason: "quota",
+        current: check.current,
+        limit: check.limit,
+      });
+      return errorEnvelope(
+        4291,
+        `Memory limit exceeded (current=${check.current}, limit=${check.limit})`,
+        requestId,
+      );
     }
   }
 
   try {
     const r = await pre.core.removeFiles(pre.data);
-    obsLogger.info("skill.handleFilesRemove.done", { req_id: requestId, code: 0, dur_ms: Date.now() - t0, skill_id: r.skill_id, version: r.version, paths: pre.data.paths.length });
+    obsLogger.info("skill.handleFilesRemove.done", {
+      req_id: requestId,
+      code: 0,
+      dur_ms: Date.now() - t0,
+      skill_id: r.skill_id,
+      version: r.version,
+      paths: pre.data.paths.length,
+    });
     return successEnvelope(toSummary(r), requestId);
   } catch (e) {
-    obsLogger.error("skill.handleFilesRemove.done", { req_id: requestId, dur_ms: Date.now() - t0, skill_id: pre.data.skill_id, expected_version: pre.data.expected_version }, e instanceof Error ? e : undefined);
-    return mapCoreError(e, requestId, deps, { skill_id: pre.data.skill_id, expected_version: pre.data.expected_version });
+    obsLogger.error(
+      "skill.handleFilesRemove.done",
+      {
+        req_id: requestId,
+        dur_ms: Date.now() - t0,
+        skill_id: pre.data.skill_id,
+        expected_version: pre.data.expected_version,
+      },
+      e instanceof Error ? e : undefined,
+    );
+    return mapCoreError(e, requestId, deps, {
+      skill_id: pre.data.skill_id,
+      expected_version: pre.data.expected_version,
+    });
   }
 }
 
-export async function handleFilesRead(body: unknown, _auth: V2AuthContext, requestId: string, deps: SkillRouterDeps): Promise<ApiResponseEnvelope> {
+export async function handleFilesRead(
+  body: unknown,
+  _auth: V3AuthContext,
+  requestId: string,
+  deps: SkillRouterDeps,
+): Promise<ApiResponseEnvelope> {
   const t0 = Date.now();
-  const pre = await precheck(filesReadRequestSchema, body, _auth, deps, requestId);
-  if (!pre.ok) { obsLogger.warn("skill.handleFilesRead.done", { req_id: requestId, code: pre.envelope.code, dur_ms: Date.now() - t0, reason: "precheck" }); return pre.envelope; }
+  const pre = await precheck(
+    filesReadRequestSchema,
+    body,
+    _auth,
+    deps,
+    requestId,
+  );
+  if (!pre.ok) {
+    obsLogger.warn("skill.handleFilesRead.done", {
+      req_id: requestId,
+      code: pre.envelope.code,
+      dur_ms: Date.now() - t0,
+      reason: "precheck",
+    });
+    return pre.envelope;
+  }
   try {
     const r = await pre.core.readFile(pre.data);
-    obsLogger.info("skill.handleFilesRead.done", { req_id: requestId, code: 0, dur_ms: Date.now() - t0, skill_id: pre.data.skill_id,
+    obsLogger.info("skill.handleFilesRead.done", {
+      req_id: requestId,
+      code: 0,
+      dur_ms: Date.now() - t0,
+      skill_id: pre.data.skill_id,
       version: r.version,
       size_bytes: r.size_bytes,
-      encoding: r.encoding, });
+      encoding: r.encoding,
+    });
     return successEnvelope(r, requestId);
-  } catch (e) { obsLogger.error("skill.handleFilesRead.done", { req_id: requestId, dur_ms: Date.now() - t0, skill_id: pre.data.skill_id }, e instanceof Error ? e : undefined); return mapCoreError(e, requestId); }
+  } catch (e) {
+    obsLogger.error(
+      "skill.handleFilesRead.done",
+      {
+        req_id: requestId,
+        dur_ms: Date.now() - t0,
+        skill_id: pre.data.skill_id,
+      },
+      e instanceof Error ? e : undefined,
+    );
+    return mapCoreError(e, requestId);
+  }
 }
 
-export async function handleExport(body: unknown, _auth: V2AuthContext, requestId: string, deps: SkillRouterDeps): Promise<ApiResponseEnvelope> {
+export async function handleExport(
+  body: unknown,
+  _auth: V3AuthContext,
+  requestId: string,
+  deps: SkillRouterDeps,
+): Promise<ApiResponseEnvelope> {
   const t0 = Date.now();
   const pre = await precheck(exportRequestSchema, body, _auth, deps, requestId);
   if (!pre.ok) {
     obsLogger.warn("skill.handleExport.done", {
-      req_id: requestId, code: pre.envelope.code, dur_ms: Date.now() - t0, reason: "precheck",
+      req_id: requestId,
+      code: pre.envelope.code,
+      dur_ms: Date.now() - t0,
+      reason: "precheck",
     });
     return pre.envelope;
   }
   try {
     const r = await pre.core.exportSkill(pre.data);
     obsLogger.info("skill.handleExport.done", {
-      req_id: requestId, code: 0, dur_ms: Date.now() - t0,
-      skill_id: pre.data.skill_id, version: r.version,
-      file_count: r.file_count, total_bytes: r.total_bytes,
+      req_id: requestId,
+      code: 0,
+      dur_ms: Date.now() - t0,
+      skill_id: pre.data.skill_id,
+      version: r.version,
+      file_count: r.file_count,
+      total_bytes: r.total_bytes,
     });
     return successEnvelope(r, requestId);
   } catch (e) {
-    obsLogger.error("skill.handleExport.done", {
-      req_id: requestId, dur_ms: Date.now() - t0, skill_id: pre.data.skill_id,
-    }, e instanceof Error ? e : undefined);
+    obsLogger.error(
+      "skill.handleExport.done",
+      {
+        req_id: requestId,
+        dur_ms: Date.now() - t0,
+        skill_id: pre.data.skill_id,
+      },
+      e instanceof Error ? e : undefined,
+    );
     return mapCoreError(e, requestId);
   }
 }
 
-export async function handleListing(body: unknown, _auth: V2AuthContext, requestId: string, deps: SkillRouterDeps): Promise<ApiResponseEnvelope> {
+export async function handleListing(
+  body: unknown,
+  _auth: V3AuthContext,
+  requestId: string,
+  deps: SkillRouterDeps,
+): Promise<ApiResponseEnvelope> {
   const t0 = Date.now();
-  const pre = await precheck(listingRequestSchema, body, _auth, deps, requestId);
-  if (!pre.ok) { obsLogger.warn("skill.handleListing.done", { req_id: requestId, code: pre.envelope.code, dur_ms: Date.now() - t0, reason: "precheck" }); return pre.envelope; }
+  const pre = await precheck(
+    listingRequestSchema,
+    body,
+    _auth,
+    deps,
+    requestId,
+  );
+  if (!pre.ok) {
+    obsLogger.warn("skill.handleListing.done", {
+      req_id: requestId,
+      code: pre.envelope.code,
+      dur_ms: Date.now() - t0,
+      reason: "precheck",
+    });
+    return pre.envelope;
+  }
   try {
     const charBudget = pre.data.char_budget ?? 8000;
     const query = (pre.data.query ?? "").trim();
@@ -682,7 +1280,12 @@ export async function handleListing(body: unknown, _auth: V2AuthContext, request
     const topK = routing?.searchTopK ?? 20;
 
     // search mode: select retrieval algorithm based on routing.mode; fallback to list head (query is empty).
-    type Item = { skill_id: string; name: string; description: string; version: number };
+    type Item = {
+      skill_id: string;
+      name: string;
+      description: string;
+      version: number;
+    };
     let items: Item[];
     let mode: "full" | "search";
     if (useSearch) {
@@ -719,25 +1322,45 @@ export async function handleListing(body: unknown, _auth: V2AuthContext, request
 
     // Render listing; truncate by char_budget (keep head + explicit truncation marker).
     const lines = items.map((s) => `- ${s.name}: ${s.description}`);
-    let listing = lines.length === 0
-      ? "<available_skills>\n(none)\n</available_skills>"
-      : `<available_skills>\n${lines.join("\n")}\n</available_skills>`;
+    let listing =
+      lines.length === 0
+        ? "<available_skills>\n(none)\n</available_skills>"
+        : `<available_skills>\n${lines.join("\n")}\n</available_skills>`;
 
     if (listing.length > charBudget) {
       const truncated = listing.slice(0, Math.max(0, charBudget - 32));
       listing = `${truncated}\n... [truncated]\n</available_skills>`;
     }
 
-    obsLogger.info("skill.handleListing.done", { req_id: requestId, code: 0, dur_ms: Date.now() - t0, mode,
+    obsLogger.info("skill.handleListing.done", {
+      req_id: requestId,
+      code: 0,
+      dur_ms: Date.now() - t0,
+      mode,
       hits: items.length,
       listing_len: listing.length,
-      truncated: listing.length >= charBudget, });
-    return successEnvelope({
-      mode,
-      listing,
-      hits: items.map((s) => ({ skill_id: s.skill_id, version: s.version, name: s.name })),
-    }, requestId);
-  } catch (e) { obsLogger.error("skill.handleListing.done", { req_id: requestId, dur_ms: Date.now() - t0 }, e instanceof Error ? e : undefined); return mapCoreError(e, requestId); }
+      truncated: listing.length >= charBudget,
+    });
+    return successEnvelope(
+      {
+        mode,
+        listing,
+        hits: items.map((s) => ({
+          skill_id: s.skill_id,
+          version: s.version,
+          name: s.name,
+        })),
+      },
+      requestId,
+    );
+  } catch (e) {
+    obsLogger.error(
+      "skill.handleListing.done",
+      { req_id: requestId, dur_ms: Date.now() - t0 },
+      e instanceof Error ? e : undefined,
+    );
+    return mapCoreError(e, requestId);
+  }
 }
 
 /**
@@ -750,7 +1373,12 @@ export async function handleListing(body: unknown, _auth: V2AuthContext, request
  *
  * See `docs/design/2026-07-17-skill-extract-direct-trigger-plan.md`.
  */
-export async function handleExtract(body: unknown, auth: V2AuthContext, requestId: string, deps: SkillRouterDeps): Promise<ApiResponseEnvelope> {
+export async function handleExtract(
+  body: unknown,
+  auth: V3AuthContext,
+  requestId: string,
+  deps: SkillRouterDeps,
+): Promise<ApiResponseEnvelope> {
   // [obs] handler internal segmentation goes through obsLogger: one info event per segment, with structured fields
   // (req_id / dur_ms / …), which can be linked throughout by req_id; obsLogger has internal try/catch,
   // so even if the logger backend is down, it won't affect business.
@@ -759,31 +1387,60 @@ export async function handleExtract(body: unknown, auth: V2AuthContext, requestI
   const t0Parse = Date.now();
   const parsed = extractRequestSchema.safeParse(body);
   obsLogger.info("skill.handleExtract.schema_parse", {
-    req_id: requestId, dur_ms: Date.now() - t0Parse, ok: parsed.success,
+    req_id: requestId,
+    dur_ms: Date.now() - t0Parse,
+    ok: parsed.success,
   });
   if (!parsed.success) {
-    obsLogger.warn("skill.handleExtract.done", { req_id: requestId, code: 40001, dur_ms: Date.now() - t0, reason: "schema" });
+    obsLogger.warn("skill.handleExtract.done", {
+      req_id: requestId,
+      code: 40001,
+      dur_ms: Date.now() - t0,
+      reason: "schema",
+    });
     return errorEnvelope(40001, formatZodErr(parsed.error), requestId);
   }
   const input = parsed.data;
 
   if (!deps.resolveConversationAdd) {
-    obsLogger.warn("skill.handleExtract.done", { req_id: requestId, code: 50301, dur_ms: Date.now() - t0, reason: "not_wired" });
-    return errorEnvelope(50301, "skill extract not wired (resolveConversationAdd missing)", requestId);
+    obsLogger.warn("skill.handleExtract.done", {
+      req_id: requestId,
+      code: 50301,
+      dur_ms: Date.now() - t0,
+      reason: "not_wired",
+    });
+    return errorEnvelope(
+      50301,
+      "skill extract not wired (resolveConversationAdd missing)",
+      requestId,
+    );
   }
   const t0Wire = Date.now();
   const wired = await deps.resolveConversationAdd(auth.serviceId);
   obsLogger.info("skill.handleExtract.resolve_wired", {
-    req_id: requestId, dur_ms: Date.now() - t0Wire, service_id: auth.serviceId, hit: !!wired,
+    req_id: requestId,
+    dur_ms: Date.now() - t0Wire,
+    service_id: auth.serviceId,
+    hit: !!wired,
   });
   if (!wired) {
-    obsLogger.warn("skill.handleExtract.done", { req_id: requestId, code: 50301, dur_ms: Date.now() - t0, reason: "not_wired_for_instance" });
-    return errorEnvelope(50301, "skill extract not wired for this instance", requestId);
+    obsLogger.warn("skill.handleExtract.done", {
+      req_id: requestId,
+      code: 50301,
+      dur_ms: Date.now() - t0,
+      reason: "not_wired_for_instance",
+    });
+    return errorEnvelope(
+      50301,
+      "skill extract not wired for this instance",
+      requestId,
+    );
   }
 
   // direct-trigger always generates a one-time session id (prefix sx-) —— because it has no cross-turn buffer,
   // session_id only determines the COS archive path segment, and it is independent for each call; it is also accepted if the caller passes it.
-  const sessionId = input.session_id ?? `sx-${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+  const sessionId =
+    input.session_id ?? `sx-${randomUUID().replace(/-/g, "").slice(0, 8)}`;
 
   // Compression + Fallback Strategy (Redesigned 2026-08-10):
   //   ① Total < chunkMax → Full archive, no compression, no truncation
@@ -805,7 +1462,8 @@ export async function handleExtract(body: unknown, auth: V2AuthContext, requestI
         tailKeepBytes: skillCfg.extraction.tailKeepBytes,
       }
     : DEFAULT_OVERSIZE_OPTIONS;
-  const chunkMax = oversizeOpts.chunkMaxBytes ?? DEFAULT_OVERSIZE_OPTIONS.chunkMaxBytes;
+  const chunkMax =
+    oversizeOpts.chunkMaxBytes ?? DEFAULT_OVERSIZE_OPTIONS.chunkMaxBytes;
 
   const t0Prep = Date.now();
   const incoming: CompressibleMessage[] = input.messages.map((m) => ({
@@ -817,24 +1475,25 @@ export async function handleExtract(body: unknown, auth: V2AuthContext, requestI
 
   // First calculate the raw bytes, only compress + fallback when exceeding chunkMax
   const rawBytes = incoming.reduce(
-    (sum, m) => sum + Buffer.byteLength(JSON.stringify(m), "utf8"), 0,
+    (sum, m) => sum + Buffer.byteLength(JSON.stringify(m), "utf8"),
+    0,
   );
   const needCompress = rawBytes >= chunkMax;
 
-  const prepared = prepareArchivePayload(
-    /* existing */ [],
-    incoming,
-    {
-      compress: compressOpts,
-      oversize: oversizeOpts,
-      forceCompress: needCompress,
-    },
-  );
+  const prepared = prepareArchivePayload(/* existing */ [], incoming, {
+    compress: compressOpts,
+    oversize: oversizeOpts,
+    forceCompress: needCompress,
+  });
   obsLogger.info("skill.handleExtract.prepare_archive", {
-    req_id: requestId, dur_ms: Date.now() - t0Prep,
-    msg_in: input.messages.length, msg_out: prepared.messages.length,
-    raw_bytes: rawBytes, need_compress: needCompress,
-    used_compress: prepared.usedCompress, used_oversize: prepared.usedOversize,
+    req_id: requestId,
+    dur_ms: Date.now() - t0Prep,
+    msg_in: input.messages.length,
+    msg_out: prepared.messages.length,
+    raw_bytes: rawBytes,
+    need_compress: needCompress,
+    used_compress: prepared.usedCompress,
+    used_oversize: prepared.usedOversize,
   });
 
   // space_id prioritizes body (for backward compatibility with early callers), falling back to auth.serviceId by default ——
@@ -860,7 +1519,9 @@ export async function handleExtract(body: unknown, auth: V2AuthContext, requestI
         agent_id: input.agent_id,
         session_id: sessionId,
       },
-      bufferAtTrigger: { messages: prepared.messages as Array<Record<string, unknown>> },
+      bufferAtTrigger: {
+        messages: prepared.messages as Array<Record<string, unknown>>,
+      },
       taskRefId: input.task_id,
       reason: input.reason,
       maxIterations: input.options?.max_iterations,
@@ -868,13 +1529,21 @@ export async function handleExtract(body: unknown, auth: V2AuthContext, requestI
       perfRequestId: requestId,
     });
     obsLogger.info("skill.handleExtract.trigger_archive", {
-      req_id: requestId, dur_ms: Date.now() - t0Archive,
-      task_id: res.taskId, archive_key: res.archiveKey,
+      req_id: requestId,
+      dur_ms: Date.now() - t0Archive,
+      task_id: res.taskId,
+      archive_key: res.archiveKey,
     });
 
     try {
-      metricProducer.send({ metric: "skill.extract.request", instanceId: input.team_id, value: 1 });
-    } catch { /* noop */ }
+      metricProducer.send({
+        metric: "skill.extract.request",
+        instanceId: input.team_id,
+        value: 1,
+      });
+    } catch {
+      /* noop */
+    }
 
     // trace.report backend span: aligned with create/update/patch/delete; task_id is the anchor,
     // in clickhouse / langfuse, worker-side skill.worker.task_done can be retrieved by task_id.
@@ -888,19 +1557,40 @@ export async function handleExtract(body: unknown, auth: V2AuthContext, requestI
         msg_count: prepared.messages.length,
         success: true,
       });
-    } catch { /* noop */ }
+    } catch {
+      /* noop */
+    }
 
-    obsLogger.info("skill.handleExtract.done", { req_id: requestId, code: 0, dur_ms: Date.now() - t0, task_id: res.taskId, msg_count: prepared.messages.length, });
-    return successEnvelope({
-      ok: true,
+    obsLogger.info("skill.handleExtract.done", {
+      req_id: requestId,
+      code: 0,
+      dur_ms: Date.now() - t0,
       task_id: res.taskId,
-      archived_at_ms: res.archivedAtMs,
-      archive_key: res.archiveKey,
-    }, requestId);
+      msg_count: prepared.messages.length,
+    });
+    return successEnvelope(
+      {
+        ok: true,
+        task_id: res.taskId,
+        archived_at_ms: res.archivedAtMs,
+        archive_key: res.archiveKey,
+      },
+      requestId,
+    );
   } catch (e) {
-    deps.logger.warn(`${TAG} /v3/skill/extract archive failed: ${(e as Error).message} req_id=${requestId}`);
-    obsLogger.error("skill.handleExtract.done", { req_id: requestId, dur_ms: Date.now() - t0, reason: "archive_failed" }, e instanceof Error ? e : undefined);
-    return errorEnvelope(50001, (e as Error).message ?? "internal error", requestId);
+    deps.logger.warn(
+      `${TAG} /v3/skill/extract archive failed: ${(e as Error).message} req_id=${requestId}`,
+    );
+    obsLogger.error(
+      "skill.handleExtract.done",
+      { req_id: requestId, dur_ms: Date.now() - t0, reason: "archive_failed" },
+      e instanceof Error ? e : undefined,
+    );
+    return errorEnvelope(
+      50001,
+      (e as Error).message ?? "internal error",
+      requestId,
+    );
   }
 }
 
@@ -918,7 +1608,7 @@ export async function handleExtract(body: unknown, auth: V2AuthContext, requestI
  */
 export async function handleConversationAdd(
   body: unknown,
-  auth: V2AuthContext,
+  auth: V3AuthContext,
   requestId: string,
   deps: SkillRouterDeps,
 ): Promise<ApiResponseEnvelope> {
@@ -930,16 +1620,32 @@ export async function handleConversationAdd(
   const t0 = Date.now();
 
   if (!deps.resolveConversationAdd) {
-    obsLogger.warn("skill.handleConversationAdd.done", { req_id: requestId, code: 404, dur_ms: Date.now() - t0, reason: "not_wired" });
-    return errorEnvelope(404, "Skill conversation-add module not enabled", requestId);
+    obsLogger.warn("skill.handleConversationAdd.done", {
+      req_id: requestId,
+      code: 404,
+      dur_ms: Date.now() - t0,
+      reason: "not_wired",
+    });
+    return errorEnvelope(
+      404,
+      "Skill conversation-add module not enabled",
+      requestId,
+    );
   }
   const t0Parse = Date.now();
   const parsed = conversationAddRequestSchema.safeParse(body);
   obsLogger.info("skill.handleConversationAdd.schema_parse", {
-    req_id: requestId, dur_ms: Date.now() - t0Parse, ok: parsed.success,
+    req_id: requestId,
+    dur_ms: Date.now() - t0Parse,
+    ok: parsed.success,
   });
   if (!parsed.success) {
-    obsLogger.warn("skill.handleConversationAdd.done", { req_id: requestId, code: 40001, dur_ms: Date.now() - t0, reason: "schema" });
+    obsLogger.warn("skill.handleConversationAdd.done", {
+      req_id: requestId,
+      code: 40001,
+      dur_ms: Date.now() - t0,
+      reason: "schema",
+    });
     return errorEnvelope(40001, formatZodErr(parsed.error), requestId);
   }
   const input = parsed.data;
@@ -949,11 +1655,23 @@ export async function handleConversationAdd(
   const t0Wire = Date.now();
   const wired = await deps.resolveConversationAdd(auth.serviceId);
   obsLogger.info("skill.handleConversationAdd.resolve_wired", {
-    req_id: requestId, dur_ms: Date.now() - t0Wire, service_id: auth.serviceId, hit: !!wired,
+    req_id: requestId,
+    dur_ms: Date.now() - t0Wire,
+    service_id: auth.serviceId,
+    hit: !!wired,
   });
   if (!wired) {
-    obsLogger.warn("skill.handleConversationAdd.done", { req_id: requestId, code: 404, dur_ms: Date.now() - t0, reason: "not_wired_for_instance" });
-    return errorEnvelope(404, "Skill conversation-add module not enabled for this instance", requestId);
+    obsLogger.warn("skill.handleConversationAdd.done", {
+      req_id: requestId,
+      code: 404,
+      dur_ms: Date.now() - t0,
+      reason: "not_wired_for_instance",
+    });
+    return errorEnvelope(
+      404,
+      "Skill conversation-add module not enabled for this instance",
+      requestId,
+    );
   }
 
   // space_id prioritizes body, falling back to auth.serviceId (same processing as handleExtract).
@@ -988,8 +1706,10 @@ export async function handleConversationAdd(
       perfRequestId: requestId,
     });
     obsLogger.info("skill.handleConversationAdd.handler_handle", {
-      req_id: requestId, dur_ms: Date.now() - t0Handle,
-      status: out.status, reason: out.archived?.reason,
+      req_id: requestId,
+      dur_ms: Date.now() - t0Handle,
+      status: out.status,
+      reason: out.archived?.reason,
     });
 
     try {
@@ -1004,23 +1724,49 @@ export async function handleConversationAdd(
         msg_count: input.messages.length,
         success: true,
       });
-    } catch { /* noop */ }
+    } catch {
+      /* noop */
+    }
 
-    obsLogger.info("skill.handleConversationAdd.done", { req_id: requestId, code: 0, dur_ms: Date.now() - t0, status: out.status,
+    obsLogger.info("skill.handleConversationAdd.done", {
+      req_id: requestId,
+      code: 0,
+      dur_ms: Date.now() - t0,
+      status: out.status,
       reason: out.archived?.reason,
       task_id: out.archived?.task_id,
-      msg_count: input.messages.length, });
+      msg_count: input.messages.length,
+    });
     return successEnvelope(out, requestId);
   } catch (err) {
     // HandlerValidationError → 400; others → 500
-    const isValidation = err instanceof Error && err.name === "HandlerValidationError";
+    const isValidation =
+      err instanceof Error && err.name === "HandlerValidationError";
     if (isValidation) {
-      obsLogger.error("skill.handleConversationAdd.done", { req_id: requestId, dur_ms: Date.now() - t0, field: (err as { field?: string }).field }, err instanceof Error ? err : undefined);
+      obsLogger.error(
+        "skill.handleConversationAdd.done",
+        {
+          req_id: requestId,
+          dur_ms: Date.now() - t0,
+          field: (err as { field?: string }).field,
+        },
+        err instanceof Error ? err : undefined,
+      );
       return errorEnvelope(40001, err.message, requestId);
     }
-    deps.logger.warn(`${TAG} /v3/skill/conversation/add failed: ${(err as Error).message}`);
-    obsLogger.error("skill.handleConversationAdd.done", { req_id: requestId, dur_ms: Date.now() - t0 }, err instanceof Error ? err : undefined);
-    return errorEnvelope(50001, (err as Error).message ?? "internal error", requestId);
+    deps.logger.warn(
+      `${TAG} /v3/skill/conversation/add failed: ${(err as Error).message}`,
+    );
+    obsLogger.error(
+      "skill.handleConversationAdd.done",
+      { req_id: requestId, dur_ms: Date.now() - t0 },
+      err instanceof Error ? err : undefined,
+    );
+    return errorEnvelope(
+      50001,
+      (err as Error).message ?? "internal error",
+      requestId,
+    );
   }
 }
 
@@ -1031,28 +1777,51 @@ export async function handleConversationAdd(
 
 export async function handleForceArchive(
   body: unknown,
-  auth: V2AuthContext,
+  auth: V3AuthContext,
   requestId: string,
   deps: SkillRouterDeps,
 ): Promise<ApiResponseEnvelope> {
   const t0 = Date.now();
 
   if (!deps.resolveConversationAdd) {
-    obsLogger.warn("skill.handleForceArchive.done", { req_id: requestId, code: 50301, dur_ms: Date.now() - t0, reason: "not_wired" });
-    return errorEnvelope(50301, "skill force-archive not wired (resolveConversationAdd missing)", requestId);
+    obsLogger.warn("skill.handleForceArchive.done", {
+      req_id: requestId,
+      code: 50301,
+      dur_ms: Date.now() - t0,
+      reason: "not_wired",
+    });
+    return errorEnvelope(
+      50301,
+      "skill force-archive not wired (resolveConversationAdd missing)",
+      requestId,
+    );
   }
 
   const parsed = forceArchiveRequestSchema.safeParse(body);
   if (!parsed.success) {
-    obsLogger.warn("skill.handleForceArchive.done", { req_id: requestId, code: 40001, dur_ms: Date.now() - t0, reason: "schema" });
+    obsLogger.warn("skill.handleForceArchive.done", {
+      req_id: requestId,
+      code: 40001,
+      dur_ms: Date.now() - t0,
+      reason: "schema",
+    });
     return errorEnvelope(40001, formatZodErr(parsed.error), requestId);
   }
   const input = parsed.data;
 
   const wired = await deps.resolveConversationAdd(auth.serviceId);
   if (!wired) {
-    obsLogger.warn("skill.handleForceArchive.done", { req_id: requestId, code: 50301, dur_ms: Date.now() - t0, reason: "not_wired_for_instance" });
-    return errorEnvelope(50301, "skill force-archive not wired for this instance", requestId);
+    obsLogger.warn("skill.handleForceArchive.done", {
+      req_id: requestId,
+      code: 50301,
+      dur_ms: Date.now() - t0,
+      reason: "not_wired_for_instance",
+    });
+    return errorEnvelope(
+      50301,
+      "skill force-archive not wired for this instance",
+      requestId,
+    );
   }
 
   const sess = {
@@ -1077,8 +1846,16 @@ export async function handleForceArchive(
 
     // Buffer is empty: no archiving needed
     if (!current.messages || current.messages.length === 0) {
-      obsLogger.info("skill.handleForceArchive.done", { req_id: requestId, code: 0, dur_ms: Date.now() - t0, status: "empty" });
-      return successEnvelope({ status: "empty", message: "No messages in buffer to archive" }, requestId);
+      obsLogger.info("skill.handleForceArchive.done", {
+        req_id: requestId,
+        code: 0,
+        dur_ms: Date.now() - t0,
+        status: "empty",
+      });
+      return successEnvelope(
+        { status: "empty", message: "No messages in buffer to archive" },
+        requestId,
+      );
     }
 
     // unconditionally call trigger.archive (skip threshold check)
@@ -1108,19 +1885,35 @@ export async function handleForceArchive(
     ]);
 
     obsLogger.info("skill.handleForceArchive.done", {
-      req_id: requestId, code: 0, dur_ms: Date.now() - t0,
-      status: "archived", task_id: archiveRes.taskId,
-    });
-    return successEnvelope({
+      req_id: requestId,
+      code: 0,
+      dur_ms: Date.now() - t0,
       status: "archived",
       task_id: archiveRes.taskId,
-      archived_at_ms: archiveRes.archivedAtMs,
-      archive_key: archiveRes.archiveKey,
-    }, requestId);
+    });
+    return successEnvelope(
+      {
+        status: "archived",
+        task_id: archiveRes.taskId,
+        archived_at_ms: archiveRes.archivedAtMs,
+        archive_key: archiveRes.archiveKey,
+      },
+      requestId,
+    );
   } catch (err) {
-    deps.logger.warn(`${TAG} /v3/skill/conversation/force-archive failed: ${(err as Error).message} req_id=${requestId}`);
-    obsLogger.error("skill.handleForceArchive.done", { req_id: requestId, dur_ms: Date.now() - t0 }, err instanceof Error ? err : undefined);
-    return errorEnvelope(50001, (err as Error).message ?? "internal error", requestId);
+    deps.logger.warn(
+      `${TAG} /v3/skill/conversation/force-archive failed: ${(err as Error).message} req_id=${requestId}`,
+    );
+    obsLogger.error(
+      "skill.handleForceArchive.done",
+      { req_id: requestId, dur_ms: Date.now() - t0 },
+      err instanceof Error ? err : undefined,
+    );
+    return errorEnvelope(
+      50001,
+      (err as Error).message ?? "internal error",
+      requestId,
+    );
   }
 }
 
@@ -1130,7 +1923,7 @@ export async function handleForceArchive(
 
 export type SkillHandler = (
   body: unknown,
-  auth: V2AuthContext,
+  auth: V3AuthContext,
   requestId: string,
   deps: SkillRouterDeps,
 ) => Promise<ApiResponseEnvelope>;

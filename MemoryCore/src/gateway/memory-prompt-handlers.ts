@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { ZodError } from "zod";
 
-import { errorEnvelope, successEnvelope } from "./v2-router.js";
-import type { ApiResponseEnvelope, V2AuthContext } from "./v2-schemas.js";
+import { errorEnvelope, successEnvelope } from "./v3-router.js";
+import type { ApiResponseEnvelope, V3AuthContext } from "./v3-schemas.js";
 import type { IMemoryStore } from "../core/store/types.js";
 import {
   buildMemoryPromptSettingId,
@@ -23,7 +23,9 @@ import {
 } from "./memory-prompt-schemas.js";
 
 function formatZodErr(error: ZodError): string {
-  return error.issues.map((issue) => `${issue.path.join(".") || "request"}: ${issue.message}`).join("; ");
+  return error.issues
+    .map((issue) => `${issue.path.join(".") || "request"}: ${issue.message}`)
+    .join("; ");
 }
 
 type PromptDeps = {
@@ -48,17 +50,33 @@ function missingStore(requestId: string): ApiResponseEnvelope {
 }
 
 function unsupportedStore(requestId: string): ApiResponseEnvelope {
-  return errorEnvelope(503, "Memory prompt store does not support this operation", requestId);
+  return errorEnvelope(
+    503,
+    "Memory prompt store does not support this operation",
+    requestId,
+  );
 }
 
-async function handleCreate(body: unknown, _auth: V2AuthContext, requestId: string, deps: unknown): Promise<ApiResponseEnvelope> {
+async function handleCreate(
+  body: unknown,
+  _auth: V3AuthContext,
+  requestId: string,
+  deps: unknown,
+): Promise<ApiResponseEnvelope> {
   const parsed = memoryPromptCreateSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodErr(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodErr(parsed.error), requestId);
   const store = getStore(deps);
   if (!store) return missingStore(requestId);
-  if (!store.countMemoryPrompts || !store.createMemoryPrompt) return unsupportedStore(requestId);
+  if (!store.countMemoryPrompts || !store.createMemoryPrompt)
+    return unsupportedStore(requestId);
   const count = await store.countMemoryPrompts();
-  if (count >= 500) return errorEnvelope(409, "PROMPT_LIMIT_EXCEEDED: maximum 500 prompts per instance", requestId);
+  if (count >= 500)
+    return errorEnvelope(
+      409,
+      "PROMPT_LIMIT_EXCEEDED: maximum 500 prompts per instance",
+      requestId,
+    );
   const now = Date.now();
   const id = `mp-${randomUUID()}`;
   const record = await store.createMemoryPrompt({
@@ -73,16 +91,25 @@ async function handleCreate(body: unknown, _auth: V2AuthContext, requestId: stri
     created_at_ms: now,
     updated_at_ms: now,
   });
-  return successEnvelope({
-    memory_prompt_id: record.memory_prompt_id,
-    version: record.version,
-    created_at_ms: record.created_at_ms,
-  }, requestId);
+  return successEnvelope(
+    {
+      memory_prompt_id: record.memory_prompt_id,
+      version: record.version,
+      created_at_ms: record.created_at_ms,
+    },
+    requestId,
+  );
 }
 
-async function handleGet(body: unknown, _auth: V2AuthContext, requestId: string, deps: unknown): Promise<ApiResponseEnvelope> {
+async function handleGet(
+  body: unknown,
+  _auth: V3AuthContext,
+  requestId: string,
+  deps: unknown,
+): Promise<ApiResponseEnvelope> {
   const parsed = memoryPromptGetSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodErr(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodErr(parsed.error), requestId);
   const store = getStore(deps);
   if (!store) return missingStore(requestId);
   const data = parsed.data;
@@ -99,28 +126,40 @@ async function handleGet(body: unknown, _auth: V2AuthContext, requestId: string,
       agentId: data.agent_id,
       layer: data.layer,
     });
-    return successEnvelope(resolved ?? {
-      memory_prompt_id: `builtin:${data.layer}`,
-      prompt: "",
-      layer: data.layer,
-      source: "system",
-      version: 1,
-    }, requestId);
+    return successEnvelope(
+      resolved ?? {
+        memory_prompt_id: `builtin:${data.layer}`,
+        prompt: "",
+        layer: data.layer,
+        source: "system",
+        version: 1,
+      },
+      requestId,
+    );
   }
   if (!store.listMemoryPrompts) return unsupportedStore(requestId);
-  return successEnvelope({
-    items: await store.listMemoryPrompts({
-      layer: data.layer,
-      limit: data.limit,
-      offset: data.offset,
-      timeOrder: data.time_order,
-    }),
-  }, requestId);
+  return successEnvelope(
+    {
+      items: await store.listMemoryPrompts({
+        layer: data.layer,
+        limit: data.limit,
+        offset: data.offset,
+        timeOrder: data.time_order,
+      }),
+    },
+    requestId,
+  );
 }
 
-async function handleUpdate(body: unknown, _auth: V2AuthContext, requestId: string, deps: unknown): Promise<ApiResponseEnvelope> {
+async function handleUpdate(
+  body: unknown,
+  _auth: V3AuthContext,
+  requestId: string,
+  deps: unknown,
+): Promise<ApiResponseEnvelope> {
   const parsed = memoryPromptUpdateSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodErr(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodErr(parsed.error), requestId);
   const store = getStore(deps);
   if (!store) return missingStore(requestId);
   if (!store.updateMemoryPrompt) return unsupportedStore(requestId);
@@ -131,38 +170,73 @@ async function handleUpdate(body: unknown, _auth: V2AuthContext, requestId: stri
     updated_at_ms: Date.now(),
   });
   return record
-    ? successEnvelope({ memory_prompt_id: record.memory_prompt_id, version: record.version, updated_at_ms: record.updated_at_ms }, requestId)
+    ? successEnvelope(
+        {
+          memory_prompt_id: record.memory_prompt_id,
+          version: record.version,
+          updated_at_ms: record.updated_at_ms,
+        },
+        requestId,
+      )
     : errorEnvelope(404, "MEMORY_PROMPT_NOT_FOUND", requestId);
 }
 
-async function handleDelete(body: unknown, _auth: V2AuthContext, requestId: string, deps: unknown): Promise<ApiResponseEnvelope> {
+async function handleDelete(
+  body: unknown,
+  _auth: V3AuthContext,
+  requestId: string,
+  deps: unknown,
+): Promise<ApiResponseEnvelope> {
   const parsed = memoryPromptDeleteSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodErr(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodErr(parsed.error), requestId);
   const store = getStore(deps);
   if (!store) return missingStore(requestId);
-  if (!store.getMemoryPrompts || !store.deleteMemoryPrompts) return unsupportedStore(requestId);
+  if (!store.getMemoryPrompts || !store.deleteMemoryPrompts)
+    return unsupportedStore(requestId);
   const records = await store.getMemoryPrompts(parsed.data.memory_prompt_ids);
   if (records.length !== parsed.data.memory_prompt_ids.length) {
-    return errorEnvelope(404, "MEMORY_PROMPT_NOT_FOUND: batch delete requires every id to exist", requestId);
+    return errorEnvelope(
+      404,
+      "MEMORY_PROMPT_NOT_FOUND: batch delete requires every id to exist",
+      requestId,
+    );
   }
   return successEnvelope(
-    await store.deleteMemoryPrompts(parsed.data.memory_prompt_ids, operatorId(deps)),
+    await store.deleteMemoryPrompts(
+      parsed.data.memory_prompt_ids,
+      operatorId(deps),
+    ),
     requestId,
   );
 }
 
-function targetsOf(data: { team_id?: string; agent_ids?: string[] }): Array<{ teamId?: string; agentId?: string }> {
-  if (data.agent_ids) return data.agent_ids.map((agentId) => ({ teamId: data.team_id, agentId }));
+function targetsOf(data: {
+  team_id?: string;
+  agent_ids?: string[];
+}): Array<{ teamId?: string; agentId?: string }> {
+  if (data.agent_ids)
+    return data.agent_ids.map((agentId) => ({ teamId: data.team_id, agentId }));
   if (data.team_id) return [{ teamId: data.team_id }];
   return [{}];
 }
 
-async function handleSet(body: unknown, _auth: V2AuthContext, requestId: string, deps: unknown): Promise<ApiResponseEnvelope> {
+async function handleSet(
+  body: unknown,
+  _auth: V3AuthContext,
+  requestId: string,
+  deps: unknown,
+): Promise<ApiResponseEnvelope> {
   const parsed = memoryPromptSetSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodErr(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodErr(parsed.error), requestId);
   const store = getStore(deps);
   if (!store) return missingStore(requestId);
-  if (!store.getMemoryPromptSettings || !store.upsertMemoryPromptSettings || !store.clearMemoryPromptSettings) {
+  if (
+    !store.getMemoryPromptSettings ||
+    !store.upsertMemoryPromptSettings ||
+    !store.clearMemoryPromptSettings
+  ) {
     return unsupportedStore(requestId);
   }
   const data = parsed.data;
@@ -170,15 +244,21 @@ async function handleSet(body: unknown, _auth: V2AuthContext, requestId: string,
   if (data.action === "apply") {
     if (!store.getMemoryPrompts) return unsupportedStore(requestId);
     const prompt = (await store.getMemoryPrompts([data.memory_prompt_id!]))[0];
-    if (!prompt || prompt.status !== "active") return errorEnvelope(404, "MEMORY_PROMPT_NOT_FOUND", requestId);
-    if (prompt.layer !== data.layer) return errorEnvelope(400, "PROMPT_LAYER_MISMATCH", requestId);
+    if (!prompt || prompt.status !== "active")
+      return errorEnvelope(404, "MEMORY_PROMPT_NOT_FOUND", requestId);
+    if (prompt.layer !== data.layer)
+      return errorEnvelope(400, "PROMPT_LAYER_MISMATCH", requestId);
     promptId = prompt.memory_prompt_id;
   }
 
   const targets = targetsOf(data);
-  const ids = targets.map((target) => buildMemoryPromptSettingId(target, data.layer));
+  const ids = targets.map((target) =>
+    buildMemoryPromptSettingId(target, data.layer),
+  );
   const current = await store.getMemoryPromptSettings(ids);
-  const currentById = new Map(current.map((setting) => [setting.setting_id, setting]));
+  const currentById = new Map(
+    current.map((setting) => [setting.setting_id, setting]),
+  );
   const now = Date.now();
   const operator = operatorId(deps);
   const logs: MemoryPromptSettingLogRecord[] = [];
@@ -239,51 +319,76 @@ async function handleSet(body: unknown, _auth: V2AuthContext, requestId: string,
   return successEnvelope({ affected: records.length }, requestId);
 }
 
-async function handleSettingList(body: unknown, _auth: V2AuthContext, requestId: string, deps: unknown): Promise<ApiResponseEnvelope> {
+async function handleSettingList(
+  body: unknown,
+  _auth: V3AuthContext,
+  requestId: string,
+  deps: unknown,
+): Promise<ApiResponseEnvelope> {
   const parsed = memoryPromptSettingListSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodErr(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodErr(parsed.error), requestId);
   const store = getStore(deps);
   if (!store) return missingStore(requestId);
   if (!store.listMemoryPromptSettings) return unsupportedStore(requestId);
-  return successEnvelope({
-    items: await store.listMemoryPromptSettings({
-      memoryPromptId: parsed.data.memory_prompt_id,
-      targetType: parsed.data.target_type,
-      teamId: parsed.data.team_id,
-      agentId: parsed.data.agent_id,
-      layer: parsed.data.layer,
-      limit: parsed.data.limit,
-      offset: parsed.data.offset,
-      timeOrder: parsed.data.time_order,
-    }),
-  }, requestId);
+  return successEnvelope(
+    {
+      items: await store.listMemoryPromptSettings({
+        memoryPromptId: parsed.data.memory_prompt_id,
+        targetType: parsed.data.target_type,
+        teamId: parsed.data.team_id,
+        agentId: parsed.data.agent_id,
+        layer: parsed.data.layer,
+        limit: parsed.data.limit,
+        offset: parsed.data.offset,
+        timeOrder: parsed.data.time_order,
+      }),
+    },
+    requestId,
+  );
 }
 
-async function handleLog(body: unknown, _auth: V2AuthContext, requestId: string, deps: unknown): Promise<ApiResponseEnvelope> {
+async function handleLog(
+  body: unknown,
+  _auth: V3AuthContext,
+  requestId: string,
+  deps: unknown,
+): Promise<ApiResponseEnvelope> {
   const parsed = memoryPromptLogSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodErr(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodErr(parsed.error), requestId);
   const store = getStore(deps);
   if (!store) return missingStore(requestId);
   if (!store.queryMemoryPromptSettingLogs) return unsupportedStore(requestId);
   const now = Date.now();
-  const start = parsed.data.start_time ? Date.parse(parsed.data.start_time) : now - 7 * 24 * 60 * 60 * 1000;
+  const start = parsed.data.start_time
+    ? Date.parse(parsed.data.start_time)
+    : now - 7 * 24 * 60 * 60 * 1000;
   const end = parsed.data.end_time ? Date.parse(parsed.data.end_time) : now;
-  return successEnvelope({
-    items: await store.queryMemoryPromptSettingLogs({
-      memoryPromptId: parsed.data.memory_prompt_id,
-      teamId: parsed.data.team_id,
-      agentId: parsed.data.agent_id,
-      action: parsed.data.action,
-      startTimeMs: start,
-      endTimeMs: end,
-      limit: parsed.data.limit,
-      offset: parsed.data.offset,
-      timeOrder: parsed.data.time_order,
-    }),
-  }, requestId);
+  return successEnvelope(
+    {
+      items: await store.queryMemoryPromptSettingLogs({
+        memoryPromptId: parsed.data.memory_prompt_id,
+        teamId: parsed.data.team_id,
+        agentId: parsed.data.agent_id,
+        action: parsed.data.action,
+        startTimeMs: start,
+        endTimeMs: end,
+        limit: parsed.data.limit,
+        offset: parsed.data.offset,
+        timeOrder: parsed.data.time_order,
+      }),
+    },
+    requestId,
+  );
 }
 
-type RouteHandler = (body: unknown, auth: V2AuthContext, requestId: string, deps: unknown) => Promise<ApiResponseEnvelope>;
+type RouteHandler = (
+  body: unknown,
+  auth: V3AuthContext,
+  requestId: string,
+  deps: unknown,
+) => Promise<ApiResponseEnvelope>;
 
 export function makeMemoryPromptRouteTable(): Record<string, RouteHandler> {
   return {

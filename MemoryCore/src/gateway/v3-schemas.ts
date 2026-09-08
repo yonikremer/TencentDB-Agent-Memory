@@ -291,7 +291,7 @@ export const conversationDeleteRequestSchema = z
     const messageIds = dedupeIdList(data.message_ids ?? []);
     const sessionIds = dedupeIdList([
       ...(data.session_ids ?? []),
-      ...(data.session_id !== undefined ? [data.session_id] : []),
+      ...(data.session_id === undefined ? [] : [data.session_id]),
     ]);
     return { message_ids: messageIds, session_ids: sessionIds };
   })
@@ -423,4 +423,4 @@ export const v2AuthContextSchema = z.object({
   apiKey: z.string().min(1),
   serviceId: z.string().min(1),
 });
-export type V2AuthContext = z.infer<typeof v2AuthContextSchema>;
+export type V3AuthContext = z.infer<typeof v2AuthContextSchema>;

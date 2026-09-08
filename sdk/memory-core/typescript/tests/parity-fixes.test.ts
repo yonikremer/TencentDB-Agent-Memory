@@ -93,3 +93,18 @@ describe("StsCredential missing PathPrefix", () => {
     expect(c.prefix).toBe("/");
   });
 });
+
+describe("offload v3 paths", () => {
+  const ISO = { team_id: "t1", agent_id: "a1", user_id: "u1" };
+  it("posts ingest/compact/query-mmd to /v3/offload/*", async () => {
+    const fake = new FakeTransport();
+    const c = new MemoryClient(fake, ISO);
+    await c.offloadIngest({ session_id: "s", tool_pairs: [], prompt: "p" });
+    expect(fake.calls[0]!.path).toBe("/v3/offload/ingest");
+    await c.offloadCompact({ session_id: "s", messages: [], ratio: 0.9, context_window: 1000, total_tokens: 100 });
+    expect(fake.calls[1]!.path).toBe("/v3/offload/compact");
+    await c.offloadQueryMmd({ session_id: "s", limit: 1 });
+    expect(fake.calls[2]!.path).toBe("/v3/offload/query-mmd");
+    expect(fake.calls[2]!.body).toEqual({ session_id: "s", limit: 1 });
+  });
+});

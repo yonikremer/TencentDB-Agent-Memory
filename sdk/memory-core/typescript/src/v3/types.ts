@@ -12,6 +12,12 @@ import type {
   CoreFile,
   CoreWriteData,
   CountData,
+  OffloadCompactData,
+  OffloadCompactRequest,
+  OffloadIngestData,
+  OffloadIngestRequest,
+  OffloadQueryMmdData,
+  OffloadQueryMmdRequest,
   ScenarioEntry,
   ScenarioFile,
   ScenarioListData,
@@ -207,3 +213,12 @@ export interface V3CoreWriteRequest {
 }
 export type V3CoreWriteData = CoreWriteData;
 export type V3CountData = CountData;
+
+// -- Offload (Ingest + Compaction + MMD) ----------------------------------------
+
+export type V3OffloadIngestRequest = OffloadIngestRequest;
+export type V3OffloadIngestData = OffloadIngestData;
+export type V3OffloadCompactRequest = OffloadCompactRequest;
+export type V3OffloadCompactData = OffloadCompactData;
+export type V3OffloadQueryMmdRequest = OffloadQueryMmdRequest;
+export type V3OffloadQueryMmdData = OffloadQueryMmdData;
