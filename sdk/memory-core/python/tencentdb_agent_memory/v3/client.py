@@ -680,7 +680,12 @@ class MemoryClient:
         return self._stub.post(
             f"{_V3}/offload/compact",
             _offload_compact_body(
-                session_id, messages, ratio, total_tokens, context_window, message_tokens
+                session_id,
+                messages,
+                ratio,
+                total_tokens,
+                context_window,
+                message_tokens,
             ),
         )
 
@@ -1133,7 +1138,12 @@ class AsyncMemoryClient:
         return await self._stub.post(
             f"{_V3}/offload/compact",
             _offload_compact_body(
-                session_id, messages, ratio, total_tokens, context_window, message_tokens
+                session_id,
+                messages,
+                ratio,
+                total_tokens,
+                context_window,
+                message_tokens,
             ),
         )
 

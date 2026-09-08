@@ -1222,8 +1222,8 @@ export class TdaiGateway {
    *   - `"invalid"`       — token present but did not match the configured key
    *
    * Caller is responsible for translating `"missing"` / `"invalid"` into the
-   * appropriate 401 response (v1 plain-text via {@link checkAuth} or v2
-   * envelope via {@link checkAuthForV3}).
+   * appropriate 401 response (plain-text via {@link checkAuth} or envelope
+   * via {@link checkAuthForV3}).
    */
   private verifyAuth(req: http.IncomingMessage): "ok" | "missing" | "invalid" {
     const expected = this.config.server.apiKey;
@@ -1241,7 +1241,7 @@ export class TdaiGateway {
   }
 
   /**
-   * v1 / admin auth gate. Writes a plain-text 401 on failure (legacy format
+   * Admin auth gate. Writes a plain-text 401 on failure (legacy format
    * preserved so existing curl-based callers keep working). Returns `false`
    * when the request must be short-circuited.
    */
@@ -1262,8 +1262,8 @@ export class TdaiGateway {
   }
 
   /**
-   * v2 auth gate. Same verification as {@link checkAuth} but returns the
-   * v2 standardized error envelope on failure so v2 clients see a consistent
+   * Bearer auth gate. Same verification as {@link checkAuth} but returns the
+   * standardized error envelope on failure so API clients see a consistent
    * `{ code, message, request_id }` shape.
    *
    * The existing in-router `parseV3Auth` (which checks for non-empty Bearer

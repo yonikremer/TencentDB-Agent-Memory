@@ -49,11 +49,14 @@ import type {
 const V3 = "/v3";
 
 function stripUndefined(obj: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined));
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== undefined),
+  );
 }
 
 function requireNonEmpty(name: string, value: string | undefined): string {
-  if (!value) throw new ParamError(`v3 MemoryClient requires non-empty ${name}`);
+  if (!value)
+    throw new ParamError(`v3 MemoryClient requires non-empty ${name}`);
   return value;
 }
 
@@ -94,8 +97,8 @@ class IsolationContext {
     if (!sid) {
       throw new ParamError(
         "v3 MemoryClient.addConversation requires session_id: " +
-        "pass it in the constructor or per call. " +
-        "Reads (query/search/count) may omit it to aggregate across sessions.",
+          "pass it in the constructor or per call. " +
+          "Reads (query/search/count) may omit it to aggregate across sessions.",
       );
     }
     return sid;
@@ -106,8 +109,10 @@ class IsolationContext {
       overrides.teamId ?? this.teamId,
       overrides.agentId ?? this.agentId,
       overrides.userId ?? this.userId,
-      overrides.sessionId === null ? undefined : overrides.sessionId ?? this.sessionId,
-      overrides.taskId === null ? undefined : overrides.taskId ?? this.taskId,
+      overrides.sessionId === null
+        ? undefined
+        : (overrides.sessionId ?? this.sessionId),
+      overrides.taskId === null ? undefined : (overrides.taskId ?? this.taskId),
     );
   }
 }
@@ -146,7 +151,9 @@ function normalizeDeleteIds(
   }
   const deduped = [...new Set(raw.map((id) => id.trim()))];
   if (deduped.length > max) {
-    throw new ParamError(`${field} accepts at most ${max} items, got ${deduped.length}`);
+    throw new ParamError(
+      `${field} accepts at most ${max} items, got ${deduped.length}`,
+    );
   }
   return deduped;
 }
@@ -157,9 +164,15 @@ export class MemoryClient {
 
   constructor(config: V3MemoryClientConfig);
   constructor(transport: Transport, isolation: V3IsolationContext);
-  constructor(configOrTransport: V3MemoryClientConfig | Transport, isolation?: V3IsolationContext) {
+  constructor(
+    configOrTransport: V3MemoryClientConfig | Transport,
+    isolation?: V3IsolationContext,
+  ) {
     if ("post" in configOrTransport) {
-      if (!isolation) throw new ParamError("v3 MemoryClient transport constructor requires isolation context");
+      if (!isolation)
+        throw new ParamError(
+          "v3 MemoryClient transport constructor requires isolation context",
+        );
       this.http = configOrTransport;
       this.iso = new IsolationContext(
         isolation.team_id,
@@ -181,7 +194,13 @@ export class MemoryClient {
       timeout: cfg.timeout,
       rejectUnauthorized: cfg.rejectUnauthorized,
     });
-    this.iso = new IsolationContext(cfg.teamId, cfg.agentId, cfg.userId, cfg.sessionId, cfg.taskId);
+    this.iso = new IsolationContext(
+      cfg.teamId,
+      cfg.agentId,
+      cfg.userId,
+      cfg.sessionId,
+      cfg.taskId,
+    );
   }
 
   withIsolation(overrides: V3IsolationOverrides): MemoryClient {
@@ -197,34 +216,49 @@ export class MemoryClient {
 
   // -- L0 Conversation ---------------------------------------------------
 
-  addConversation(params: V3ConversationAddRequest): Promise<V3ConversationAddData> {
-    return this.http.post(`${V3}/conversation/add`, stripUndefined({
-      ...this.iso.baseBody(),
-      session_id: this.iso.resolveSessionForWrite(params.session_id),
-      messages: params.messages,
-    }));
+  addConversation(
+    params: V3ConversationAddRequest,
+  ): Promise<V3ConversationAddData> {
+    return this.http.post(
+      `${V3}/conversation/add`,
+      stripUndefined({
+        ...this.iso.baseBody(),
+        session_id: this.iso.resolveSessionForWrite(params.session_id),
+        messages: params.messages,
+      }),
+    );
   }
 
-  queryConversation(params: V3ConversationQueryRequest = {}): Promise<V3ConversationQueryData> {
-    return this.http.post(`${V3}/conversation/query`, stripUndefined({
-      ...this.iso.baseBody(),
-      session_id: this.iso.resolveSession(params.session_id),
-      limit: params.limit,
-      offset: params.offset,
-      time_start: params.time_start,
-      time_end: params.time_end,
-    }));
+  queryConversation(
+    params: V3ConversationQueryRequest = {},
+  ): Promise<V3ConversationQueryData> {
+    return this.http.post(
+      `${V3}/conversation/query`,
+      stripUndefined({
+        ...this.iso.baseBody(),
+        session_id: this.iso.resolveSession(params.session_id),
+        limit: params.limit,
+        offset: params.offset,
+        time_start: params.time_start,
+        time_end: params.time_end,
+      }),
+    );
   }
 
-  searchConversation(params: V3ConversationSearchRequest): Promise<V3ConversationSearchData> {
-    return this.http.post(`${V3}/conversation/search`, stripUndefined({
-      ...this.iso.baseBody(),
-      session_id: this.iso.resolveSession(params.session_id),
-      query: params.query,
-      limit: params.limit,
-      time_start: params.time_start,
-      time_end: params.time_end,
-    }));
+  searchConversation(
+    params: V3ConversationSearchRequest,
+  ): Promise<V3ConversationSearchData> {
+    return this.http.post(
+      `${V3}/conversation/search`,
+      stripUndefined({
+        ...this.iso.baseBody(),
+        session_id: this.iso.resolveSession(params.session_id),
+        query: params.query,
+        limit: params.limit,
+        time_start: params.time_start,
+        time_end: params.time_end,
+      }),
+    );
   }
 
   /**
@@ -236,12 +270,25 @@ export class MemoryClient {
    * operation, if it automatically brings the default session like read interfaces, callers who only want to delete a few messages by message_ids
    * will accidentally delete the entire session. To delete sessions you must explicitly pass `session_ids`.
    */
-  deleteConversation(params: V3ConversationDeleteRequest = {}): Promise<V3ConversationDeleteData> {
-    const messageIds = normalizeDeleteIds("message_ids", params.message_ids, 5000);
+  deleteConversation(
+    params: V3ConversationDeleteRequest = {},
+  ): Promise<V3ConversationDeleteData> {
+    const messageIds = normalizeDeleteIds(
+      "message_ids",
+      params.message_ids,
+      5000,
+    );
     // Accepts both session_ids (recommended) and the deprecated singular session_id, normalized to an array.
-    const sessionIds = normalizeDeleteIds("session_ids", params.session_ids, 100);
+    const sessionIds = normalizeDeleteIds(
+      "session_ids",
+      params.session_ids,
+      100,
+    );
     const legacySingle = params.session_id;
-    if (legacySingle !== undefined && (typeof legacySingle !== "string" || !legacySingle.trim())) {
+    if (
+      legacySingle !== undefined &&
+      (typeof legacySingle !== "string" || !legacySingle.trim())
+    ) {
       throw new ParamError("session_id must be a non-empty string");
     }
     const mergedSessions = legacySingle
@@ -251,60 +298,77 @@ export class MemoryClient {
     if (!messageIds?.length && !mergedSessions?.length) {
       throw new ParamError(
         "deleteConversation requires message_ids or session_ids " +
-        "(the constructor session_id is intentionally NOT used for deletes)",
+          "(the constructor session_id is intentionally NOT used for deletes)",
       );
     }
 
-    return this.http.post(`${V3}/conversation/delete`, stripUndefined({
-      ...this.iso.baseBody(),
-      message_ids: messageIds,
-      session_ids: mergedSessions,
-    }));
+    return this.http.post(
+      `${V3}/conversation/delete`,
+      stripUndefined({
+        ...this.iso.baseBody(),
+        message_ids: messageIds,
+        session_ids: mergedSessions,
+      }),
+    );
   }
 
-  countConversation(params: V3ConversationCountRequest = {}): Promise<V3CountData> {
-    return this.http.post(`${V3}/conversation/count`, stripUndefined({
-      ...this.iso.baseBody(),
-      session_id: this.iso.resolveSession(params.session_id),
-      time_start: params.time_start,
-      time_end: params.time_end,
-    }));
+  countConversation(
+    params: V3ConversationCountRequest = {},
+  ): Promise<V3CountData> {
+    return this.http.post(
+      `${V3}/conversation/count`,
+      stripUndefined({
+        ...this.iso.baseBody(),
+        session_id: this.iso.resolveSession(params.session_id),
+        time_start: params.time_start,
+        time_end: params.time_end,
+      }),
+    );
   }
 
   // -- L1 Atomic ---------------------------------------------------------
 
   updateAtomic(params: V3AtomicUpdateRequest): Promise<V3AtomicUpdateData> {
-    return this.http.post(`${V3}/atomic/update`, stripUndefined({
-      ...this.iso.baseBody(),
-      session_id: this.iso.resolveSession(params.session_id),
-      id: params.id,
-      content: params.content,
-      background: params.background,
-    }));
+    return this.http.post(
+      `${V3}/atomic/update`,
+      stripUndefined({
+        ...this.iso.baseBody(),
+        session_id: this.iso.resolveSession(params.session_id),
+        id: params.id,
+        content: params.content,
+        background: params.background,
+      }),
+    );
   }
 
   queryAtomic(params: V3AtomicQueryRequest = {}): Promise<V3AtomicQueryData> {
-    return this.http.post(`${V3}/atomic/query`, stripUndefined({
-      ...this.iso.baseBody(),
-      session_id: this.iso.resolveSession(params.session_id),
-      type: params.type,
-      limit: params.limit,
-      offset: params.offset,
-      time_start: params.time_start,
-      time_end: params.time_end,
-    }));
+    return this.http.post(
+      `${V3}/atomic/query`,
+      stripUndefined({
+        ...this.iso.baseBody(),
+        session_id: this.iso.resolveSession(params.session_id),
+        type: params.type,
+        limit: params.limit,
+        offset: params.offset,
+        time_start: params.time_start,
+        time_end: params.time_end,
+      }),
+    );
   }
 
   searchAtomic(params: V3AtomicSearchRequest): Promise<V3AtomicSearchData> {
-    return this.http.post(`${V3}/atomic/search`, stripUndefined({
-      ...this.iso.baseBody(),
-      session_id: this.iso.resolveSession(params.session_id),
-      query: params.query,
-      limit: params.limit,
-      type: params.type,
-      time_start: params.time_start,
-      time_end: params.time_end,
-    }));
+    return this.http.post(
+      `${V3}/atomic/search`,
+      stripUndefined({
+        ...this.iso.baseBody(),
+        session_id: this.iso.resolveSession(params.session_id),
+        query: params.query,
+        limit: params.limit,
+        type: params.type,
+        time_start: params.time_start,
+        time_end: params.time_end,
+      }),
+    );
   }
 
   deleteAtomic(params: V3AtomicDeleteRequest): Promise<V3AtomicDeleteData> {
@@ -313,64 +377,102 @@ export class MemoryClient {
     if (!ids?.length) {
       throw new ParamError("deleteAtomic requires a non-empty ids list");
     }
-    return this.http.post(`${V3}/atomic/delete`, stripUndefined({
-      ...this.iso.baseBody(),
-      session_id: this.iso.resolveSession(params.session_id),
-      ids,
-    }));
+    return this.http.post(
+      `${V3}/atomic/delete`,
+      stripUndefined({
+        ...this.iso.baseBody(),
+        session_id: this.iso.resolveSession(params.session_id),
+        ids,
+      }),
+    );
   }
 
   countAtomic(params: V3AtomicCountRequest = {}): Promise<V3CountData> {
-    return this.http.post(`${V3}/atomic/count`, stripUndefined({
-      ...this.iso.baseBody(),
-      session_id: this.iso.resolveSession(params.session_id),
-      type: params.type,
-      time_start: params.time_start,
-      time_end: params.time_end,
-    }));
+    return this.http.post(
+      `${V3}/atomic/count`,
+      stripUndefined({
+        ...this.iso.baseBody(),
+        session_id: this.iso.resolveSession(params.session_id),
+        type: params.type,
+        time_start: params.time_start,
+        time_end: params.time_end,
+      }),
+    );
   }
 
   // -- L2 Scenario -------------------------------------------------------
 
-  listScenarios(params: V3ScenarioListRequest = {}): Promise<V3ScenarioListData> {
-    return this.http.post(`${V3}/scenario/ls`, stripUndefined({ ...this.iso.baseBody(), path_prefix: params.path_prefix }));
+  listScenarios(
+    params: V3ScenarioListRequest = {},
+  ): Promise<V3ScenarioListData> {
+    return this.http.post(
+      `${V3}/scenario/ls`,
+      stripUndefined({
+        ...this.iso.baseBody(),
+        path_prefix: params.path_prefix,
+      }),
+    );
   }
 
   readScenario(params: V3ScenarioReadRequest): Promise<V3ScenarioFile> {
-    return this.http.post(`${V3}/scenario/read`, stripUndefined({ ...this.iso.baseBody(), path: params.path }));
+    return this.http.post(
+      `${V3}/scenario/read`,
+      stripUndefined({ ...this.iso.baseBody(), path: params.path }),
+    );
   }
 
   writeScenario(params: V3ScenarioWriteRequest): Promise<V3ScenarioWriteData> {
-    return this.http.post(`${V3}/scenario/write`, stripUndefined({
-      ...this.iso.baseBody(),
-      path: params.path,
-      content: params.content,
-      summary: params.summary,
-    }));
+    return this.http.post(
+      `${V3}/scenario/write`,
+      stripUndefined({
+        ...this.iso.baseBody(),
+        path: params.path,
+        content: params.content,
+        summary: params.summary,
+      }),
+    );
   }
 
   rmScenario(params: V3ScenarioRmRequest): Promise<void> {
-    return this.http.post(`${V3}/scenario/rm`, stripUndefined({ ...this.iso.baseBody(), path: params.path }));
+    return this.http.post(
+      `${V3}/scenario/rm`,
+      stripUndefined({ ...this.iso.baseBody(), path: params.path }),
+    );
   }
 
   countScenario(params: V3ScenarioCountRequest = {}): Promise<V3CountData> {
-    return this.http.post(`${V3}/scenario/count`, stripUndefined({ ...this.iso.baseBody(), path_prefix: params.path_prefix }));
+    return this.http.post(
+      `${V3}/scenario/count`,
+      stripUndefined({
+        ...this.iso.baseBody(),
+        path_prefix: params.path_prefix,
+      }),
+    );
   }
 
   // -- L3 Core ------------------------------------------------------------
 
   readCore(_params: V3CoreReadRequest = {}): Promise<V3CoreFile> {
     // SAFETY: transport post takes an untyped body record; baseBody already returns the exact isolation shape.
-    return this.http.post(`${V3}/core/read`, this.iso.baseBody() as unknown as Record<string, unknown>);
+    return this.http.post(
+      `${V3}/core/read`,
+      this.iso.baseBody() as unknown as Record<string, unknown>,
+    );
   }
 
   writeCore(params: V3CoreWriteRequest): Promise<V3CoreWriteData> {
-    return this.http.post(`${V3}/core/write`, stripUndefined({ ...this.iso.baseBody(), content: params.content }));
+    return this.http.post(
+      `${V3}/core/write`,
+      stripUndefined({ ...this.iso.baseBody(), content: params.content }),
+    );
   }
 
   countCore(): Promise<V3CountData> {
     // SAFETY: transport post takes an untyped body record; baseBody already returns the exact isolation shape.
-    return this.http.post(`${V3}/core/count`, this.iso.baseBody() as unknown as Record<string, unknown>);
+    return this.http.post(
+      `${V3}/core/count`,
+      this.iso.baseBody() as unknown as Record<string, unknown>,
+    );
   }
 
   // -- Chat Memory (asset-level) -------------------------------------------
@@ -394,10 +496,14 @@ export class MemoryClient {
    * Failed items will carry a `retryable` flag; true means the server has automatically retried but still failed,
    * retry later to complete clearing remaining content.
    */
-  clearChatMemory(params: V3ChatMemoryClearRequest): Promise<V3ChatMemoryClearData> {
+  clearChatMemory(
+    params: V3ChatMemoryClearRequest,
+  ): Promise<V3ChatMemoryClearData> {
     const memoryIds = normalizeDeleteIds("memory_ids", params.memory_ids, 100);
     if (!memoryIds?.length) {
-      throw new ParamError("clearChatMemory requires a non-empty memory_ids list");
+      throw new ParamError(
+        "clearChatMemory requires a non-empty memory_ids list",
+      );
     }
     // Note: does not carry isolation tuple — scope is determined by memory_ids.
     return this.http.post(`${V3}/chat-memory/clear`, { memory_ids: memoryIds });
@@ -409,35 +515,48 @@ export class MemoryClient {
    * `POST /v3/offload/ingest` — report tool call pairs to trigger async L1 processing.
    */
   offloadIngest(params: V3OffloadIngestRequest): Promise<V3OffloadIngestData> {
-    return this.http.post(`${V3}/offload/ingest`, stripUndefined({
-      session_id: params.session_id,
-      tool_pairs: params.tool_pairs,
-      prompt: params.prompt,
-      recent_messages: params.recent_messages,
-    }));
+    return this.http.post(
+      `${V3}/offload/ingest`,
+      stripUndefined({
+        session_id: params.session_id,
+        tool_pairs: params.tool_pairs,
+        prompt: params.prompt,
+        recent_messages: params.recent_messages,
+      }),
+    );
   }
 
   /**
    * `POST /v3/offload/compact` — server-side context compaction.
    */
-  offloadCompact(params: V3OffloadCompactRequest): Promise<V3OffloadCompactData> {
-    return this.http.post(`${V3}/offload/compact`, stripUndefined({
-      session_id: params.session_id,
-      messages: params.messages,
-      ratio: params.ratio,
-      context_window: params.context_window,
-      total_tokens: params.total_tokens,
-      message_tokens: params.message_tokens,
-    }));
+  offloadCompact(
+    params: V3OffloadCompactRequest,
+  ): Promise<V3OffloadCompactData> {
+    return this.http.post(
+      `${V3}/offload/compact`,
+      stripUndefined({
+        session_id: params.session_id,
+        messages: params.messages,
+        ratio: params.ratio,
+        context_window: params.context_window,
+        total_tokens: params.total_tokens,
+        message_tokens: params.message_tokens,
+      }),
+    );
   }
 
   /**
    * `POST /v3/offload/query-mmd` — query the session task flow chart (MMD).
    */
-  offloadQueryMmd(params: V3OffloadQueryMmdRequest): Promise<V3OffloadQueryMmdData> {
-    return this.http.post(`${V3}/offload/query-mmd`, stripUndefined({
-      session_id: params.session_id,
-      limit: params.limit,
-    }));
+  offloadQueryMmd(
+    params: V3OffloadQueryMmdRequest,
+  ): Promise<V3OffloadQueryMmdData> {
+    return this.http.post(
+      `${V3}/offload/query-mmd`,
+      stripUndefined({
+        session_id: params.session_id,
+        limit: params.limit,
+      }),
+    );
   }
 }
