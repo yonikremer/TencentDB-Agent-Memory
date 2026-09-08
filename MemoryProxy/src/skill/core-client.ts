@@ -208,7 +208,7 @@ export interface ListingResult {
   hits: Array<{ skill_id: string; version: number; name: string }>;
 }
 
-/** Core gateway envelope (mirrors `tdai-memory-plugin/src/gateway/v2-router.ts:145-150`). */
+/** Core gateway envelope (mirrors `tdai-memory-plugin/src/gateway/v3-router.ts:145-150`). */
 interface CoreEnvelope<T> {
   code: number;
   message?: string;

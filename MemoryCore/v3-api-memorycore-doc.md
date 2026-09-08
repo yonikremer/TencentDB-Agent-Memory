@@ -11,7 +11,7 @@
 ### 1.1 Service and port
 
 | Item | Value |
-|---|---|
+| --- | --- |
 | Service | MemoryCore (memory kernel gateway) |
 | Port | 8420 |
 | Method | All `POST` (v3 is RPC-style, no GET) |
@@ -27,7 +27,7 @@ All v3 endpoints return a unified envelope:
 ```
 
 | Field | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | code | number | `0` = success; non-zero = failure. **Note**: skill-module failure codes are 5-digit numbers (see §1.6) |
 | message | string | Fixed `"ok"` on success; error description on failure (format in §1.6) |
 | request_id | string | Request ID, from `x-request-id` or generated server-side |
@@ -46,7 +46,7 @@ All v3 endpoints return a unified envelope:
 v3 endpoints fall into four auth layers (all require `Authorization: Bearer <KERNEL_AUTH_TOKEN>` as the Layer-1 gateway gate; not enforced when `apiKey` is unconfigured):
 
 | Layer | Route scope | Extra auth |
-|---|---|---|
+| --- | --- | --- |
 | Data plane | `/v3/conversation·atomic·scenario·core/*`, `/v3/skill/*`, `/v3/knowledge/*`, `/v3/chat-memory/*`, `/v3/memory-prompt/*`, `/v3/memory-generation-log/*` | `x-tdai-service-id` (instance ID) |
 | Metadata plane | `/v3/meta/*` | `x-tdai-service-id` + `x-tdai-user-key` (`auth/verify` exempt from user-key) |
 | Internal ops plane | `/v3/internal/meta/*` | Bearer only; user-key is **not** parsed |
@@ -57,7 +57,7 @@ v3 endpoints fall into four auth layers (all require `Authorization: Bearer <KER
 ### 1.5 Error-code semantics (data-plane common)
 
 | code | Meaning |
-|---|---|
+| --- | --- |
 | 400 | Invalid parameters (missing ID, mutually exclusive fields, empty input) |
 | 401 | Auth failure |
 | 403 | Ownership consistency check failed (e.g. `(team_id, agent_id)` is not a valid ownership pair, or `task_id` does not belong to `team_id`) |
@@ -73,7 +73,7 @@ v3 endpoints fall into four auth layers (all require `Authorization: Bearer <KER
 Different modules return different failure `message` formats; the frontend must handle each separately:
 
 | Module | message format | HTTP-code trait | Example |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | meta / internal-meta | `"{error_code}: {detail}"` (error_code is UPPER_SNAKE_CASE) | Standard 4xx/5xx | `"team_not_found: not found: t_1"` |
 | skill | `SkillCoreError.message` verbatim | **5-digit** (40001 etc.) | `"SKILL_NOT_FOUND: ..."` |
 | data-plane / knowledge / chat-memory / memory-prompt / generation-log | Plain text or plain uppercase enum | Standard 4xx/5xx | `"Knowledge not found"`, `"MEMORY_PROMPT_NOT_FOUND"`, `"Store not available"` |
@@ -83,7 +83,7 @@ Different modules return different failure `message` formats; the frontend must 
 ## 2. Endpoint directory
 
 | Module | Endpoints | Prefix |
-|---|---|---|
+| --- | --- | --- |
 | L0–L3 data plane | 18 | `/v3/conversation·atomic·scenario·core/*` |
 | Skill | 17 | `/v3/skill/*` |
 | Knowledge details | 5 | `/v3/knowledge/*` |
@@ -113,7 +113,7 @@ Writes L0 raw conversation messages. On success it asynchronously triggers the L
 **Request body**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | session_id | string | Yes | Business session ID |
 | messages | object[] | Yes | 1–100 entries, `{ role: "user"\|"assistant", content: 1–8192 chars, timestamp?, recorded_at? }` |
 | team_id / agent_id / user_id / task_id | string | No* | Isolation fields (*v3 enforces team+agent+user; falls back to the default bucket) |
@@ -121,7 +121,7 @@ Writes L0 raw conversation messages. On success it asynchronously triggers the L
 **Response** `data`
 
 | Field | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | accepted_ids | string[] | IDs of accepted messages |
 | accepted_versions | string[] | Same order as accepted_ids; new entries are always `v1` |
 | total_count | number | Total accepted |
@@ -164,7 +164,7 @@ Batch-deletes L0 by message_ids or session_ids.
 **Request body**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | message_ids | string[] | one of the two | up to 5000 |
 | session_ids | string[] | one of the two | up to 100 |
 | session_id | string | No | @deprecated, use session_ids |
@@ -191,7 +191,7 @@ Updates a single L1 memory atom (version auto-increments).
 
 **Response** `data`: `{ id, version, updated_at }`, where `version` is a **string** `"v{n}"` (e.g. `"v2"`).
 
-> ⚠️ Version-type inconsistency: `update` returns a string `"v{n}"`, but `query`/`search` return a **number** (`r.version ?? 0`). The root cause is in code (`generated/types.ts` declares `string "v1"`, but `v2-schemas.ts` overrides it to `number`); one document cannot satisfy both, so the frontend must handle each endpoint separately.
+> ⚠️ Version-type inconsistency: `update` returns a string `"v{n}"`, but `query`/`search` return a **number** (`r.version ?? 0`). The root cause is in code (`generated/types.ts` declares `string "v1"`, but `v3-schemas.ts` overrides it to `number`); one document cannot satisfy both, so the frontend must handle each endpoint separately.
 
 ### POST /v3/atomic/query
 
@@ -204,7 +204,7 @@ Paginated query of L1.
 **AtomicDetail** fields:
 
 | Field | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | id | string | Atom ID |
 | version | number | Current version (**query/search return a number**; note `update` returns a string `"v{n}"` — types are inconsistent) |
 | type | string | `episodic` / `persona` / `instruction` |
@@ -339,7 +339,7 @@ Creates a skill (on success it auto-registers a meta_asset and binds it to the o
 **Request body**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | name | string | Yes | ≤64 chars; must equal frontmatter.name |
 | content | string | Yes | Full SKILL.md content |
 | resources | object[] | No | ≤100 entries, `{ path ≤512, content, encoding: "utf-8"\|"base64", mime_type?, is_executable? }` |
@@ -492,7 +492,7 @@ direct-trigger: manually archives one session slice (equivalent to one independe
 **Request body**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | user_id / team_id / agent_id | string | Yes | none may contain `\|` |
 | messages | object[] | Yes | 1–500 entries, `{ role: user\|assistant\|tool_call\|tool_result\|system, content, timestamp?, tool_name?, tool_call_id? }` |
 | session_id | string | No | defaults to a generated `sx-` prefix |
@@ -508,7 +508,7 @@ Called synchronously at the end of each conversation turn; does concatenation + 
 **Request body**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | session_id / user_id / team_id / agent_id | string | Yes | none may contain `\|` |
 | messages | object[] | Yes | 1–500 entries (roles same as extract; `tool_call`/`tool_result` must carry tool_name + tool_call_id) |
 | space_id / task_id | string | No | — |
@@ -530,7 +530,7 @@ Manually force-archives the current session buffer (skips thresholds).
 **SkillSummary unified output** (returned by list/create/update etc.):
 
 | Field | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | skill_id | string | Globally unique, `skl-` prefix |
 | name | string | Name |
 | description | string? | Description |
@@ -625,7 +625,7 @@ Clears the **content** of several memories (L0/L1/L2/L3) while **keeping the ass
 **Response** `data`
 
 | Field | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | items | object[] | Per-memory clear result |
 | all_cleared | boolean | true if all succeeded |
 
@@ -670,6 +670,7 @@ Creates a prompt.
 ### POST /v3/memory-prompt/get
 
 Three modes (mutually exclusive):
+
 1. `memory_prompt_id` → returns a single prompt (returns 404 if not active).
 2. `layer` + (`team_id`/`agent_id`) → resolves the effective prompt (returns the built-in fallback if none).
 3. `layer` only → returns a list `{ items }`.
@@ -705,7 +706,7 @@ Sets the effective prompt (apply / clear).
 **Request body**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | action | string | Yes | `apply` / `clear` |
 | layer | string | Yes | l1/l2/l3 |
 | memory_prompt_id | string | required for apply | prompt ID |
@@ -753,6 +754,7 @@ Log list (last 7 days by default, cursor pagination).
 ### POST /v3/memory-generation-log/get
 
 Two modes:
+
 1. `log_id` → fetch the log directly.
 2. `memory_id` + `layer` → look up the generation log by memory.
 
@@ -773,7 +775,7 @@ Two modes:
 ### 3.7.1 User (5)
 
 | Endpoint | Auth | Description |
-|---|---|---|
+| --- | --- | --- |
 | `POST /user/create` | system_admin | Creates a normal user; returns `{ user_id, user_type, created_at, default_user_key }` |
 | `POST /user/create-with-key` | system_admin | Sister endpoint; can explicitly set user_key |
 | `POST /user/get` | self/admin | Looks up by user_id or user_key |
@@ -805,7 +807,7 @@ Two modes:
 ### 3.7.2 User-Key (5)
 
 | Endpoint | Description |
-|---|---|
+| --- | --- |
 | `POST /user-key/create` | Creates a key; `user_id` defaults to the current caller |
 | `POST /user-key/list` | Paginated list |
 | `POST /user-key/get` | Looks up by key_id (masked) |
@@ -819,7 +821,7 @@ Two modes:
 ### 3.7.3 Team (5)
 
 | Endpoint | Description |
-|---|---|
+| --- | --- |
 | `POST /team/create` | Creates a team |
 | `POST /team/get` | Looks up by team_id |
 | `POST /team/update` | Updates (owner cannot be changed) |
@@ -835,7 +837,7 @@ Two modes:
 ### 3.7.4 Team-Member (4)
 
 | Endpoint | Description |
-|---|---|
+| --- | --- |
 | `POST /team-member/add` | Adds a member |
 | `POST /team-member/remove` | Removes a member |
 | `POST /team-member/list` | Member list |
@@ -849,7 +851,7 @@ Two modes:
 ### 3.7.5 Agent (6)
 
 | Endpoint | Description |
-|---|---|
+| --- | --- |
 | `POST /agent/create` | Creates an agent |
 | `POST /agent/get` | Looks up by agent_id |
 | `POST /agent/update` | Updates (owner cannot be changed) |
@@ -880,7 +882,7 @@ Two modes:
 ### 3.7.6 Task (6)
 
 | Endpoint | Description |
-|---|---|
+| --- | --- |
 | `POST /task/create` | Creates a task (may carry linked_agents) |
 | `POST /task/get` | Looks up by task_id |
 | `POST /task/update` | Updates |
@@ -895,7 +897,7 @@ Two modes:
 ### 3.7.7 Task-Agent (3)
 
 | Endpoint | Description |
-|---|---|
+| --- | --- |
 | `POST /task-agent/link` | Links an agent to a task |
 | `POST /task-agent/unlink` | Unlinks |
 | `POST /task-agent/list` | Lists a task's agents |
@@ -907,7 +909,7 @@ Two modes:
 ### 3.7.8 Participation-Log (2)
 
 | Endpoint | Description |
-|---|---|
+| --- | --- |
 | `POST /participation-log/append` | Appends a participation event |
 | `POST /participation-log/list` | List (time/entity filters + dedupe) |
 
@@ -917,7 +919,7 @@ Two modes:
 ### 3.7.9 Asset (7)
 
 | Endpoint | Description |
-|---|---|
+| --- | --- |
 | `POST /asset/create` | Registers an asset (asset_id provided by caller) |
 | `POST /asset/get` | Looks up by asset_id |
 | `POST /asset/update` | Updates |
@@ -935,7 +937,7 @@ Two modes:
 ### 3.7.10 Agent-Fixed-Asset (4)
 
 | Endpoint | Description |
-|---|---|
+| --- | --- |
 | `POST /agent-fixed-asset/set` | Fully sets an agent's fixed-asset bindings |
 | `POST /agent-fixed-asset/list` | Paginated binding list |
 | `POST /agent-fixed-asset/list-with-detail` | With details + visibility filtering |
@@ -950,7 +952,7 @@ Two modes:
 ### 3.7.11 ACL (4)
 
 | Endpoint | Description |
-|---|---|
+| --- | --- |
 | `POST /acl/grant` | Grants permission |
 | `POST /acl/revoke` | Revokes |
 | `POST /acl/list` | Lists ACLs by asset |
@@ -994,7 +996,7 @@ Validates a user_key and returns the caller identity. **Exempt from user-key** (
 ### 3.7.13 Instance-Quota & Config (3)
 
 | Endpoint | Description |
-|---|---|
+| --- | --- |
 | `POST /instance-quota/get` | Fetches instance quota limits |
 | `POST /config/user/get` | Fetches user config (requires owner) |
 | `POST /config/user/set` | Sets user config (requires owner) |
@@ -1047,7 +1049,7 @@ Thoroughly cleans up all instance data (state/store/COS/quota + v3 metadata DBs)
 ### 4.1 Deprecated endpoints (v1 / v2, not in this volume's main text)
 
 | Category | Paths | Description |
-|---|---|---|
+| --- | --- | --- |
 | v1 legacy | `POST /recall`, `/capture`, `/search/memories`, `/search/conversations`, `/session/end`, `/seed` | Replaced by the v3 data-plane split (hermes migration doc lists the mapping) |
 | v2 data plane | `/v2/conversation·atomic·scenario·core/*` (14) | Dual entry to the same handler as v3; no count endpoints; looser isolation checks (team optional, may use legacyCompat) |
 | v2 entity | `/v2/team·user·agent·task/*` (16) | @deprecated; use `/v3/meta/*`; deletion planned |
@@ -1058,7 +1060,7 @@ Thoroughly cleans up all instance data (state/store/COS/quota + v3 metadata DBs)
 #### Skill (5-digit codes)
 
 | code | SkillCoreError | Description |
-|---|---|---|
+| --- | --- | --- |
 | 40001 | INVALID_FRONTMATTER / INVALID_PATH | frontmatter mismatch / invalid path |
 | 40301 | SKILL_NOT_OWNER | not the owner |
 | 40302 | SKILL_TEAM_MISMATCH | team mismatch |
@@ -1078,7 +1080,7 @@ Thoroughly cleans up all instance data (state/store/COS/quota + v3 metadata DBs)
 #### Meta / Internal-Meta (standard HTTP code; message carries error_code)
 
 | HTTP | error_code | Description |
-|---|---|---|
+| --- | --- | --- |
 | 400 | missing_instance_id / invalid_instance_id / missing_team_id / filter_not_allowed / invalid_user_ids | invalid params/instance |
 | 401 | invalid_credentials / invalid_password / unauthorized | auth failure |
 | 403 | permission_denied / agent_team_mismatch / task_agent_not_linked / user_inactive | permission/ownership |
@@ -1088,7 +1090,7 @@ Thoroughly cleans up all instance data (state/store/COS/quota + v3 metadata DBs)
 #### Data-plane / knowledge / chat-memory / memory-prompt / generation-log (standard HTTP code; message plain text or enum)
 
 | HTTP | message example | Description |
-|---|---|---|
+| --- | --- | --- |
 | 400 | field-validation failure text | Zod schema failure |
 | 403 | Knowledge team_id mismatch | ownership mismatch |
 | 404 | Knowledge not found / MEMORY_PROMPT_NOT_FOUND / MEMORY_GENERATION_LOG_NOT_FOUND | resource not found |

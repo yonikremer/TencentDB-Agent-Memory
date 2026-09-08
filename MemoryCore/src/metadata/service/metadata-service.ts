@@ -877,7 +877,7 @@ export class MetadataService {
       });
     } catch (err) {
       // No dedicated warn logger here (service layer only has PermCheckLogger.debug),
-      // use console.warn to be consistent with similar catch in v2-router.handleConversationAdd.
+      // use console.warn to be consistent with similar catch in v3-router.handleConversationAdd.
       console.warn(
         `[META] createAgent: ensureChatMemoryAsset failed (agent=${agent.agent_id} team=${agent.team_id}): ` +
         (err instanceof Error ? err.message : String(err)),
@@ -1235,7 +1235,7 @@ export class MetadataService {
    *     addAgentFixedAsset is absorbed by store layer as no-op
    *
    * Failure strategy: This method **will throw errors** (agent_not_found / team_mismatch / DB failure).
-   * Caller (handleConversationAdd in v2-router) is responsible for catch + logging warn only,
+   * Caller (handleConversationAdd in v3-router) is responsible for catch + logging warn only,
    * without blocking main flow conversation writing.
    */
   async ensureChatMemoryAsset(params: {

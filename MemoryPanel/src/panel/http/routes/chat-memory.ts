@@ -1872,7 +1872,7 @@ function requiredBlockId(body: Record<string, unknown>): string | null {
   return typeof t === "string" && t.trim() ? t.trim() : null;
 }
 
-// ── Batch delete limit (consistent with MemoryCore/src/gateway/v2-schemas.ts) ──
+// ── Batch delete limit (consistent with MemoryCore/src/gateway/v3-schemas.ts) ──
 /** Number of memory entries that can be cleared in a single /chat-memory/clear operation. */
 const MAX_CLEAR_MEMORY_IDS = 100;
 /** L0 Batch delete: message_ids limit. */

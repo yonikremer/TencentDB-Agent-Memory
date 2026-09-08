@@ -7,14 +7,24 @@
  */
 import type http from "node:http";
 import type { StorageAdapter } from "../../core/storage/adapter.js";
-import type { OffloadEntry, OffloadState, OffloadExecutorConfig, CompactState } from "../types.js";
+import type {
+  OffloadEntry,
+  OffloadState,
+  OffloadExecutorConfig,
+  CompactState,
+} from "../types.js";
 import { defaultOffloadState, defaultCompactState } from "../types.js";
 import { parseJsonl } from "../parsers/json-utils.js";
-import { CompactionRequestSchemaV2 } from "../schemas.js";
+import { CompactionRequestSchema } from "../schemas.js";
 import { buildOffloadBasePath } from "../session-utils.js";
 import { applyFastPath } from "./fast-path.js";
 import { injectActiveMmd, injectHistoryMmds } from "./mmd-injector.js";
-import { resolveLevel, mildCompress, aggressiveCompress, emergencyCompress } from "./compressor.js";
+import {
+  resolveLevel,
+  mildCompress,
+  aggressiveCompress,
+  emergencyCompress,
+} from "./compressor.js";
 import { estimateMessageTokens, extractToolResultId } from "./helpers.js";
 import type { Message } from "./helpers.js";
 import { traceServerCompaction } from "../opik-tracer.js";
@@ -22,7 +32,11 @@ import { traceServerCompaction } from "../opik-tracer.js";
 export interface CompactionDeps {
   storage: StorageAdapter;
   config: OffloadExecutorConfig;
-  logger: { info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void; error: (...args: unknown[]) => void };
+  logger: {
+    info: (...args: unknown[]) => void;
+    warn: (...args: unknown[]) => void;
+    error: (...args: unknown[]) => void;
+  };
 }
 
 export interface CompactionReport {
@@ -38,12 +52,12 @@ export interface CompactionReport {
 }
 
 /**
- * Handle POST /v2/offload/compact.
+ * Handle POST /v3/offload/compact.
  */
 export async function handleCompaction(
   req: http.IncomingMessage,
   res: http.ServerResponse,
-  auth: { serviceId: string },
+  _auth: { serviceId: string },
   deps: CompactionDeps,
   requestId: string,
   parseJsonBody: <T>(req: http.IncomingMessage) => Promise<T>,
@@ -52,13 +66,19 @@ export async function handleCompaction(
   errorEnvelope: (code: number, message: string, requestId: string) => unknown,
 ): Promise<void> {
   const body = await parseJsonBody(req);
-  const parsed = CompactionRequestSchemaV2.safeParse(body);
+  const parsed = CompactionRequestSchema.safeParse(body);
   if (!parsed.success) {
     sendJson(res, 400, errorEnvelope(400, parsed.error.message, requestId));
     return;
   }
 
-  const { session_id: sessionId, messages, ratio, context_window: contextWindow, message_tokens: messageTokens } = parsed.data;
+  const {
+    session_id: sessionId,
+    messages,
+    ratio,
+    context_window: contextWindow,
+    message_tokens: messageTokens,
+  } = parsed.data;
   let { total_tokens: totalTokens } = parsed.data;
   const { storage, config } = deps;
   const basePath = buildOffloadBasePath(sessionId);
@@ -72,13 +92,14 @@ export async function handleCompaction(
   // These are included in clientTotalTokens but NOT in messages.
   // overhead = clientTotal - sum(preciseMessageTokens for each message)
   const messagesTokenSum = (messages as any[]).reduce(
-    (s: number, msg: any) => s + preciseMessageTokens(msg), 0,
+    (s: number, msg: any) => s + preciseMessageTokens(msg),
+    0,
   );
   const fixedOverhead = Math.max(0, totalTokens - messagesTokenSum);
 
   deps.logger.info(
     `[offload-server] compaction: clientTotal=${totalTokens}, msgsTokens=${messagesTokenSum}, ` +
-    `overhead=${fixedOverhead}, msgs=${originalCount}, ratio=${ratio.toFixed(2)}`,
+      `overhead=${fixedOverhead}, msgs=${originalCount}, ratio=${ratio.toFixed(2)}`,
   );
 
   // Read offload state (L1/L1.5/L2 managed, read-only here) and compact state (L3 owned)
@@ -87,14 +108,21 @@ export async function handleCompaction(
   const entriesRaw = await storage.readFile(`${basePath}/entries.jsonl`);
   const entries = entriesRaw
     ? parseJsonl<OffloadEntry>(entriesRaw, (line, err) => {
-        deps.logger.warn(`[offload-server] compaction: bad JSONL line: ${line}`, err);
+        deps.logger.warn(
+          `[offload-server] compaction: bad JSONL line: ${line}`,
+          err,
+        );
       })
     : [];
 
   // Merge node-mapping.jsonl into entries (L2 writes node_id to a separate file)
-  const nodeMappingRaw = await storage.readFile(`${basePath}/node-mapping.jsonl`);
+  const nodeMappingRaw = await storage.readFile(
+    `${basePath}/node-mapping.jsonl`,
+  );
   if (nodeMappingRaw) {
-    const mappings = parseJsonl<{ tool_call_id: string; node_id: string }>(nodeMappingRaw);
+    const mappings = parseJsonl<{ tool_call_id: string; node_id: string }>(
+      nodeMappingRaw,
+    );
     const nodeMap = new Map(mappings.map((m) => [m.tool_call_id, m.node_id]));
     for (const entry of entries) {
       if (!entry.node_id && nodeMap.has(entry.tool_call_id)) {
@@ -106,7 +134,11 @@ export async function handleCompaction(
   // Token array: use tiktoken values directly (no calibration against clientTotal).
   // clientTotal includes fixedOverhead which is not in messages, so calibration
   // would inflate per-message tokens incorrectly.
-  const tokenArray = buildTokenArray(messages as Message[], messagesTokenSum, messageTokens);
+  const tokenArray = buildTokenArray(
+    messages as Message[],
+    messagesTokenSum,
+    messageTokens,
+  );
 
   const report: CompactionReport = {
     resolvedLevel: "fastpath",
@@ -129,14 +161,18 @@ export async function handleCompaction(
   // totalTokens = tiktoken(remaining messages) + fixedOverhead
   if (fp.deletedCount > 0) {
     const postFpMsgsTokens = (messages as any[]).reduce(
-      (s: number, msg: any) => s + preciseMessageTokens(msg), 0,
+      (s: number, msg: any) => s + preciseMessageTokens(msg),
+      0,
     );
     totalTokens = postFpMsgsTokens + fixedOverhead;
     // Rebuild tokenArray for remaining messages
     tokenArray.length = 0;
-    tokenArray.push(...buildTokenArray(messages as Message[], postFpMsgsTokens, undefined));
+    tokenArray.push(
+      ...buildTokenArray(messages as Message[], postFpMsgsTokens, undefined),
+    );
   }
-  const effectiveRatio = contextWindow > 0 ? totalTokens / contextWindow : ratio;
+  const effectiveRatio =
+    contextWindow > 0 ? totalTokens / contextWindow : ratio;
 
   // Step 2: Resolve compression level using post-fast-path ratio
   const level = resolveLevel(effectiveRatio, {
@@ -178,32 +214,52 @@ export async function handleCompaction(
   // Target: just below the aggressive trigger threshold (leave ~5% headroom)
   let aggRemainingTokens = totalTokens; // track for emergency
   if (level === "aggressive" || level === "emergency") {
-    const aggTargetTokens = Math.floor(contextWindow * (config.aggressiveCompressRatio - 0.05));
+    const aggTargetTokens = Math.floor(
+      contextWindow * (config.aggressiveCompressRatio - 0.05),
+    );
     // Skip aggressive if mild already brought tokens below target
     if (totalTokens <= aggTargetTokens) {
       deps.logger.info(
         `[offload-server] aggressive skipped: mild already reduced tokens to ${totalTokens} (target=${aggTargetTokens})`,
       );
     } else {
-      const agg = aggressiveCompress(messages, aggTargetTokens, tokenArray, totalTokens);
+      const agg = aggressiveCompress(
+        messages,
+        aggTargetTokens,
+        tokenArray,
+        totalTokens,
+      );
       report.aggressiveDeleted = agg.deletedCount;
       aggRemainingTokens = agg.remainingTokens;
       compactState.deletedOffloadIds.push(...agg.deletedIds);
 
       // Inject history MMDs for deleted entries
       if (agg.deletedIds.length > 0) {
-        const mmdBudget = Math.floor(contextWindow * 0.1 / 4); // 10% of context, in estimated tokens
+        const mmdBudget = Math.floor((contextWindow * 0.1) / 4); // 10% of context, in estimated tokens
         const hist = await injectHistoryMmds(
-          messages, agg.deletedIds, entries, state, storage, basePath, mmdBudget,
+          messages,
+          agg.deletedIds,
+          entries,
+          state,
+          storage,
+          basePath,
+          mmdBudget,
         );
         report.mmdInjected += hist.injectedCount;
         // Sync tokenArray for any injected MMD messages (calibrate against messages-only tokens)
         if (hist.injectedCount > 0) {
           const postAggMsgsTokens = (messages as any[]).reduce(
-            (s: number, msg: any) => s + preciseMessageTokens(msg), 0,
+            (s: number, msg: any) => s + preciseMessageTokens(msg),
+            0,
           );
           tokenArray.length = 0;
-          tokenArray.push(...buildTokenArray(messages as Message[], postAggMsgsTokens, undefined));
+          tokenArray.push(
+            ...buildTokenArray(
+              messages as Message[],
+              postAggMsgsTokens,
+              undefined,
+            ),
+          );
         }
       }
     }
@@ -212,8 +268,15 @@ export async function handleCompaction(
   // Step 6: Emergency compression
   // Target: just below the aggressive threshold (so next turn won't immediately re-trigger)
   if (level === "emergency") {
-    const emTargetTokens = Math.floor(contextWindow * (config.aggressiveCompressRatio - 0.10));
-    const em = emergencyCompress(messages, emTargetTokens, tokenArray, aggRemainingTokens);
+    const emTargetTokens = Math.floor(
+      contextWindow * (config.aggressiveCompressRatio - 0.1),
+    );
+    const em = emergencyCompress(
+      messages,
+      emTargetTokens,
+      tokenArray,
+      aggRemainingTokens,
+    );
     report.emergencyDeleted = em.deletedCount;
     aggRemainingTokens = em.remainingTokens;
     compactState.deletedOffloadIds.push(...em.deletedIds);
@@ -229,10 +292,12 @@ export async function handleCompaction(
   await writeCompactState(storage, basePath, compactState);
 
   // Compute remaining tokens (tracked from aggressive/emergency, no full re-scan)
-  const remainingTokens = level === "fastpath" || level === "mild"
-    ? totalTokens  // no deletion happened
-    : aggRemainingTokens;  // tracked through aggressive → emergency chain
-  const remainingRatio = contextWindow > 0 ? (remainingTokens / contextWindow).toFixed(2) : "N/A";
+  const remainingTokens =
+    level === "fastpath" || level === "mild"
+      ? totalTokens // no deletion happened
+      : aggRemainingTokens; // tracked through aggressive → emergency chain
+  const remainingRatio =
+    contextWindow > 0 ? (remainingTokens / contextWindow).toFixed(2) : "N/A";
 
   // Opik trace: compaction decision
   traceServerCompaction({
@@ -244,6 +309,7 @@ export async function handleCompaction(
     totalTokensAfter: remainingTokens,
     originalMsgCount: originalCount,
     compactedMsgCount: messages.length,
+    // SAFETY: CompactionReport is JSON-serializable counters/strings; the trace payload takes an untyped record, so this double-cast is lossless.
     report: report as unknown as Record<string, unknown>,
     messages: messages as unknown[],
     durationMs: Date.now() - compactionStartMs,
@@ -255,9 +321,9 @@ export async function handleCompaction(
 
   deps.logger.info(
     `[offload-server] compaction done: ${originalCount}→${messages.length} msgs, level=${level}, ` +
-    `tokens=${originalTotalTokens}→${remainingTokens} (${remainingRatio}), ` +
-    `fp=${fp.replacedCount}r/${fp.deletedCount}d, mild=${report.mildReplacements}, ` +
-    `agg=${report.aggressiveDeleted}, em=${report.emergencyDeleted}, mmd=${report.mmdInjected}`,
+      `tokens=${originalTotalTokens}→${remainingTokens} (${remainingRatio}), ` +
+      `fp=${fp.replacedCount}r/${fp.deletedCount}d, mild=${report.mildReplacements}, ` +
+      `agg=${report.aggressiveDeleted}, em=${report.emergencyDeleted}, mmd=${report.mmdInjected}`,
   );
 }
 
@@ -293,7 +359,10 @@ export function buildTokenArray(
   if (drift <= CALIBRATION_THRESHOLD) return raw;
 
   // Linear calibration: only scale estimated items, keep precise items unchanged
-  const factor = Math.max(CALIBRATION_FACTOR_MIN, Math.min(CALIBRATION_FACTOR_MAX, totalTokens / rawTotal));
+  const factor = Math.max(
+    CALIBRATION_FACTOR_MIN,
+    Math.min(CALIBRATION_FACTOR_MAX, totalTokens / rawTotal),
+  );
   return raw.map((v, i) =>
     messageTokens && i < messageTokens.length
       ? v
@@ -303,7 +372,10 @@ export function buildTokenArray(
 
 // ─── State Helpers ───────────────────────────────────────────────────────────
 
-async function readOffloadState(storage: StorageAdapter, basePath: string): Promise<OffloadState> {
+async function readOffloadState(
+  storage: StorageAdapter,
+  basePath: string,
+): Promise<OffloadState> {
   const raw = await storage.readFile(`${basePath}/state.json`);
   if (!raw) return defaultOffloadState();
   try {
@@ -313,7 +385,10 @@ async function readOffloadState(storage: StorageAdapter, basePath: string): Prom
   }
 }
 
-async function readCompactState(storage: StorageAdapter, basePath: string): Promise<CompactState> {
+async function readCompactState(
+  storage: StorageAdapter,
+  basePath: string,
+): Promise<CompactState> {
   const raw = await storage.readFile(`${basePath}/compact-state.json`);
   if (!raw) return defaultCompactState();
   try {
@@ -323,6 +398,13 @@ async function readCompactState(storage: StorageAdapter, basePath: string): Prom
   }
 }
 
-async function writeCompactState(storage: StorageAdapter, basePath: string, state: CompactState): Promise<void> {
-  await storage.writeFile(`${basePath}/compact-state.json`, JSON.stringify(state));
+async function writeCompactState(
+  storage: StorageAdapter,
+  basePath: string,
+  state: CompactState,
+): Promise<void> {
+  await storage.writeFile(
+    `${basePath}/compact-state.json`,
+    JSON.stringify(state),
+  );
 }

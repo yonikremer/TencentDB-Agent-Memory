@@ -28,7 +28,10 @@ import { applyMetadataEnvFromGatewayConfig } from "./metadata-env.js";
 import { initDataDirectories } from "../utils/pipeline-factory.js";
 import { SessionFilter } from "../utils/session-filter.js";
 import { WorkerPermitPool } from "../services/worker-permit-pool.js";
-import { createExtractorAdapter, SkillExtractor as SkillExtractorClass } from "../core/skill/skill-extractor.js";
+import {
+  createExtractorAdapter,
+  SkillExtractor as SkillExtractorClass,
+} from "../core/skill/skill-extractor.js";
 import type { SkillCore as SkillCoreType } from "../core/skill/skill-core.js";
 import type {
   HealthResponse,
@@ -54,13 +57,22 @@ import { initObservabilityBackend } from "../core/report/factory.js";
 import type { ObservabilityConfig as CoreObservabilityConfig } from "../core/report/types.js";
 import { TracedTaskExecutor } from "../core/report/traced-task-executor.js";
 import { StorePool } from "../core/store/store-pool.js";
-import { validateAndNormalizeRaw, SeedValidationError } from "../core/seed/input.js";
+import {
+  validateAndNormalizeRaw,
+  SeedValidationError,
+} from "../core/seed/input.js";
 import { executeSeed } from "../core/seed/seed-runtime.js";
 import type { SeedProgress } from "../core/seed/types.js";
-import { handleV2Route, errorEnvelope, makeRequestId } from "./v2-router.js";
-import type { V2RouterDeps } from "./v2-router.js";
-import { handleV3MetaRoute, V3_PREFIX } from "../metadata/router/v3-meta-router.js";
-import { handleInternalMetaRoute, V3_INTERNAL_PREFIX } from "../metadata/router/internal-meta-router.js";
+import { handleV3Route, errorEnvelope, makeRequestId } from "./v3-router.js";
+import type { V3RouterDeps } from "./v3-router.js";
+import {
+  handleV3MetaRoute,
+  V3_PREFIX,
+} from "../metadata/router/v3-meta-router.js";
+import {
+  handleInternalMetaRoute,
+  V3_INTERNAL_PREFIX,
+} from "../metadata/router/internal-meta-router.js";
 import { MetadataService } from "../metadata/service/metadata-service.js";
 import { ConfigParamService } from "../metadata/service/config-param-service.js";
 import { loadDefaultRegistry } from "../metadata/config/param-registry.js";
@@ -86,7 +98,7 @@ import {
 } from "../api-trace/index.js";
 import { readApiTraceEnabled } from "../utils/env-config.js";
 import { makeSkillRouteTable } from "./skill-handlers.js";
-import type { SkillRouterDeps as SkillRouterDeps } from "./skill-handlers.js";
+import type { SkillRouterDeps } from "./skill-handlers.js";
 import {
   wireConversationAddHandler,
   RedisSkillAgentTaskQueue,
@@ -102,11 +114,14 @@ import {
 import type { ISkillExtractor } from "../core/skill/queue/types.js";
 import type { SkillBufferStorage } from "../core/skill/conversation-add/index.js";
 import { makeKnowledgeRouteTable } from "./knowledge-handlers.js";
-import { makeChatMemoryRouteTable, clearChatMemoryContentResilient } from "./chat-memory-handlers.js";
+import {
+  makeChatMemoryRouteTable,
+  clearChatMemoryContentResilient,
+} from "./chat-memory-handlers.js";
 import { makeMemoryPromptRouteTable } from "./memory-prompt-handlers.js";
 import { makeMemoryGenerationLogRouteTable } from "./memory-generation-log-handlers.js";
-import { handleOffloadV2Route } from "../offload_server/router.js";
-import type { OffloadV2Deps } from "../offload_server/router.js";
+import { handleOffloadV3Route } from "../offload_server/router.js";
+import type { OffloadV3Deps } from "../offload_server/router.js";
 import { resolveV3StrictIsolation } from "../utils/env-config.js";
 import { initServerOpikTracer } from "../offload_server/opik-tracer.js";
 import { classifyError } from "./error-handler.js";
@@ -143,10 +158,12 @@ function nowLocalIso(): string {
 
 function createConsoleLogger(): Logger {
   return {
-    debug: (msg: string) => console.debug(`${nowLocalIso()} DEBUG ${TAG} ${msg}`),
+    debug: (msg: string) =>
+      console.debug(`${nowLocalIso()} DEBUG ${TAG} ${msg}`),
     info: (msg: string) => console.info(`${nowLocalIso()} INFO  ${TAG} ${msg}`),
     warn: (msg: string) => console.warn(`${nowLocalIso()} WARN  ${TAG} ${msg}`),
-    error: (msg: string) => console.error(`${nowLocalIso()} ERROR ${TAG} ${msg}`),
+    error: (msg: string) =>
+      console.error(`${nowLocalIso()} ERROR ${TAG} ${msg}`),
   };
 }
 
@@ -173,7 +190,7 @@ const MAX_BODY_BYTES = resolveMaxBodyBytes();
 
 /**
  * Thrown by `parseJsonBody` when the incoming body exceeds `MAX_BODY_BYTES`.
- * Caught at the top-level request handler (and v2 router) and translated
+ * Caught at the top-level request handler (and data-plane router) and translated
  * to HTTP 413 instead of being conflated with HTTP 500.
  */
 export class PayloadTooLargeError extends Error {
@@ -201,7 +218,9 @@ export async function parseJsonBody<T>(req: http.IncomingMessage): Promise<T> {
 
     // Determine if the body is compressed (Content-Encoding header).
     // Support gzip and deflate; reject unsupported encodings with 400.
-    const encoding = (req.headers["content-encoding"] ?? "").toLowerCase().trim();
+    const encoding = (req.headers["content-encoding"] ?? "")
+      .toLowerCase()
+      .trim();
     let source: NodeJS.ReadableStream = req;
     if (encoding === "gzip" || encoding === "x-gzip") {
       source = req.pipe(zlib.createGunzip());
@@ -238,14 +257,18 @@ export async function parseJsonBody<T>(req: http.IncomingMessage): Promise<T> {
       }
     });
     source.on("error", (_err) => {
-      if (aborted) return;  // already rejected with PayloadTooLargeError
+      if (aborted) return; // already rejected with PayloadTooLargeError
       // Decompression errors (e.g. truncated gzip) are client-side faults
       reject(new Error("Invalid JSON body"));
     });
   });
 }
 
-function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
+function sendJson(
+  res: http.ServerResponse,
+  status: number,
+  body: unknown,
+): void {
   const json = JSON.stringify(body);
   res.writeHead(status, {
     "Content-Type": "application/json",
@@ -254,7 +277,11 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
   res.end(json);
 }
 
-function sendError(res: http.ServerResponse, status: number, message: string): void {
+function sendError(
+  res: http.ServerResponse,
+  status: number,
+  message: string,
+): void {
   sendJson(res, status, { error: message } satisfies GatewayErrorResponse);
 }
 
@@ -299,17 +326,24 @@ export class TdaiGateway {
   // ── Instance config & Store pool (multi-instance VDB) ──
   private configProvider: InstanceConfigProvider | null = null;
   private storePool: StorePool | null = null;
-  private quotaManager: import("../core/quota/quota-manager.js").QuotaManager | null = null;
+  private quotaManager:
+    | import("../core/quota/quota-manager.js").QuotaManager
+    | null = null;
   private statefulPipelineManager: StatefulPipelineManager | null = null;
 
   // ── COS: global shared client singleton + per-instance StorageAdapter cache ──
-  private sharedCosClient: import("../integrations/cos/cos-backend.js").SharedCosClient | null = null;
+  private sharedCosClient:
+    | import("../integrations/cos/cos-backend.js").SharedCosClient
+    | null = null;
   private cosStorageCache: Map<string, StorageAdapter> | null = null;
 
   // ── Metadata (v3): shared store pool + per-instance MetadataService ──
   private metadataStorePool: MetadataStorePool | null = null;
   private memorySystemUserConfig: MemorySystemUserConfig | undefined;
-  private readonly metadataServiceByInstance = new Map<string, MetadataService>();
+  private readonly metadataServiceByInstance = new Map<
+    string,
+    MetadataService
+  >();
 
   // ── Skill conversation-add (§21): per-instance handler cache ──
   //
@@ -320,7 +354,10 @@ export class TdaiGateway {
   //
   // Use in-flight Promise cache to ensure that concurrent requests on the same instance only wire the handler once
   // (the worker pool is a global singleton, so concurrency is no longer a wiring issue).
-  private readonly conversationAddByInstance = new Map<string, Promise<WiredConversationAddHandler>>();
+  private readonly conversationAddByInstance = new Map<
+    string,
+    Promise<WiredConversationAddHandler>
+  >();
 
   /** 2026-07-30: Shared skill agent queue across all processes (List + Set). Lazy init after startup. */
   private skillSharedQueue: ISkillAgentTaskQueue | null = null;
@@ -338,69 +375,60 @@ export class TdaiGateway {
       logger: this.logger,
       platform: "gateway",
     });
-
-    // Create core
-    //
-    // ── Skill Asset Linkage Hooks (align standalone/OpenClaw with service mode) ──
-    // In service mode, gateway/server.ts:resolveSkillCore constructs a per-instance SkillCore
-    // and attaches hooks with the same name for each instanceId; the SkillCore in tdai-core
-    // goes through the standalone / OpenClaw embedded / bypass of resolveSkillCore. The two do not interfere
-    // (each SkillCore only calls the hooks attached to itself), ensureSkillAsset / deleteAssets
-    // are idempotent, so even if triggered in combination there is no side effect. See SkillAssetHooks doc.
-    //
-    // in standalone mode instanceId is fixed to "default" (see `this.config.instanceId ?? "default"` in start());
-    // here in the closure we can just take default directly;
-    // in service mode this SkillCore is in fact not reached by v3/skill/*, and the default in the closure
-    // is just a placeholder (no fire means no impact).
-    const gatewayRef = this;
-    const skillAssetInstanceId = this.config.instanceId
-      ?? (this.config.deployMode === "service" ? "__unset__" : "default");
+    const skillAssetInstanceId =
+      this.config.instanceId ??
+      (this.config.deployMode === "service" ? "__unset__" : "default");
     // Shared permit pool — used by memory PipelineWorker. skill side goes
     // wireConversationAdd's SkillConversationExtractWorker (agent-level serial lock),
     // No longer using semaphore for concurrency limit.
-    this.workerPermitPool = new WorkerPermitPool(this.config.worker.concurrency);
+    this.workerPermitPool = new WorkerPermitPool(
+      this.config.worker.concurrency,
+    );
 
     this.core = new TdaiCore({
       hostAdapter: adapter,
       config: this.config.memory,
-      sessionFilter: new SessionFilter(this.config.memory.capture.excludeAgents),
+      sessionFilter: new SessionFilter(
+        this.config.memory.capture.excludeAgents,
+      ),
       skillAssetHooks: {
         // v1 pioneers a pre-await at the front: throwing an exception = create failure (avoiding the silent inconsistency of "skill already persisted but asset
         // missing"). In standalone mode, the only registration entry besides the handler layer's
         // handleCreate fallback is here —— regardless of who calls SkillCore.create, it can trigger.
         onSkillCreated: async ({ skill_id, team_id, agent_id, name }) => {
           if (!team_id || !agent_id) return; // No tenant context → skip (OpenClaw local scope, etc.)
-          const metaSvc = await gatewayRef.ensureMetadataService(skillAssetInstanceId);
+          const metaSvc =
+            await this.ensureMetadataService(skillAssetInstanceId);
           await metaSvc.ensureSkillAsset({ skill_id, team_id, agent_id, name });
         },
         // Read-time self-healing: fire-and-forget, swallow exceptions. Backfill orphan skills from history / migration / accidental deletion.
         onSkillAccessed: (skill) => {
           if (!skill.team_id || !skill.owner_agent_id) return;
-          gatewayRef
-            .ensureMetadataService(skillAssetInstanceId)
-            .then((svc) => svc.ensureSkillAsset({
-              skill_id: skill.skill_id,
-              team_id: skill.team_id!,
-              agent_id: skill.owner_agent_id!,
-              name: skill.name,
-            }))
+          this.ensureMetadataService(skillAssetInstanceId)
+            .then((svc) =>
+              svc.ensureSkillAsset({
+                skill_id: skill.skill_id,
+                team_id: skill.team_id!,
+                agent_id: skill.owner_agent_id!,
+                name: skill.name,
+              }),
+            )
             .catch((err: unknown) => {
-              gatewayRef.logger.warn(
-                `[skill-asset-sync] ensureSkillAsset(access) failed for ${skill.skill_id}: `
-                  + (err instanceof Error ? err.message : String(err)),
+              this.logger.warn(
+                `[skill-asset-sync] ensureSkillAsset(access) failed for ${skill.skill_id}: ` +
+                  (err instanceof Error ? err.message : String(err)),
               );
             });
         },
         // Archive cascade: fire-and-forget, swallow exceptions. The second delete will re-trigger the hook, eventually converging.
         onSkillArchived: ({ skill_id, team_id }) => {
-          gatewayRef
-            .ensureMetadataService(skillAssetInstanceId)
+          this.ensureMetadataService(skillAssetInstanceId)
             .then((svc) => svc.deleteAssets([skill_id]))
             .catch((err: unknown) => {
-              gatewayRef.logger.warn(
-                `[skill-asset-sync] deleteAssets(archive) failed for ${skill_id}`
-                  + ` (team=${team_id ?? "-"}): `
-                  + (err instanceof Error ? err.message : String(err)),
+              this.logger.warn(
+                `[skill-asset-sync] deleteAssets(archive) failed for ${skill_id}` +
+                  ` (team=${team_id ?? "-"}): ` +
+                  (err instanceof Error ? err.message : String(err)),
               );
             });
         },
@@ -420,24 +448,31 @@ export class TdaiGateway {
         fallbackSqliteBaseDir,
       );
       this.metadataStorePool = new MetadataStorePool(config);
-      this.logger.info(`[META-V3] metadata store pool ready (backend=${config.backend})`);
+      this.logger.info(
+        `[META-V3] metadata store pool ready (backend=${config.backend})`,
+      );
     }
     return this.metadataStorePool;
   }
 
-  private async ensureMetadataStore(instanceId: string): Promise<IMetadataStore> {
+  private async ensureMetadataStore(
+    instanceId: string,
+  ): Promise<IMetadataStore> {
     const pool = await this.ensureMetadataStorePool();
     return pool.getStore(instanceId);
   }
 
-  private async ensureMetadataService(instanceId: string): Promise<MetadataService> {
+  private async ensureMetadataService(
+    instanceId: string,
+  ): Promise<MetadataService> {
     let svc = this.metadataServiceByInstance.get(instanceId);
     if (!svc) {
       const [store, pool] = await Promise.all([
         this.ensureMetadataStore(instanceId),
         this.ensureMetadataStorePool(),
       ]);
-      const storeSource = pool.backend === "mongodb" ? "mongodb-adapter.ts" : "sqlite-adapter.ts";
+      const storeSource =
+        pool.backend === "mongodb" ? "mongodb-adapter.ts" : "sqlite-adapter.ts";
       const rawSvc = new MetadataService(
         wrapApiStoreForTrace(store, storeSource),
         instanceId,
@@ -446,7 +481,9 @@ export class TdaiGateway {
         this.memorySystemUserConfig,
       );
 
-      const registry = loadDefaultRegistry(this.config.metadata.configParamsFile);
+      const registry = loadDefaultRegistry(
+        this.config.metadata.configParamsFile,
+      );
       const configSvc = new ConfigParamService(store, registry);
       await configSvc.initDefaults(registry, this.config.metadata);
       rawSvc.setConfigParamService(configSvc);
@@ -459,9 +496,14 @@ export class TdaiGateway {
       // Must resolve store/storage by instanceId: in service mode each instance has independent
       // TCVDB + COS, using a global single instance would clear to the wrong database.
       rawSvc.setChatMemoryContentCleaner(async ({ teamId, agentId }) => {
-        const { store: memoryStore, storage } = await this.resolveMemoryContentTargets(instanceId);
+        const { store: memoryStore, storage } =
+          await this.resolveMemoryContentTargets(instanceId);
         await clearChatMemoryContentResilient({
-          store: memoryStore, storage, teamId, agentId, logger: this.logger,
+          store: memoryStore,
+          storage,
+          teamId,
+          agentId,
+          logger: this.logger,
         });
       });
 
@@ -480,12 +522,17 @@ export class TdaiGateway {
 
     applyMetadataEnvFromGatewayConfig(this.config.metadata);
 
-    this.memorySystemUserConfig = resolveMemorySystemUserConfig(this.config.metadata);
-    validateMemorySystemUserConfig(this.config.deployMode, this.memorySystemUserConfig);
+    this.memorySystemUserConfig = resolveMemorySystemUserConfig(
+      this.config.metadata,
+    );
+    validateMemorySystemUserConfig(
+      this.config.deployMode,
+      this.memorySystemUserConfig,
+    );
     if (this.memorySystemUserConfig) {
       this.logger.info(
         `[META-V3] memory system user loaded user_id=${this.memorySystemUserConfig.userId} ` +
-        `key_prefix=${maskMemorySystemUserKeyForLog(this.memorySystemUserConfig.userKey)}`,
+          `key_prefix=${maskMemorySystemUserKeyForLog(this.memorySystemUserConfig.userKey)}`,
       );
     }
 
@@ -497,12 +544,14 @@ export class TdaiGateway {
       if (this.config.llm.provider === "proxy") {
         this.logger.info(
           `[LLM] provider=proxy, baseUrl=${this.config.llm.baseUrl}, ` +
-          `useMemorySystemUserKey=${this.config.llm.proxy?.useMemorySystemUserKey ?? true}`,
+            `useMemorySystemUserKey=${this.config.llm.proxy?.useMemorySystemUserKey ?? true}`,
         );
       }
     } catch (err) {
       if (err instanceof LlmResolveError) {
-        throw new Error(`[LLM] provider configuration validation failed: ${err.message}`);
+        throw new Error(
+          `[LLM] provider configuration validation failed: ${err.message}`,
+        );
       }
       throw err;
     }
@@ -519,7 +568,9 @@ export class TdaiGateway {
     }
 
     const metadataPool = await this.ensureMetadataStorePool();
-    initApiTraceConfig(metadataPool.backend, { enabled: readApiTraceEnabled() });
+    initApiTraceConfig(metadataPool.backend, {
+      enabled: readApiTraceEnabled(),
+    });
 
     // ── Initialize global backend for observability facade ──
     // Must be called before initOTelSDK, because LangfuseFilteringProcessor is constructed when
@@ -596,7 +647,9 @@ export class TdaiGateway {
               ])
             : false,
         });
-        this.logger.info(`OTel SDK initialized: ${otelOk ? "enabled" : "skipped (deps not available)"}`);
+        this.logger.info(
+          `OTel SDK initialized: ${otelOk ? "enabled" : "skipped (deps not available)"}`,
+        );
       } catch (err) {
         // Observability initialization failure does not affect main business
         const msg = err instanceof Error ? err.message : String(err);
@@ -620,13 +673,15 @@ export class TdaiGateway {
     // ── Org-hierarchy sync (env-gated; never blocks boot) ──
     await this.startGroupySync();
 
-    // ── Initialize StorageAdapter for v2 API ──
+    // ── Initialize StorageAdapter for v3 API ──
     // In standalone mode, use LocalStorageBackend pointing to dataDir.
     // In service mode, CosStorageBackend was already injected above.
     if (!this.core.getStorage()) {
       const backend = new LocalStorageBackend(this.config.data.baseDir);
       this.core.setStorage(new StorageAdapter(backend));
-      this.logger.info(`${TAG} StorageAdapter initialized (local: ${this.config.data.baseDir})`);
+      this.logger.info(
+        `${TAG} StorageAdapter initialized (local: ${this.config.data.baseDir})`,
+      );
     }
 
     // ── Skill module post-wiring (after storage is set) ──
@@ -638,7 +693,9 @@ export class TdaiGateway {
     try {
       await this.core.ensureSkillModuleWired();
     } catch (err) {
-      this.logger.warn(`${TAG} ensureSkillModuleWired failed: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.warn(
+        `${TAG} ensureSkillModuleWired failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
     // Create HTTP server (with Trace middleware wrapping)
@@ -651,7 +708,8 @@ export class TdaiGateway {
     // Only for the /v3/skill/ prefix to avoid polluting meta / memory main pipeline logs.
     this.server = http.createServer((req, res) => {
       const perfT0 = Date.now();
-      const isSkill = typeof req.url === "string" && req.url.startsWith("/v3/skill/");
+      const isSkill =
+        typeof req.url === "string" && req.url.startsWith("/v3/skill/");
       if (isSkill) {
         // Attach to req so that the handler can read T0 to calculate phase duration
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -678,13 +736,15 @@ export class TdaiGateway {
           }
         });
       }
-      wrapWithTrace(req, res, () => this.handleRequest(req, res)).catch((err) => {
-        // wrapWithTrace already records the error internally, here we only do fallback
-        if (!res.headersSent) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Internal Server Error" }));
-        }
-      });
+      wrapWithTrace(req, res, () => this.handleRequest(req, res)).catch(
+        (err) => {
+          // wrapWithTrace already records the error internally, here we only do fallback
+          if (!res.headersSent) {
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Internal Server Error" }));
+          }
+        },
+      );
     });
 
     // TCP-level: new socket logs a debug, to check if keepalive hits (same src ip:port
@@ -723,35 +783,36 @@ export class TdaiGateway {
   private logSecurityPosture(): void {
     const { host, apiKey, corsOrigins } = this.config.server;
     const authOn = !!apiKey;
-    const loopback = host === "127.0.0.1" || host === "localhost" || host === "::1";
+    const loopback =
+      host === "127.0.0.1" || host === "localhost" || host === "::1";
 
     this.logger.info(
       `Security posture: auth=${authOn ? "ENABLED (Bearer)" : "disabled"} ` +
-      `host=${host} cors=${corsOrigins.length === 0 ? "no-headers" : corsOrigins.includes("*") ? "wildcard(*)" : `allowlist(${corsOrigins.length})`}`
+        `host=${host} cors=${corsOrigins.length === 0 ? "no-headers" : corsOrigins.includes("*") ? "wildcard(*)" : `allowlist(${corsOrigins.length})`}`,
     );
 
     if (!authOn) {
       this.logger.warn(
         "TDAI_GATEWAY_API_KEY is NOT set — all routes except GET /health are " +
-        "open to anyone who can reach this port. This is the legacy default. " +
-        "Set TDAI_GATEWAY_API_KEY (or server.apiKey in tdai-gateway.yaml) and " +
-        "pass `Authorization: Bearer <key>` from clients before exposing the " +
-        "gateway beyond the loopback interface."
+          "open to anyone who can reach this port. This is the legacy default. " +
+          "Set TDAI_GATEWAY_API_KEY (or server.apiKey in tdai-gateway.yaml) and " +
+          "pass `Authorization: Bearer <key>` from clients before exposing the " +
+          "gateway beyond the loopback interface.",
       );
     }
     if (!loopback && !authOn) {
       this.logger.warn(
         `Gateway is bound to ${host} (non-loopback) WITHOUT an API key. ` +
-        "Every /capture, /search/conversations, /recall, /seed call from the " +
-        "network is currently unauthenticated. Bind to 127.0.0.1, or set " +
-        "TDAI_GATEWAY_API_KEY, before continuing."
+          "Every /capture, /search/conversations, /recall, /seed call from the " +
+          "network is currently unauthenticated. Bind to 127.0.0.1, or set " +
+          "TDAI_GATEWAY_API_KEY, before continuing.",
       );
     }
     if (corsOrigins.includes("*")) {
       this.logger.warn(
         "CORS allow-list contains '*' — every browser origin can call this " +
-        "gateway. Restrict server.corsOrigins to a concrete allow-list for any " +
-        "non-local deployment."
+          "gateway. Restrict server.corsOrigins to a concrete allow-list for any " +
+          "non-local deployment.",
       );
     }
   }
@@ -786,9 +847,11 @@ export class TdaiGateway {
     // 2026-07-30 After the pool refactoring, there is one SkillWorkerPool for the entire process, so simply stopping the pool is sufficient.
     // conversationAddByInstance is just a handler bundle and does not hold lifecycle resources.
     if (this.skillWorkerPool) {
-      await this.skillWorkerPool.stop().catch((e) =>
-        this.logger.warn(`[skill-worker-pool] stop failed: ${e}`),
-      );
+      await this.skillWorkerPool
+        .stop()
+        .catch((e) =>
+          this.logger.warn(`[skill-worker-pool] stop failed: ${e}`),
+        );
       this.skillWorkerPool = null;
       this.logger.info("Skill Worker Pool stopped");
     }
@@ -828,8 +891,14 @@ export class TdaiGateway {
   // Request router
   // ============================
 
-  private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+  private async handleRequest(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
+    const url = new URL(
+      req.url ?? "/",
+      `http://${req.headers.host ?? "localhost"}`,
+    );
     const method = req.method?.toUpperCase() ?? "GET";
     const pathname = url.pathname;
 
@@ -843,34 +912,31 @@ export class TdaiGateway {
     }
 
     try {
-      // ── /v2/instance/destroy — admin endpoint, gated by the v1-style
-      //    Bearer apiKey only (no service-id / per-request envelope).
+      // ── /v3/instance/destroy — admin endpoint, gated by the
+      //    Bearer apiKey only (no service-id / per-request envelope,
+      //    not going through tenant x-tdai-user-key).
       //    When `server.apiKey` is unset this is open by default, matching
       //    the pre-existing behaviour; operators see the "auth disabled"
-      //    WARN at startup.
-      if (method === "POST" && pathname === "/v2/instance/destroy") {
+      //    WARN at startup. Runs general cleanup (state / store / cos / quota)
+      //    plus v3 metadata cleanup (team/user/asset/acl, etc.).
+      if (method === "POST" && pathname === "/v3/instance/destroy") {
         if (!this.checkAuth(req, res)) return;
         return await this.handleInstanceDestroy(req, res);
       }
 
-      // ── /v3/instance/destroy — v3 compatible version.
-      //    Request/response contract is consistent with v2; authentication is the same as v2 (Bearer apiKey, ops interface,
-      //     not going through tenant x-tdai-user-key).
-      //    Implement by first reusing v2's general cleanup (state / store / cos / quota), then reserving
-      //    v3 exclusive metadata cleanup (team/user/asset/acl, etc.), later handled by the person responsible for v3
-      //    fill in by the metadata team. No full reuse here to avoid missing silent cleanups on the v3 side.
-      if (method === "POST" && pathname === "/v3/instance/destroy") {
-        if (!this.checkAuth(req, res)) return;
-        return await this.handleInstanceDestroyV3(req, res);
-      }
-
       // ── v3 internal metadata (/v3/internal/meta/*, Bearer only) ──
       if (pathname.startsWith(`${V3_INTERNAL_PREFIX}/`)) {
-        if (!this.checkAuthForV2(req, res)) return;
+        if (!this.checkAuthForV3(req, res)) return;
         const handledInternal = await handleInternalMetaRoute(
-          req, res, pathname, method, parseJsonBody, sendJson,
+          req,
+          res,
+          pathname,
+          method,
+          parseJsonBody,
+          sendJson,
           {
-            getMetadataService: (instanceId) => this.ensureMetadataService(instanceId),
+            getMetadataService: (instanceId) =>
+              this.ensureMetadataService(instanceId),
             logger: this.logger,
           },
         );
@@ -878,37 +944,44 @@ export class TdaiGateway {
       }
 
       // ── v3 metadata routes (/v3/meta/*) ──
-      // Layer 1: same Bearer apiKey gate as v2. Layer 3 (x-tdai-user-key) in handleV3MetaRoute.
+      // Layer 1: Bearer apiKey gate. Layer 3 (x-tdai-user-key) in handleV3MetaRoute.
       if (pathname.startsWith(`${V3_PREFIX}/`)) {
-        if (!this.checkAuthForV2(req, res)) return;
-        const handledV3 = await handleV3MetaRoute(req, res, pathname, method, parseJsonBody, sendJson, {
-          getMetadataService: (instanceId) => this.ensureMetadataService(instanceId),
-          logger: this.logger,
-        });
+        if (!this.checkAuthForV3(req, res)) return;
+        const handledV3 = await handleV3MetaRoute(
+          req,
+          res,
+          pathname,
+          method,
+          parseJsonBody,
+          sendJson,
+          {
+            getMetadataService: (instanceId) =>
+              this.ensureMetadataService(instanceId),
+            logger: this.logger,
+          },
+        );
         if (handledV3) return;
       }
 
-      // ── v2 / v3 API routes ──
-      // /v2 = existing data plane + management plane entry (team/agent optional, user fallback).
-      // /v3 = L0–L3 data plane "strict isolation version" (team/agent/user/session required), sharing the same set of handler implementations,
-      //        with an additional validation layer only at the dispatch layer. See the comments in v2-router.ts for V3_PREFIX/V3_ALLOWED_SUBPATHS.
+      // ── v3 API routes (strict isolation data plane + skill/knowledge/chat-memory) ──
+      // See the comments in v3-router.ts for V3_PREFIX/V3_ALLOWED_SUBPATHS.
       //
-      // Apply the develop-introduced apiKey gate first so v2/v3 inherits the
-      // optional shared-secret protection. v2's own `parseV2Auth` (Bearer +
-      // x-tdai-service-id) still runs inside `handleV2Route`, preserving
+      // Apply the develop-introduced apiKey gate first so v3 inherits the
+      // optional shared-secret protection. `parseV3Auth` (Bearer +
+      // x-tdai-service-id) still runs inside `handleV3Route`, preserving
       // its existing semantics. When `server.apiKey` is unset, this gate
       // is a no-op (default-open), matching the develop_server_test
       // baseline.
-      if (pathname.startsWith("/v2/") || pathname.startsWith("/v3/")) {
-        if (!this.checkAuthForV2(req, res)) return;
+      if (pathname.startsWith("/v3/")) {
+        if (!this.checkAuthForV3(req, res)) return;
       }
 
-      const v2Deps: V2RouterDeps = {
+      const v3Deps: V3RouterDeps = {
         getStore: () => this.core.getVectorStore(),
         getEmbedding: () => this.core.getEmbeddingService(),
         getStorage: () => this.core.getStorage(),
         deployMode: this.config.deployMode,
-        // Inject pipeline introspection deps for /v2/pipeline/status (standalone-only).
+        // Inject pipeline introspection deps for /v3/pipeline/status (standalone-only).
         // Both can be undefined in legacy standalone (no stateBackend configured) —
         // the handler returns 503 in that case.
         stateBackend: this.stateBackend ?? undefined,
@@ -920,13 +993,14 @@ export class TdaiGateway {
         // handleConversationAdd uses it to automatically register chat_memory assets (team+agent granularity)
         // and bind them to the agent. The first write triggers create + bind; subsequent writes for the same (team, agent) go
         // through MetadataService's in-process LRU short-circuit.
-        getMetadataService: (instanceId) => this.ensureMetadataService(instanceId),
+        getMetadataService: (instanceId) =>
+          this.ensureMetadataService(instanceId),
       };
 
-      // Skill module deps — composed alongside V2RouterDeps so v2-router.ts
-      // doesn't have to widen its interface (and break v2-router.test.ts
+      // Skill module deps — composed alongside V3RouterDeps so v3-router.ts
+      // doesn't have to widen its interface (and break v3-router.test.ts
       // mocks). The skill route table is registered as `extraRouteTable` in
-      // handleV2Route below, and our `mergedDeps` object satisfies BOTH
+      // handleV3Route below, and our `mergedDeps` object satisfies BOTH
       // interfaces simultaneously (TypeScript-wise the cast widens it to
       // `unknown` so each handler reads its own fields).
       const skillDeps: SkillRouterDeps = {
@@ -939,7 +1013,8 @@ export class TdaiGateway {
         // handleCreate uses this dep to call metaSvc.ensureSkillAsset() after skill creation succeeds
         // to complete asset registration + agent fixed-asset binding. In service mode, the onSkillCreated hook in buildSkillCore does the same thing,
         // both paths are covered, and ensureSkillAsset itself is idempotent.
-        getMetadataService: (instanceId) => this.ensureMetadataService(instanceId),
+        getMetadataService: (instanceId) =>
+          this.ensureMetadataService(instanceId),
       };
 
       // Service mode: inject per-instance resolvers (storePool + configProvider + COS)
@@ -948,33 +1023,42 @@ export class TdaiGateway {
         const configProvider = this.configProvider;
         const logger = this.logger;
 
-        v2Deps.resolveStore = async (instanceId: string) => {
-          const vdbConfig = storePool["mode"] === "tcvdb"
-            ? await configProvider.resolveVdb(instanceId)
-            : null;
+        v3Deps.resolveStore = async (instanceId: string) => {
+          const vdbConfig =
+            storePool["mode"] === "tcvdb"
+              ? await configProvider.resolveVdb(instanceId)
+              : null;
           const pooled = await storePool.getStore(instanceId, vdbConfig);
           return { store: pooled.store, embedding: pooled.embedding };
         };
 
-        v2Deps.resolveStorage = (instanceId: string) => this.resolveStorageForInstance(instanceId);
+        v3Deps.resolveStorage = (instanceId: string) =>
+          this.resolveStorageForInstance(instanceId);
 
         // Pipeline notify: trigger async L1 extraction when v2 /conversation/add writes L0
         if (this.statefulPipelineManager) {
           const pipelineManager = this.statefulPipelineManager;
-          v2Deps.notifyPipeline = async (
+          v3Deps.notifyPipeline = async (
             instanceId: string,
             sessionId: string,
             rounds: number,
             teamId?: string,
             agentId?: string,
           ) => {
-            await pipelineManager.notifyConversation(sessionId, [], instanceId, rounds, teamId, agentId);
+            await pipelineManager.notifyConversation(
+              sessionId,
+              [],
+              instanceId,
+              rounds,
+              teamId,
+              agentId,
+            );
           };
         }
 
         // Inject QuotaManager for memory/credit limit checks
         if (this.quotaManager) {
-          v2Deps.quotaManager = this.quotaManager;
+          v3Deps.quotaManager = this.quotaManager;
         }
 
         // ── Skill: per-instance resolver (TcvdbSkillStore + COS storage) ──
@@ -983,8 +1067,10 @@ export class TdaiGateway {
         // it can be started separately here in service mode.
         if (storePool.mode === "tcvdb") {
           // per-instance resolvers extracted private methods (the same implementation is shared by handler and skill worker).
-          skillDeps.resolveSkillCore = (instanceId: string) => this.resolveSkillCoreForInstance(instanceId);
-          skillDeps.buildSkillExtractor = (core, instanceId) => this.buildSkillExtractorForInstance(core, instanceId);
+          skillDeps.resolveSkillCore = (instanceId: string) =>
+            this.resolveSkillCoreForInstance(instanceId);
+          skillDeps.buildSkillExtractor = (core, instanceId) =>
+            this.buildSkillExtractorForInstance(core, instanceId);
         }
         // /v3/skill/conversation/add + /v3/skill/extract{,result} wiring:
         //   - tcvdb (service): goes through ensureConversationAddForInstance (per-instance TCVDB + COS)
@@ -994,28 +1080,42 @@ export class TdaiGateway {
         //   - handleConversationAdd with .handler
         //   - handleExtract with .trigger (direct-trigger)
         skillDeps.resolveConversationAdd = async (instanceId: string) => {
-          const wired = storePool.mode === "tcvdb"
-            ? await this.ensureConversationAddForInstance(instanceId)
-            : await this.ensureConversationAddForStandalone(instanceId);
+          const wired =
+            storePool.mode === "tcvdb"
+              ? await this.ensureConversationAddForInstance(instanceId)
+              : await this.ensureConversationAddForStandalone(instanceId);
           return wired;
         };
       }
 
-      // ── Offload V2 routes (async ingest + mmd query) ──
-      const offloadDeps: OffloadV2Deps = {
-        resolveStorage: v2Deps.resolveStorage,
-        getStorage: v2Deps.getStorage ?? (() => undefined),
+      // ── Offload V3 routes (async ingest + mmd query) ──
+      const offloadDeps: OffloadV3Deps = {
+        resolveStorage: v3Deps.resolveStorage,
+        getStorage: v3Deps.getStorage ?? (() => undefined),
         logger: this.logger,
         stateBackend: this.stateBackend,
-        config: { ...this.config.offload, l1Model: "", l15Model: "", l2Model: "" },
+        config: {
+          ...this.config.offload,
+          l1Model: "",
+          l15Model: "",
+          l2Model: "",
+        },
       };
-      const offloadHandled = await handleOffloadV2Route(req, res, pathname, method, parseJsonBody, sendJson, offloadDeps);
+      const offloadHandled = await handleOffloadV3Route(
+        req,
+        res,
+        pathname,
+        method,
+        parseJsonBody,
+        sendJson,
+        offloadDeps,
+      );
       if (offloadHandled) return;
 
-      // Compose deps: V2RouterDeps fields + SkillRouterDeps fields. The
+      // Compose deps: V3RouterDeps fields + SkillRouterDeps fields. The
       // route table union of routeTable + makeSkillRouteTable() is what
       // tells the dispatcher which subset of fields each handler reads.
-      const mergedDeps = Object.assign({}, v2Deps, skillDeps);
+      const mergedDeps = Object.assign({}, v3Deps, skillDeps);
 
       // Merge management-plane extra route tables.
       const extraRoutes = {
@@ -1026,17 +1126,22 @@ export class TdaiGateway {
         ...makeMemoryGenerationLogRouteTable(),
       } as Record<
         string,
-        (body: unknown, auth: import("./v2-schemas.js").V2AuthContext, requestId: string, deps: unknown) => Promise<import("./v2-schemas.js").ApiResponseEnvelope>
+        (
+          body: unknown,
+          auth: import("./v3-schemas.js").V3AuthContext,
+          requestId: string,
+          deps: unknown,
+        ) => Promise<import("./v3-schemas.js").ApiResponseEnvelope>
       >;
 
-      const handled = await handleV2Route(
+      const handled = await handleV3Route(
         req,
         res,
         pathname,
         method,
         parseJsonBody,
         sendJson,
-        mergedDeps as V2RouterDeps,
+        mergedDeps as V3RouterDeps,
         extraRoutes,
       );
       if (handled) return;
@@ -1074,7 +1179,9 @@ export class TdaiGateway {
     } catch (err) {
       if (err instanceof PayloadTooLargeError) {
         // Fast-path: PayloadTooLargeError messages are already safe (constant + numeric limit).
-        this.logger.warn(`Request rejected [${method} ${pathname}]: ${err.message}`);
+        this.logger.warn(
+          `Request rejected [${method} ${pathname}]: ${err.message}`,
+        );
         sendError(res, 413, err.message);
         return;
       }
@@ -1082,7 +1189,9 @@ export class TdaiGateway {
       // Server log keeps full stack via classified.logLine; client only sees
       // a safe code + message + trace_id.
       const classified = classifyError(err);
-      this.logger.error(`Request error [${method} ${pathname}] ${classified.logLine}`);
+      this.logger.error(
+        `Request error [${method} ${pathname}] ${classified.logLine}`,
+      );
       sendJson(res, classified.status, {
         // Keep legacy `error` field for backward compat with existing v1 clients.
         error: classified.client.message,
@@ -1113,8 +1222,8 @@ export class TdaiGateway {
    *   - `"invalid"`       — token present but did not match the configured key
    *
    * Caller is responsible for translating `"missing"` / `"invalid"` into the
-   * appropriate 401 response (v1 plain-text via {@link checkAuth} or v2
-   * envelope via {@link checkAuthForV2}).
+   * appropriate 401 response (plain-text via {@link checkAuth} or envelope
+   * via {@link checkAuthForV3}).
    */
   private verifyAuth(req: http.IncomingMessage): "ok" | "missing" | "invalid" {
     const expected = this.config.server.apiKey;
@@ -1132,11 +1241,14 @@ export class TdaiGateway {
   }
 
   /**
-   * v1 / admin auth gate. Writes a plain-text 401 on failure (legacy format
+   * Admin auth gate. Writes a plain-text 401 on failure (legacy format
    * preserved so existing curl-based callers keep working). Returns `false`
    * when the request must be short-circuited.
    */
-  private checkAuth(req: http.IncomingMessage, res: http.ServerResponse): boolean {
+  private checkAuth(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): boolean {
     const result = this.verifyAuth(req);
     if (result === "ok") return true;
     sendError(
@@ -1150,14 +1262,17 @@ export class TdaiGateway {
   }
 
   /**
-   * v2 auth gate. Same verification as {@link checkAuth} but returns the
-   * v2 standardized error envelope on failure so v2 clients see a consistent
+   * Bearer auth gate. Same verification as {@link checkAuth} but returns the
+   * standardized error envelope on failure so API clients see a consistent
    * `{ code, message, request_id }` shape.
    *
-   * The existing in-router `parseV2Auth` (which checks for non-empty Bearer
+   * The existing in-router `parseV3Auth` (which checks for non-empty Bearer
    * + `x-tdai-service-id`) is layered on top; this gate runs first.
    */
-  private checkAuthForV2(req: http.IncomingMessage, res: http.ServerResponse): boolean {
+  private checkAuthForV3(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): boolean {
     const result = this.verifyAuth(req);
     if (result === "ok") return true;
     const requestId = makeRequestId();
@@ -1177,7 +1292,10 @@ export class TdaiGateway {
    * The single-entry list `["*"]` opts back into permissive CORS (development
    * use only; the startup log flags this loudly).
    */
-  private applyCorsHeaders(req: http.IncomingMessage, res: http.ServerResponse): void {
+  private applyCorsHeaders(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
     const allow = this.config.server.corsOrigins ?? [];
     if (allow.length === 0) return; // strict default — no headers
 
@@ -1188,7 +1306,10 @@ export class TdaiGateway {
       // mirroring how the gateway behaved before this change.
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+      res.setHeader(
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization",
+      );
       return;
     }
 
@@ -1201,7 +1322,10 @@ export class TdaiGateway {
     }
     res.setHeader("Access-Control-Allow-Origin", requestOrigin);
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization",
+    );
     res.setHeader("Vary", "Origin");
   }
 
@@ -1210,49 +1334,32 @@ export class TdaiGateway {
   // ============================
 
   /**
-   * POST /v2/instance/destroy — Purge all data for a destroyed instance.
+   * POST /v3/instance/destroy — Purge all data for a destroyed instance.
    * Intended for trusted internal callers only.
    *
    * Request body: { instance_id: string }
    * Response: { code, message, data: { instance_id, cleaned: { ... } } }
+   *
+   * Drops the instance metadata database on top of the general cleanup
+   * (v3.0 sharded database: `MetadataStorePool.purgeInstance`).
    */
-  private async handleInstanceDestroy(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  private async handleInstanceDestroy(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
     const body = await parseJsonBody<{ instance_id?: string }>(req);
     const instanceId = body?.instance_id;
 
     if (!instanceId || typeof instanceId !== "string") {
-      sendJson(res, 400, { code: 400, message: "Missing required field: instance_id" });
+      sendJson(res, 400, {
+        code: 400,
+        message: "Missing required field: instance_id",
+      });
       return;
     }
 
     this.logger.info(`[instance/destroy] Purging instance: ${instanceId}`);
-    const cleaned = await this.purgeInstanceCommon(instanceId, "v2");
-
-    sendJson(res, 200, {
-      code: 0,
-      message: "ok",
-      data: { instance_id: instanceId, cleaned },
-    });
-  }
-
-  /**
-   * POST /v3/instance/destroy — v3 compatible route.
-   *
-   * Request/response contract is completely consistent with v2, and the caller can switch with zero changes.
-   *
-   * Drop this instance metadata database on top of the general cleanup (v3.0 sharded database: `MetadataStorePool.purgeInstance`).
-   */
-  private async handleInstanceDestroyV3(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    const body = await parseJsonBody<{ instance_id?: string }>(req);
-    const instanceId = body?.instance_id;
-
-    if (!instanceId || typeof instanceId !== "string") {
-      sendJson(res, 400, { code: 400, message: "Missing required field: instance_id" });
-      return;
-    }
-
-    this.logger.info(`[instance/destroy] [v3] Purging instance: ${instanceId}`);
-    const cleaned = await this.purgeInstanceCommon(instanceId, "v3");
+    const cleaned = await this.purgeInstanceCommon(instanceId);
 
     cleaned.v3_metadata = await this.purgeV3Metadata(instanceId);
 
@@ -1264,14 +1371,12 @@ export class TdaiGateway {
   }
 
   /**
-   * General cleanup steps (state / store / cos / quota), shared by v2 and v3.
-   * @param source used only as a log prefix to distinguish the caller.
+   * General cleanup steps (state / store / cos / quota).
    */
   private async purgeInstanceCommon(
     instanceId: string,
-    source: "v2" | "v3",
   ): Promise<Record<string, unknown>> {
-    const tag = `[instance/destroy] [${source}]`;
+    const tag = "[instance/destroy]";
     const cleaned: Record<string, unknown> = {};
 
     // 1. Purge state backend (timers, sessions, buffers, pending tasks)
@@ -1279,9 +1384,13 @@ export class TdaiGateway {
       try {
         const result = await this.stateBackend.purgeInstance(instanceId);
         cleaned.state = result;
-        this.logger.info(`${tag} State purged: sessions=${result.sessions}, timers=${result.timers}, buffers=${result.buffers}`);
+        this.logger.info(
+          `${tag} State purged: sessions=${result.sessions}, timers=${result.timers}, buffers=${result.buffers}`,
+        );
       } catch (err) {
-        this.logger.error(`${tag} State purge failed: ${err instanceof Error ? err.message : String(err)}`);
+        this.logger.error(
+          `${tag} State purge failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
         cleaned.state_error = err instanceof Error ? err.message : String(err);
       }
     }
@@ -1294,7 +1403,9 @@ export class TdaiGateway {
         cleaned.store_evicted = true;
         cleaned.skill_store_evicted = true;
       } catch (err) {
-        this.logger.error(`${tag} Store evict failed: ${err instanceof Error ? err.message : String(err)}`);
+        this.logger.error(
+          `${tag} Store evict failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
         cleaned.store_evicted = false;
         cleaned.skill_store_evicted = false;
       }
@@ -1308,8 +1419,10 @@ export class TdaiGateway {
       try {
         const cosConfig = await this.configProvider.resolveCos();
         if (cosConfig?.cosUrl) {
-          const { CosStorageBackend } = await import("../integrations/cos/cos-backend.js");
-          const prefix = `${cosConfig.pathPrefix.replace(/\/$/, '')}/${instanceId}/`;
+          const { CosStorageBackend } = await import(
+            "../integrations/cos/cos-backend.js"
+          );
+          const prefix = `${cosConfig.pathPrefix.replace(/\/$/, "")}/${instanceId}/`;
           const backend = new CosStorageBackend({
             sharedClient: this.sharedCosClient,
             prefix,
@@ -1320,7 +1433,9 @@ export class TdaiGateway {
           this.logger.info(`${tag} COS objects deleted: ${deletedCount}`);
         }
       } catch (err) {
-        this.logger.error(`${tag} COS cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
+        this.logger.error(
+          `${tag} COS cleanup failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
         cleaned.cos_error = err instanceof Error ? err.message : String(err);
       }
     }
@@ -1336,8 +1451,11 @@ export class TdaiGateway {
       const skillPurged = await this.purgeSkillQueueForInstance(instanceId);
       cleaned.skill_queue = skillPurged;
     } catch (err) {
-      this.logger.error(`${tag} Skill queue purge failed: ${err instanceof Error ? err.message : String(err)}`);
-      cleaned.skill_queue_error = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `${tag} Skill queue purge failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      cleaned.skill_queue_error =
+        err instanceof Error ? err.message : String(err);
     }
 
     // Clear handler bundle cache for this instance
@@ -1359,7 +1477,9 @@ export class TdaiGateway {
    * v3 unique: drop this instance's metadata database (MongoDB dropDatabase / SQLite delete directory).
    * On failure, write the return structure and do not throw, consistent with purgeInstanceCommon.
    */
-  private async purgeV3Metadata(instanceId: string): Promise<Record<string, unknown>> {
+  private async purgeV3Metadata(
+    instanceId: string,
+  ): Promise<Record<string, unknown>> {
     try {
       const pool = await this.ensureMetadataStorePool();
       const result = await pool.purgeInstance(instanceId);
@@ -1370,7 +1490,9 @@ export class TdaiGateway {
       return { db_name: result.db_name, dropped: result.dropped };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`[instance/destroy] [v3] metadata purge failed: ${msg}`);
+      this.logger.error(
+        `[instance/destroy] [v3] metadata purge failed: ${msg}`,
+      );
       return { dropped: false, error: msg };
     }
   }
@@ -1394,7 +1516,10 @@ export class TdaiGateway {
     sendJson(res, 200, response);
   }
 
-  private async handleRecall(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  private async handleRecall(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
     const body = await parseJsonBody<RecallRequest>(req);
 
     if (!body.query || !body.session_key) {
@@ -1403,7 +1528,10 @@ export class TdaiGateway {
     }
 
     const startMs = Date.now();
-    const result = await this.core.handleBeforeRecall(body.query, body.session_key);
+    const result = await this.core.handleBeforeRecall(
+      body.query,
+      body.session_key,
+    );
     const elapsed = Date.now() - startMs;
 
     // H-15: distinguish "no recall content to inject" from "recall failed".
@@ -1413,10 +1541,12 @@ export class TdaiGateway {
     if (result.error) {
       this.logger.warn(
         `Recall failed in ${elapsed}ms: code=${result.error.code} category=${result.error.category} ` +
-        `msg="${result.error.message}"`,
+          `msg="${result.error.message}"`,
       );
     } else {
-      this.logger.info(`Recall completed in ${elapsed}ms: context=${(result.appendSystemContext?.length ?? 0)} chars`);
+      this.logger.info(
+        `Recall completed in ${elapsed}ms: context=${result.appendSystemContext?.length ?? 0} chars`,
+      );
     }
 
     const response: RecallResponse = {
@@ -1430,11 +1560,18 @@ export class TdaiGateway {
     sendJson(res, 200, response);
   }
 
-  private async handleCapture(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  private async handleCapture(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
     const body = await parseJsonBody<CaptureRequest>(req);
 
     if (!body.user_content || !body.assistant_content || !body.session_key) {
-      sendError(res, 400, "Missing required fields: user_content, assistant_content, session_key");
+      sendError(
+        res,
+        400,
+        "Missing required fields: user_content, assistant_content, session_key",
+      );
       return;
     }
 
@@ -1451,7 +1588,9 @@ export class TdaiGateway {
     });
     const elapsed = Date.now() - startMs;
 
-    this.logger.info(`Capture completed in ${elapsed}ms: l0=${result.l0RecordedCount}`);
+    this.logger.info(
+      `Capture completed in ${elapsed}ms: l0=${result.l0RecordedCount}`,
+    );
 
     const response: CaptureResponse = {
       l0_recorded: result.l0RecordedCount,
@@ -1460,7 +1599,10 @@ export class TdaiGateway {
     sendJson(res, 200, response);
   }
 
-  private async handleSearchMemories(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  private async handleSearchMemories(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
     const body = await parseJsonBody<MemorySearchRequest>(req);
 
     if (!body.query) {
@@ -1483,7 +1625,10 @@ export class TdaiGateway {
     sendJson(res, 200, response);
   }
 
-  private async handleSearchConversations(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  private async handleSearchConversations(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
     const body = await parseJsonBody<ConversationSearchRequest>(req);
 
     if (!body.query) {
@@ -1504,7 +1649,10 @@ export class TdaiGateway {
     sendJson(res, 200, response);
   }
 
-  private async handleSessionEnd(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  private async handleSessionEnd(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
     const body = await parseJsonBody<SessionEndRequest>(req);
 
     if (!body.session_key) {
@@ -1518,7 +1666,10 @@ export class TdaiGateway {
     sendJson(res, 200, response);
   }
 
-  private async handleSeed(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  private async handleSeed(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
     const body = await parseJsonBody<SeedRequest>(req);
 
     if (!body.data) {
@@ -1547,7 +1698,7 @@ export class TdaiGateway {
 
     this.logger.info(
       `Seed request: ${input.sessions.length} session(s), ` +
-      `${input.totalRounds} round(s), ${input.totalMessages} message(s)`,
+        `${input.totalRounds} round(s), ${input.totalMessages} message(s)`,
     );
 
     // Resolve output directory: use gateway's data dir with a timestamped subfolder
@@ -1560,8 +1711,9 @@ export class TdaiGateway {
 
     // Merge config overrides if provided
     // Start with the base memory config + inject llm config from gateway settings
+    // SAFETY: gateway memory config is a validated superset of the seed plugin config shape; spread into an untyped record for plugin overrides.
     const baseConfig = this.config.memory as unknown as Record<string, unknown>;
-    let pluginConfig: Record<string, unknown> = {
+    const pluginConfig: Record<string, unknown> = {
       ...baseConfig,
       llm: Object.fromEntries([
         ["enabled", true],
@@ -1576,9 +1728,18 @@ export class TdaiGateway {
       for (const key of Object.keys(body.config_override)) {
         const baseVal = pluginConfig[key];
         const overVal = body.config_override[key];
-        if (baseVal && typeof baseVal === "object" && !Array.isArray(baseVal) &&
-            overVal && typeof overVal === "object" && !Array.isArray(overVal)) {
-          pluginConfig[key] = { ...(baseVal as Record<string, unknown>), ...(overVal as Record<string, unknown>) };
+        if (
+          baseVal &&
+          typeof baseVal === "object" &&
+          !Array.isArray(baseVal) &&
+          overVal &&
+          typeof overVal === "object" &&
+          !Array.isArray(overVal)
+        ) {
+          pluginConfig[key] = {
+            ...(baseVal as Record<string, unknown>),
+            ...(overVal as Record<string, unknown>),
+          };
         } else {
           pluginConfig[key] = overVal;
         }
@@ -1594,14 +1755,14 @@ export class TdaiGateway {
       onProgress: (progress: SeedProgress) => {
         this.logger.debug?.(
           `Seed progress: [${progress.currentRound}/${progress.totalRounds}] ` +
-          `session=${progress.sessionKey} stage=${progress.stage}`,
+            `session=${progress.sessionKey} stage=${progress.stage}`,
         );
       },
     });
 
     this.logger.info(
       `Seed complete: sessions=${summary.sessionsProcessed}, rounds=${summary.roundsProcessed}, ` +
-      `l0=${summary.l0RecordedCount}, duration=${(summary.durationMs / 1000).toFixed(1)}s`,
+        `l0=${summary.l0RecordedCount}, duration=${(summary.durationMs / 1000).toFixed(1)}s`,
     );
 
     const response: SeedResponse = {
@@ -1642,23 +1803,34 @@ export class TdaiGateway {
     try {
       const config = this.config.groupy;
       if (!config.enabled) return;
-      const { GroupyScheduler } = await import("../metadata/groupy/scheduler.js");
-      const { recomputeGroupyShares } = await import("../metadata/groupy/grant-service.js");
+      const { GroupyScheduler } = await import(
+        "../metadata/groupy/scheduler.js"
+      );
+      const { recomputeGroupyShares } = await import(
+        "../metadata/groupy/grant-service.js"
+      );
       const instanceId = this.config.instanceId ?? "default";
       const svc = await this.ensureMetadataService(instanceId);
       const scheduler = new GroupyScheduler({
         service: svc,
         config,
         logger: this.logger,
-        onMembershipApplied: (c) => recomputeGroupyShares({
-          service: c.service, graph: c.graph, closure: c.closure,
-        }),
+        onMembershipApplied: (c) =>
+          recomputeGroupyShares({
+            service: c.service,
+            graph: c.graph,
+            closure: c.closure,
+          }),
       });
       svc.setGroupyScheduler(scheduler);
       scheduler.start();
-      this.logger.info?.(`[groupy-sync] enabled, roots=${config.roots.join(",")}`);
+      this.logger.info?.(
+        `[groupy-sync] enabled, roots=${config.roots.join(",")}`,
+      );
     } catch (err) {
-      this.logger.warn?.(`[groupy-sync] boot skipped: ${(err as Error).message}`);
+      this.logger.warn?.(
+        `[groupy-sync] boot skipped: ${(err as Error).message}`,
+      );
     }
   }
 
@@ -1667,92 +1839,120 @@ export class TdaiGateway {
     //   - "standalone" → local (in-process Map/setTimeout, zero dependencies)
     //   - "service"    → remote state backend
     const backendType: "redis" | "local" =
-      this.config.stateBackend ?? (this.config.deployMode === "service" ? "redis" : "local");
+      this.config.stateBackend ??
+      (this.config.deployMode === "service" ? "redis" : "local");
 
-    this.logger.info(`Starting integrated services (deployMode=${this.config.deployMode}, state_backend=${backendType})...`);
+    this.logger.info(
+      `Starting integrated services (deployMode=${this.config.deployMode}, state_backend=${backendType})...`,
+    );
 
     // 1. Create State Backend
     const { createStateBackend } = await import("../core/state/index.js");
     this.stateBackend = await createStateBackend({
       type: backendType,
-      local: backendType === "local" ? {
-        onTimerExpired: (entry) => {
-          // Parse timer member by prefix: "offload-{type}:{instanceId}:{sessionId}[:{extra}]"
-          // or legacy "session:L2_schedule"
-          const member = entry.member;
-          let taskType: string;
-          let instanceId: string;
-          let sessionId: string;
-          let teamId: string | undefined;
-          let agentId: string | undefined;
+      local:
+        backendType === "local"
+          ? {
+              onTimerExpired: (entry) => {
+                // Parse timer member by prefix: "offload-{type}:{instanceId}:{sessionId}[:{extra}]"
+                // or legacy "session:L2_schedule"
+                const member = entry.member;
+                let taskType: string;
+                let instanceId: string;
+                let sessionId: string;
+                let teamId: string | undefined;
+                let agentId: string | undefined;
 
-          const firstColon = member.indexOf(":");
-          const prefix = firstColon > 0 ? member.slice(0, firstColon) : member;
+                const firstColon = member.indexOf(":");
+                const prefix =
+                  firstColon > 0 ? member.slice(0, firstColon) : member;
 
-          if (prefix === "offload-l1" || prefix === "offload-l15" || prefix === "offload-l2") {
-            taskType = prefix;
-            // Format: "offload-{type}:{instanceId}:{sessionId}[:{mmdFile}]"
-            // instanceId is the segment right after the prefix
-            const rest = member.slice(firstColon + 1);
-            const instanceEnd = rest.indexOf(":");
-            if (instanceEnd > 0) {
-              instanceId = rest.slice(0, instanceEnd);
-              sessionId = rest.slice(instanceEnd + 1);
-            } else {
-              instanceId = this.config.instanceId ?? "default";
-              sessionId = rest;
+                if (
+                  prefix === "offload-l1" ||
+                  prefix === "offload-l15" ||
+                  prefix === "offload-l2"
+                ) {
+                  taskType = prefix;
+                  // Format: "offload-{type}:{instanceId}:{sessionId}[:{mmdFile}]"
+                  // instanceId is the segment right after the prefix
+                  const rest = member.slice(firstColon + 1);
+                  const instanceEnd = rest.indexOf(":");
+                  if (instanceEnd > 0) {
+                    instanceId = rest.slice(0, instanceEnd);
+                    sessionId = rest.slice(instanceEnd + 1);
+                  } else {
+                    instanceId = this.config.instanceId ?? "default";
+                    sessionId = rest;
+                  }
+                  // For offload-l2: strip trailing ":{mmdFile}" from sessionId
+                  // (mmdFile is extracted separately from timerMember in the executor)
+                  if (prefix === "offload-l2" && sessionId.endsWith(".mmd")) {
+                    const lastColon = sessionId.lastIndexOf(":");
+                    if (lastColon > 0) {
+                      sessionId = sessionId.slice(0, lastColon);
+                    }
+                  }
+                } else {
+                  // Pipeline memory timer. The member may be legacy "sessionId:L1_idle"
+                  // or scoped "scope:team:T|agent:A|session:S:L1_idle"; scope is member
+                  // data only and does not affect Redis key slotting.
+                  const parsed = parsePipelineTimerMember(member);
+                  sessionId = parsed.sessionId;
+                  taskType = parsed.taskType;
+                  teamId = parsed.teamId;
+                  agentId = parsed.agentId;
+                  instanceId =
+                    entry.instanceId ?? this.config.instanceId ?? "default";
+                }
+                const now = Date.now();
+                // Extract targetMmdFile from member for offload-l2 (needed by pipeline-worker lockKey)
+                let targetMmdFile: string | undefined;
+                if (taskType === "offload-l2") {
+                  const mmdMatch = member.match(/(\d+-[^:]+\.mmd)$/);
+                  if (mmdMatch) targetMmdFile = mmdMatch[1];
+                }
+                const task = {
+                  id: `${taskType}-${sessionId}-${now}`,
+                  type: taskType as any,
+                  instanceId,
+                  sessionId,
+                  teamId,
+                  agentId,
+                  priority: 0,
+                  createdAt: now,
+                  data: {
+                    triggeredBy: "timer_scanner",
+                    timerMember: member,
+                    instanceId,
+                    targetMmdFile,
+                    teamId,
+                    agentId,
+                  },
+                };
+                this.stateBackend!.enqueueTask(task)
+                  .then(() => {
+                    this.logger.info(
+                      `[local-timer] Timer fired: ${member} → enqueued ${taskType} task`,
+                    );
+                  })
+                  .catch((err) => {
+                    this.logger.error(
+                      `[local-timer] Failed to enqueue task for ${member}: ${err instanceof Error ? err.message : String(err)}`,
+                    );
+                  });
+              },
             }
-            // For offload-l2: strip trailing ":{mmdFile}" from sessionId
-            // (mmdFile is extracted separately from timerMember in the executor)
-            if (prefix === "offload-l2" && sessionId.endsWith(".mmd")) {
-              const lastColon = sessionId.lastIndexOf(":");
-              if (lastColon > 0) {
-                sessionId = sessionId.slice(0, lastColon);
-              }
-            }
-          } else {
-            // Pipeline memory timer. The member may be legacy "sessionId:L1_idle"
-            // or scoped "scope:team:T|agent:A|session:S:L1_idle"; scope is member
-            // data only and does not affect Redis key slotting.
-            const parsed = parsePipelineTimerMember(member);
-            sessionId = parsed.sessionId;
-            taskType = parsed.taskType;
-            teamId = parsed.teamId;
-            agentId = parsed.agentId;
-            instanceId = entry.instanceId ?? this.config.instanceId ?? "default";
-          }
-          const now = Date.now();
-          // Extract targetMmdFile from member for offload-l2 (needed by pipeline-worker lockKey)
-          let targetMmdFile: string | undefined;
-          if (taskType === "offload-l2") {
-            const mmdMatch = member.match(/(\d+-[^:]+\.mmd)$/);
-            if (mmdMatch) targetMmdFile = mmdMatch[1];
-          }
-          const task = {
-            id: `${taskType}-${sessionId}-${now}`,
-            type: taskType as any,
-            instanceId,
-            sessionId,
-            teamId,
-            agentId,
-            priority: 0,
-            createdAt: now,
-            data: { triggeredBy: "timer_scanner", timerMember: member, instanceId, targetMmdFile, teamId, agentId },
-          };
-          this.stateBackend!.enqueueTask(task).then(() => {
-            this.logger.info(`[local-timer] Timer fired: ${member} → enqueued ${taskType} task`);
-          }).catch((err) => {
-            this.logger.error(`[local-timer] Failed to enqueue task for ${member}: ${err instanceof Error ? err.message : String(err)}`);
-          });
-        },
-      } : undefined,
-      redis: backendType === "redis" ? Object.fromEntries([
-        ["host", this.config.redis.host],
-        ["port", this.config.redis.port],
-        ["password", this.config.redis.password],
-        ["db", this.config.redis.db],
-        ["keyPrefix", this.config.redis.keyPrefix],
-      ]) : undefined,
+          : undefined,
+      redis:
+        backendType === "redis"
+          ? Object.fromEntries([
+              ["host", this.config.redis.host],
+              ["port", this.config.redis.port],
+              ["password", this.config.redis.password],
+              ["db", this.config.redis.db],
+              ["keyPrefix", this.config.redis.keyPrefix],
+            ])
+          : undefined,
     });
     this.logger.info(`State Backend created (${backendType})`);
 
@@ -1768,7 +1968,10 @@ export class TdaiGateway {
     // Optional deployment adapters are loaded dynamically. When unavailable,
     // standalone falls back to LocalConfigSource + NoopQuotaReporter; service
     // mode fails fast because it requires deployment-specific adapters.
-    let adapterDeps: { configSource: import("../core/abstractions/index.js").IConfigSource; quotaReporter: import("../core/abstractions/index.js").IQuotaReporter };
+    let adapterDeps: {
+      configSource: import("../core/abstractions/index.js").IConfigSource;
+      quotaReporter: import("../core/abstractions/index.js").IQuotaReporter;
+    };
     try {
       const { createAdapterDeps } = await import("../integrations/factory.js");
       adapterDeps = await createAdapterDeps({
@@ -1788,8 +1991,12 @@ export class TdaiGateway {
         `[gateway] integrations/ not available (${err instanceof Error ? err.message : String(err)}); ` +
           `falling back to inline LocalConfigSource + NoopQuotaReporter (standalone only).`,
       );
-      const { LocalConfigSource } = await import("../core/instance-config-provider.js");
-      const { NoopQuotaReporter } = await import("../core/quota/noop-quota-reporter.js");
+      const { LocalConfigSource } = await import(
+        "../core/instance-config-provider.js"
+      );
+      const { NoopQuotaReporter } = await import(
+        "../core/quota/noop-quota-reporter.js"
+      );
       adapterDeps = {
         configSource: new LocalConfigSource(this.logger),
         quotaReporter: new NoopQuotaReporter(),
@@ -1812,17 +2019,22 @@ export class TdaiGateway {
         reporter: adapterDeps.quotaReporter,
         logger: this.logger,
       });
-      this.logger.info("QuotaManager initialized (memoryLimit=10000, creditLimit=1000)");
+      this.logger.info(
+        "QuotaManager initialized (memoryLimit=10000, creditLimit=1000)",
+      );
     }
     // Allow overriding store mode independently from deployMode. Useful for
     // service-mode integration smoke tests where Redis + COS are real but no
     // VDB is available — set STORE_MODE=sqlite to keep the VDB-dependent
     // pieces local while exercising the rest of the service-mode wiring.
-    const storeModeOverride = process.env.STORE_MODE === "sqlite" || process.env.STORE_MODE === "tcvdb"
-      ? (process.env.STORE_MODE as "sqlite" | "tcvdb")
-      : undefined;
+    const storeModeOverride =
+      process.env.STORE_MODE === "sqlite" || process.env.STORE_MODE === "tcvdb"
+        ? (process.env.STORE_MODE as "sqlite" | "tcvdb")
+        : undefined;
     this.storePool = new StorePool({
-      mode: storeModeOverride ?? (this.config.deployMode === "service" ? "tcvdb" : "sqlite"),
+      mode:
+        storeModeOverride ??
+        (this.config.deployMode === "service" ? "tcvdb" : "sqlite"),
       memoryCfg: this.config.memory,
       dataDir: this.config.data.baseDir,
       maxStores: this.config.shark.maxInstances,
@@ -1833,7 +2045,9 @@ export class TdaiGateway {
       },
       logger: this.logger,
     });
-    this.logger.info(`Instance Config Provider + Store Pool initialized (mode=${this.config.deployMode})`);
+    this.logger.info(
+      `Instance Config Provider + Store Pool initialized (mode=${this.config.deployMode})`,
+    );
 
     // 1.3. Switch Core's default storage to remote object storage in service mode.
     // This ensures v1 API (capture/recall) also writes L0/L1 to shared storage instead of local filesystem.
@@ -1842,10 +2056,14 @@ export class TdaiGateway {
     }
 
     // 1.5. Inject StatefulPipelineManager into Core (replaces legacy MemoryPipelineManager)
-    const { createStatefulPipelineManager } = await import("../utils/pipeline-factory.js");
+    const { createStatefulPipelineManager } = await import(
+      "../utils/pipeline-factory.js"
+    );
     // Service mode: defaultInstanceId must NOT be "default"; all calls must provide explicit instanceId.
     // Standalone mode: uses configured instanceId or "default" as fallback.
-    const instanceId = this.config.instanceId ?? (this.config.deployMode === "service" ? "__unset__" : "default");
+    const instanceId =
+      this.config.instanceId ??
+      (this.config.deployMode === "service" ? "__unset__" : "default");
     const statefulManager = createStatefulPipelineManager(
       this.config.memory,
       this.stateBackend,
@@ -1856,34 +2074,50 @@ export class TdaiGateway {
     // Attach to core — core.setStatefulPipelineManager will wire capture to use captureAtomic
     if (typeof (this.core as any).setStatefulPipelineManager === "function") {
       (this.core as any).setStatefulPipelineManager(statefulManager);
-      this.logger.info(`Core switched to StatefulPipelineManager (instance=${instanceId})`);
+      this.logger.info(
+        `Core switched to StatefulPipelineManager (instance=${instanceId})`,
+      );
     }
 
     // 2. Start Timer Scanner (Scheme D: leaderless, scans sharded global ZSETs)
     const { TimerScanner } = await import("../services/timer-scanner.js");
-    const defaultInstances = this.config.scanner.instances.split(",").filter(Boolean);
+    const defaultInstances = this.config.scanner.instances
+      .split(",")
+      .filter(Boolean);
 
-    this.timerScanner = new TimerScanner(this.stateBackend, {
-      scanIntervalMs: this.config.scanner.intervalMs,
-    }, this.logger);
+    this.timerScanner = new TimerScanner(
+      this.stateBackend,
+      {
+        scanIntervalMs: this.config.scanner.intervalMs,
+      },
+      this.logger,
+    );
     await this.timerScanner.start();
-    this.logger.info(`Timer Scanner started (defaultInstances=${defaultInstances.join(",")}, sharded=true, leaderless=true)`);
+    this.logger.info(
+      `Timer Scanner started (defaultInstances=${defaultInstances.join(",")}, sharded=true, leaderless=true)`,
+    );
 
     // 3. Start Pipeline Worker
     const { PipelineWorker } = await import("../services/pipeline-worker.js");
     const rawExecutor = this.buildTaskExecutor();
     // Wrap with TracedTaskExecutor decorator to add Trace Span for L1/L2/L3 tasks
     const executor = new TracedTaskExecutor(rawExecutor);
-    this.pipelineWorker = new PipelineWorker(this.stateBackend, executor, {
-      pollIntervalMs: this.config.worker.pollMs,
-      concurrency: this.config.worker.concurrency,
-      // L1 complete, advance L2 timer (fast path: L1 complete → trigger L2 after delay seconds)
-      onL1Complete: statefulManager.advanceL2TimerAfterL1.bind(statefulManager),
-      // Set maxInterval fallback timer after L2 is complete
-      onL2Complete: statefulManager.armL2MaxInterval.bind(statefulManager),
-      // Node-level concurrency limit shared with skill worker
-      permitPool: this.workerPermitPool ?? undefined,
-    }, this.logger);
+    this.pipelineWorker = new PipelineWorker(
+      this.stateBackend,
+      executor,
+      {
+        pollIntervalMs: this.config.worker.pollMs,
+        concurrency: this.config.worker.concurrency,
+        // L1 complete, advance L2 timer (fast path: L1 complete → trigger L2 after delay seconds)
+        onL1Complete:
+          statefulManager.advanceL2TimerAfterL1.bind(statefulManager),
+        // Set maxInterval fallback timer after L2 is complete
+        onL2Complete: statefulManager.armL2MaxInterval.bind(statefulManager),
+        // Node-level concurrency limit shared with skill worker
+        permitPool: this.workerPermitPool ?? undefined,
+      },
+      this.logger,
+    );
     await this.pipelineWorker.start();
     this.logger.info("Pipeline Worker started");
 
@@ -1898,9 +2132,14 @@ export class TdaiGateway {
    * Share the same implementation body with the inline version in handleRequest, avoiding skill worker (process-level singleton)
    * and handler (per request) go through two different construction logic.
    */
-  private async resolveSkillCoreForInstance(instanceId: string): Promise<SkillCoreType> {
+  private async resolveSkillCoreForInstance(
+    instanceId: string,
+  ): Promise<SkillCoreType> {
     if (!this.configProvider || !this.storePool) {
-      throw new SkillCoreError("SKILL_COS_REQUIRED", "resolveSkillCoreForInstance: configProvider/storePool not ready");
+      throw new SkillCoreError(
+        "SKILL_COS_REQUIRED",
+        "resolveSkillCoreForInstance: configProvider/storePool not ready",
+      );
     }
     const configProvider = this.configProvider;
     const storePool = this.storePool;
@@ -1917,9 +2156,15 @@ export class TdaiGateway {
     } else if (sharedCosClient) {
       const cosConfig = await configProvider.resolveCos();
       if (cosConfig?.cosUrl) {
-        const { CosStorageBackend } = await import("../integrations/cos/cos-backend.js");
+        const { CosStorageBackend } = await import(
+          "../integrations/cos/cos-backend.js"
+        );
         const prefix = `${cosConfig.pathPrefix.replace(/\/$/, "")}/${instanceId}/`;
-        const backend = new CosStorageBackend({ sharedClient: sharedCosClient, prefix, logger });
+        const backend = new CosStorageBackend({
+          sharedClient: sharedCosClient,
+          prefix,
+          logger,
+        });
         storage = new StorageAdapter(backend);
         if (!this.cosStorageCache) this.cosStorageCache = new Map();
         this.cosStorageCache.set(instanceId, storage);
@@ -1936,11 +2181,20 @@ export class TdaiGateway {
       );
     }
 
-    const maxResourceSize = this.core.getResolvedSkillConfig()?.resources.maxResourceSizeBytes ?? 5_000_000;
-    const { SkillResourceStore } = await import("../core/skill/skill-resource-store.js");
-    const skillResources = new SkillResourceStore({ storage, maxResourceSizeBytes: maxResourceSize });
+    const maxResourceSize =
+      this.core.getResolvedSkillConfig()?.resources.maxResourceSizeBytes ??
+      5_000_000;
+    const { SkillResourceStore } = await import(
+      "../core/skill/skill-resource-store.js"
+    );
+    const skillResources = new SkillResourceStore({
+      storage,
+      maxResourceSizeBytes: maxResourceSize,
+    });
 
-    const { SkillVersioning } = await import("../core/skill/skill-versioning.js");
+    const { SkillVersioning } = await import(
+      "../core/skill/skill-versioning.js"
+    );
     const quotaMgr = this.quotaManager;
     const resolveMetaSvc = () => this.ensureMetadataService(instanceId);
     const skillVersioning = new SkillVersioning({
@@ -1966,16 +2220,18 @@ export class TdaiGateway {
       onSkillAccessed: (skill) => {
         if (!skill.team_id || !skill.owner_agent_id) return;
         resolveMetaSvc()
-          .then((svc) => svc.ensureSkillAsset({
-            skill_id: skill.skill_id,
-            team_id: skill.team_id,
-            agent_id: skill.owner_agent_id,
-            name: skill.name,
-          }))
+          .then((svc) =>
+            svc.ensureSkillAsset({
+              skill_id: skill.skill_id,
+              team_id: skill.team_id,
+              agent_id: skill.owner_agent_id,
+              name: skill.name,
+            }),
+          )
           .catch((err: unknown) => {
             logger.warn(
-              `[skill-asset-sync] ensureSkillAsset(access) failed for ${skill.skill_id}: `
-                + (err instanceof Error ? err.message : String(err)),
+              `[skill-asset-sync] ensureSkillAsset(access) failed for ${skill.skill_id}: ` +
+                (err instanceof Error ? err.message : String(err)),
             );
           });
       },
@@ -1984,9 +2240,9 @@ export class TdaiGateway {
           .then((svc) => svc.deleteAssets([skill_id]))
           .catch((err: unknown) => {
             logger.warn(
-              `[skill-asset-sync] deleteAssets(archive) failed for ${skill_id}`
-                + ` (team=${team_id ?? "-"}): `
-                + (err instanceof Error ? err.message : String(err)),
+              `[skill-asset-sync] deleteAssets(archive) failed for ${skill_id}` +
+                ` (team=${team_id ?? "-"}): ` +
+                (err instanceof Error ? err.message : String(err)),
             );
           });
       },
@@ -2002,23 +2258,36 @@ export class TdaiGateway {
     instanceId: string,
   ): Promise<SkillExtractorClass> {
     const { SKILL_REVIEW_PROMPT } = await import("../core/skill/index.js");
-    const { StandaloneLLMRunner } = await import("../adapters/standalone/llm-runner.js");
-    const { resolveStandaloneLlmForRuntime, LlmProviderResolveError } = await import("../adapters/standalone/llm-provider-resolver.js");
+    const { StandaloneLLMRunner } = await import(
+      "../adapters/standalone/llm-runner.js"
+    );
+    const { resolveStandaloneLlmForRuntime, LlmProviderResolveError } =
+      await import("../adapters/standalone/llm-provider-resolver.js");
 
     const llmCfg = this.config.llm;
     if (!llmCfg?.baseUrl) {
-      throw new SkillCoreError("LLM_UNAVAILABLE", "LLM baseUrl not configured for skill extraction");
+      throw new SkillCoreError(
+        "LLM_UNAVAILABLE",
+        "LLM baseUrl not configured for skill extraction",
+      );
     }
     if ((llmCfg.provider ?? "openai") === "openai" && !llmCfg.apiKey) {
-      throw new SkillCoreError("LLM_UNAVAILABLE", "LLM apiKey not configured (provider=openai)");
+      throw new SkillCoreError(
+        "LLM_UNAVAILABLE",
+        "LLM apiKey not configured (provider=openai)",
+      );
     }
 
     let effective: import("../adapters/standalone/llm-runner.js").StandaloneLLMConfig;
     try {
       effective = resolveStandaloneLlmForRuntime(llmCfg, instanceId);
     } catch (err) {
-      const msg = err instanceof LlmProviderResolveError ? err.message : String(err);
-      throw new SkillCoreError("LLM_UNAVAILABLE", `LLM provider resolve failed: ${msg}`);
+      const msg =
+        err instanceof LlmProviderResolveError ? err.message : String(err);
+      throw new SkillCoreError(
+        "LLM_UNAVAILABLE",
+        `LLM provider resolve failed: ${msg}`,
+      );
     }
     this.logger.debug?.(
       `[skill-extractor] resolved LLM: provider=${llmCfg.provider ?? "openai"}, model=${effective.model}, baseUrl=${effective.baseUrl}`,
@@ -2064,7 +2333,9 @@ export class TdaiGateway {
    * `tdai_memory_prod_v3:skill-conv` —— same as the old skill queue
    * (`{prefix}:skill:*`) literally does not collide.
    */
-  private ensureConversationAddForInstance(instanceId: string): Promise<WiredConversationAddHandler> {
+  private ensureConversationAddForInstance(
+    instanceId: string,
+  ): Promise<WiredConversationAddHandler> {
     // In-flight cache: concurrent requests with the same instanceId share the same handler wire promise.
     // (the worker pool is a global singleton, so there is no issue of multiple workers grabbing the lock for wire due to concurrency)
     const cached = this.conversationAddByInstance.get(instanceId);
@@ -2084,7 +2355,9 @@ export class TdaiGateway {
    * Standalone (sqlite) version of the in-flight cache entry, with semantics completely consistent with
    * ensureConversationAddForInstance, only build goes through the standalone path.
    */
-  private ensureConversationAddForStandalone(instanceId: string): Promise<WiredConversationAddHandler> {
+  private ensureConversationAddForStandalone(
+    instanceId: string,
+  ): Promise<WiredConversationAddHandler> {
     const cached = this.conversationAddByInstance.get(instanceId);
     if (cached) return cached;
 
@@ -2132,9 +2405,17 @@ export class TdaiGateway {
     // Redis backend: directly get the ioredis client from stateBackend for SCAN
     const redisClient = this.getSharedIoRedisClient();
     if (redisClient && queue instanceof RedisSkillAgentTaskQueue) {
+      // SAFETY: redisClient is the shared ioredis instance null-checked above; the structural type lists only the SCAN-family commands this purge uses.
       const client = redisClient as unknown as {
-        sscan(k: string, cursor: string, ...args: (string | number)[]): Promise<[string, string[]]>;
-        scan(cursor: string, ...args: (string | number)[]): Promise<[string, string[]]>;
+        sscan(
+          k: string,
+          cursor: string,
+          ...args: (string | number)[]
+        ): Promise<[string, string[]]>;
+        scan(
+          cursor: string,
+          ...args: (string | number)[]
+        ): Promise<[string, string[]]>;
         srem(k: string, ...members: string[]): Promise<number>;
         lrem(k: string, count: number, value: string): Promise<number>;
         del(...keys: string[]): Promise<number>;
@@ -2145,7 +2426,14 @@ export class TdaiGateway {
       // SSCAN + MATCH matching 5 tuples
       let cursor = "0";
       do {
-        const [next, members] = await client.sscan(setKey, cursor, "MATCH", `${prefixSegment}*`, "COUNT", 500);
+        const [next, members] = await client.sscan(
+          setKey,
+          cursor,
+          "MATCH",
+          `${prefixSegment}*`,
+          "COUNT",
+          500,
+        );
         cursor = next;
         for (const m of members) {
           await client.srem(setKey, m);
@@ -2167,7 +2455,13 @@ export class TdaiGateway {
       for (const pattern of patterns) {
         let cur = "0";
         do {
-          const [next, keys] = await client.scan(cur, "MATCH", pattern, "COUNT", 500);
+          const [next, keys] = await client.scan(
+            cur,
+            "MATCH",
+            pattern,
+            "COUNT",
+            500,
+          );
           cur = next;
           if (keys.length > 0) {
             const deleted = await client.del(...keys);
@@ -2178,7 +2472,11 @@ export class TdaiGateway {
       this.logger.info(
         `[skill-queue-purge] instance=${instanceId} redis: tuples=${tuplesRemoved} locks=${locksRemoved}`,
       );
-      return { tuples_removed: tuplesRemoved, locks_removed: locksRemoved, backend: "redis" };
+      return {
+        tuples_removed: tuplesRemoved,
+        locks_removed: locksRemoved,
+        backend: "redis",
+      };
     }
 
     // Local backend: go through _snapshot reverse filtering
@@ -2201,7 +2499,11 @@ export class TdaiGateway {
       this.logger.info(
         `[skill-queue-purge] instance=${instanceId} local: tuples=${tuplesRemoved}`,
       );
-      return { tuples_removed: tuplesRemoved, locks_removed: 0, backend: "local" };
+      return {
+        tuples_removed: tuplesRemoved,
+        locks_removed: 0,
+        backend: "local",
+      };
     }
     return { tuples_removed: 0, locks_removed: 0, backend: "none" };
   }
@@ -2216,7 +2518,9 @@ export class TdaiGateway {
         client: redisClient as SkillAgentTaskQueueRedisLike,
         keyPrefix,
       });
-      this.logger.info(`[skill-worker-pool] shared queue ready: backend=redis prefix=${keyPrefix}`);
+      this.logger.info(
+        `[skill-worker-pool] shared queue ready: backend=redis prefix=${keyPrefix}`,
+      );
     } else {
       // Local state backend / standalone without redis → single-node in-memory queue
       this.skillSharedQueue = new LocalSkillAgentTaskQueue();
@@ -2242,11 +2546,12 @@ export class TdaiGateway {
     if (this.skillWorkerPool) return this.skillWorkerPool;
     const skillCfg = this.core.getResolvedSkillConfig();
     if (!skillCfg) {
-      this.logger.info(`[skill-worker-pool] resolved skill config missing (skill.enabled=false?); pool not started`);
+      this.logger.info(
+        `[skill-worker-pool] resolved skill config missing (skill.enabled=false?); pool not started`,
+      );
       return null;
     }
     const queue = this.ensureSkillSharedQueue();
-    const gateway = this;
     const isStandalone = this.config.deployMode !== "service";
 
     this.skillWorkerPool = new SkillWorkerPool({
@@ -2257,28 +2562,46 @@ export class TdaiGateway {
       brpopBlockMs: skillCfg.worker.brpopBlockMs,
       extractLockTtlMs: skillCfg.worker.extractLockTtlMs,
       extractLockRenewIntervalMs: skillCfg.worker.extractLockRenewIntervalMs,
-      resolveBuffer: async (instanceId: string): Promise<SkillBufferStorage> => {
-        const storage = await gateway.resolveStorageForInstance(instanceId);
+      resolveBuffer: async (
+        instanceId: string,
+      ): Promise<SkillBufferStorage> => {
+        const storage = await this.resolveStorageForInstance(instanceId);
         // SkillBufferStorage is lightweight for each new, but the storage adapter is cached
-        const { SkillBufferStorage: Cls } = await import("../core/skill/conversation-add/buffer-storage.js");
+        const { SkillBufferStorage: Cls } = await import(
+          "../core/skill/conversation-add/buffer-storage.js"
+        );
         return new Cls({ storage });
       },
-      resolveExtractor: async (instanceId: string): Promise<ISkillExtractor> => {
+      resolveExtractor: async (
+        instanceId: string,
+      ): Promise<ISkillExtractor> => {
         if (isStandalone) {
-          const raw = gateway.core.getSkillExtractor();
+          const raw = this.core.getSkillExtractor();
           if (!raw) {
-            throw new Error(`[skill-worker-pool] standalone SkillExtractor unavailable (instance=${instanceId})`);
+            throw new Error(
+              `[skill-worker-pool] standalone SkillExtractor unavailable (instance=${instanceId})`,
+            );
           }
-          return createExtractorAdapter(raw, gateway.logger);
+          return createExtractorAdapter(raw, this.logger);
         }
-        const skillCore = await gateway.resolveSkillCoreForInstance(instanceId);
-        const raw = await gateway.buildSkillExtractorForInstance(skillCore, instanceId);
-        return createExtractorAdapter(raw, gateway.logger);
+        const skillCore = await this.resolveSkillCoreForInstance(instanceId);
+        const raw = await this.buildSkillExtractorForInstance(
+          skillCore,
+          instanceId,
+        );
+        return createExtractorAdapter(raw, this.logger);
       },
       resolveSink: async (instanceId: string): Promise<SkillCandidatesSink> => {
-        const metadataService = await gateway.ensureMetadataService(instanceId).catch(() => undefined);
-        const { SkillCoreSink } = await import("../core/skill/conversation-add/skill-core-sink.js");
-        return new SkillCoreSink({ metadata: metadataService, logger: gateway.logger });
+        const metadataService = await this.ensureMetadataService(
+          instanceId,
+        ).catch(() => undefined);
+        const { SkillCoreSink } = await import(
+          "../core/skill/conversation-add/skill-core-sink.js"
+        );
+        return new SkillCoreSink({
+          metadata: metadataService,
+          logger: this.logger,
+        });
       },
     });
     this.skillWorkerPool.start();
@@ -2306,7 +2629,8 @@ export class TdaiGateway {
       thresholds: {
         toolCallThreshold: cfg.extraction.toolCallThreshold,
         bytesThreshold: cfg.extraction.bytesThreshold,
-        requestCompressThresholdBytes: cfg.extraction.requestCompressThresholdBytes,
+        requestCompressThresholdBytes:
+          cfg.extraction.requestCompressThresholdBytes,
       },
       compressOptions: {
         toolContentThresholdBytes: cfg.compress.toolContentThresholdBytes,
@@ -2321,7 +2645,9 @@ export class TdaiGateway {
     };
   }
 
-  private async buildConversationAddForInstance(instanceId: string): Promise<WiredConversationAddHandler> {
+  private async buildConversationAddForInstance(
+    instanceId: string,
+  ): Promise<WiredConversationAddHandler> {
     // 2026-07-30 After pooling, this function only creates per-instance handler bundles.
     // extractor / sink are removed from the handler side and handed to the resolver in SkillWorkerPool for retrieval now.
     // However, the signature of wireConversationAddHandler still requires an extractor parameter (for backward compatibility with old wireConversationAdd),
@@ -2331,14 +2657,18 @@ export class TdaiGateway {
     await this.resolveSkillCoreForInstance(instanceId);
     const storage = this.cosStorageCache?.get(instanceId);
     if (!storage) {
-      throw new Error(`[skill-conversation-add] storage missing for instance=${instanceId} after resolveSkillCore`);
+      throw new Error(
+        `[skill-conversation-add] storage missing for instance=${instanceId} after resolveSkillCore`,
+      );
     }
 
     // 2) queue: process-wide shared singleton
     const queue = this.ensureSkillSharedQueue();
 
     // 3) noop extractor / sink placeholder (handler not used, only the real one is used by the worker pool)
-    const noopExtractor: ISkillExtractor = { extract: async () => ({ candidates: [] }) };
+    const noopExtractor: ISkillExtractor = {
+      extract: async () => ({ candidates: [] }),
+    };
 
     const wired = wireConversationAddHandler({
       storage,
@@ -2369,16 +2699,22 @@ export class TdaiGateway {
    *   - extractor: if cfg.llm is incomplete and TdaiCore fails to create a skillExtractor, skipWorker
    *      Only attach handler+buffer, Client side can write to buffer, but archiving cannot be triggered (warn).
    */
-  private async buildConversationAddForStandalone(instanceId: string): Promise<WiredConversationAddHandler> {
+  private async buildConversationAddForStandalone(
+    instanceId: string,
+  ): Promise<WiredConversationAddHandler> {
     // 2026-07-30 After pooling, standalone uses the same handler wire, and the worker pool is a global singleton.
     const skillCore = this.core.getSkillCore();
     if (!skillCore) {
-      throw new Error(`[skill-conversation-add] SkillCore not enabled (standalone) — check cfg.skill.enabled`);
+      throw new Error(
+        `[skill-conversation-add] SkillCore not enabled (standalone) — check cfg.skill.enabled`,
+      );
     }
 
     const storage = await this.resolveStorageForInstance(instanceId);
     const queue = this.ensureSkillSharedQueue();
-    const noopExtractor: ISkillExtractor = { extract: async () => ({ candidates: [] }) };
+    const noopExtractor: ISkillExtractor = {
+      extract: async () => ({ candidates: [] }),
+    };
 
     const wired = wireConversationAddHandler({
       storage,
@@ -2416,9 +2752,10 @@ export class TdaiGateway {
     let store: IMemoryStore | undefined;
 
     if (this.storePool && this.configProvider) {
-      const vdbConfig = this.storePool.mode === "tcvdb"
-        ? await this.configProvider.resolveVdb(instanceId)
-        : null;
+      const vdbConfig =
+        this.storePool.mode === "tcvdb"
+          ? await this.configProvider.resolveVdb(instanceId)
+          : null;
       const pooled = await this.storePool.getStore(instanceId, vdbConfig);
       store = pooled.store;
     } else {
@@ -2426,15 +2763,20 @@ export class TdaiGateway {
     }
 
     if (!store) {
-      throw new Error(`memory store unavailable for instance ${instanceId}, cannot clear chat memory content`);
+      throw new Error(
+        `memory store unavailable for instance ${instanceId}, cannot clear chat memory content`,
+      );
     }
 
-    const storage = this.storePool && this.configProvider
-      ? await this.resolveStorageForInstance(instanceId)
-      : this.core.getStorage();
+    const storage =
+      this.storePool && this.configProvider
+        ? await this.resolveStorageForInstance(instanceId)
+        : this.core.getStorage();
 
     if (!storage) {
-      throw new Error(`storage unavailable for instance ${instanceId}, cannot clear chat memory content`);
+      throw new Error(
+        `storage unavailable for instance ${instanceId}, cannot clear chat memory content`,
+      );
     }
 
     return { store, storage };
@@ -2449,18 +2791,23 @@ export class TdaiGateway {
    *     LocalStorageBackend rooted at data.baseDir.
    *   - Service: per-instance CosStorageBackend with `${pathPrefix}/${instanceId}/`.
    *
-   * Both `/v2/*` (memory) and `/v3/skill/conversation/add` need per-instance
+   * Both `/v3/*` (memory) and `/v3/skill/conversation/add` need per-instance
    * storage; keeping this in one method keeps the fallback semantics identical
    * on both paths.
    */
-  private async resolveStorageForInstance(instanceId: string): Promise<StorageAdapter> {
+  private async resolveStorageForInstance(
+    instanceId: string,
+  ): Promise<StorageAdapter> {
     const cached = this.cosStorageCache?.get(instanceId);
     if (cached) return cached;
 
     // Standalone mode: fall back to local storage (no COS needed)
     if (!this.sharedCosClient && this.config.deployMode === "standalone") {
       const localDir = this.config.data.baseDir;
-      const backend = new LocalStorageBackend({ rootDir: localDir, logger: this.logger });
+      const backend = new LocalStorageBackend({
+        rootDir: localDir,
+        logger: this.logger,
+      });
       const adapter = new StorageAdapter(backend);
       if (!this.cosStorageCache) this.cosStorageCache = new Map();
       this.cosStorageCache.set(instanceId, adapter);
@@ -2468,21 +2815,29 @@ export class TdaiGateway {
     }
 
     if (!this.sharedCosClient) {
-      throw new Error(`SharedCosClient not initialized for instance ${instanceId}`);
+      throw new Error(
+        `SharedCosClient not initialized for instance ${instanceId}`,
+      );
     }
     if (!this.configProvider) {
-      throw new Error(`configProvider not initialized for instance ${instanceId}`);
+      throw new Error(
+        `configProvider not initialized for instance ${instanceId}`,
+      );
     }
 
     // Get current COS config to determine prefix
     const cosConfig = await this.configProvider.resolveCos();
     if (!cosConfig?.cosUrl) {
-      throw new Error(`COS config not available for instance ${instanceId} (Shark returned null or empty CosUrl)`);
+      throw new Error(
+        `COS config not available for instance ${instanceId} (Shark returned null or empty CosUrl)`,
+      );
     }
 
     // Per-instance CosStorageBackend: lightweight, only holds prefix
-    const { CosStorageBackend } = await import("../integrations/cos/cos-backend.js");
-    const prefix = `${cosConfig.pathPrefix.replace(/\/$/, '')}/${instanceId}/`;
+    const { CosStorageBackend } = await import(
+      "../integrations/cos/cos-backend.js"
+    );
+    const prefix = `${cosConfig.pathPrefix.replace(/\/$/, "")}/${instanceId}/`;
     const backend = new CosStorageBackend({
       sharedClient: this.sharedCosClient,
       prefix,
@@ -2500,6 +2855,7 @@ export class TdaiGateway {
   private getSharedIoRedisClient(): SkillAgentTaskQueueRedisLike | null {
     if (!this.stateBackend) return null;
     // duck-type: only RedisStateBackend has getClient()
+    // SAFETY: duck-type probe only — getClient existence is checked before use, so this never yields a false-typed value.
     const maybe = this.stateBackend as unknown as { getClient?: () => unknown };
     if (typeof maybe.getClient !== "function") return null;
     try {
@@ -2521,23 +2877,37 @@ export class TdaiGateway {
       try {
         const cosConfig = await this.configProvider.resolveCos();
         if (!cosConfig?.cosUrl) {
-          this.logger.warn(`${TAG} COS config unavailable from Shark (attempt ${attempt}/${maxRetries})`);
+          this.logger.warn(
+            `${TAG} COS config unavailable from Shark (attempt ${attempt}/${maxRetries})`,
+          );
           if (attempt < maxRetries) {
-            await new Promise(r => setTimeout(r, attempt * 2000));
+            await new Promise((r) => setTimeout(r, attempt * 2000));
             continue;
           }
-          this.logger.error(`${TAG} COS init failed after ${maxRetries} attempts: Shark returned empty COS config`);
+          this.logger.error(
+            `${TAG} COS init failed after ${maxRetries} attempts: Shark returned empty COS config`,
+          );
           return;
         }
 
-        const { CosStorageBackend, SharedCosClient } = await import("../integrations/cos/cos-backend.js");
-        const { CachedCredentialProvider, parseCosUrl } = await import("../core/storage/credential-provider.js");
+        const { CosStorageBackend, SharedCosClient } = await import(
+          "../integrations/cos/cos-backend.js"
+        );
+        const { CachedCredentialProvider, parseCosUrl } = await import(
+          "../core/storage/credential-provider.js"
+        );
         const { bucket, region } = parseCosUrl(cosConfig.cosUrl);
-        const cosHost = cosConfig.cosUrl.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+        const cosHost = cosConfig.cosUrl
+          .replace(/^https?:\/\//, "")
+          .replace(/\/+$/, "");
         const bucketPrefix = `${bucket}.`;
-        const endpointDomain = cosHost.startsWith(bucketPrefix) ? cosHost.slice(bucketPrefix.length) : undefined;
+        const endpointDomain = cosHost.startsWith(bucketPrefix)
+          ? cosHost.slice(bucketPrefix.length)
+          : undefined;
         const isInternalDomain = endpointDomain?.includes("tencentcos.cn");
-        const internalDomain = isInternalDomain ? endpointDomain : `cos-internal.${region}.tencentcos.cn`;
+        const internalDomain = isInternalDomain
+          ? endpointDomain
+          : `cos-internal.${region}.tencentcos.cn`;
         const cosEndpointDomain = this.config.cos.domain || internalDomain;
 
         const configProvider = this.configProvider;
@@ -2553,7 +2923,12 @@ export class TdaiGateway {
               ["bucket", parsed.bucket],
               ["region", parsed.region],
               ["prefix", fresh.pathPrefix],
-              ["expiresAt", fresh.expirationTime ? new Date(fresh.expirationTime).getTime() : undefined],
+              [
+                "expiresAt",
+                fresh.expirationTime
+                  ? new Date(fresh.expirationTime).getTime()
+                  : undefined,
+              ],
             ]);
           },
           cacheTtlMs: this.config.shark.cosBufferMs ?? 120000,
@@ -2566,10 +2941,14 @@ export class TdaiGateway {
           cosEndpointDomain,
         });
         await this.sharedCosClient.getClient();
-        this.logger.info(`${TAG} SharedCosClient initialized (bucket=${bucket}, domain=${cosEndpointDomain}, attempt=${attempt})`);
+        this.logger.info(
+          `${TAG} SharedCosClient initialized (bucket=${bucket}, domain=${cosEndpointDomain}, attempt=${attempt})`,
+        );
         if (this.config.cos.generationLogRetentionDays > 0) {
           try {
-            await this.sharedCosClient.ensureGenerationLogRetention(this.config.cos.generationLogRetentionDays);
+            await this.sharedCosClient.ensureGenerationLogRetention(
+              this.config.cos.generationLogRetentionDays,
+            );
           } catch (error) {
             this.logger.warn(
               `${TAG} generation log lifecycle setup failed (non-fatal, retention=${this.config.cos.generationLogRetentionDays}d): ${error instanceof Error ? error.message : String(error)}`,
@@ -2579,23 +2958,29 @@ export class TdaiGateway {
 
         // Set Core default storage to COS
         const defaultInstanceId = this.config.instanceId ?? "default";
-        const defaultPrefix = `${cosConfig.pathPrefix.replace(/\/$/, '')}/${defaultInstanceId}/`;
+        const defaultPrefix = `${cosConfig.pathPrefix.replace(/\/$/, "")}/${defaultInstanceId}/`;
         const cosBackend = new CosStorageBackend({
           sharedClient: this.sharedCosClient,
           prefix: defaultPrefix,
           logger: this.logger,
         });
         this.core.setStorage(new StorageAdapter(cosBackend));
-        this.logger.info(`${TAG} Core default storage switched to COS (prefix=${defaultPrefix})`);
+        this.logger.info(
+          `${TAG} Core default storage switched to COS (prefix=${defaultPrefix})`,
+        );
         return;
       } catch (err) {
-        this.logger.warn(`${TAG} COS init attempt ${attempt}/${maxRetries} failed: ${err instanceof Error ? err.message : String(err)}`);
+        this.logger.warn(
+          `${TAG} COS init attempt ${attempt}/${maxRetries} failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
         if (attempt < maxRetries) {
-          await new Promise(r => setTimeout(r, attempt * 2000));
+          await new Promise((r) => setTimeout(r, attempt * 2000));
         }
       }
     }
-    this.logger.error(`${TAG} SharedCosClient init failed after ${maxRetries} retries, L2/L3 tasks will fail until COS is available`);
+    this.logger.error(
+      `${TAG} SharedCosClient init failed after ${maxRetries} retries, L2/L3 tasks will fail until COS is available`,
+    );
   }
 
   /**
@@ -2613,28 +2998,45 @@ export class TdaiGateway {
     const gateway = this;
 
     const resolveStore = async (task: TaskPayload) => {
-      const instanceId = typeof task.data?.instanceId === "string" ? task.data.instanceId : undefined;
+      const instanceId =
+        typeof task.data?.instanceId === "string"
+          ? task.data.instanceId
+          : undefined;
       if (!instanceId) {
-        throw new Error(`Task ${task.id} missing instanceId in service mode (task.data.instanceId is required)`);
+        throw new Error(
+          `Task ${task.id} missing instanceId in service mode (task.data.instanceId is required)`,
+        );
       }
-      const vdbConfig = storePool.mode === "tcvdb"
-        ? await configProvider.resolveVdb(instanceId)
-        : null;
+      const vdbConfig =
+        storePool.mode === "tcvdb"
+          ? await configProvider.resolveVdb(instanceId)
+          : null;
       return storePool.getStore(instanceId, vdbConfig);
     };
 
     const resolveStorage = async (task: TaskPayload) => {
-      const instanceId = typeof task.data?.instanceId === "string" ? task.data.instanceId : undefined;
+      const instanceId =
+        typeof task.data?.instanceId === "string"
+          ? task.data.instanceId
+          : undefined;
       if (!instanceId) {
-        throw new Error(`Task ${task.id} missing instanceId in service mode (task.data.instanceId is required)`);
+        throw new Error(
+          `Task ${task.id} missing instanceId in service mode (task.data.instanceId is required)`,
+        );
       }
 
       // Standalone mode: use local storage (no COS needed)
-      if (!gateway.sharedCosClient && gateway.config.deployMode === "standalone") {
+      if (
+        !gateway.sharedCosClient &&
+        gateway.config.deployMode === "standalone"
+      ) {
         const cached = gateway.cosStorageCache?.get(instanceId);
         if (cached) return cached;
         const localDir = gateway.config.data.baseDir;
-        const backend = new LocalStorageBackend({ rootDir: localDir, logger: gateway.logger });
+        const backend = new LocalStorageBackend({
+          rootDir: localDir,
+          logger: gateway.logger,
+        });
         const adapter = new StorageAdapter(backend);
         if (!gateway.cosStorageCache) gateway.cosStorageCache = new Map();
         gateway.cosStorageCache.set(instanceId, adapter);
@@ -2647,16 +3049,22 @@ export class TdaiGateway {
       }
 
       if (!gateway.sharedCosClient) {
-        throw new Error(`SharedCosClient not initialized for worker task ${task.id} (instance=${instanceId})`);
+        throw new Error(
+          `SharedCosClient not initialized for worker task ${task.id} (instance=${instanceId})`,
+        );
       }
       const cached = gateway.cosStorageCache?.get(instanceId);
       if (cached) return cached;
       const cosConfig = await configProvider.resolveCos();
       if (!cosConfig) {
-        throw new Error(`COS config not available for worker task ${task.id} (instance=${instanceId}, Shark returned null)`);
+        throw new Error(
+          `COS config not available for worker task ${task.id} (instance=${instanceId}, Shark returned null)`,
+        );
       }
-      const { CosStorageBackend } = await import("../integrations/cos/cos-backend.js");
-      const prefix = `${cosConfig.pathPrefix.replace(/\/$/, '')}/${instanceId}/`;
+      const { CosStorageBackend } = await import(
+        "../integrations/cos/cos-backend.js"
+      );
+      const prefix = `${cosConfig.pathPrefix.replace(/\/$/, "")}/${instanceId}/`;
       const backend = new CosStorageBackend({
         sharedClient: gateway.sharedCosClient,
         prefix,
@@ -2692,8 +3100,10 @@ export class TdaiGateway {
       if (!backend) return undefined;
       return {
         lock: {
-          acquireLock: (key, ownerId, ttlMs) => backend.acquireLock(key, ownerId, ttlMs),
-          renewLock: (key, ownerId, ttlMs) => backend.renewLock(key, ownerId, ttlMs),
+          acquireLock: (key, ownerId, ttlMs) =>
+            backend.acquireLock(key, ownerId, ttlMs),
+          renewLock: (key, ownerId, ttlMs) =>
+            backend.renewLock(key, ownerId, ttlMs),
           releaseLock: (key, ownerId) => backend.releaseLock(key, ownerId),
         },
         lockKey: instanceId,
@@ -2709,7 +3119,9 @@ export class TdaiGateway {
             );
           },
           onLockLost: (key) => {
-            gateway.logger.warn(`[checkpoint-lock] lock lost during critical section key=${key}`);
+            gateway.logger.warn(
+              `[checkpoint-lock] lock lost during critical section key=${key}`,
+            );
           },
         },
       };
@@ -2717,20 +3129,43 @@ export class TdaiGateway {
 
     return {
       async executeL1(task: TaskPayload, signal?: AbortSignal) {
-        const instanceId = typeof task.data?.instanceId === "string" ? task.data.instanceId : undefined;
-        if (!instanceId) throw new Error(`L1 task ${task.id} missing instanceId`);
-        const teamId = task.teamId ?? (typeof task.data?.teamId === "string" ? task.data.teamId : undefined);
-        const agentId = task.agentId ?? (typeof task.data?.agentId === "string" ? task.data.agentId : undefined);
+        const instanceId =
+          typeof task.data?.instanceId === "string"
+            ? task.data.instanceId
+            : undefined;
+        if (!instanceId)
+          throw new Error(`L1 task ${task.id} missing instanceId`);
+        const teamId =
+          task.teamId ??
+          (typeof task.data?.teamId === "string"
+            ? task.data.teamId
+            : undefined);
+        const agentId =
+          task.agentId ??
+          (typeof task.data?.agentId === "string"
+            ? task.data.agentId
+            : undefined);
 
         // H-11 Step 2: early abort check — if pipeline-worker already lost its lock
         // before we even started, bail out without doing any work.
-        if (signal?.aborted) throw signal.reason ?? new Error("executeL1: aborted before start");
+        if (signal?.aborted)
+          throw signal.reason ?? new Error("executeL1: aborted before start");
 
         // Dedup: if triggered by timer but session already processed (count=0), skip
-        if (task.data?.triggeredBy === "timer_scanner" && gateway.stateBackend) {
-          const state = await gateway.stateBackend.getSessionState(instanceId, task.sessionId, teamId, agentId);
+        if (
+          task.data?.triggeredBy === "timer_scanner" &&
+          gateway.stateBackend
+        ) {
+          const state = await gateway.stateBackend.getSessionState(
+            instanceId,
+            task.sessionId,
+            teamId,
+            agentId,
+          );
           if (state && state.conversation_count === 0) {
-            gateway.logger.debug?.(`[executor] L1 skipped: session ${task.sessionId} already processed (count=0)`);
+            gateway.logger.debug?.(
+              `[executor] L1 skipped: session ${task.sessionId} already processed (count=0)`,
+            );
             return;
           }
         }
@@ -2739,13 +3174,16 @@ export class TdaiGateway {
         if (gateway.quotaManager) {
           const check = await gateway.quotaManager.checkCreditQuota(instanceId);
           if (!check.allowed) {
-            gateway.logger.warn(`[executor] L1 skipped: credit limit exceeded (instance=${instanceId}, current=${check.current}, limit=${check.limit})`);
+            gateway.logger.warn(
+              `[executor] L1 skipped: credit limit exceeded (instance=${instanceId}, current=${check.current}, limit=${check.limit})`,
+            );
             return;
           }
         }
 
         // H-11 Step 2: check again after async quota call before launching LLM
-        if (signal?.aborted) throw signal.reason ?? new Error("executeL1: aborted before LLM");
+        if (signal?.aborted)
+          throw signal.reason ?? new Error("executeL1: aborted before LLM");
 
         core.setInstanceId(instanceId);
         const { store, embedding } = await resolveStore(task);
@@ -2766,7 +3204,9 @@ export class TdaiGateway {
           const { storedCount, creditUsed } = result;
           const reportCredit = gateway.reportedCreditFor(creditUsed, "L1");
           if (storedCount > 0 || reportCredit > 0) {
-            gateway.quotaManager.reportUsage(instanceId, storedCount, reportCredit, "L1").catch(() => {});
+            gateway.quotaManager
+              .reportUsage(instanceId, storedCount, reportCredit, "L1")
+              .catch(() => {});
           }
         }
 
@@ -2779,29 +3219,52 @@ export class TdaiGateway {
         // See pipeline-factory.ts createL1Runner for the full state machine.
         if (gateway.statefulPipelineManager) {
           if (result.hasFullBacklog) {
-            gateway.statefulPipelineManager.enqueueL1Drain(task.sessionId, instanceId, teamId, agentId).catch((err) => {
-              gateway.logger.warn(`[executor] L1 drain enqueue failed: ${err instanceof Error ? err.message : String(err)}`);
-            });
+            gateway.statefulPipelineManager
+              .enqueueL1Drain(task.sessionId, instanceId, teamId, agentId)
+              .catch((err) => {
+                gateway.logger.warn(
+                  `[executor] L1 drain enqueue failed: ${err instanceof Error ? err.message : String(err)}`,
+                );
+              });
           } else if (result.hasMore) {
-            gateway.statefulPipelineManager.armL1IdleAfterDrain(task.sessionId, instanceId, teamId, agentId).catch((err) => {
-              gateway.logger.warn(`[executor] L1 idle arm failed: ${err instanceof Error ? err.message : String(err)}`);
-            });
+            gateway.statefulPipelineManager
+              .armL1IdleAfterDrain(task.sessionId, instanceId, teamId, agentId)
+              .catch((err) => {
+                gateway.logger.warn(
+                  `[executor] L1 idle arm failed: ${err instanceof Error ? err.message : String(err)}`,
+                );
+              });
           }
         }
       },
       async executeL2(task: TaskPayload, signal?: AbortSignal) {
-        const instanceId = typeof task.data?.instanceId === "string" ? task.data.instanceId : undefined;
-        if (!instanceId) throw new Error(`L2 task ${task.id} missing instanceId`);
-        const teamId = task.teamId ?? (typeof task.data?.teamId === "string" ? task.data.teamId : undefined);
-        const agentId = task.agentId ?? (typeof task.data?.agentId === "string" ? task.data.agentId : undefined);
+        const instanceId =
+          typeof task.data?.instanceId === "string"
+            ? task.data.instanceId
+            : undefined;
+        if (!instanceId)
+          throw new Error(`L2 task ${task.id} missing instanceId`);
+        const teamId =
+          task.teamId ??
+          (typeof task.data?.teamId === "string"
+            ? task.data.teamId
+            : undefined);
+        const agentId =
+          task.agentId ??
+          (typeof task.data?.agentId === "string"
+            ? task.data.agentId
+            : undefined);
 
-        if (signal?.aborted) throw signal.reason ?? new Error("executeL2: aborted before start");
+        if (signal?.aborted)
+          throw signal.reason ?? new Error("executeL2: aborted before start");
 
         // Credit quota check before LLM call
         if (gateway.quotaManager) {
           const check = await gateway.quotaManager.checkCreditQuota(instanceId);
           if (!check.allowed) {
-            gateway.logger.warn(`[executor] L2 skipped: credit limit exceeded (instance=${instanceId})`);
+            gateway.logger.warn(
+              `[executor] L2 skipped: credit limit exceeded (instance=${instanceId})`,
+            );
             return;
           }
         }
@@ -2810,13 +3273,19 @@ export class TdaiGateway {
         // This ensures L2 only processes L1 records created after the last extraction.
         let cursor: string | undefined;
         if (gateway.stateBackend) {
-          const state = await gateway.stateBackend.getSessionState(instanceId, task.sessionId, teamId, agentId);
+          const state = await gateway.stateBackend.getSessionState(
+            instanceId,
+            task.sessionId,
+            teamId,
+            agentId,
+          );
           if (state?.l2_last_extraction_time) {
             cursor = state.l2_last_extraction_time;
           }
         }
 
-        if (signal?.aborted) throw signal.reason ?? new Error("executeL2: aborted before LLM");
+        if (signal?.aborted)
+          throw signal.reason ?? new Error("executeL2: aborted before LLM");
 
         core.setInstanceId(instanceId);
         const { store } = await resolveStore(task);
@@ -2829,10 +3298,17 @@ export class TdaiGateway {
             const { StoragePaths } = await import("../core/storage/types.js");
             const idx = await storage.readFile(StoragePaths.sceneIndex);
             if (idx) sceneCountBefore = JSON.parse(idx).length;
-          } catch { /* ok */ }
+          } catch {
+            /* ok */
+          }
         }
 
-        const result = await core.runL2WithStore(task.sessionId, store, storage ?? undefined, cursor);
+        const result = await core.runL2WithStore(
+          task.sessionId,
+          store,
+          storage ?? undefined,
+          cursor,
+        );
 
         // Mark task as skipped if L2 had no new records to process
         if (result.skipped) {
@@ -2847,32 +3323,48 @@ export class TdaiGateway {
             try {
               const { StoragePaths } = await import("../core/storage/types.js");
               const idx = await storage.readFile(StoragePaths.sceneIndex);
-              if (idx) newScenes = Math.max(0, JSON.parse(idx).length - sceneCountBefore);
-            } catch { /* ok */ }
+              if (idx)
+                newScenes = Math.max(
+                  0,
+                  JSON.parse(idx).length - sceneCountBefore,
+                );
+            } catch {
+              /* ok */
+            }
           }
           // In provider=proxy mode, credit is reported by context_proxy, and here only the memory delta is reported.
           const reportCredit = gateway.reportedCreditFor(creditUsed, "L2");
           if (reportCredit > 0 || newScenes > 0) {
-            gateway.quotaManager.reportUsage(instanceId, newScenes, reportCredit, "L2").catch(() => {});
+            gateway.quotaManager
+              .reportUsage(instanceId, newScenes, reportCredit, "L2")
+              .catch(() => {});
           }
         }
       },
       async executeL3(task: TaskPayload, signal?: AbortSignal) {
-        const instanceId = typeof task.data?.instanceId === "string" ? task.data.instanceId : undefined;
-        if (!instanceId) throw new Error(`L3 task ${task.id} missing instanceId`);
+        const instanceId =
+          typeof task.data?.instanceId === "string"
+            ? task.data.instanceId
+            : undefined;
+        if (!instanceId)
+          throw new Error(`L3 task ${task.id} missing instanceId`);
 
-        if (signal?.aborted) throw signal.reason ?? new Error("executeL3: aborted before start");
+        if (signal?.aborted)
+          throw signal.reason ?? new Error("executeL3: aborted before start");
 
         // Credit quota check before LLM call
         if (gateway.quotaManager) {
           const check = await gateway.quotaManager.checkCreditQuota(instanceId);
           if (!check.allowed) {
-            gateway.logger.warn(`[executor] L3 skipped: credit limit exceeded (instance=${instanceId})`);
+            gateway.logger.warn(
+              `[executor] L3 skipped: credit limit exceeded (instance=${instanceId})`,
+            );
             return;
           }
         }
 
-        if (signal?.aborted) throw signal.reason ?? new Error("executeL3: aborted before LLM");
+        if (signal?.aborted)
+          throw signal.reason ?? new Error("executeL3: aborted before LLM");
 
         // Check if persona exists before L3 (to detect first creation)
         let personaExistedBefore = false;
@@ -2881,7 +3373,9 @@ export class TdaiGateway {
           try {
             const { StoragePaths } = await import("../core/storage/types.js");
             personaExistedBefore = await storage.exists(StoragePaths.persona);
-          } catch { /* ok */ }
+          } catch {
+            /* ok */
+          }
         }
 
         core.setInstanceId(instanceId);
@@ -2892,10 +3386,12 @@ export class TdaiGateway {
         // In provider=proxy mode, credit is reported by context_proxy, and here only the memory delta is reported.
         if (gateway.quotaManager) {
           const { creditUsed } = result;
-          const memoryDelta = (!personaExistedBefore && storage) ? 1 : 0;
+          const memoryDelta = !personaExistedBefore && storage ? 1 : 0;
           const reportCredit = gateway.reportedCreditFor(creditUsed, "L3");
           if (reportCredit > 0 || memoryDelta > 0) {
-            gateway.quotaManager.reportUsage(instanceId, memoryDelta, reportCredit, "L3").catch(() => {});
+            gateway.quotaManager
+              .reportUsage(instanceId, memoryDelta, reportCredit, "L3")
+              .catch(() => {});
           }
         }
       },
@@ -2906,57 +3402,84 @@ export class TdaiGateway {
       // ── Offload executors (L1 summary, L1.5 task judgment, L2 MMD update) ──
       async executeOffloadL1(task: TaskPayload, signal?: AbortSignal) {
         if (signal?.aborted) return;
-        const { OffloadTaskExecutor } = await import("../offload_server/offload-task-executor.js");
+        const { OffloadTaskExecutor } = await import(
+          "../offload_server/offload-task-executor.js"
+        );
         const storage = await resolveStorage(task);
         if (!storage) return;
         const llmClient = gateway.buildOffloadLlmClient(task.instanceId);
         if (!llmClient) {
-          gateway.logger.warn(`[executor] offload-l1 skipped: no LLM client available`);
+          gateway.logger.warn(
+            `[executor] offload-l1 skipped: no LLM client available`,
+          );
           return;
         }
         const executor = new OffloadTaskExecutor({
           resolveStorage: async () => storage,
           llmClient,
           stateBackend: gateway.stateBackend!,
-          config: { ...gateway.config.offload, l1Model: "", l15Model: "", l2Model: "" },
+          config: {
+            ...gateway.config.offload,
+            l1Model: "",
+            l15Model: "",
+            l2Model: "",
+          },
           logger: gateway.logger,
         });
         await executor.executeOffloadL1(task, signal);
       },
       async executeOffloadL15(task: TaskPayload, signal?: AbortSignal) {
         if (signal?.aborted) return;
-        const { OffloadTaskExecutor } = await import("../offload_server/offload-task-executor.js");
+        const { OffloadTaskExecutor } = await import(
+          "../offload_server/offload-task-executor.js"
+        );
         const storage = await resolveStorage(task);
         if (!storage) return;
         const llmClient = gateway.buildOffloadLlmClient(task.instanceId);
         if (!llmClient) {
-          gateway.logger.warn(`[executor] offload-l15 skipped: no LLM client available`);
+          gateway.logger.warn(
+            `[executor] offload-l15 skipped: no LLM client available`,
+          );
           return;
         }
         const executor = new OffloadTaskExecutor({
           resolveStorage: async () => storage,
           llmClient,
           stateBackend: gateway.stateBackend!,
-          config: { ...gateway.config.offload, l1Model: "", l15Model: "", l2Model: "" },
+          config: {
+            ...gateway.config.offload,
+            l1Model: "",
+            l15Model: "",
+            l2Model: "",
+          },
           logger: gateway.logger,
         });
         await executor.executeOffloadL15(task, signal);
       },
       async executeOffloadL2(task: TaskPayload, signal?: AbortSignal) {
         if (signal?.aborted) return;
-        const { OffloadTaskExecutor } = await import("../offload_server/offload-task-executor.js");
+        const { OffloadTaskExecutor } = await import(
+          "../offload_server/offload-task-executor.js"
+        );
         const storage = await resolveStorage(task);
         if (!storage) return;
         const llmClient = gateway.buildOffloadLlmClient(task.instanceId);
         if (!llmClient) {
-          gateway.logger.warn(`[executor] offload-l2 skipped: no LLM client available`);
+          gateway.logger.warn(
+            `[executor] offload-l2 skipped: no LLM client available`,
+          );
           return;
         }
         const executor = new OffloadTaskExecutor({
           resolveStorage: async () => storage,
           llmClient,
           stateBackend: gateway.stateBackend!,
-          config: { ...gateway.config.offload, l1Model: "", l15Model: "", l2Model: "" },
+          config: {
+            ...gateway.config.offload,
+            l1Model: "",
+            l15Model: "",
+            l2Model: "",
+          },
           logger: gateway.logger,
         });
         await executor.executeOffloadL2(task, signal);
@@ -2968,11 +3491,17 @@ export class TdaiGateway {
    * CreditDelta to report: set to zero when provider=proxy (proxy has already reported, to avoid duplicate billing),
    * otherwise pass through as-is. See quota-credit-policy.ts for details.
    */
-  private reportedCreditFor(rawCreditUsed: number, level: "L1" | "L2" | "L3"): number {
-    const reported = resolveReportedCredit(rawCreditUsed, this.config.llm.provider);
+  private reportedCreditFor(
+    rawCreditUsed: number,
+    level: "L1" | "L2" | "L3",
+  ): number {
+    const reported = resolveReportedCredit(
+      rawCreditUsed,
+      this.config.llm.provider,
+    );
     if (reported === 0 && rawCreditUsed > 0) {
       this.logger.debug?.(
-        `[quota] ${level} creditUsed=${rawCreditUsed} reported by context_proxy, kernel skips credit part`
+        `[quota] ${level} creditUsed=${rawCreditUsed} reported by context_proxy, kernel skips credit part`,
       );
     }
     return reported;
@@ -2988,14 +3517,15 @@ export class TdaiGateway {
     const llmCfg = this.config.llm;
     if (!llmCfg.baseUrl || !llmCfg.model) return null;
     // when provider=openai, an explicit apiKey is still required; when provider=proxy, apiKey is injected by resolver from env
-    if ((llmCfg.provider ?? "openai") === "openai" && !llmCfg.apiKey) return null;
+    if ((llmCfg.provider ?? "openai") === "openai" && !llmCfg.apiKey)
+      return null;
 
     let effective: StandaloneLLMConfig;
     try {
       effective = resolveStandaloneLlmForRuntime(llmCfg, instanceId);
     } catch (err) {
       this.logger.warn(
-        `[offload-llm] provider parsing failed, skipped: ${err instanceof Error ? err.message : String(err)}`
+        `[offload-llm] provider parsing failed, skipped: ${err instanceof Error ? err.message : String(err)}`,
       );
       return null;
     }
@@ -3010,25 +3540,33 @@ export class TdaiGateway {
         timeoutMs?: number;
       }): Promise<string> {
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), params.timeoutMs ?? 30000);
+        const timer = setTimeout(
+          () => controller.abort(),
+          params.timeoutMs ?? 30000,
+        );
         try {
-          const response = await fetch(`${effective.baseUrl}/chat/completions`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${effective.apiKey}`,
+          const response = await fetch(
+            `${effective.baseUrl}/chat/completions`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${effective.apiKey}`,
+              },
+              body: JSON.stringify({
+                model: effective.model || params.model,
+                messages: params.messages,
+                temperature: params.temperature,
+                max_tokens: params.max_tokens,
+              }),
+              signal: controller.signal,
             },
-            body: JSON.stringify({
-              model: effective.model || params.model,
-              messages: params.messages,
-              temperature: params.temperature,
-              max_tokens: params.max_tokens,
-            }),
-            signal: controller.signal,
-          });
+          );
           clearTimeout(timer);
           if (!response.ok) {
-            throw new Error(`LLM API returned ${response.status}: ${await response.text()}`);
+            throw new Error(
+              `LLM API returned ${response.status}: ${await response.text()}`,
+            );
           }
           const json = (await response.json()) as any;
           const finishReason = json.choices?.[0]?.finish_reason;
@@ -3036,7 +3574,7 @@ export class TdaiGateway {
             const content = json.choices?.[0]?.message?.content ?? "";
             logger.warn(
               `[offload-llm] Response truncated (finish_reason=length, max_tokens=${params.max_tokens}), ` +
-              `content=${content.length} chars`,
+                `content=${content.length} chars`,
             );
           }
           return json.choices?.[0]?.message?.content ?? "";
@@ -3087,7 +3625,9 @@ async function main(): Promise<void> {
 }
 
 // Auto-start when run directly
-const isMain = process.argv[1]?.endsWith("server.ts") || process.argv[1]?.endsWith("server.js");
+const isMain =
+  process.argv[1]?.endsWith("server.ts") ||
+  process.argv[1]?.endsWith("server.js");
 if (isMain) {
   main().catch((err) => {
     console.error("Gateway startup failed:", err);

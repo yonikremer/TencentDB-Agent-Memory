@@ -14,7 +14,7 @@
  *     to support team for log correlation
  *
  * Note: this module is deliberately leaf-level (no imports from server.ts /
- * v2-router.ts) so both can import it without circular deps. Use duck-typing
+ * v3-router.ts) so both can import it without circular deps. Use duck-typing
  * for PayloadTooLargeError detection to avoid pulling server.ts in.
  */
 
@@ -70,24 +70,40 @@ export function classifyError(err: unknown): ClassifiedError {
   if (err instanceof Error && err.message === "Invalid JSON body") {
     return {
       status: 400,
-      client: { code: 400, message: "Invalid JSON body", trace_id, retryable: false },
+      client: {
+        code: 400,
+        message: "Invalid JSON body",
+        trace_id,
+        retryable: false,
+      },
       logLine: `[${trace_id}] InvalidJsonBody: request body could not be parsed as JSON`,
     };
   }
 
   // 1c. COS AppendPositionErr — concurrent append conflict. The client should retry.
   // This is a transient conflict, not a permanent error.
-  if (err instanceof Error && /AppendPositionErr|Position not equal object length/i.test(err.message)) {
+  if (
+    err instanceof Error &&
+    /AppendPositionErr|Position not equal object length/i.test(err.message)
+  ) {
     return {
       status: 409,
-      client: { code: 409, message: "Concurrent write conflict, please retry", trace_id, retryable: true },
+      client: {
+        code: 409,
+        message: "Concurrent write conflict, please retry",
+        trace_id,
+        retryable: true,
+      },
       logLine: `[${trace_id}] CosAppendConflict: ${err.message}`,
     };
   }
 
   // 1d. Unsupported Content-Encoding — parseJsonBody rejects with this message when the
   // client sends an encoding the server does not support (not gzip/deflate/identity).
-  if (err instanceof Error && err.message.startsWith("Unsupported Content-Encoding:")) {
+  if (
+    err instanceof Error &&
+    err.message.startsWith("Unsupported Content-Encoding:")
+  ) {
     const safeMsg = err.message.replace(/[^\w\s:/-]/g, "");
     return {
       status: 415,
@@ -101,22 +117,39 @@ export function classifyError(err: unknown): ClassifiedError {
   // the global catch, but if a code path forgets, this fallback ensures no raw leak.)
   if (err instanceof RecallFailure) {
     const re = err.recallError;
-    const causeStr = err.cause instanceof Error
-      ? (err.cause.stack ?? err.cause.message)
-      : err.cause !== undefined ? String(err.cause) : "(no cause)";
+    const causeStr =
+      err.cause instanceof Error
+        ? (err.cause.stack ?? err.cause.message)
+        : err.cause === undefined
+          ? "(no cause)"
+          : String(err.cause);
     return {
       status: re.category === "config" ? 503 : 500,
-      client: { code: re.code, message: re.message, trace_id, retryable: re.retryable },
+      client: {
+        code: re.code,
+        message: re.message,
+        trace_id,
+        retryable: re.retryable,
+      },
       logLine: `[${trace_id}] RecallFailure code=${re.code} category=${re.category} cause=${sanitize(causeStr)}`,
     };
   }
 
   // 3. SeedValidationError — known user-input class
-  if (err && typeof err === "object" && (err as { name?: string }).name === "SeedValidationError") {
+  if (
+    err &&
+    typeof err === "object" &&
+    (err as { name?: string }).name === "SeedValidationError"
+  ) {
     const errMsg = err instanceof Error ? err.message : String(err);
     return {
       status: 400,
-      client: { code: 400, message: "Invalid seed input", trace_id, retryable: false },
+      client: {
+        code: 400,
+        message: "Invalid seed input",
+        trace_id,
+        retryable: false,
+      },
       logLine: `[${trace_id}] SeedValidationError: ${sanitize(errMsg)}`,
     };
   }
@@ -126,7 +159,12 @@ export function classifyError(err: unknown): ClassifiedError {
   const errStack = err instanceof Error ? err.stack : undefined;
   return {
     status: 500,
-    client: { code: 500, message: "Internal server error", trace_id, retryable: true },
+    client: {
+      code: 500,
+      message: "Internal server error",
+      trace_id,
+      retryable: true,
+    },
     logLine: `[${trace_id}] UnhandledError: ${sanitize(errMsg)}\n${sanitize(errStack ?? "(no stack)")}`,
   };
 }
@@ -149,23 +187,25 @@ export function classifyError(err: unknown): ClassifiedError {
  */
 export function sanitize(input: string): string {
   if (typeof input !== "string") return String(input);
-  return input
-    // sk-ant-xxx — Anthropic (must come before the generic sk-* rule below
-    // since "sk-ant-..." also matches /sk-[A-Za-z0-9_-]{16,}/)
-    .replace(/sk-ant-[A-Za-z0-9_-]{16,}/g, "sk-ant-***")
-    // sk-xxxxx (16+ chars) — OpenAI, DeepSeek, etc.
-    .replace(/sk-[A-Za-z0-9_-]{16,}/g, "sk-***")
-    // Bearer / Basic auth headers
-    .replace(/(Bearer|Basic)\s+[A-Za-z0-9._\-+/=]+/gi, "$1 ***")
-    // JSON-like "field": "value" for sensitive fields (case-insensitive, both single/double quotes)
-    .replace(
-      /("(?:SecretKey|apiKey|api_key|password|token|authorization|TmpSecretId|TmpSecretKey|TmpToken)"\s*:\s*)"[^"]*"/gi,
-      '$1"***"',
-    )
-    .replace(
-      /('(?:SecretKey|apiKey|api_key|password|token|authorization|TmpSecretId|TmpSecretKey|TmpToken)'\s*:\s*)'[^']*'/gi,
-      "$1'***'",
-    );
+  return (
+    input
+      // sk-ant-xxx — Anthropic (must come before the generic sk-* rule below
+      // since "sk-ant-..." also matches /sk-[A-Za-z0-9_-]{16,}/)
+      .replace(/sk-ant-[A-Za-z0-9_-]{16,}/g, "sk-ant-***")
+      // sk-xxxxx (16+ chars) — OpenAI, DeepSeek, etc.
+      .replace(/sk-[A-Za-z0-9_-]{16,}/g, "sk-***")
+      // Bearer / Basic auth headers
+      .replace(/(Bearer|Basic)\s+[A-Za-z0-9._\-+/=]+/gi, "$1 ***")
+      // JSON-like "field": "value" for sensitive fields (case-insensitive, both single/double quotes)
+      .replace(
+        /("(?:SecretKey|apiKey|api_key|password|token|authorization|TmpSecretId|TmpSecretKey|TmpToken)"\s*:\s*)"[^"]*"/gi,
+        '$1"***"',
+      )
+      .replace(
+        /('(?:SecretKey|apiKey|api_key|password|token|authorization|TmpSecretId|TmpSecretKey|TmpToken)'\s*:\s*)'[^']*'/gi,
+        "$1'***'",
+      )
+  );
 }
 
 /**
@@ -180,7 +220,11 @@ export function sanitizeObject(obj: unknown): unknown {
   if (obj && typeof obj === "object") {
     const r: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
-      if (/secretkey|apikey|api_key|password|token|authorization|TmpSecret/i.test(k)) {
+      if (
+        /secretkey|apikey|api_key|password|token|authorization|TmpSecret/i.test(
+          k,
+        )
+      ) {
         r[k] = "***";
       } else {
         r[k] = sanitizeObject(v);

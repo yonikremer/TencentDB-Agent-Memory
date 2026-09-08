@@ -1,7 +1,7 @@
 /**
  * /v3/knowledge/* HTTP handlers — Knowledge entity CRUD.
  *
- * Pattern mirrors team/agent entity handlers in v2-router.ts:
+ * Pattern mirrors team/agent entity handlers in v3-router.ts:
  *   Zod safeParse → getEntityStore → store.method → successEnvelope/errorEnvelope
  *
  * 5 endpoints:
@@ -19,7 +19,7 @@
 
 import { ZodError } from "zod";
 
-import { errorEnvelope, successEnvelope } from "./v2-router.js";
+import { errorEnvelope, successEnvelope } from "./v3-router.js";
 import {
   knowledgeCreateRequestSchema,
   knowledgeGetRequestSchema,
@@ -27,21 +27,46 @@ import {
   knowledgeBatchDeleteRequestSchema,
   knowledgeListRequestSchema,
 } from "./knowledge-schemas.js";
-import type { ApiResponseEnvelope, V2AuthContext } from "./v2-schemas.js";
-import type { KnowledgeEntity, KnowledgeListResult, BatchDeleteResult } from "../core/store/types.js";
+import type { ApiResponseEnvelope, V3AuthContext } from "./v3-schemas.js";
+import type {
+  KnowledgeEntity,
+  KnowledgeListResult,
+  BatchDeleteResult,
+} from "../core/store/types.js";
 
 function formatZodErr(err: ZodError): string {
   return err.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
 }
 
-// ── EntityStore access (same pattern as v2-router.ts) ──
+// ── EntityStore access (same pattern as v3-router.ts) ──
 
 type EntityStore = {
-  createKnowledge?(input: Omit<KnowledgeEntity, "created_at" | "updated_at">): KnowledgeEntity | Promise<KnowledgeEntity>;
-  getKnowledge?(knowledgeId: string): KnowledgeEntity | null | Promise<KnowledgeEntity | null>;
-  updateKnowledge?(knowledgeId: string, patch: Partial<Pick<KnowledgeEntity, "name" | "summary" | "service_url" | "repo_url" | "branch">>): KnowledgeEntity | null | Promise<KnowledgeEntity | null>;
-  deleteKnowledge?(knowledgeIds: string[], teamId?: string): BatchDeleteResult | Promise<BatchDeleteResult>;
-  listKnowledge?(input: { team_id: string; type?: "wiki" | "code-graph"; knowledge_ids?: string[]; limit?: number; offset?: number }): KnowledgeListResult | Promise<KnowledgeListResult>;
+  createKnowledge?(
+    input: Omit<KnowledgeEntity, "created_at" | "updated_at">,
+  ): KnowledgeEntity | Promise<KnowledgeEntity>;
+  getKnowledge?(
+    knowledgeId: string,
+  ): KnowledgeEntity | null | Promise<KnowledgeEntity | null>;
+  updateKnowledge?(
+    knowledgeId: string,
+    patch: Partial<
+      Pick<
+        KnowledgeEntity,
+        "name" | "summary" | "service_url" | "repo_url" | "branch"
+      >
+    >,
+  ): KnowledgeEntity | null | Promise<KnowledgeEntity | null>;
+  deleteKnowledge?(
+    knowledgeIds: string[],
+    teamId?: string,
+  ): BatchDeleteResult | Promise<BatchDeleteResult>;
+  listKnowledge?(input: {
+    team_id: string;
+    type?: "wiki" | "code-graph";
+    knowledge_ids?: string[];
+    limit?: number;
+    offset?: number;
+  }): KnowledgeListResult | Promise<KnowledgeListResult>;
 };
 
 function getEntityStore(deps: unknown): EntityStore | undefined {
@@ -56,20 +81,31 @@ function missingEntityStore(requestId: string): ApiResponseEnvelope {
 // ── Handlers ──
 
 async function handleKnowledgeCreate(
-  body: unknown, _auth: V2AuthContext, requestId: string, deps: unknown,
+  body: unknown,
+  _auth: V3AuthContext,
+  requestId: string,
+  deps: unknown,
 ): Promise<ApiResponseEnvelope> {
   const parsed = knowledgeCreateRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodErr(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodErr(parsed.error), requestId);
   const store = getEntityStore(deps);
   if (!store?.createKnowledge) return missingEntityStore(requestId);
-  return successEnvelope<KnowledgeEntity>(await store.createKnowledge(parsed.data), requestId);
+  return successEnvelope<KnowledgeEntity>(
+    await store.createKnowledge(parsed.data),
+    requestId,
+  );
 }
 
 async function handleKnowledgeGet(
-  body: unknown, _auth: V2AuthContext, requestId: string, deps: unknown,
+  body: unknown,
+  _auth: V3AuthContext,
+  requestId: string,
+  deps: unknown,
 ): Promise<ApiResponseEnvelope> {
   const parsed = knowledgeGetRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodErr(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodErr(parsed.error), requestId);
   const store = getEntityStore(deps);
   if (!store?.getKnowledge) return missingEntityStore(requestId);
   const data = await store.getKnowledge(parsed.data.knowledge_id);
@@ -81,19 +117,26 @@ async function handleKnowledgeGet(
 }
 
 async function handleKnowledgeUpdate(
-  body: unknown, _auth: V2AuthContext, requestId: string, deps: unknown,
+  body: unknown,
+  _auth: V3AuthContext,
+  requestId: string,
+  deps: unknown,
 ): Promise<ApiResponseEnvelope> {
   const parsed = knowledgeUpdateRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodErr(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodErr(parsed.error), requestId);
   const { knowledge_id, team_id, ...patch } = parsed.data;
   const store = getEntityStore(deps);
   if (!store?.updateKnowledge) return missingEntityStore(requestId);
 
   // team_id ownership check
   if (team_id) {
-    const current = store.getKnowledge ? await store.getKnowledge(knowledge_id) : null;
+    const current = store.getKnowledge
+      ? await store.getKnowledge(knowledge_id)
+      : null;
     if (!current) return errorEnvelope(404, "Knowledge not found", requestId);
-    if (current.team_id !== team_id) return errorEnvelope(403, "Knowledge team_id mismatch", requestId);
+    if (current.team_id !== team_id)
+      return errorEnvelope(403, "Knowledge team_id mismatch", requestId);
   }
 
   const data = await store.updateKnowledge(knowledge_id, patch);
@@ -103,10 +146,14 @@ async function handleKnowledgeUpdate(
 }
 
 async function handleKnowledgeDelete(
-  body: unknown, _auth: V2AuthContext, requestId: string, deps: unknown,
+  body: unknown,
+  _auth: V3AuthContext,
+  requestId: string,
+  deps: unknown,
 ): Promise<ApiResponseEnvelope> {
   const parsed = knowledgeBatchDeleteRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodErr(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodErr(parsed.error), requestId);
   const store = getEntityStore(deps);
   if (!store?.deleteKnowledge) return missingEntityStore(requestId);
   return successEnvelope<BatchDeleteResult>(
@@ -116,10 +163,14 @@ async function handleKnowledgeDelete(
 }
 
 async function handleKnowledgeList(
-  body: unknown, _auth: V2AuthContext, requestId: string, deps: unknown,
+  body: unknown,
+  _auth: V3AuthContext,
+  requestId: string,
+  deps: unknown,
 ): Promise<ApiResponseEnvelope> {
   const parsed = knowledgeListRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodErr(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodErr(parsed.error), requestId);
   const store = getEntityStore(deps);
   if (!store?.listKnowledge) return missingEntityStore(requestId);
   const result = await store.listKnowledge({
@@ -136,7 +187,7 @@ async function handleKnowledgeList(
 
 type RouteHandler = (
   body: unknown,
-  auth: V2AuthContext,
+  auth: V3AuthContext,
   requestId: string,
   deps: unknown,
 ) => Promise<ApiResponseEnvelope>;

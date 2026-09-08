@@ -1,5 +1,5 @@
 /**
- * Low-level HTTP transport for the TencentDB Agent Memory v2 API.
+ * Low-level HTTP transport for the TencentDB Agent Memory v3 API.
  *
  * - Auth: `Authorization: Bearer {apiKey}` + `x-tdai-service-id` + optional `x-tdai-user-key`
  * - Envelope unwrap: `code === 0` → return `data`; else throw `TDAMError`
@@ -62,7 +62,10 @@ export class HttpTransport {
     }
   }
 
-  async post<T = unknown>(path: string, body: Record<string, unknown> = {}): Promise<T & { trace_id?: string }> {
+  async post<T = unknown>(
+    path: string,
+    body: Record<string, unknown> = {},
+  ): Promise<T & { trace_id?: string }> {
     const url = `${this.endpoint}${path}`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeout);
@@ -89,7 +92,9 @@ export class HttpTransport {
 
       if (envelope.code !== 0) {
         const reqId =
-          resp.headers.get("x-qcloud-transaction-id") ?? envelope.request_id ?? "";
+          resp.headers.get("x-qcloud-transaction-id") ??
+          envelope.request_id ??
+          "";
         const details =
           envelope.data && typeof envelope.data === "object"
             ? (envelope.data as Record<string, unknown>)

@@ -6,7 +6,7 @@
  */
 import { trace } from "../../core/report/trace.js";
 import { getObservabilityBackend } from "../../core/report/factory.js";
-import type { ApiResponseEnvelope } from "../../gateway/v2-schemas.js";
+import type { ApiResponseEnvelope } from "../../gateway/v3-schemas.js";
 import {
   getApiTraceConfig,
   logApiTrace,

@@ -63,42 +63,63 @@ export function createApp() {
   // /v3 prefix applied once here — routes define paths without prefix
   const api = new Hono();
   // Only Agent tool executions are usage telemetry; health/admin/ingest remain excluded.
-  api.use("/tools/call", createKnowledgeTelemetryMiddleware(knowledgeTelemetry));
-  api.route("/wiki", createWikiRoutes({
-    wikiService: knowledgeModule.wikiService,
-    wikiMgr: knowledgeModule.wikiMgr,
-    publicBaseUrl: config.publicBaseUrl,
-  }));
-  api.route("/code-graph", createCodeGraphRoutes({
-    cgService: knowledgeModule.cgService,
-    instancePool: knowledgeModule.instancePool,
-    publicBaseUrl: config.publicBaseUrl,
-  }));
+  api.use(
+    "/tools/call",
+    createKnowledgeTelemetryMiddleware(knowledgeTelemetry),
+  );
+  api.route(
+    "/wiki",
+    createWikiRoutes({
+      wikiService: knowledgeModule.wikiService,
+      wikiMgr: knowledgeModule.wikiMgr,
+      publicBaseUrl: config.publicBaseUrl,
+    }),
+  );
+  api.route(
+    "/code-graph",
+    createCodeGraphRoutes({
+      cgService: knowledgeModule.cgService,
+      instancePool: knowledgeModule.instancePool,
+      publicBaseUrl: config.publicBaseUrl,
+    }),
+  );
 
   // grants/set + grants/clear — org-hierarchy-sync share mirror (Panel/admin plane)
-  api.route("/grants", createGrantsRoutes({
-    wikiService: knowledgeModule.wikiService,
-    cgService: knowledgeModule.cgService,
-  }));
+  api.route(
+    "/grants",
+    createGrantsRoutes({
+      wikiService: knowledgeModule.wikiService,
+      cgService: knowledgeModule.cgService,
+    }),
+  );
 
   // tools/list + tools/call — Agent self-discovery HTTP endpoints
-  api.route("/tools", createToolsRoutes({
-    wikiService: knowledgeModule.wikiService,
-    wikiMgr: knowledgeModule.wikiMgr,
-    cgService: knowledgeModule.cgService,
-    instancePool: knowledgeModule.instancePool,
-  }));
+  api.route(
+    "/tools",
+    createToolsRoutes({
+      wikiService: knowledgeModule.wikiService,
+      wikiMgr: knowledgeModule.wikiMgr,
+      cgService: knowledgeModule.cgService,
+      instancePool: knowledgeModule.instancePool,
+    }),
+  );
 
   // internal/* — control-plane endpoints (TMC / operator). Per-instance LLM routing.
-  api.route("/internal/llm-binding", createLlmBindingRoutes({
-    llmBindingStore: knowledgeModule.llmBindingStore,
-  }));
+  api.route(
+    "/internal/llm-binding",
+    createLlmBindingRoutes({
+      llmBindingStore: knowledgeModule.llmBindingStore,
+    }),
+  );
 
   // auto-sync admin — Periodic sync scheduler status query and manual trigger
-  api.route("/", createAutoSyncRoutes({
-    scheduler: knowledgeModule.autoSyncScheduler,
-    config: knowledgeModule.autoSyncConfig,
-  }));
+  api.route(
+    "/",
+    createAutoSyncRoutes({
+      scheduler: knowledgeModule.autoSyncScheduler,
+      config: knowledgeModule.autoSyncConfig,
+    }),
+  );
 
   app.route(config.apiPrefix, api);
 
@@ -109,7 +130,9 @@ export function createApp() {
   try {
     const openapiContent = readFileSync(openapiPath, "utf-8");
     app.get("/openapi.json", (c) => {
-      return c.body(openapiContent, 200, { "Content-Type": "application/yaml" });
+      return c.body(openapiContent, 200, {
+        "Content-Type": "application/yaml",
+      });
     });
     app.use("/docs", swaggerUI({ url: "/openapi.json" }));
     log.info("Swagger UI mounted at /docs");
@@ -128,7 +151,9 @@ async function startServer(): Promise<void> {
   log.info(`Data dir: ${config.dataDir}`);
   log.info(`DB path: ${config.dbPath}`);
   log.info(`API prefix: ${config.apiPrefix}`);
-  log.info(`ClickHouse telemetry: ${config.clickhouse.enabled ? "enabled" : "disabled"}`);
+  log.info(
+    `ClickHouse telemetry: ${config.clickhouse.enabled ? "enabled" : "disabled"}`,
+  );
 
   const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
     log.info(`Knowledge service listening on http://localhost:${info.port}`);

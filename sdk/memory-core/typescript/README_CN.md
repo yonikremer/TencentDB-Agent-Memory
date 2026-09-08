@@ -104,7 +104,7 @@ await client.addConversation({
 ### v3 数据面
 
 | 层级 | 方法 | 接口 |
-|------|------|------|
+| ------ | ------ | ------ |
 | L0 | `addConversation()` | `POST /v3/conversation/add` |
 | L0 | `queryConversation()` | `POST /v3/conversation/query` |
 | L0 | `searchConversation()` | `POST /v3/conversation/search` |
@@ -162,28 +162,28 @@ if (!res.all_cleared) {
 ### v2 兼容数据面
 
 | 层级 | 方法 | 接口 |
-|------|------|------|
-| L0 | `addConversation()` | `POST /v2/conversation/add` |
-| L0 | `queryConversation()` | `POST /v2/conversation/query` |
-| L0 | `searchConversation()` | `POST /v2/conversation/search` |
-| L0 | `deleteConversation()` | `POST /v2/conversation/delete` |
-| L0 | `countConversation()` | `POST /v2/conversation/count` |
-| L1 | `updateAtomic()` | `POST /v2/atomic/update` |
-| L1 | `queryAtomic()` | `POST /v2/atomic/query` |
-| L1 | `searchAtomic()` | `POST /v2/atomic/search` |
-| L1 | `deleteAtomic()` | `POST /v2/atomic/delete` |
-| L1 | `countAtomic()` | `POST /v2/atomic/count` |
-| L2 | `listScenarios()` | `POST /v2/scenario/ls` |
-| L2 | `readScenario()` | `POST /v2/scenario/read` |
-| L2 | `writeScenario()` | `POST /v2/scenario/write` |
-| L2 | `rmScenario()` | `POST /v2/scenario/rm` |
-| L2 | `countScenario()` | `POST /v2/scenario/count` |
-| L3 | `readCore()` | `POST /v2/core/read` |
-| L3 | `writeCore()` | `POST /v2/core/write` |
+| ------ | ------ | ------ |
+| L0 | `addConversation()` | `POST /v3/conversation/add` |
+| L0 | `queryConversation()` | `POST /v3/conversation/query` |
+| L0 | `searchConversation()` | `POST /v3/conversation/search` |
+| L0 | `deleteConversation()` | `POST /v3/conversation/delete` |
+| L0 | `countConversation()` | `POST /v3/conversation/count` |
+| L1 | `updateAtomic()` | `POST /v3/atomic/update` |
+| L1 | `queryAtomic()` | `POST /v3/atomic/query` |
+| L1 | `searchAtomic()` | `POST /v3/atomic/search` |
+| L1 | `deleteAtomic()` | `POST /v3/atomic/delete` |
+| L1 | `countAtomic()` | `POST /v3/atomic/count` |
+| L2 | `listScenarios()` | `POST /v3/scenario/ls` |
+| L2 | `readScenario()` | `POST /v3/scenario/read` |
+| L2 | `writeScenario()` | `POST /v3/scenario/write` |
+| L2 | `rmScenario()` | `POST /v3/scenario/rm` |
+| L2 | `countScenario()` | `POST /v3/scenario/count` |
+| L3 | `readCore()` | `POST /v3/core/read` |
+| L3 | `writeCore()` | `POST /v3/core/write` |
 | L3 | `countCore()` | `POST /v3/core/count` |
-| Offload | `offloadIngest()` | `POST /v2/offload/ingest` |
-| Offload | `offloadCompact()` | `POST /v2/offload/compact` |
-| Offload | `offloadQueryMmd()` | `POST /v2/offload/query-mmd` |
+| Offload | `offloadIngest()` | `POST /v3/offload/ingest` |
+| Offload | `offloadCompact()` | `POST /v3/offload/compact` |
+| Offload | `offloadQueryMmd()` | `POST /v3/offload/query-mmd` |
 
 ## 自定义 Prompt 与生成溯源
 
@@ -202,7 +202,7 @@ const provenance = await logs.getByMemoryId("memory-id", "l1");
 ```
 
 | SDK 方法 | 接口 | 说明 |
-|----------|------|------|
+| ---------- | ------ | ------ |
 | `create()` | `POST /v3/memory-prompt/create` | 创建 Prompt |
 | `get()` / `list()` / `getEffective()` | `GET /v3/memory-prompt/get` | 查详情、列表或最终生效 Prompt |
 | `update()` | `POST /v3/memory-prompt/update` | 更新名称/内容；相同值为幂等 no-op |
@@ -235,7 +235,7 @@ const meta = new MetadataClient({
 管理 Knowledge 实体元数据（`wiki` / `code-graph` 两种类型）。注意：这组接口是**管理面 CRUD**，只管元数据；真正去 wiki/code-graph 里搜内容、读页面、同步仓库是 Knowledge Service 数据面的活，不在这个 client 里。
 
 | 方法 | 接口 | 说明 |
-|------|------|------|
+| ------ | ------ | ------ |
 | `createKnowledge()` | `POST /v3/knowledge/create` | upsert 元数据（幂等，重复 post 即覆盖） |
 | `getKnowledge(id, teamId?)` | `POST /v3/knowledge/get` | 单条查询 |
 | `updateKnowledge()` | `POST /v3/knowledge/update` | 部分更新（name/summary/service_url/repo_url/branch） |

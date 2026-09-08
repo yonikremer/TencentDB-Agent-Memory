@@ -1,7 +1,7 @@
 /**
  * v3 metadata API authentication middleware (v3.1).
  *
- * Layer 1 (Gateway): `Authorization: Bearer <KERNEL_AUTH_TOKEN>` - verified in checkAuthForV2 of server.ts.
+ * Layer 1 (Gateway): `Authorization: Bearer <KERNEL_AUTH_TOKEN>` - verified in checkAuthForV3 of server.ts.
  * Layer 3 (User Identity): `x-tdai-user-key` - parsed by this module into userId / isSystemAdmin.
  *
  * `/v3/meta/*` requires user-key except for `auth/verify`.

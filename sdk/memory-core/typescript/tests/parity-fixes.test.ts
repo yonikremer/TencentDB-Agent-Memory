@@ -8,7 +8,10 @@ import type { Transport } from "../src/client.js";
 
 class FakeTransport implements Transport {
   calls: Array<{ path: string; body: Record<string, unknown> }> = [];
-  async post<T = unknown>(path: string, body: Record<string, unknown> = {}): Promise<T> {
+  async post<T = unknown>(
+    path: string,
+    body: Record<string, unknown> = {},
+  ): Promise<T> {
     this.calls.push({ path, body });
     return {} as T;
   }
@@ -17,13 +20,27 @@ class FakeTransport implements Transport {
 describe("getByName does not merge constructor defaults", () => {
   it("throws when team_id/agent_id omitted even with defaults set", () => {
     const fake = new FakeTransport();
-    const c = new SkillClient(fake, { teamId: "dt", agentId: "da", userId: "du", taskId: "dtask" });
-    expect(() => (c as unknown as { getByName(p: unknown): unknown }).getByName({ skill_name: "x" })).toThrow(ParamError);
+    const c = new SkillClient(fake, {
+      teamId: "dt",
+      agentId: "da",
+      userId: "du",
+      taskId: "dtask",
+    });
+    expect(() =>
+      (c as unknown as { getByName(p: unknown): unknown }).getByName({
+        skill_name: "x",
+      }),
+    ).toThrow(ParamError);
   });
 
   it("uses explicit ids only, ignoring user/task defaults", async () => {
     const fake = new FakeTransport();
-    const c = new SkillClient(fake, { teamId: "dt", agentId: "da", userId: "du", taskId: "dtask" });
+    const c = new SkillClient(fake, {
+      teamId: "dt",
+      agentId: "da",
+      userId: "du",
+      taskId: "dtask",
+    });
     await c.getByName({ skill_name: "x", team_id: "T", agent_id: "A" });
     const body = fake.calls[0]!.body;
     expect(body.team_id).toBe("T");
@@ -36,7 +53,9 @@ describe("getByName does not merge constructor defaults", () => {
   it("rejects empty skill_name", () => {
     const fake = new FakeTransport();
     const c = new SkillClient(fake);
-    expect(() => c.getByName({ skill_name: "  ", team_id: "t", agent_id: "a" })).toThrow(ParamError);
+    expect(() =>
+      c.getByName({ skill_name: "  ", team_id: "t", agent_id: "a" }),
+    ).toThrow(ParamError);
   });
 });
 
@@ -45,9 +64,13 @@ describe("deleteConversation legacy session_id guard", () => {
   it("rejects non-string and empty legacy session_id", () => {
     const fake = new FakeTransport();
     const c = new MemoryClient(fake, ISO);
-    expect(() => c.deleteConversation({ session_id: 42 as never })).toThrow(ParamError);
+    expect(() => c.deleteConversation({ session_id: 42 as never })).toThrow(
+      ParamError,
+    );
     expect(() => c.deleteConversation({ session_id: "" })).toThrow(ParamError);
-    expect(() => c.deleteConversation({ session_id: "   " })).toThrow(ParamError);
+    expect(() => c.deleteConversation({ session_id: "   " })).toThrow(
+      ParamError,
+    );
   });
 
   it("trims legacy session_id when merging", async () => {
@@ -59,7 +82,12 @@ describe("deleteConversation legacy session_id guard", () => {
 
   it("withIsolation keeps session on empty overrides and applies string override", async () => {
     const fake = new FakeTransport();
-    const c = new MemoryClient(fake, { team_id: "t", agent_id: "a", user_id: "u", session_id: "s1" });
+    const c = new MemoryClient(fake, {
+      team_id: "t",
+      agent_id: "a",
+      user_id: "u",
+      session_id: "s1",
+    });
     const kept = c.withIsolation({});
     await kept.queryConversation({});
     expect(fake.calls[0]!.body.session_id).toBe("s1");
@@ -73,8 +101,18 @@ describe("deleteConversation legacy session_id guard", () => {
 describe("HttpTransport request-id fallback", () => {
   afterEach(() => vi.unstubAllGlobals());
   it("business error with no header and no envelope request_id yields empty requestId", async () => {
-    const t = new HttpTransport({ endpoint: "http://mem.example.com", apiKey: "k", serviceId: "s" });
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ code: 40001, message: "bad" }))));
+    const t = new HttpTransport({
+      endpoint: "http://mem.example.com",
+      apiKey: "k",
+      serviceId: "s",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ code: 40001, message: "bad" })),
+      ),
+    );
     const err = await t.post("/x").catch((e: unknown) => e);
     expect((err as { requestId: string }).requestId).toBe("");
   });
@@ -91,5 +129,26 @@ describe("StsCredential missing PathPrefix", () => {
       PathPrefix: undefined as never,
     });
     expect(c.prefix).toBe("/");
+  });
+});
+
+describe("offload v3 paths", () => {
+  const ISO = { team_id: "t1", agent_id: "a1", user_id: "u1" };
+  it("posts ingest/compact/query-mmd to /v3/offload/*", async () => {
+    const fake = new FakeTransport();
+    const c = new MemoryClient(fake, ISO);
+    await c.offloadIngest({ session_id: "s", tool_pairs: [], prompt: "p" });
+    expect(fake.calls[0]!.path).toBe("/v3/offload/ingest");
+    await c.offloadCompact({
+      session_id: "s",
+      messages: [],
+      ratio: 0.9,
+      context_window: 1000,
+      total_tokens: 100,
+    });
+    expect(fake.calls[1]!.path).toBe("/v3/offload/compact");
+    await c.offloadQueryMmd({ session_id: "s", limit: 1 });
+    expect(fake.calls[2]!.path).toBe("/v3/offload/query-mmd");
+    expect(fake.calls[2]!.body).toEqual({ session_id: "s", limit: 1 });
   });
 });

@@ -25,13 +25,19 @@ import { randomUUID } from "node:crypto";
 
 import { ZodError, z } from "zod";
 
-import { errorEnvelope, successEnvelope } from "./v2-router.js";
-import type { ApiResponseEnvelope, V2AuthContext } from "./v2-schemas.js";
-import type { IMemoryStore, MemoryContentClearResult } from "../core/store/types.js";
+import { errorEnvelope, successEnvelope } from "./v3-router.js";
+import type { ApiResponseEnvelope, V3AuthContext } from "./v3-schemas.js";
+import type {
+  IMemoryStore,
+  MemoryContentClearResult,
+} from "../core/store/types.js";
 import type { StorageAdapter } from "../core/storage/types.js";
 import { createScopedStorageAdapter } from "../core/storage/adapter.js";
 import { buildProfileIsolationScope } from "../core/profile/profile-sync.js";
-import { MetadataError, type MetadataService } from "../metadata/service/metadata-service.js";
+import {
+  MetadataError,
+  type MetadataService,
+} from "../metadata/service/metadata-service.js";
 import type { Logger } from "../core/types.js";
 
 const TAG = "[chat-memory-handlers]";
@@ -43,22 +49,24 @@ export const CHAT_MEMORY_CLEAR_MAX = 100;
 //  Schema
 // ═════════════════════════════════════════════════════════════
 
-export const chatMemoryClearRequestSchema = z.object({
-  memory_ids: z.array(z.string()).min(1).max(CHAT_MEMORY_CLEAR_MAX),
-}).transform((data) => {
-  const seen = new Set<string>();
-  const memoryIds: string[] = [];
-  for (const raw of data.memory_ids) {
-    const id = raw.trim();
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    memoryIds.push(id);
-  }
-  return { memory_ids: memoryIds };
-}).refine(
-  (data) => data.memory_ids.length > 0,
-  { message: "memory_ids must contain at least one non-empty id" },
-);
+export const chatMemoryClearRequestSchema = z
+  .object({
+    memory_ids: z.array(z.string()).min(1).max(CHAT_MEMORY_CLEAR_MAX),
+  })
+  .transform((data) => {
+    const seen = new Set<string>();
+    const memoryIds: string[] = [];
+    for (const raw of data.memory_ids) {
+      const id = raw.trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      memoryIds.push(id);
+    }
+    return { memory_ids: memoryIds };
+  })
+  .refine((data) => data.memory_ids.length > 0, {
+    message: "memory_ids must contain at least one non-empty id",
+  });
 
 /** Single memory clear result. */
 export interface ChatMemoryClearItem {
@@ -101,7 +109,9 @@ export interface ChatMemoryRouterDeps {
 }
 
 function formatZodErr(err: ZodError): string {
-  return err.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+  return err.issues
+    .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+    .join("; ");
 }
 
 /** MetadataError.code → envelope code. Semantics consistent with v3-meta-router mapping. */
@@ -138,12 +148,12 @@ async function clearProfileStorage(
   if (!team || !agent) {
     throw new Error(
       "clearProfileStorage requires non-empty teamId and agentId " +
-      "(empty values would silently target the shared \"default\" profile scope)",
+        '(empty values would silently target the shared "default" profile scope)',
     );
   }
 
   const scope = buildProfileIsolationScope({ teamId: team, agentId: agent });
-  // Scope prefix completely consistent with v2-router scopedProfileStorage,
+  // Scope prefix completely consistent with v3-router scopedProfileStorage,
   // otherwise it clears the wrong directory (or none).
   const scopePrefix = `profiles/${encodeURIComponent(scope)}/`;
   const storage = createScopedStorageAdapter(baseStorage, scopePrefix);
@@ -154,7 +164,9 @@ async function clearProfileStorage(
   try {
     const entries = await storage.readdir("");
     removed = entries.filter((e) => !e.isDirectory).length;
-  } catch { /* Scope doesn't exist yet → treat as cleared */ }
+  } catch {
+    /* Scope doesn't exist yet → treat as cleared */
+  }
 
   // Empty string prefix after scoped adapter key() concatenation is `profiles/<scope>/`,
   // always non-empty, won't step out of bounds to other agents, nor hit backend empty key protection.
@@ -183,7 +195,9 @@ export async function clearChatMemoryContent(args: {
   const teamId = (args.teamId ?? "").trim();
   const agentId = (args.agentId ?? "").trim();
   if (!teamId || !agentId) {
-    throw new Error("clearChatMemoryContent requires non-empty teamId and agentId");
+    throw new Error(
+      "clearChatMemoryContent requires non-empty teamId and agentId",
+    );
   }
 
   if (typeof args.store.clearMemoryContent !== "function") {
@@ -216,14 +230,14 @@ function isNonRetryableClearError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return (
     // Empty inputs — caller bug, retry is meaningless
-    msg.includes("requires non-empty teamId and agentId")
-    || msg.includes("requires a non-empty sessionId")
+    msg.includes("requires non-empty teamId and agentId") ||
+    msg.includes("requires a non-empty sessionId") ||
     // store capability missing — config issue
-    || msg.includes("does not support clearMemoryContent")
+    msg.includes("does not support clearMemoryContent") ||
     // Dangerous filter blocked by guardrails — code defect, must expose instead of covering by retrying
-    || msg.includes("refusing clearMemoryContent")
-    || msg.includes("would wipe the whole collection")
-    || msg.includes("missing required scope field")
+    msg.includes("refusing clearMemoryContent") ||
+    msg.includes("would wipe the whole collection") ||
+    msg.includes("missing required scope field")
   );
 }
 
@@ -270,7 +284,7 @@ async function clearChatMemoryContentWithRetry(args: {
       if (isNonRetryableClearError(err)) {
         args.logger.error(
           `${TAG} clear failed with non-retryable error memory=${args.memoryId}: ` +
-          `${err instanceof Error ? err.message : String(err)}`,
+            `${err instanceof Error ? err.message : String(err)}`,
         );
         throw err;
       }
@@ -279,7 +293,7 @@ async function clearChatMemoryContentWithRetry(args: {
         const delay = CLEAR_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
         args.logger.warn(
           `${TAG} clear attempt ${attempt}/${CLEAR_MAX_ATTEMPTS} failed memory=${args.memoryId}, ` +
-          `retrying in ${delay}ms: ${err instanceof Error ? err.message : String(err)}`,
+            `retrying in ${delay}ms: ${err instanceof Error ? err.message : String(err)}`,
         );
         await new Promise((r) => setTimeout(r, delay));
       }
@@ -311,7 +325,7 @@ export async function clearChatMemoryContentResilient(args: {
 
 /**
  * Write clear audit. One delete event each for L1/L2/L3, record_id uses memory_id (asset_id),
- * no original content written. Audit failure won't block main flow (semantics consistent with v2-router recordAudit).
+ * no original content written. Audit failure won't block main flow (semantics consistent with v3-router recordAudit).
  */
 export async function recordClearAudit(
   store: IMemoryStore,
@@ -341,7 +355,7 @@ export async function recordClearAudit(
     } catch (err) {
       args.logger.warn(
         `${TAG} audit append failed (clear/${layer} memory=${args.memoryId}): ` +
-        `${err instanceof Error ? err.message : String(err)}`,
+          `${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
@@ -349,19 +363,24 @@ export async function recordClearAudit(
 
 async function handleChatMemoryClear(
   body: unknown,
-  auth: V2AuthContext,
+  auth: V3AuthContext,
   requestId: string,
   depsRaw: unknown,
 ): Promise<ApiResponseEnvelope> {
   const deps = depsRaw as ChatMemoryRouterDeps;
   const parsed = chatMemoryClearRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodErr(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodErr(parsed.error), requestId);
   const { memory_ids } = parsed.data;
 
   const store = deps.getStore();
   if (!store) return errorEnvelope(503, "Store not available", requestId);
   if (typeof store.clearMemoryContent !== "function") {
-    return errorEnvelope(503, "Store does not support chat memory clear", requestId);
+    return errorEnvelope(
+      503,
+      "Store does not support chat memory clear",
+      requestId,
+    );
   }
   const storage = deps.getStorage();
   if (!storage) return errorEnvelope(503, "Storage not available", requestId);
@@ -373,7 +392,9 @@ async function handleChatMemoryClear(
   try {
     metaSvc = await deps.getMetadataService(auth.serviceId);
   } catch (err) {
-    deps.logger.warn(`${TAG} metadata service unavailable: ${err instanceof Error ? err.message : String(err)}`);
+    deps.logger.warn(
+      `${TAG} metadata service unavailable: ${err instanceof Error ? err.message : String(err)}`,
+    );
     return errorEnvelope(503, "Metadata service not available", requestId);
   }
 
@@ -432,8 +453,8 @@ async function handleChatMemoryClear(
       const retryable = !isNonRetryableClearError(err);
       deps.logger.error(
         `${TAG} clear failed memory=${target.asset_id} team=${target.team_id} ` +
-        `agent=${target.agent_id} retryable=${retryable}: ` +
-        `${err instanceof Error ? err.message : String(err)}`,
+          `agent=${target.agent_id} retryable=${retryable}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
       );
       items.push({
         memory_id: target.asset_id,
@@ -450,10 +471,13 @@ async function handleChatMemoryClear(
     }
   }
 
-  return successEnvelope<ChatMemoryClearData>({
-    items,
-    all_cleared: items.every((i) => i.cleared),
-  }, requestId);
+  return successEnvelope<ChatMemoryClearData>(
+    {
+      items,
+      all_cleared: items.every((i) => i.cleared),
+    },
+    requestId,
+  );
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -462,7 +486,7 @@ async function handleChatMemoryClear(
 
 type RouteHandler = (
   body: unknown,
-  auth: V2AuthContext,
+  auth: V3AuthContext,
   requestId: string,
   deps: unknown,
 ) => Promise<ApiResponseEnvelope>;

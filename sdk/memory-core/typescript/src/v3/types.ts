@@ -1,209 +1,224 @@
 import type {
-  AtomicDeleteData,
-  AtomicDetail,
-  AtomicQueryData,
-  AtomicSearchData,
-  AtomicUpdateData,
-  ConversationAddData,
-  ConversationDeleteData,
-  ConversationItem,
-  ConversationQueryData,
-  ConversationSearchData,
-  CoreFile,
-  CoreWriteData,
-  CountData,
-  ScenarioEntry,
-  ScenarioFile,
-  ScenarioListData,
-  ScenarioWriteData,
+ AtomicDeleteData,
+ AtomicDetail,
+ AtomicQueryData,
+ AtomicSearchData,
+ AtomicUpdateData,
+ ConversationAddData,
+ ConversationDeleteData,
+ ConversationItem,
+ ConversationQueryData,
+ ConversationSearchData,
+ CoreFile,
+ CoreWriteData,
+ CountData,
+ OffloadCompactData,
+ OffloadCompactRequest,
+ OffloadIngestData,
+ OffloadIngestRequest,
+ OffloadQueryMmdData,
+ OffloadQueryMmdRequest,
+ ScenarioEntry,
+ ScenarioFile,
+ ScenarioListData,
+ ScenarioWriteData,
 } from "../types.js";
 import type { MemoryClientConfig, Transport } from "../client.js";
 
 export interface V3MemoryClientConfig extends MemoryClientConfig {
-  /** Team ID. Required by v3 strict isolation. */
-  teamId: string;
-  /** Agent ID. Required by v3 strict isolation. */
-  agentId: string;
-  /** User ID. Required by v3 strict isolation. */
-  userId: string;
-  /** Optional default session ID. L0/L1 calls may override it per request. */
-  sessionId?: string;
-  /** Optional task ID carried in isolation fields. */
-  taskId?: string;
-  /**
-   * Optional user API key, passed through as the `x-tdai-user-key` header.
-   *
-   * L0-L3 data plane and `clearChatMemory()` **do not** require it — the kernel does not perform user-level authorization.
-   * This optional parameter is retained for alignment with `MetadataClient`: when a gateway/panel that validates user identity
-   * is placed in front of the gateway, it allows the request to carry caller identity.
-   */
-  userKey?: string;
+ /** Team ID. Required by v3 strict isolation. */
+ teamId: string;
+ /** Agent ID. Required by v3 strict isolation. */
+ agentId: string;
+ /** User ID. Required by v3 strict isolation. */
+ userId: string;
+ /** Optional default session ID. L0/L1 calls may override it per request. */
+ sessionId?: string;
+ /** Optional task ID carried in isolation fields. */
+ taskId?: string;
+ /**
+  * Optional user API key, passed through as the `x-tdai-user-key` header.
+  *
+  * L0-L3 data plane and `clearChatMemory()` **do not** require it — the kernel does not perform user-level authorization.
+  * This optional parameter is retained for alignment with `MetadataClient`: when a gateway/panel that validates user identity
+  * is placed in front of the gateway, it allows the request to carry caller identity.
+  */
+ userKey?: string;
 }
 
 export type V3MemoryClientInput = V3MemoryClientConfig | Transport;
 
 export interface V3IsolationContext {
-  team_id: string;
-  agent_id: string;
-  user_id: string;
-  session_id?: string;
-  task_id?: string;
+ team_id: string;
+ agent_id: string;
+ user_id: string;
+ session_id?: string;
+ task_id?: string;
 }
 
 export interface V3IsolationOverrides {
-  teamId?: string;
-  agentId?: string;
-  userId?: string;
-  sessionId?: string | null;
-  taskId?: string | null;
+ teamId?: string;
+ agentId?: string;
+ userId?: string;
+ sessionId?: string | null;
+ taskId?: string | null;
 }
 
 export interface V3ConversationAddRequest {
-  session_id?: string;
-  messages: ConversationItem[];
+ session_id?: string;
+ messages: ConversationItem[];
 }
 export type V3ConversationAddData = ConversationAddData;
 
 export interface V3ConversationQueryRequest {
-  session_id?: string;
-  limit?: number;
-  offset?: number;
-  time_start?: string;
-  time_end?: string;
+ session_id?: string;
+ limit?: number;
+ offset?: number;
+ time_start?: string;
+ time_end?: string;
 }
 export type V3ConversationQueryData = ConversationQueryData;
 
 export interface V3ConversationSearchRequest {
-  query: string;
-  limit?: number;
-  session_id?: string;
-  time_start?: string;
-  time_end?: string;
+ query: string;
+ limit?: number;
+ session_id?: string;
+ time_start?: string;
+ time_end?: string;
 }
 export type V3ConversationSearchData = ConversationSearchData;
 
 export interface V3ConversationDeleteRequest {
-  /** List of message ids to delete, max 5000 per request (automatically deduplicated). */
-  message_ids?: string[];
-  /** List of session ids to clear, max 100 per request (automatically deduplicated). */
-  session_ids?: string[];
-  /**
-   * @deprecated Use `session_ids` instead. Retained only for compatibility with old callers, will be merged into
-   * `session_ids`. Note: delete path **will not** fall back to the session_id in the constructor.
-   */
-  session_id?: string;
+ /** List of message ids to delete, max 5000 per request (automatically deduplicated). */
+ message_ids?: string[];
+ /** List of session ids to clear, max 100 per request (automatically deduplicated). */
+ session_ids?: string[];
+ /**
+  * @deprecated Use `session_ids` instead. Retained only for compatibility with old callers, will be merged into
+  * `session_ids`. Note: delete path **will not** fall back to the session_id in the constructor.
+  */
+ session_id?: string;
 }
 export type V3ConversationDeleteData = ConversationDeleteData;
 export interface V3ConversationCountRequest {
-  session_id?: string;
-  time_start?: string;
-  time_end?: string;
+ session_id?: string;
+ time_start?: string;
+ time_end?: string;
 }
 
 export interface V3AtomicUpdateRequest {
-  id: string;
-  content: string;
-  background?: string;
-  session_id?: string;
+ id: string;
+ content: string;
+ background?: string;
+ session_id?: string;
 }
 export type V3AtomicUpdateData = AtomicUpdateData;
 
 export interface V3AtomicQueryRequest {
-  type?: string;
-  limit?: number;
-  offset?: number;
-  time_start?: string;
-  time_end?: string;
-  session_id?: string;
+ type?: string;
+ limit?: number;
+ offset?: number;
+ time_start?: string;
+ time_end?: string;
+ session_id?: string;
 }
 export type V3AtomicDetail = AtomicDetail;
 export type V3AtomicQueryData = AtomicQueryData;
 
 export interface V3AtomicSearchRequest {
-  query: string;
-  limit?: number;
-  type?: string;
-  time_start?: string;
-  time_end?: string;
-  session_id?: string;
+ query: string;
+ limit?: number;
+ type?: string;
+ time_start?: string;
+ time_end?: string;
+ session_id?: string;
 }
 export type V3AtomicSearchData = AtomicSearchData;
 
 export interface V3AtomicDeleteRequest {
-  /** List of L1 note ids to delete, max 5000 per request (automatically deduplicated). */
-  ids: string[];
-  session_id?: string;
+ /** List of L1 note ids to delete, max 5000 per request (automatically deduplicated). */
+ ids: string[];
+ session_id?: string;
 }
 export type V3AtomicDeleteData = AtomicDeleteData;
 
 // -- Chat Memory (asset-level) ---------------------------------------------
 
 export interface V3ChatMemoryClearRequest {
-  /** List of chat memory asset ids to clear, 1-100 items (automatically deduplicated). */
-  memory_ids: string[];
+ /** List of chat memory asset ids to clear, 1-100 items (automatically deduplicated). */
+ memory_ids: string[];
 }
 
 /** Clear result for a single memory. */
 export interface V3ChatMemoryClearItem {
-  memory_id: string;
-  /** Whether cleared successfully. If false, content may remain. */
-  cleared: boolean;
-  l0_deleted: number;
-  l1_deleted: number;
-  /** Number of L2/L3 profile records (VDB rows + storage files). */
-  profile_deleted: number;
-  /** Reason for failure; not returned on success. */
-  reason?: string;
-  /** Whether the failure is worth retrying (server has automatically retried). */
-  retryable?: boolean;
-  /** Actual number of server attempts. */
-  attempts?: number;
+ memory_id: string;
+ /** Whether cleared successfully. If false, content may remain. */
+ cleared: boolean;
+ l0_deleted: number;
+ l1_deleted: number;
+ /** Number of L2/L3 profile records (VDB rows + storage files). */
+ profile_deleted: number;
+ /** Reason for failure; not returned on success. */
+ reason?: string;
+ /** Whether the failure is worth retrying (server has automatically retried). */
+ retryable?: boolean;
+ /** Actual number of server attempts. */
+ attempts?: number;
 }
 
 export interface V3ChatMemoryClearData {
-  items: V3ChatMemoryClearItem[];
-  /** True when all succeed. */
-  all_cleared: boolean;
+ items: V3ChatMemoryClearItem[];
+ /** True when all succeed. */
+ all_cleared: boolean;
 }
 
 export interface V3AtomicCountRequest {
-  type?: string;
-  time_start?: string;
-  time_end?: string;
-  session_id?: string;
+ type?: string;
+ time_start?: string;
+ time_end?: string;
+ session_id?: string;
 }
 
 export interface V3ScenarioListRequest {
-  path_prefix?: string;
+ path_prefix?: string;
 }
 export type V3ScenarioEntry = ScenarioEntry;
 export type V3ScenarioListData = ScenarioListData;
 
 export interface V3ScenarioReadRequest {
-  path: string;
+ path: string;
 }
 export type V3ScenarioFile = ScenarioFile;
 
 export interface V3ScenarioWriteRequest {
-  path: string;
-  content: string;
-  summary?: string;
+ path: string;
+ content: string;
+ summary?: string;
 }
 export type V3ScenarioWriteData = ScenarioWriteData;
 
 export interface V3ScenarioRmRequest {
-  path: string;
+ path: string;
 }
 
 export interface V3ScenarioCountRequest {
-  path_prefix?: string;
+ path_prefix?: string;
 }
 
 export type V3CoreReadRequest = Record<string, never>;
 export type V3CoreFile = CoreFile;
 
 export interface V3CoreWriteRequest {
-  content: string;
+ content: string;
 }
 export type V3CoreWriteData = CoreWriteData;
 export type V3CountData = CountData;
+
+// -- Offload (Ingest + Compaction + MMD) ----------------------------------------
+
+export type V3OffloadIngestRequest = OffloadIngestRequest;
+export type V3OffloadIngestData = OffloadIngestData;
+export type V3OffloadCompactRequest = OffloadCompactRequest;
+export type V3OffloadCompactData = OffloadCompactData;
+export type V3OffloadQueryMmdRequest = OffloadQueryMmdRequest;
+export type V3OffloadQueryMmdData = OffloadQueryMmdData;

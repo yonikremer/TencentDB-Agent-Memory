@@ -76,18 +76,32 @@ export interface PipelineWorkerConfig {
   /** Pending message timeout threshold ms (default: 300000 = 5min, must be > lockTtlMs) */
   pendingStaleMs?: number;
   /** Dead letter task persistence callback */
-  onDeadLetter?: (task: TaskPayload, error: string, retryCount: number) => Promise<void>;
+  onDeadLetter?: (
+    task: TaskPayload,
+    error: string,
+    retryCount: number,
+  ) => Promise<void>;
   /**
    * Callback after L1 completes, used to advance L2 timer (solves L2 fast path).
    * Injected by server.ts via statefulManager.advanceL2TimerAfterL1.
    * If not injected, L2 relies solely on maxInterval as fallback.
    */
-  onL1Complete?: (sessionId: string, instanceId: string, teamId?: string, agentId?: string) => Promise<void>;
+  onL1Complete?: (
+    sessionId: string,
+    instanceId: string,
+    teamId?: string,
+    agentId?: string,
+  ) => Promise<void>;
   /**
    * Callback after L2 completes, used to set L2 maxInterval timer.
    * Injected by server.ts via statefulManager.armL2MaxInterval.
    */
-  onL2Complete?: (sessionId: string, instanceId: string, teamId?: string, agentId?: string) => Promise<void>;
+  onL2Complete?: (
+    sessionId: string,
+    instanceId: string,
+    teamId?: string,
+    agentId?: string,
+  ) => Promise<void>;
   /**
    * Distributed lock granularity (default: "session")
    * - "session": L1/L2 per-session lock, L3 per-instance lock (original behavior, max concurrency)
@@ -133,7 +147,12 @@ const MAX_LOCK_REQUEUE = 15;
 export class PipelineWorker {
   private backend: IStateBackend;
   private executor: TaskExecutor;
-  private config: Required<Omit<PipelineWorkerConfig, "onDeadLetter" | "onL1Complete" | "onL2Complete" | "permitPool">> & {
+  private config: Required<
+    Omit<
+      PipelineWorkerConfig,
+      "onDeadLetter" | "onL1Complete" | "onL2Complete" | "permitPool"
+    >
+  > & {
     onDeadLetter?: PipelineWorkerConfig["onDeadLetter"];
     onL1Complete?: PipelineWorkerConfig["onL1Complete"];
     onL2Complete?: PipelineWorkerConfig["onL2Complete"];
@@ -149,7 +168,7 @@ export class PipelineWorker {
   private activeLocks = new Set<string>();
 
   // In-flight tasks (consumed but not yet completed/failed/dropped). Used by
-  // standalone /v2/pipeline/status to compute per-L-type running stats.
+  // standalone /v3/pipeline/status to compute per-L-type running stats.
   // Service mode never reads this — it just costs a Map.set/delete per task.
   private runningTasks = new Map<string, TaskPayload>();
 
@@ -172,12 +191,23 @@ export class PipelineWorker {
     executionAborted: 0,
   };
 
-  constructor(backend: IStateBackend, executor: TaskExecutor, config?: PipelineWorkerConfig, logger?: Logger) {
+  constructor(
+    backend: IStateBackend,
+    executor: TaskExecutor,
+    config?: PipelineWorkerConfig,
+    logger?: Logger,
+  ) {
     this.backend = backend;
     this.executor = executor;
-    this.logger = logger ?? { info: console.log, warn: console.warn, error: console.error };
+    this.logger = logger ?? {
+      info: console.log,
+      warn: console.warn,
+      error: console.error,
+    };
     this.config = {
-      workerId: config?.workerId ?? `worker-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      workerId:
+        config?.workerId ??
+        `worker-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       concurrency: config?.concurrency ?? 60,
       pollIntervalMs: config?.pollIntervalMs ?? 200,
       lockTtlMs: config?.lockTtlMs ?? 600000,
@@ -202,7 +232,9 @@ export class PipelineWorker {
     if (this.destroyed || this.running) return;
     this.running = true;
 
-    this.logger.info(`${TAG} Starting (workerId=${this.config.workerId}, concurrency=${this.config.concurrency})`);
+    this.logger.info(
+      `${TAG} Starting (workerId=${this.config.workerId}, concurrency=${this.config.concurrency})`,
+    );
 
     // Start pending message recovery loop
     this.startPendingRecovery();
@@ -219,28 +251,39 @@ export class PipelineWorker {
     this.running = false;
 
     // Stop pending recovery
-    if (this.recoveryTimer) { clearInterval(this.recoveryTimer); this.recoveryTimer = null; }
+    if (this.recoveryTimer) {
+      clearInterval(this.recoveryTimer);
+      this.recoveryTimer = null;
+    }
 
     // Release all active locks
     for (const lockKey of this.activeLocks) {
-      try { await this.backend.releaseLock(lockKey, this.config.workerId); } catch { /* best effort */ }
+      try {
+        await this.backend.releaseLock(lockKey, this.config.workerId);
+      } catch {
+        /* best effort */
+      }
     }
     this.activeLocks.clear();
 
     this.logger.info(
       `${TAG} Stopped (consumed=${this.metrics.tasksConsumed}, completed=${this.metrics.tasksCompleted}, ` +
-      `failed=${this.metrics.tasksFailed}, deadLettered=${this.metrics.tasksDeadLettered})`,
+        `failed=${this.metrics.tasksFailed}, deadLettered=${this.metrics.tasksDeadLettered})`,
     );
   }
 
   getMetrics() {
-    return { ...this.metrics, workerId: this.config.workerId, deadLetterCount: this.deadLetterQueue.length };
+    return {
+      ...this.metrics,
+      workerId: this.config.workerId,
+      deadLetterCount: this.deadLetterQueue.length,
+    };
   }
 
   /**
    * Snapshot of tasks currently being executed by this worker (after lock
    * acquisition, before completion/failure). Used by standalone
-   * /v2/pipeline/status to compute per-L-type running stats. Service mode
+   * /v3/pipeline/status to compute per-L-type running stats. Service mode
    * never calls this. Returns a fresh array (Map values copy).
    */
   getRunningTasks(): TaskPayload[] {
@@ -258,14 +301,19 @@ export class PipelineWorker {
   private async consumeLoop(): Promise<void> {
     while (this.running && !this.destroyed) {
       try {
-        const task = await this.backend.consumeTask(this.config.workerId, this.config.pollIntervalMs);
+        const task = await this.backend.consumeTask(
+          this.config.workerId,
+          this.config.pollIntervalMs,
+        );
         if (!task) continue;
 
         this.metrics.tasksConsumed++;
         await this.processTask(task);
       } catch (err) {
         if (!this.destroyed) {
-          this.logger.error(`${TAG} Consume loop error: ${err instanceof Error ? err.message : String(err)}`);
+          this.logger.error(
+            `${TAG} Consume loop error: ${err instanceof Error ? err.message : String(err)}`,
+          );
           await this.sleep(1000); // Avoid crazy retries
         }
       }
@@ -292,9 +340,12 @@ export class PipelineWorker {
       if (permitReleased) return;
       permitReleased = true;
       if (permitPool) {
-        try { permitPool.release(); }
-        catch (err) {
-          this.logger.warn(`${TAG} permitPool release error: ${err instanceof Error ? err.message : String(err)}`);
+        try {
+          permitPool.release();
+        } catch (err) {
+          this.logger.warn(
+            `${TAG} permitPool release error: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
     };
@@ -310,16 +361,26 @@ export class PipelineWorker {
         if (msgId) await this.backend.ackTask(msgId);
 
         this.metrics.tasksCompleted++;
-        this.logger?.debug?.(`${TAG} Task completed (lock-free): ${task.type} [${task.instanceId}/${task.sessionId}]`);
+        this.logger?.debug?.(
+          `${TAG} Task completed (lock-free): ${task.type} [${task.instanceId}/${task.sessionId}]`,
+        );
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         this.metrics.tasksFailed++;
 
         if (retryCount < this.config.maxRetries) {
           const delay = this.config.retryBaseDelayMs * Math.pow(3, retryCount);
-          this.logger.warn(`${TAG} Task failed (lock-free, retry ${retryCount + 1}/${this.config.maxRetries}, delay=${delay}ms): ${errMsg}`);
+          this.logger.warn(
+            `${TAG} Task failed (lock-free, retry ${retryCount + 1}/${this.config.maxRetries}, delay=${delay}ms): ${errMsg}`,
+          );
           const msgId = (task as any)._msgId;
-          if (msgId) { try { await this.backend.ackTask(msgId); } catch { /* best effort */ } }
+          if (msgId) {
+            try {
+              await this.backend.ackTask(msgId);
+            } catch {
+              /* best effort */
+            }
+          }
           await this.sleep(delay);
           await this.reEnqueue(task, retryCount + 1);
           this.metrics.tasksRetried++;
@@ -331,14 +392,20 @@ export class PipelineWorker {
         releasePermitOnce();
 
         // Deferred enqueue (same as locked path)
-        const deferred = (task as any)._deferredEnqueue as TaskPayload[] | undefined;
+        const deferred = (task as any)._deferredEnqueue as
+          | TaskPayload[]
+          | undefined;
         if (deferred?.length) {
           for (const dTask of deferred) {
             try {
               await this.backend.enqueueTask(dTask);
-              this.logger?.debug?.(`${TAG} Deferred enqueue: ${dTask.type} [${dTask.id}]`);
+              this.logger?.debug?.(
+                `${TAG} Deferred enqueue: ${dTask.type} [${dTask.id}]`,
+              );
             } catch (err) {
-              this.logger?.warn?.(`${TAG} Deferred enqueue failed: ${err instanceof Error ? err.message : String(err)}`);
+              this.logger?.warn?.(
+                `${TAG} Deferred enqueue failed: ${err instanceof Error ? err.message : String(err)}`,
+              );
             }
           }
         }
@@ -347,16 +414,26 @@ export class PipelineWorker {
     }
 
     // Step 1: Grab distributed lock
-    const locked = await this.backend.acquireLock(lockKey, this.config.workerId, this.config.lockTtlMs);
+    const locked = await this.backend.acquireLock(
+      lockKey,
+      this.config.workerId,
+      this.config.lockTtlMs,
+    );
     if (!locked) {
       this.metrics.lockConflicts++;
 
       // offload-l2: skip immediately on lock conflict (idempotent timer will re-trigger)
       if (task.type === "offload-l2") {
-        this.logger?.debug?.(`${TAG} Lock conflict [offload-l2] (task=${task.id}): ${lockKey}, skip (timer will re-trigger)`);
+        this.logger?.debug?.(
+          `${TAG} Lock conflict [offload-l2] (task=${task.id}): ${lockKey}, skip (timer will re-trigger)`,
+        );
         const msgId = (task as any)._msgId;
         if (msgId) {
-          try { await this.backend.ackTask(msgId); } catch { /* best effort */ }
+          try {
+            await this.backend.ackTask(msgId);
+          } catch {
+            /* best effort */
+          }
         }
         releasePermitOnce();
         return;
@@ -373,9 +450,15 @@ export class PipelineWorker {
       let delay = 200;
       while (Date.now() < deadline && this.running) {
         attempt++;
-        this.logger?.debug?.(`${TAG} Lock conflict [${task.type}] (task=${task.id}): ${lockKey}, retry ${attempt} after ${delay}ms`);
+        this.logger?.debug?.(
+          `${TAG} Lock conflict [${task.type}] (task=${task.id}): ${lockKey}, retry ${attempt} after ${delay}ms`,
+        );
         await this.sleep(delay);
-        acquired = await this.backend.acquireLock(lockKey, this.config.workerId, this.config.lockTtlMs);
+        acquired = await this.backend.acquireLock(
+          lockKey,
+          this.config.workerId,
+          this.config.lockTtlMs,
+        );
         if (acquired) break;
         delay = Math.min(delay * 3, 5000);
       }
@@ -388,7 +471,10 @@ export class PipelineWorker {
         // guarantees no loss and does not rely on pending requeue mechanism.
         //
         // lockRetryCount prevents infinite loop: same task requeued max MAX_LOCK_REQUEUE times.
-        const retryCount = Number((task.data as Record<string, unknown> | undefined)?.lockRetryCount ?? 0);
+        const retryCount = Number(
+          (task.data as Record<string, unknown> | undefined)?.lockRetryCount ??
+            0,
+        );
         const msgId = (task as any)._msgId;
 
         if (retryCount < MAX_LOCK_REQUEUE) {
@@ -407,17 +493,21 @@ export class PipelineWorker {
           } catch (err) {
             this.logger?.warn?.(
               `${TAG} Lock conflict requeue failed [${task.type}] (task=${task.id}): ` +
-              (err instanceof Error ? err.message : String(err)),
+                (err instanceof Error ? err.message : String(err)),
             );
           }
 
           if (enqueued) {
             this.logger?.info?.(
               `${TAG} Lock conflict timeout [${task.type}] (task=${task.id}): ${lockKey}, ` +
-              `requeued as ${requeued.id} (attempt ${retryCount + 1}/${MAX_LOCK_REQUEUE})`,
+                `requeued as ${requeued.id} (attempt ${retryCount + 1}/${MAX_LOCK_REQUEUE})`,
             );
             if (msgId) {
-              try { await this.backend.ackTask(msgId); } catch { /* best effort */ }
+              try {
+                await this.backend.ackTask(msgId);
+              } catch {
+                /* best effort */
+              }
             }
             releasePermitOnce();
             return;
@@ -426,12 +516,16 @@ export class PipelineWorker {
         } else {
           this.logger?.error?.(
             `${TAG} Lock conflict exhausted [${task.type}] (task=${task.id}): ${lockKey}, ` +
-            `dropping after ${retryCount} requeues`,
+              `dropping after ${retryCount} requeues`,
           );
         }
 
         if (msgId) {
-          try { await this.backend.ackTask(msgId); } catch { /* best effort */ }
+          try {
+            await this.backend.ackTask(msgId);
+          } catch {
+            /* best effort */
+          }
         }
         releasePermitOnce();
         return;
@@ -440,7 +534,7 @@ export class PipelineWorker {
     }
 
     this.activeLocks.add(lockKey);
-    // Track in-flight task — used by standalone /v2/pipeline/status. Done after
+    // Track in-flight task — used by standalone /v3/pipeline/status. Done after
     // lock acquisition so lock-conflict drops don't pollute the running set.
     this.runningTasks.set(task.id, task);
     let lockLost = false;
@@ -452,12 +546,16 @@ export class PipelineWorker {
     // Step 2: Start lock renewal (local timer, per-task independent)
     const renewTimer = setInterval(async () => {
       try {
-        const renewed = await this.backend.renewLock(lockKey, this.config.workerId, this.config.lockTtlMs);
+        const renewed = await this.backend.renewLock(
+          lockKey,
+          this.config.workerId,
+          this.config.lockTtlMs,
+        );
         if (!renewed) {
           this.metrics.lockRenewFailed++;
           this.logger.warn(
             `${TAG} Lock renew failed for ${lockKey} (worker=${this.config.workerId}); ` +
-            `marking lockLost and aborting executor`,
+              `marking lockLost and aborting executor`,
           );
           lockLost = true;
           clearInterval(renewTimer);
@@ -465,7 +563,9 @@ export class PipelineWorker {
           // wired to this signal will throw an AbortError and tear down cleanly.
           if (!abortController.signal.aborted) {
             this.metrics.executionAborted++;
-            abortController.abort(new Error("pipeline-worker: lock lost during execution"));
+            abortController.abort(
+              new Error("pipeline-worker: lock lost during execution"),
+            );
           }
         }
       } catch (e) {
@@ -477,7 +577,9 @@ export class PipelineWorker {
         clearInterval(renewTimer);
         if (!abortController.signal.aborted) {
           this.metrics.executionAborted++;
-          abortController.abort(new Error("pipeline-worker: lock renew exception"));
+          abortController.abort(
+            new Error("pipeline-worker: lock renew exception"),
+          );
         }
       }
     }, this.config.lockRenewIntervalMs);
@@ -495,8 +597,8 @@ export class PipelineWorker {
         this.metrics.lockLostDuringExecution++;
         this.logger.warn(
           `${TAG} Lock lost during execution but task body returned; ` +
-          `skipping ACK + cascadeSchedule so another worker can re-process: ` +
-          `${task.type} [${task.instanceId}/${task.sessionId}]`,
+            `skipping ACK + cascadeSchedule so another worker can re-process: ` +
+            `${task.type} [${task.instanceId}/${task.sessionId}]`,
         );
         // NOTE: rely on L1/L2/L3 idempotency (vectorStore.upsert by memoryId
         // is idempotent; jsonl appends use ETag/append-position so concurrent
@@ -509,7 +611,9 @@ export class PipelineWorker {
       if (msgId) await this.backend.ackTask(msgId);
 
       this.metrics.tasksCompleted++;
-      this.logger?.debug?.(`${TAG} Task completed: ${task.type} [${task.instanceId}/${task.sessionId}]`);
+      this.logger?.debug?.(
+        `${TAG} Task completed: ${task.type} [${task.instanceId}/${task.sessionId}]`,
+      );
 
       // Step 5: Cascading schedule (L1->L2, L2->L3)
       await this.cascadeSchedule(task);
@@ -518,7 +622,9 @@ export class PipelineWorker {
 
       // Check if lock is lost -> if lost, do not retry (avoid duplicate execution)
       if (lockLost) {
-        this.logger.warn(`${TAG} Lock lost during execution, aborting: ${task.type} [${task.instanceId}/${task.sessionId}]`);
+        this.logger.warn(
+          `${TAG} Lock lost during execution, aborting: ${task.type} [${task.instanceId}/${task.sessionId}]`,
+        );
         this.metrics.tasksFailed++;
         return;
       }
@@ -536,7 +642,11 @@ export class PipelineWorker {
         // with the retry, causing the same task to run twice.
         const msgId = (task as any)._msgId;
         if (msgId) {
-          try { await this.backend.ackTask(msgId); } catch { /* best effort */ }
+          try {
+            await this.backend.ackTask(msgId);
+          } catch {
+            /* best effort */
+          }
         }
         await this.sleep(delay);
         await this.reEnqueue(task, retryCount + 1);
@@ -549,34 +659,57 @@ export class PipelineWorker {
       clearInterval(renewTimer);
       this.activeLocks.delete(lockKey);
       this.runningTasks.delete(task.id);
-      try { await this.backend.releaseLock(lockKey, this.config.workerId); } catch { /* best effort */ }
+      try {
+        await this.backend.releaseLock(lockKey, this.config.workerId);
+      } catch {
+        /* best effort */
+      }
       releasePermitOnce();
 
       // Step 7: Deferred enqueue - executor can use task._deferredEnqueue to temporarily store tasks that need to be enqueued after the lock is released,
       // avoiding unnecessary lock conflicts caused by new tasks being consumed immediately while the same session lock is still held.
-      const deferred = (task as any)._deferredEnqueue as TaskPayload[] | undefined;
+      const deferred = (task as any)._deferredEnqueue as
+        | TaskPayload[]
+        | undefined;
       if (deferred?.length) {
         for (const dTask of deferred) {
           try {
             await this.backend.enqueueTask(dTask);
-            this.logger?.debug?.(`${TAG} Deferred enqueue: ${dTask.type} [${dTask.id}]`);
+            this.logger?.debug?.(
+              `${TAG} Deferred enqueue: ${dTask.type} [${dTask.id}]`,
+            );
           } catch (err) {
-            this.logger?.warn?.(`${TAG} Deferred enqueue failed: ${err instanceof Error ? err.message : String(err)}`);
+            this.logger?.warn?.(
+              `${TAG} Deferred enqueue failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
           }
         }
       }
     }
   }
 
-  private async executeTask(task: TaskPayload, signal?: AbortSignal): Promise<void> {
+  private async executeTask(
+    task: TaskPayload,
+    signal?: AbortSignal,
+  ): Promise<void> {
     switch (task.type) {
-      case "L1": return this.executor.executeL1(task, signal);
-      case "L2": return this.executor.executeL2(task, signal);
-      case "L3": return this.executor.executeL3(task, signal);
-      case "flush": return this.executor.executeFlush?.(task, signal) ?? this.executor.executeL1(task, signal);
-      case "offload-l1": return this.executor.executeOffloadL1?.(task, signal);
-      case "offload-l15": return this.executor.executeOffloadL15?.(task, signal);
-      case "offload-l2": return this.executor.executeOffloadL2?.(task, signal);
+      case "L1":
+        return this.executor.executeL1(task, signal);
+      case "L2":
+        return this.executor.executeL2(task, signal);
+      case "L3":
+        return this.executor.executeL3(task, signal);
+      case "flush":
+        return (
+          this.executor.executeFlush?.(task, signal) ??
+          this.executor.executeL1(task, signal)
+        );
+      case "offload-l1":
+        return this.executor.executeOffloadL1?.(task, signal);
+      case "offload-l15":
+        return this.executor.executeOffloadL15?.(task, signal);
+      case "offload-l2":
+        return this.executor.executeOffloadL2?.(task, signal);
       default:
         this.logger.warn(`${TAG} Unknown task type: ${task.type}`);
     }
@@ -593,30 +726,49 @@ export class PipelineWorker {
 
     if (task.type === "L1" || task.type === "flush") {
       // L1 complete → reset session-level L1 state, then advance agent/profile-level L2 timers.
-      await this.backend.updateSessionState(task.instanceId, task.sessionId, {
-        conversation_count: 0,
-      }, tid, aid);
+      await this.backend.updateSessionState(
+        task.instanceId,
+        task.sessionId,
+        {
+          conversation_count: 0,
+        },
+        tid,
+        aid,
+      );
       const profileScopes = Array.isArray((task as any)._l2ProfileScopes)
         ? ((task as any)._l2ProfileScopes as string[]).filter(Boolean)
         : [];
-      const l2Keys = profileScopes.length > 0 ? profileScopes : [task.sessionId];
+      const l2Keys =
+        profileScopes.length > 0 ? profileScopes : [task.sessionId];
       if (this.config.onL1Complete) {
         for (const l2Key of l2Keys) {
           try {
-            await this.backend.updateSessionState(task.instanceId, l2Key, { l2_pending_l1_count: 1 }, tid, aid);
+            await this.backend.updateSessionState(
+              task.instanceId,
+              l2Key,
+              { l2_pending_l1_count: 1 },
+              tid,
+              aid,
+            );
             await this.config.onL1Complete(l2Key, task.instanceId, tid, aid);
           } catch (err) {
-            this.logger?.warn?.(`${TAG} onL1Complete failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+            this.logger?.warn?.(
+              `${TAG} onL1Complete failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+            );
           }
         }
       }
-      this.logger?.debug?.(`${TAG} [${task.instanceId}/${task.sessionId}] L1 done → L2 timer advanced (${l2Keys.join(",")})`);
+      this.logger?.debug?.(
+        `${TAG} [${task.instanceId}/${task.sessionId}] L1 done → L2 timer advanced (${l2Keys.join(",")})`,
+      );
     }
 
     if (task.type === "L2") {
       // If L2 was skipped (no new L1 records), don't cascade to L3 or arm timer
       if ((task as any)._l2Skipped) {
-        this.logger?.debug?.(`${TAG} [${task.instanceId}/${task.sessionId}] L2 skipped (no new data), not arming timer or enqueuing L3`);
+        this.logger?.debug?.(
+          `${TAG} [${task.instanceId}/${task.sessionId}] L2 skipped (no new data), not arming timer or enqueuing L3`,
+        );
         return;
       }
 
@@ -630,22 +782,39 @@ export class PipelineWorker {
         teamId: tid,
         agentId: aid,
         priority: 2,
-        data: task.data ? { ...task.data, ...serializeTraceContext() } : { teamId: tid, agentId: aid, ...serializeTraceContext() },
+        data: task.data
+          ? { ...task.data, ...serializeTraceContext() }
+          : { teamId: tid, agentId: aid, ...serializeTraceContext() },
         createdAt: now,
       });
-      await this.backend.updateSessionState(task.instanceId, task.sessionId, {
-        l2_pending_l1_count: 0,
-        l2_last_extraction_time: new Date().toISOString(),
-      }, tid, aid);
+      await this.backend.updateSessionState(
+        task.instanceId,
+        task.sessionId,
+        {
+          l2_pending_l1_count: 0,
+          l2_last_extraction_time: new Date().toISOString(),
+        },
+        tid,
+        aid,
+      );
       // onL2Complete is injected by server.ts via statefulManager.armL2MaxInterval
       if (this.config.onL2Complete) {
         try {
-          await this.config.onL2Complete(task.sessionId, task.instanceId, tid, aid);
+          await this.config.onL2Complete(
+            task.sessionId,
+            task.instanceId,
+            tid,
+            aid,
+          );
         } catch (err) {
-          this.logger?.warn?.(`${TAG} onL2Complete failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+          this.logger?.warn?.(
+            `${TAG} onL2Complete failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
-      this.logger?.debug?.(`${TAG} [${task.instanceId}/${task.sessionId}] L2 done → L3 enqueued`);
+      this.logger?.debug?.(
+        `${TAG} [${task.instanceId}/${task.sessionId}] L2 done → L3 enqueued`,
+      );
     }
   }
 
@@ -713,7 +882,9 @@ export class PipelineWorker {
     let tid = task.teamId || (task.data as any)?.teamId;
     let aid = task.agentId || (task.data as any)?.agentId;
     if (!tid || !aid) {
-      const m = task.sessionId.match(/^profile:team:([^|]+)\|agent:([^|]+)(?:\|session:.+)?$/);
+      const m = task.sessionId.match(
+        /^profile:team:([^|]+)\|agent:([^|]+)(?:\|session:.+)?$/,
+      );
       if (m) {
         // The team field in profile scope is actually (teamId || userId), consistent with buildProfileIsolationScope.
         // Just use it as teamId here, as long as the hash bucketing dimension aligns.
@@ -738,8 +909,17 @@ export class PipelineWorker {
   // Dead Letter (#13)
   // ============================
 
-  private async moveToDeadLetter(task: TaskPayload, error: string, retryCount: number): Promise<void> {
-    const entry: DeadLetterEntry = { task, error, retryCount, deadAt: Date.now() };
+  private async moveToDeadLetter(
+    task: TaskPayload,
+    error: string,
+    retryCount: number,
+  ): Promise<void> {
+    const entry: DeadLetterEntry = {
+      task,
+      error,
+      retryCount,
+      deadAt: Date.now(),
+    };
     this.deadLetterQueue.push(entry);
     this.metrics.tasksDeadLettered++;
 
@@ -753,16 +933,34 @@ export class PipelineWorker {
     // worker pool (root-caused from a production incident).
     const msgId = (task as any)._msgId;
     if (msgId) {
-      try { await this.backend.ackTask(msgId); } catch { /* best effort */ }
+      try {
+        await this.backend.ackTask(msgId);
+      } catch {
+        /* best effort */
+      }
     }
 
     // Clean up timers for this session to prevent ghost triggers
     try {
       const tid = task.teamId ?? (task.data as any)?.teamId;
       const aid = task.agentId ?? (task.data as any)?.agentId;
-      await this.backend.removeTimer(task.instanceId, buildPipelineTimerMember(task.sessionId, "L1_idle", { teamId: tid, agentId: aid }));
-      await this.backend.removeTimer(task.instanceId, buildPipelineTimerMember(task.sessionId, "L2_schedule", { teamId: tid, agentId: aid }));
-    } catch { /* best effort */ }
+      await this.backend.removeTimer(
+        task.instanceId,
+        buildPipelineTimerMember(task.sessionId, "L1_idle", {
+          teamId: tid,
+          agentId: aid,
+        }),
+      );
+      await this.backend.removeTimer(
+        task.instanceId,
+        buildPipelineTimerMember(task.sessionId, "L2_schedule", {
+          teamId: tid,
+          agentId: aid,
+        }),
+      );
+    } catch {
+      /* best effort */
+    }
 
     // Critical node log: task enters dead letter queue
     obsLogger.error("core.task.dead_letter", {
@@ -779,12 +977,17 @@ export class PipelineWorker {
       try {
         await this.config.onDeadLetter(task, error, retryCount);
       } catch (err) {
-        this.logger.error(`${TAG} onDeadLetter callback failed: ${err instanceof Error ? err.message : String(err)}`);
+        this.logger.error(
+          `${TAG} onDeadLetter callback failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
   }
 
-  private async reEnqueue(task: TaskPayload, newRetryCount: number): Promise<void> {
+  private async reEnqueue(
+    task: TaskPayload,
+    newRetryCount: number,
+  ): Promise<void> {
     await this.backend.enqueueTask({
       ...task,
       id: `${task.type}-${task.sessionId}-retry${newRetryCount}-${Date.now()}`,
@@ -819,17 +1022,23 @@ export class PipelineWorker {
           10, // claim up to 10 at a time
         );
         if (stale.length > 0) {
-          this.logger.info(`${TAG} Recovered ${stale.length} stale pending task(s)`);
+          this.logger.info(
+            `${TAG} Recovered ${stale.length} stale pending task(s)`,
+          );
           for (const task of stale) {
             this.metrics.tasksConsumed++;
             // Directly process the claimed task (goes through normal processTask flow)
             this.processTask(task).catch((err) => {
-              this.logger.error(`${TAG} Recovery task failed: ${err instanceof Error ? err.message : String(err)}`);
+              this.logger.error(
+                `${TAG} Recovery task failed: ${err instanceof Error ? err.message : String(err)}`,
+              );
             });
           }
         }
       } catch (err) {
-        this.logger.warn(`${TAG} Pending recovery error: ${err instanceof Error ? err.message : String(err)}`);
+        this.logger.warn(
+          `${TAG} Pending recovery error: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }, this.config.pendingRecoveryIntervalMs);
   }
@@ -839,6 +1048,9 @@ export class PipelineWorker {
   // ============================
 
   private sleep(ms: number): Promise<void> {
-    return new Promise((r) => { const t = setTimeout(r, ms); t.unref(); });
+    return new Promise((r) => {
+      const t = setTimeout(r, ms);
+      t.unref();
+    });
   }
 }

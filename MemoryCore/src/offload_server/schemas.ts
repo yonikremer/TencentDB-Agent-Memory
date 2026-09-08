@@ -4,11 +4,16 @@
 import { z } from "zod";
 
 /** Safe session ID: alphanumeric, underscore, hyphen, dot, colon allowed. No slashes or path traversal. Max 500 chars. */
-const safeSessionId = z.string().min(1).max(500, {
-  message: "sessionId must not exceed 500 characters",
-}).regex(/^[a-zA-Z0-9_.\-:]+$/, {
-  message: "Must only contain alphanumeric, underscore, hyphen, dot, or colon characters",
-});
+const safeSessionId = z
+  .string()
+  .min(1)
+  .max(500, {
+    message: "sessionId must not exceed 500 characters",
+  })
+  .regex(/^[a-zA-Z0-9_.\-:]+$/, {
+    message:
+      "Must only contain alphanumeric, underscore, hyphen, dot, or colon characters",
+  });
 
 const ToolPairSchema = z.object({
   tool_name: z.string(),
@@ -31,13 +36,20 @@ export const IngestRequestSchema = z
     session_id: safeSessionId,
     tool_pairs: z.array(ToolPairSchema).default([]),
     /** Current user prompt that triggers L1.5 task judgment. Must be non-empty (whitespace-only is rejected). */
-    prompt: z.string().trim().min(1, { message: "prompt must not be empty or whitespace-only" }).optional(),
+    prompt: z
+      .string()
+      .trim()
+      .min(1, { message: "prompt must not be empty or whitespace-only" })
+      .optional(),
     /** Recent history messages (user/assistant only, no tool calls). */
     recent_messages: z.array(RecentMessageSchema).optional(),
   })
   .refine(
-    (data) => data.tool_pairs.length > 0 || (data.prompt && data.prompt.length > 0),
-    { message: "Either tool_pairs must be non-empty or prompt must be provided" },
+    (data) =>
+      data.tool_pairs.length > 0 || (data.prompt && data.prompt.length > 0),
+    {
+      message: "Either tool_pairs must be non-empty or prompt must be provided",
+    },
   );
 
 export type IngestRequest = z.infer<typeof IngestRequestSchema>;
@@ -50,20 +62,13 @@ export type IngestRequest = z.infer<typeof IngestRequestSchema>;
 const CompactionMessageSchema = z
   .record(z.string(), z.unknown())
   .refine(
-    (msg) => typeof msg["role"] === "string" && (msg["role"] as string).length > 0,
+    (msg) =>
+      typeof msg["role"] === "string" && (msg["role"] as string).length > 0,
     { message: "Each message must have a non-empty 'role' field" },
   );
 
-export const CompactionRequestSchema = z.object({
-  session_id: safeSessionId,
-  messages: z.array(CompactionMessageSchema),
-  ratio: z.number().min(0).max(2),
-});
-
-export type CompactionRequest = z.infer<typeof CompactionRequestSchema>;
-
 /** Extended compaction schema with token metadata for L3 compression. */
-export const CompactionRequestSchemaV2 = z.object({
+export const CompactionRequestSchema = z.object({
   session_id: safeSessionId,
   messages: z.array(CompactionMessageSchema),
   ratio: z.number().min(0).max(2),
@@ -72,7 +77,7 @@ export const CompactionRequestSchemaV2 = z.object({
   message_tokens: z.array(z.number()).optional(),
 });
 
-export type CompactionRequestV2 = z.infer<typeof CompactionRequestSchemaV2>;
+export type CompactionRequest = z.infer<typeof CompactionRequestSchema>;
 
 export const MmdQuerySchema = z.object({
   session_id: safeSessionId,

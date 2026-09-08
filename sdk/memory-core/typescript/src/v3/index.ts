@@ -1,5 +1,8 @@
 export { MemoryClient } from "./client.js";
-export { MemoryPromptClient, type MemoryPromptClientConfig } from "./memory-prompt-client.js";
+export {
+  MemoryPromptClient,
+  type MemoryPromptClientConfig,
+} from "./memory-prompt-client.js";
 export { MemoryGenerationLogClient } from "./memory-generation-log-client.js";
 export { SkillClient, type SkillClientConfig } from "./skill-client.js";
 export { SkillErrorCode, type SkillErrorCodeValue } from "./skill-types.js";
@@ -35,6 +38,12 @@ export type {
   V3IsolationOverrides,
   V3MemoryClientConfig,
   V3MemoryClientInput,
+  V3OffloadCompactData,
+  V3OffloadCompactRequest,
+  V3OffloadIngestData,
+  V3OffloadIngestRequest,
+  V3OffloadQueryMmdData,
+  V3OffloadQueryMmdRequest,
   V3ScenarioEntry,
   V3ScenarioFile,
   V3ScenarioListData,
@@ -93,7 +102,10 @@ export type {
   SkillVersionsData,
   SkillVersionsRequest,
 } from "./skill-types.js";
-export { MetadataClient, type MetadataClientConfig } from "./metadata-client.js";
+export {
+  MetadataClient,
+  type MetadataClientConfig,
+} from "./metadata-client.js";
 export type {
   UserStatus,
   UserType,

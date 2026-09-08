@@ -9,8 +9,8 @@ import {
   errorEnvelope,
   resolveRequestId,
   makeRequestId,
-} from "../../gateway/v2-router.js";
-import { formatZodError, type ApiResponseEnvelope } from "../../gateway/v2-schemas.js";
+} from "../../gateway/v3-router.js";
+import { formatZodError, type ApiResponseEnvelope } from "../../gateway/v3-schemas.js";
 import type { Logger } from "../../core/types.js";
 import { MetadataService, MetadataError } from "../service/metadata-service.js";
 import { extractInstanceId, normalizeInstanceIdForRoute } from "./instance.js";

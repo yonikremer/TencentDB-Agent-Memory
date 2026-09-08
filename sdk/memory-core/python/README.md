@@ -105,24 +105,24 @@ asyncio.run(main())
 ## API Methods
 
 | Layer | Method | Endpoint |
-|-------|--------|----------|
-| L0 | `add_conversation()` | `POST /v2/conversation/add` |
-| L0 | `query_conversation()` | `POST /v2/conversation/query` |
-| L0 | `search_conversation()` | `POST /v2/conversation/search` |
-| L0 | `delete_conversation()` | `POST /v2/conversation/delete` |
-| L1 | `update_atomic()` | `POST /v2/atomic/update` |
-| L1 | `query_atomic()` | `POST /v2/atomic/query` |
-| L1 | `search_atomic()` | `POST /v2/atomic/search` |
-| L1 | `delete_atomic()` | `POST /v2/atomic/delete` |
-| L2 | `list_scenarios()` | `POST /v2/scenario/ls` |
-| L2 | `read_scenario()` | `POST /v2/scenario/read` |
-| L2 | `write_scenario()` | `POST /v2/scenario/write` |
-| L2 | `rm_scenario()` | `POST /v2/scenario/rm` |
-| L3 | `read_core()` | `POST /v2/core/read` |
-| L3 | `write_core()` | `POST /v2/core/write` |
-| Offload | `offload_ingest()` | `POST /v2/offload/ingest` |
-| Offload | `offload_compact()` | `POST /v2/offload/compact` |
-| Offload | `offload_query_mmd()` | `POST /v2/offload/query-mmd` |
+| ------- | -------- | ---------- |
+| L0 | `add_conversation()` | `POST /v3/conversation/add` |
+| L0 | `query_conversation()` | `POST /v3/conversation/query` |
+| L0 | `search_conversation()` | `POST /v3/conversation/search` |
+| L0 | `delete_conversation()` | `POST /v3/conversation/delete` |
+| L1 | `update_atomic()` | `POST /v3/atomic/update` |
+| L1 | `query_atomic()` | `POST /v3/atomic/query` |
+| L1 | `search_atomic()` | `POST /v3/atomic/search` |
+| L1 | `delete_atomic()` | `POST /v3/atomic/delete` |
+| L2 | `list_scenarios()` | `POST /v3/scenario/ls` |
+| L2 | `read_scenario()` | `POST /v3/scenario/read` |
+| L2 | `write_scenario()` | `POST /v3/scenario/write` |
+| L2 | `rm_scenario()` | `POST /v3/scenario/rm` |
+| L3 | `read_core()` | `POST /v3/core/read` |
+| L3 | `write_core()` | `POST /v3/core/write` |
+| Offload | `offload_ingest()` | `POST /v3/offload/ingest` |
+| Offload | `offload_compact()` | `POST /v3/offload/compact` |
+| Offload | `offload_query_mmd()` | `POST /v3/offload/query-mmd` |
 
 ### v3 batch delete and clear
 
@@ -183,7 +183,7 @@ provenance = logs.get_by_memory_id("memory-id", "l1")
 ```
 
 | Method | Endpoint | Purpose |
-|--------|----------|---------|
+| -------- | ---------- | --------- |
 | `create()` | `POST /v3/memory-prompt/create` | Create a Prompt |
 | `get()` / `list()` / `get_effective()` | `GET /v3/memory-prompt/get` | Get one, list Prompts, or resolve the effective Prompt |
 | `update()` | `POST /v3/memory-prompt/update` | Update name/content; identical values are a no-op |
@@ -249,7 +249,7 @@ meta.delete_knowledge(["wiki-docs", "cg-repo-1"], team_id="team-1")
 ```
 
 | Method | Endpoint | Notes |
-|--------|----------|-------|
+| -------- | ---------- | ------- |
 | `create_knowledge(p)` | `POST /v3/knowledge/create` | upsert metadata (idempotent; re-post overwrites) |
 | `get_knowledge(id, team_id=None)` | `POST /v3/knowledge/get` | get one by id |
 | `update_knowledge(p)` | `POST /v3/knowledge/update` | partial update (name/summary/service_url/repo_url/branch) |

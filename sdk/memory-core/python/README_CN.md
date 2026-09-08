@@ -109,7 +109,7 @@ asyncio.run(main())
 > v3 与 v2 的主要差异：L0/L1 强制要求 `session_id`（strict session isolation），请求路径从 `/v2/*` 升级为 `/v3/*`，响应包络结构一致。
 
 | 层级 | 方法 | 接口 |
-|------|------|------|
+| ------ | ------ | ------ |
 | L0 | `add_conversation()` | `POST /v3/conversation/add` |
 | L0 | `query_conversation()` | `POST /v3/conversation/query` |
 | L0 | `search_conversation()` | `POST /v3/conversation/search` |
@@ -167,29 +167,29 @@ if not res["all_cleared"]:
 > v2 的 L0/L1 不强制 `session_id`，隔离仅基于 `(team_id, user_id, agent_id)` 三元组。
 
 | 层级 | 方法 | 接口 |
-|------|------|------|
-| L0 | `add_conversation()` | `POST /v2/conversation/add` |
-| L0 | `query_conversation()` | `POST /v2/conversation/query` |
-| L0 | `search_conversation()` | `POST /v2/conversation/search` |
-| L0 | `delete_conversation()` | `POST /v2/conversation/delete` |
-| L1 | `update_atomic()` | `POST /v2/atomic/update` |
-| L1 | `query_atomic()` | `POST /v2/atomic/query` |
-| L1 | `search_atomic()` | `POST /v2/atomic/search` |
-| L1 | `delete_atomic()` | `POST /v2/atomic/delete` |
-| L2 | `list_scenarios()` | `POST /v2/scenario/ls` |
-| L2 | `read_scenario()` | `POST /v2/scenario/read` |
-| L2 | `write_scenario()` | `POST /v2/scenario/write` |
-| L2 | `rm_scenario()` | `POST /v2/scenario/rm` |
-| L3 | `read_core()` | `POST /v2/core/read` |
-| L3 | `write_core()` | `POST /v2/core/write` |
-| Offload | `offload_ingest()` | `POST /v2/offload/ingest` |
-| Offload | `offload_compact()` | `POST /v2/offload/compact` |
-| Offload | `offload_query_mmd()` | `POST /v2/offload/query-mmd` |
+| ------ | ------ | ------ |
+| L0 | `add_conversation()` | `POST /v3/conversation/add` |
+| L0 | `query_conversation()` | `POST /v3/conversation/query` |
+| L0 | `search_conversation()` | `POST /v3/conversation/search` |
+| L0 | `delete_conversation()` | `POST /v3/conversation/delete` |
+| L1 | `update_atomic()` | `POST /v3/atomic/update` |
+| L1 | `query_atomic()` | `POST /v3/atomic/query` |
+| L1 | `search_atomic()` | `POST /v3/atomic/search` |
+| L1 | `delete_atomic()` | `POST /v3/atomic/delete` |
+| L2 | `list_scenarios()` | `POST /v3/scenario/ls` |
+| L2 | `read_scenario()` | `POST /v3/scenario/read` |
+| L2 | `write_scenario()` | `POST /v3/scenario/write` |
+| L2 | `rm_scenario()` | `POST /v3/scenario/rm` |
+| L3 | `read_core()` | `POST /v3/core/read` |
+| L3 | `write_core()` | `POST /v3/core/write` |
+| Offload | `offload_ingest()` | `POST /v3/offload/ingest` |
+| Offload | `offload_compact()` | `POST /v3/offload/compact` |
+| Offload | `offload_query_mmd()` | `POST /v3/offload/query-mmd` |
 
 ### v3 vs v2 差异说明
 
 | 维度 | v2 | v3 |
-|------|----|----|
+| ------ | ---- | ---- |
 | 路径前缀 | `/v2/*` | `/v3/*` |
 | L0/L1 隔离 | `(team_id, user_id, agent_id)` 三元组 | 三元组 + `session_id`（strict session isolation） |
 | `session_id` | 可选 | L0/L1 必填，缺失返回 422 |
@@ -212,7 +212,7 @@ provenance = logs.get_by_memory_id("memory-id", "l1")
 ```
 
 | SDK 方法 | 接口 | 说明 |
-|----------|------|------|
+| ---------- | ------ | ------ |
 | `create()` | `POST /v3/memory-prompt/create` | 创建 Prompt |
 | `get()` / `list()` / `get_effective()` | `GET /v3/memory-prompt/get` | 查详情、列表或最终生效 Prompt |
 | `update()` | `POST /v3/memory-prompt/update` | 更新名称/内容；相同值为幂等 no-op |
@@ -267,7 +267,7 @@ meta.delete_knowledge(["wiki-docs", "cg-repo-1"], team_id="team-1")
 ```
 
 | 方法 | 接口 | 说明 |
-|------|------|------|
+| ------ | ------ | ------ |
 | `create_knowledge(p)` | `POST /v3/knowledge/create` | upsert 元数据（幂等，重复 post 即覆盖） |
 | `get_knowledge(id, team_id=None)` | `POST /v3/knowledge/get` | 单条查询 |
 | `update_knowledge(p)` | `POST /v3/knowledge/update` | 部分更新（name/summary/service_url/repo_url/branch） |
