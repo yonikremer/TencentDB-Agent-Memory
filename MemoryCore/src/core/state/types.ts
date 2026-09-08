@@ -136,7 +136,7 @@ export interface IStateBackend {
   getQueueDepth(): Promise<{ high: number; low: number }>;
   /**
    * Snapshot of all tasks currently waiting in the queue (not yet consumed).
-   * Used by `/v2/pipeline/status` to compute per-L-type queue stats with full
+   * Used by `/v3/pipeline/status` to compute per-L-type queue stats with full
    * type/sessionId/instanceId info (queue is single-shared, but task.type
    * distinguishes L1/L2/L3 — see TaskPayload).
    *

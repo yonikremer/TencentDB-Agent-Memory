@@ -149,7 +149,7 @@ export class PipelineWorker {
   private activeLocks = new Set<string>();
 
   // In-flight tasks (consumed but not yet completed/failed/dropped). Used by
-  // standalone /v2/pipeline/status to compute per-L-type running stats.
+  // standalone /v3/pipeline/status to compute per-L-type running stats.
   // Service mode never reads this — it just costs a Map.set/delete per task.
   private runningTasks = new Map<string, TaskPayload>();
 
@@ -240,7 +240,7 @@ export class PipelineWorker {
   /**
    * Snapshot of tasks currently being executed by this worker (after lock
    * acquisition, before completion/failure). Used by standalone
-   * /v2/pipeline/status to compute per-L-type running stats. Service mode
+   * /v3/pipeline/status to compute per-L-type running stats. Service mode
    * never calls this. Returns a fresh array (Map values copy).
    */
   getRunningTasks(): TaskPayload[] {
@@ -440,7 +440,7 @@ export class PipelineWorker {
     }
 
     this.activeLocks.add(lockKey);
-    // Track in-flight task — used by standalone /v2/pipeline/status. Done after
+    // Track in-flight task — used by standalone /v3/pipeline/status. Done after
     // lock acquisition so lock-conflict drops don't pollute the running set.
     this.runningTasks.set(task.id, task);
     let lockLost = false;

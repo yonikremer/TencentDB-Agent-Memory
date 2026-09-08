@@ -1,5 +1,5 @@
 /**
- * Offload V2 Router — route registration and dispatch.
+ * Offload V3 Router — route registration and dispatch.
  */
 import type http from "node:http";
 import type { StorageAdapter } from "../core/storage/adapter.js";
@@ -32,7 +32,7 @@ export async function handleOffloadV2Route(
   sendJson: (res: http.ServerResponse, status: number, body: unknown) => void,
   deps: OffloadV2Deps,
 ): Promise<boolean> {
-  if (!pathname.startsWith("/v2/offload/")) return false;
+  if (!pathname.startsWith("/v3/offload/")) return false;
 
   const requestId = makeRequestId();
 
@@ -54,7 +54,7 @@ export async function handleOffloadV2Route(
   const route = `${method} ${normalizedPath}`;
 
   switch (route) {
-    case "POST /v2/offload/ingest":
+    case "POST /v3/offload/ingest":
       await handleIngest(req, res, auth, {
         storage,
         stateBackend: deps.stateBackend,
@@ -63,7 +63,7 @@ export async function handleOffloadV2Route(
       }, requestId, parseJsonBody, sendJson, successEnvelope, errorEnvelope);
       return true;
 
-    case "POST /v2/offload/query-mmd": {
+    case "POST /v3/offload/query-mmd": {
       const body = await parseJsonBody<{ session_id?: string; limit?: number }>(req);
       const parsed = MmdQuerySchema.safeParse(body);
       if (!parsed.success) {
@@ -74,7 +74,7 @@ export async function handleOffloadV2Route(
       return true;
     }
 
-    case "POST /v2/offload/compact":
+    case "POST /v3/offload/compact":
       await handleCompaction(req, res, auth, {
         storage,
         config,

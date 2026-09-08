@@ -163,27 +163,27 @@ if (!res.all_cleared) {
 
 | 层级 | 方法 | 接口 |
 |------|------|------|
-| L0 | `addConversation()` | `POST /v2/conversation/add` |
-| L0 | `queryConversation()` | `POST /v2/conversation/query` |
-| L0 | `searchConversation()` | `POST /v2/conversation/search` |
-| L0 | `deleteConversation()` | `POST /v2/conversation/delete` |
-| L0 | `countConversation()` | `POST /v2/conversation/count` |
-| L1 | `updateAtomic()` | `POST /v2/atomic/update` |
-| L1 | `queryAtomic()` | `POST /v2/atomic/query` |
-| L1 | `searchAtomic()` | `POST /v2/atomic/search` |
-| L1 | `deleteAtomic()` | `POST /v2/atomic/delete` |
-| L1 | `countAtomic()` | `POST /v2/atomic/count` |
-| L2 | `listScenarios()` | `POST /v2/scenario/ls` |
-| L2 | `readScenario()` | `POST /v2/scenario/read` |
-| L2 | `writeScenario()` | `POST /v2/scenario/write` |
-| L2 | `rmScenario()` | `POST /v2/scenario/rm` |
-| L2 | `countScenario()` | `POST /v2/scenario/count` |
-| L3 | `readCore()` | `POST /v2/core/read` |
-| L3 | `writeCore()` | `POST /v2/core/write` |
+| L0 | `addConversation()` | `POST /v3/conversation/add` |
+| L0 | `queryConversation()` | `POST /v3/conversation/query` |
+| L0 | `searchConversation()` | `POST /v3/conversation/search` |
+| L0 | `deleteConversation()` | `POST /v3/conversation/delete` |
+| L0 | `countConversation()` | `POST /v3/conversation/count` |
+| L1 | `updateAtomic()` | `POST /v3/atomic/update` |
+| L1 | `queryAtomic()` | `POST /v3/atomic/query` |
+| L1 | `searchAtomic()` | `POST /v3/atomic/search` |
+| L1 | `deleteAtomic()` | `POST /v3/atomic/delete` |
+| L1 | `countAtomic()` | `POST /v3/atomic/count` |
+| L2 | `listScenarios()` | `POST /v3/scenario/ls` |
+| L2 | `readScenario()` | `POST /v3/scenario/read` |
+| L2 | `writeScenario()` | `POST /v3/scenario/write` |
+| L2 | `rmScenario()` | `POST /v3/scenario/rm` |
+| L2 | `countScenario()` | `POST /v3/scenario/count` |
+| L3 | `readCore()` | `POST /v3/core/read` |
+| L3 | `writeCore()` | `POST /v3/core/write` |
 | L3 | `countCore()` | `POST /v3/core/count` |
-| Offload | `offloadIngest()` | `POST /v2/offload/ingest` |
-| Offload | `offloadCompact()` | `POST /v2/offload/compact` |
-| Offload | `offloadQueryMmd()` | `POST /v2/offload/query-mmd` |
+| Offload | `offloadIngest()` | `POST /v3/offload/ingest` |
+| Offload | `offloadCompact()` | `POST /v3/offload/compact` |
+| Offload | `offloadQueryMmd()` | `POST /v3/offload/query-mmd` |
 
 ## 自定义 Prompt 与生成溯源
 

@@ -1,5 +1,5 @@
 /**
- * TDAI Memory Gateway — v2 REST Router.
+ * TDAI Memory Gateway — v3 REST Router (strict isolation).
  *
  * Implements POST routes defined in `01-api-spec.yaml`:
  *
@@ -8,7 +8,7 @@
  *   L2 Scenario:     ls / read / write / rm
  *   L3 Core:         read / write
  *
- * All routes are prefixed with `/v2/`.
+ * All routes are prefixed with `/v3/`.
  * Authentication: Authorization Bearer + x-tdai-service-id.
  * Request validation: Zod v4 safeParse → 400 on failure.
  * Response envelope: { code, message, request_id, data }.
@@ -17,9 +17,16 @@
 import { createHash, randomUUID } from "node:crypto";
 import type http from "node:http";
 import { classifyError } from "./error-handler.js";
-import type { IMemoryStore, L0Record, ProfileSyncRecord } from "../core/store/types.js";
+import type {
+  IMemoryStore,
+  L0Record,
+  ProfileSyncRecord,
+} from "../core/store/types.js";
 import type { EmbeddingService } from "../core/store/embedding.js";
-import { createScopedStorageAdapter, type StorageAdapter } from "../core/storage/adapter.js";
+import {
+  createScopedStorageAdapter,
+  type StorageAdapter,
+} from "../core/storage/adapter.js";
 import { StoragePaths } from "../core/storage/types.js";
 import type { Logger } from "../core/types.js";
 import type { IStateBackend } from "../core/state/types.js";
@@ -48,22 +55,6 @@ import {
   scenarioCountRequestSchema,
   coreWriteRequestSchema,
   coreCountRequestSchema,
-  teamCreateRequestSchema,
-  teamGetRequestSchema,
-  teamUpdateRequestSchema,
-  teamBatchDeleteRequestSchema,
-  userCreateRequestSchema,
-  userGetRequestSchema,
-  userUpdateRequestSchema,
-  userBatchDeleteRequestSchema,
-  agentCreateRequestSchema,
-  agentGetRequestSchema,
-  agentUpdateRequestSchema,
-  agentBatchDeleteRequestSchema,
-  taskCreateRequestSchema,
-  taskGetRequestSchema,
-  taskUpdateRequestSchema,
-  taskBatchDeleteRequestSchema,
   formatZodError,
   resolveIsolation,
   type ApiResponseEnvelope,
@@ -86,17 +77,15 @@ import {
   type ScenarioWriteData,
   type CoreFile,
   type CoreWriteData,
-  type BatchDeleteResult,
-  type TeamData,
-  type UserData,
-  type AgentData,
-  type TaskData,
 } from "./v2-schemas.js";
 import { stripSceneNavigation } from "../core/scene/scene-navigation.js";
-import { buildProfileIsolationScope, buildProfileStableId, DEFAULT_PROFILE_SCOPE } from "../core/profile/profile-sync.js";
+import {
+  buildProfileIsolationScope,
+  buildProfileStableId,
+  DEFAULT_PROFILE_SCOPE,
+} from "../core/profile/profile-sync.js";
 
-const TAG = "[tdai-gateway][v2]";
-const V2_PREFIX = "/v2";
+const TAG = "[tdai-gateway][v3]";
 
 /**
  * /v3 is the "strict isolation version" of L0-L3 data plane interfaces:
@@ -138,7 +127,8 @@ function collectV3Missing(
     return typeof raw === "string" ? raw : undefined;
   };
   const get = (bodyKey: string, headerKey: string): string => {
-    const v = (body?.[bodyKey] as string | undefined) ?? headerStr(headerKey) ?? "";
+    const v =
+      (body?.[bodyKey] as string | undefined) ?? headerStr(headerKey) ?? "";
     return typeof v === "string" ? v.trim() : "";
   };
   const missing: string[] = [];
@@ -169,6 +159,7 @@ const V3_ALLOWED_SUBPATHS = new Set<string>([
   "/core/read",
   "/core/write",
   "/core/count",
+  "/pipeline/status",
 ]);
 
 /**
@@ -187,7 +178,13 @@ async function recordAudit(
     record_id: string;
     layer: "L1" | "L2" | "L3";
     action: "update" | "delete";
-    iso?: { teamId?: string; userId?: string; agentId?: string; sessionId?: string; taskId?: string };
+    iso?: {
+      teamId?: string;
+      userId?: string;
+      agentId?: string;
+      sessionId?: string;
+      taskId?: string;
+    };
     version: number;
     requestId: string;
     logger?: { warn?: (msg: string) => void };
@@ -244,7 +241,12 @@ export interface V2RouterDeps {
   // auth.serviceId as the instanceId key, falling back to the static getters above.
 
   /** Resolve IMemoryStore + EmbeddingService for a given instanceId (service mode). */
-  resolveStore?: (instanceId: string) => Promise<{ store: IMemoryStore; embedding: EmbeddingService | undefined }>;
+  resolveStore?: (
+    instanceId: string,
+  ) => Promise<{
+    store: IMemoryStore;
+    embedding: EmbeddingService | undefined;
+  }>;
   /** Resolve per-instance StorageAdapter for a given instanceId (service mode). */
   resolveStorage?: (instanceId: string) => Promise<StorageAdapter | undefined>;
 
@@ -257,21 +259,31 @@ export interface V2RouterDeps {
    *   - standalone: LocalStateBackend (single-process, default)
    * When absent (misconfiguration), v2 add writes L0 only — pipeline is not triggered.
    */
-  notifyPipeline?: (instanceId: string, sessionId: string, messageCount: number, teamId?: string, agentId?: string) => Promise<void>;
+  notifyPipeline?: (
+    instanceId: string,
+    sessionId: string,
+    messageCount: number,
+    teamId?: string,
+    agentId?: string,
+  ) => Promise<void>;
 
   /** Quota manager for memory/credit limit checks and usage reporting (service mode). */
   quotaManager?: import("../core/quota/quota-manager.js").QuotaManager;
 
   /**
-   * Get (per instance) MetadataService. Used only when /v2/conversation/add first
+   * Get (per instance) MetadataService. Used only when /v3/conversation/add first
    * writes to a (team, agent) to automatically register chat_memory asset and bind to agent.
    * When not injected, this feature degrades gracefully: conversation still writes normally, just assets will not be automatically
    * created —— fully compatible with old deployments.
    */
-  getMetadataService?: (instanceId: string) => Promise<import("../metadata/service/metadata-service.js").MetadataService>;
+  getMetadataService?: (
+    instanceId: string,
+  ) => Promise<
+    import("../metadata/service/metadata-service.js").MetadataService
+  >;
 
   /**
-   * State backend handle, used by /v2/pipeline/status to call listQueuedTasks().
+   * State backend handle, used by /v3/pipeline/status to call listQueuedTasks().
    * Wired in standalone and service modes, but the status endpoint itself is
    * standalone-only. The handler returns 404 in service mode before touching
    * this field, so remote backends do not need to implement listQueuedTasks().
@@ -279,7 +291,7 @@ export interface V2RouterDeps {
   stateBackend?: IStateBackend;
 
   /**
-   * Pipeline worker handle, used by /v2/pipeline/status to call getRunningTasks()
+   * Pipeline worker handle, used by /v3/pipeline/status to call getRunningTasks()
    * for per-L-type in-flight stats. Service mode never invokes this getter
    * (status endpoint returns 404 in service mode).
    */
@@ -306,7 +318,13 @@ export interface V2RouterDeps {
    */
   v3StrictIsolation?: boolean;
   /** Resolved isolation context for the current request (set by dispatch). */
-  requestIsolation?: { teamId?: string; userId: string; agentId: string; sessionId: string; taskId?: string };
+  requestIsolation?: {
+    teamId?: string;
+    userId: string;
+    agentId: string;
+    sessionId: string;
+    taskId?: string;
+  };
   /** When isolation could not be resolved AND legacy_compat_mode is off, the missing fields. */
   requestIsolationMissing?: string[];
 }
@@ -329,12 +347,25 @@ export function resolveRequestId(
   return makeRequestId();
 }
 
-export function successEnvelope<T>(data: T, requestId: string): ApiResponseEnvelope<T> {
+export function successEnvelope<T>(
+  data: T,
+  requestId: string,
+): ApiResponseEnvelope<T> {
   return { code: 0, message: "ok", request_id: requestId, data };
 }
 
-export function errorEnvelope(code: number, message: string, requestId: string, extra?: Record<string, unknown>): ApiResponseEnvelope {
-  return { code, message, request_id: requestId, ...(extra ? { data: extra } : {}) };
+export function errorEnvelope(
+  code: number,
+  message: string,
+  requestId: string,
+  extra?: Record<string, unknown>,
+): ApiResponseEnvelope {
+  return {
+    code,
+    message,
+    request_id: requestId,
+    ...(extra ? { data: extra } : {}),
+  };
 }
 
 // ============================
@@ -351,11 +382,23 @@ export function parseV2Auth(
   const serviceId = (req.headers["x-tdai-service-id"] as string) ?? "";
 
   if (!authHeader.startsWith("Bearer ") || !authHeader.slice(7).trim()) {
-    sendJsonFn(res, 401, errorEnvelope(401, "Missing or invalid Authorization header. Expected: Bearer {api_key}", requestId));
+    sendJsonFn(
+      res,
+      401,
+      errorEnvelope(
+        401,
+        "Missing or invalid Authorization header. Expected: Bearer {api_key}",
+        requestId,
+      ),
+    );
     return null;
   }
   if (!serviceId.trim()) {
-    sendJsonFn(res, 401, errorEnvelope(401, "Missing x-tdai-service-id header", requestId));
+    sendJsonFn(
+      res,
+      401,
+      errorEnvelope(401, "Missing x-tdai-service-id header", requestId),
+    );
     return null;
   }
 
@@ -373,7 +416,10 @@ export function parseV2Auth(
 async function resolveStoreForRequest(
   auth: V2AuthContext,
   deps: V2RouterDeps,
-): Promise<{ store: IMemoryStore | undefined; embedding: EmbeddingService | undefined }> {
+): Promise<{
+  store: IMemoryStore | undefined;
+  embedding: EmbeddingService | undefined;
+}> {
   if (deps.resolveStore) {
     // Service mode: per-instance VDB store is mandatory. Do NOT fallback to local SQLite.
     return await deps.resolveStore(auth.serviceId);
@@ -407,7 +453,7 @@ type RouteHandler = (
 ) => Promise<ApiResponseEnvelope>;
 
 /**
- * L0-L3 data plane handler mapping (subpath → handler). Historical interfaces mounted simultaneously on /v2/* and /v3/*;
+ * L0-L3 data plane handler mapping (subpath → handler). L0-L3 data plane serves /v3/* only (legacy /v2/* mounts removed);
  * count interface mounted only on /v3/* according to sdk-v3.yaml. /v3 uses strict isolation validation; /v2 uses existing enforce/legacyCompat config.
  */
 const DATAPLANE_HANDLERS: Record<string, RouteHandler> = {
@@ -432,40 +478,13 @@ const DATAPLANE_HANDLERS: Record<string, RouteHandler> = {
 };
 
 const routeTable: Record<string, RouteHandler> = {
-// L0-L3 data plane: historical read/write interfaces retain /v2 and /v3 dual entries; count exposed only on /v3 per sdk-v3.yaml.
+  // L0-L3 data plane: v3 only (strict isolation). Legacy /v2 dual entries removed.
   ...Object.fromEntries(
-    Object.entries(DATAPLANE_HANDLERS).flatMap(([sub, h]) => {
-      const v3Route = [`${V3_PREFIX}${sub}`, h] as const;
-      if (sub.endsWith("/count")) return [v3Route];
-      return [[`${V2_PREFIX}${sub}`, h] as const, v3Route];
-    }),
+    Object.entries(DATAPLANE_HANDLERS).map(
+      ([sub, h]) => [`${V3_PREFIX}${sub}`, h] as const,
+    ),
   ),
-  // ──────────────────────────────────────────────────────────────────────────
-// @deprecated v2 entity routes (team/user/agent/task, 16 entries). /v2 only.
-// Metadata already taken over by v3 /v3/meta/* (normalized meta_* tables + MetadataService), control
-// panel remote mode routes directly to v3. Routes below still use old entity_* aggregate array model, **only for compatibility with existing network
-  // retain, unchanged behavior**, no longer evolve, new integrators must switch to v3. Planned to be entirely deleted after confirming no external callers.
-  // Decision (2026-06-26, per user): Mark as deprecated, keep code temporarily, do not adapt MetadataService.
-  // See team-memory-control/docs/architecture/08-metadata-migration-and-permission-design.md §8.5.
-  // ──────────────────────────────────────────────────────────────────────────
-  [`${V2_PREFIX}/team/create`]: handleTeamCreate, // @deprecated Switch to /v3/meta/team/create
-  [`${V2_PREFIX}/team/get`]: handleTeamGet, // @deprecated Switch to /v3/meta/team/get
-  [`${V2_PREFIX}/team/update`]: handleTeamUpdate, // @deprecated Switch to /v3/meta/team/update
-  [`${V2_PREFIX}/team/delete`]: handleTeamDelete, // @deprecated Switch to /v3/meta/team/delete
-  [`${V2_PREFIX}/user/create`]: handleUserCreate, // @deprecated Switch to /v3/meta/user/create
-  [`${V2_PREFIX}/user/get`]: handleUserGet, // @deprecated Switch to /v3/meta/user/get
-  [`${V2_PREFIX}/user/update`]: handleUserUpdate, // @deprecated Switch to /v3/meta/user/update
-  [`${V2_PREFIX}/user/delete`]: handleUserDelete, // @deprecated Switch to /v3/meta/user/delete
-  [`${V2_PREFIX}/agent/create`]: handleAgentCreate, // @deprecated Switch to /v3/meta/agent/create
-  [`${V2_PREFIX}/agent/get`]: handleAgentGet, // @deprecated Switch to /v3/meta/agent/get
-  [`${V2_PREFIX}/agent/update`]: handleAgentUpdate, // @deprecated Switch to /v3/meta/agent/update
-  [`${V2_PREFIX}/agent/delete`]: handleAgentDelete, // @deprecated Switch to /v3/meta/agent/delete
-  [`${V2_PREFIX}/task/create`]: handleTaskCreate, // @deprecated Switch to /v3/meta/task/create
-  [`${V2_PREFIX}/task/get`]: handleTaskGet, // @deprecated Switch to /v3/meta/task/get
-  [`${V2_PREFIX}/task/update`]: handleTaskUpdate, // @deprecated Switch to /v3/meta/task/update
-  [`${V2_PREFIX}/task/delete`]: handleTaskDelete, // @deprecated Switch to /v3/meta/task/delete
-  // ── end @deprecated v2 entity routes ──
-  [`${V2_PREFIX}/pipeline/status`]: handlePipelineStatus,
+  [`${V3_PREFIX}/pipeline/status`]: handlePipelineStatus,
 };
 
 export async function handleV2Route(
@@ -480,7 +499,7 @@ export async function handleV2Route(
    * Optional: extra routes contributed by other modules (e.g.
    * /v3/skill/* from `makeSkillRouteTable()`). Looked up only when the
    * built-in `routeTable` doesn't contain the pathname, so module-level
-   * routes always win on collision. Supports `/v2/*`, `/v3/*` (L0–L3
+   * routes always win on collision. Supports `/v3/*` (L0–L3
    * data-plane + extraRouteTable for /v3/skill/*, /v3/knowledge/* and
    * /v3/chat-memory/*).
    *
@@ -492,30 +511,34 @@ export async function handleV2Route(
    */
   extraRouteTable?: Record<
     string,
-    (body: unknown, auth: V2AuthContext, requestId: string, deps: unknown) => Promise<ApiResponseEnvelope>
+    (
+      body: unknown,
+      auth: V2AuthContext,
+      requestId: string,
+      deps: unknown,
+    ) => Promise<ApiResponseEnvelope>
   >,
 ): Promise<boolean> {
-  const isPromptRead = method === "GET" && (
-    pathname === "/v3/memory-prompt/get" ||
-    pathname === "/v3/memory-prompt/setting/list" ||
-    pathname === "/v3/memory-prompt/log" ||
-    pathname === "/v3/memory-generation-log/list" ||
-    pathname === "/v3/memory-generation-log/get"
-  );
+  const isPromptRead =
+    method === "GET" &&
+    (pathname === "/v3/memory-prompt/get" ||
+      pathname === "/v3/memory-prompt/setting/list" ||
+      pathname === "/v3/memory-prompt/log" ||
+      pathname === "/v3/memory-generation-log/list" ||
+      pathname === "/v3/memory-generation-log/get");
   if (method !== "POST" && !isPromptRead) return false;
   const isV3 = pathname.startsWith(`${V3_PREFIX}/`);
-  const isV2 = pathname.startsWith(`${V2_PREFIX}/`);
   // Management-plane modules are provided by extraRouteTable, not by the
   // built-in V3 data-plane list. They bypass strict L0-L3 isolation because
   // each module validates its own target semantics.
-  const isV3Extra = !!extraRouteTable && (
-    pathname.startsWith("/v3/skill/") ||
-    pathname.startsWith("/v3/knowledge/") ||
-    pathname.startsWith("/v3/chat-memory/") ||
-    pathname.startsWith("/v3/memory-prompt/") ||
-    pathname.startsWith("/v3/memory-generation-log/")
-  );
-  if (!isV2 && !isV3) return false;
+  const isV3Extra =
+    !!extraRouteTable &&
+    (pathname.startsWith("/v3/skill/") ||
+      pathname.startsWith("/v3/knowledge/") ||
+      pathname.startsWith("/v3/chat-memory/") ||
+      pathname.startsWith("/v3/memory-prompt/") ||
+      pathname.startsWith("/v3/memory-generation-log/"));
+  if (!isV3) return false;
 
   // /v3 exposes L0-L3 data plane 14 routes (V3_ALLOWED_SUBPATHS) + /v3/skill/* + /v3/knowledge/* (extraRouteTable);
   // Other /v3 subpaths route directly to 404
@@ -533,7 +556,9 @@ export async function handleV2Route(
   // T0 taken from server.ts socket-level instrumentation; fallback to dispatch entry time if missing.
   const isSkillPerf = pathname.startsWith("/v3/skill/");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const perfT0 = isSkillPerf ? ((req as any).__skillPerfT0 as number | undefined) ?? Date.now() : 0;
+  const perfT0 = isSkillPerf
+    ? (((req as any).__skillPerfT0 as number | undefined) ?? Date.now())
+    : 0;
   // Attach request_id to res, so server.ts res.on(finish) can include it
   if (isSkillPerf) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -553,7 +578,10 @@ export async function handleV2Route(
   const authStart = Date.now();
   const auth = parseV2Auth(req, res, requestId, sendJson);
   if (isSkillPerf) {
-    perfMark("parseAuth", `dur=${Date.now() - authStart}ms ok=${auth ? "true" : "false"}`);
+    perfMark(
+      "parseAuth",
+      `dur=${Date.now() - authStart}ms ok=${auth ? "true" : "false"}`,
+    );
   }
   if (!auth) return true;
 
@@ -562,7 +590,10 @@ export async function handleV2Route(
     const resolveStart = Date.now();
     const resolved = await resolveStoreForRequest(auth, deps);
     const resolvedStorage = await resolveStorageForRequest(auth, deps);
-    perfMark("resolveStoreAndStorage", `dur=${Date.now() - resolveStart}ms serviceId=${auth.serviceId}`);
+    perfMark(
+      "resolveStoreAndStorage",
+      `dur=${Date.now() - resolveStart}ms serviceId=${auth.serviceId}`,
+    );
 
     // Wrap deps so handlers use the resolved per-instance resources
     const resolvedDeps: V2RouterDeps = {
@@ -573,10 +604,19 @@ export async function handleV2Route(
     };
 
     const bodyStart = Date.now();
-    const body = method === "GET"
-      ? Object.fromEntries(new URL(req.url ?? pathname, "http://localhost").searchParams.entries())
-      : await parseJsonBody(req);
-    perfMark("parseJsonBody", `dur=${Date.now() - bodyStart}ms len=${req.headers["content-length"] ?? "?"}`);
+    const body =
+      method === "GET"
+        ? Object.fromEntries(
+            new URL(
+              req.url ?? pathname,
+              "http://localhost",
+            ).searchParams.entries(),
+          )
+        : await parseJsonBody(req);
+    perfMark(
+      "parseJsonBody",
+      `dur=${Date.now() - bodyStart}ms len=${req.headers["content-length"] ?? "?"}`,
+    );
 
     // Tenancy isolation — pulled from body (preferred) or x-tdai-* headers
     // and attached to the per-request deps so handlers can persist
@@ -585,16 +625,23 @@ export async function handleV2Route(
     //
     // We only attempt resolution; whether missing fields are fatal is up
     // to each handler (some endpoints don't need isolation at all, e.g.
-    // /v2/pipeline/status). See resolveIsolation() in v2-schemas.
+    // /v3/pipeline/status). See resolveIsolation() in v2-schemas.
     //
     // /v3 strictly validates: must simultaneously provide team_id + agent_id + user_id + session_id,
     // Missing any directly returns 422, and no fallback to legacyCompatMode.
-    const headers = (req.headers ?? {}) as Record<string, string | string[] | undefined>;
-    const isoLegacyCompat = isV3 ? false : (deps.isolationConfig?.legacyCompatMode ?? false);
-    const isoResolved = resolveIsolation(body as Record<string, unknown> | undefined, headers, {
-      legacyCompatMode: isoLegacyCompat,
-      legacyPlaceholder: deps.isolationConfig?.legacyPlaceholder,
-    });
+    const headers = (req.headers ?? {}) as Record<
+      string,
+      string | string[] | undefined
+    >;
+    const isoLegacyCompat = false;
+    const isoResolved = resolveIsolation(
+      body as Record<string, unknown> | undefined,
+      headers,
+      {
+        legacyCompatMode: isoLegacyCompat,
+        legacyPlaceholder: deps.isolationConfig?.legacyPlaceholder,
+      },
+    );
 
     // /v3 strict isolation is for L0–L3 memory data-plane only.
     // Skill and knowledge endpoints are team-scoped management-plane
@@ -602,16 +649,27 @@ export async function handleV2Route(
     // Runtime default comes from server.ts/env and is OFF;
     // undefined keeps strict in direct router tests for backward compatibility.
     const v3StrictEnabled = deps.v3StrictIsolation ?? true;
-    if (isV3 && !isV3Extra && v3StrictEnabled) {
+    // /pipeline/status is instance-level introspection without isolation semantics — exempt from the triad check.
+    const v3IsolationExempt =
+      pathname.slice(V3_PREFIX.length) === "/pipeline/status";
+    if (isV3 && !isV3Extra && v3StrictEnabled && !v3IsolationExempt) {
       const v3Subpath = pathname.slice(V3_PREFIX.length);
-      const v3Missing = collectV3Missing(v3Subpath, body as Record<string, unknown> | undefined, headers);
+      const v3Missing = collectV3Missing(
+        v3Subpath,
+        body as Record<string, unknown> | undefined,
+        headers,
+      );
       if (v3Missing.length > 0) {
-        sendJson(res, 422, errorEnvelope(
+        sendJson(
+          res,
           422,
-          `/v3 requires strict isolation: missing ${v3Missing.join(", ")}. ` +
-          `Provide via request body or x-tdai-{team-id,agent-id,user-id,session-id} headers.`,
-          requestId,
-        ));
+          errorEnvelope(
+            422,
+            `/v3 requires strict isolation: missing ${v3Missing.join(", ")}. ` +
+              `Provide via request body or x-tdai-{team-id,agent-id,user-id,session-id} headers.`,
+            requestId,
+          ),
+        );
         return true;
       }
     }
@@ -619,9 +677,12 @@ export async function handleV2Route(
     const depsWithIsolation: V2RouterDeps = {
       ...resolvedDeps,
       // /v3 path forcibly overrides isolationConfig.enforce, ensuring handlers internally consistently hit strict branch
-      isolationConfig: isV3
-        ? { enforce: true, legacyCompatMode: false, legacyPlaceholder: resolvedDeps.isolationConfig?.legacyPlaceholder ?? "" }
-        : resolvedDeps.isolationConfig,
+      isolationConfig: {
+        enforce: true,
+        legacyCompatMode: false,
+        legacyPlaceholder:
+          resolvedDeps.isolationConfig?.legacyPlaceholder ?? "",
+      },
       requestIsolation: isoResolved.ctx,
       // resolveIsolation always returns { ok: true } — missing fields are filled with defaults.
       // requestIsolationMissing is only set when the caller explicitly needs to reject incomplete
@@ -633,11 +694,22 @@ export async function handleV2Route(
     const envelope = handler
       ? await handler(body, auth, requestId, depsWithIsolation)
       : await extra!(body, auth, requestId, depsWithIsolation as unknown);
-    perfMark("handler", `dur=${Date.now() - handlerStart}ms envelope_code=${envelope.code}`);
-    const httpStatus = envelope.code === 0 ? 200 : envelope.code >= 400 && envelope.code < 600 ? envelope.code : 200;
+    perfMark(
+      "handler",
+      `dur=${Date.now() - handlerStart}ms envelope_code=${envelope.code}`,
+    );
+    const httpStatus =
+      envelope.code === 0
+        ? 200
+        : envelope.code >= 400 && envelope.code < 600
+          ? envelope.code
+          : 200;
     const sendStart = Date.now();
     sendJson(res, httpStatus, envelope);
-    perfMark("sendJson", `dur=${Date.now() - sendStart}ms status=${httpStatus}`);
+    perfMark(
+      "sendJson",
+      `dur=${Date.now() - sendStart}ms status=${httpStatus}`,
+    );
   } catch (err) {
     // H-13: use classifyError so 5xx leaves no err.message leak; PayloadTooLargeError
     // and RecallFailure already carry safe messages but go through the same path for uniformity.
@@ -648,7 +720,11 @@ export async function handleV2Route(
       deps.logger.warn(`${TAG} [${pathname}] ${classified.logLine}`);
     }
     sendJson(res, classified.status, {
-      ...errorEnvelope(classified.client.code, classified.client.message, requestId),
+      ...errorEnvelope(
+        classified.client.code,
+        classified.client.message,
+        requestId,
+      ),
       trace_id: classified.client.trace_id,
       retryable: classified.client.retryable,
     });
@@ -661,20 +737,30 @@ export async function handleV2Route(
 // L0 Conversation Handlers
 // ============================
 
-async function handleConversationAdd(body: unknown, auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
+async function handleConversationAdd(
+  body: unknown,
+  auth: V2AuthContext,
+  requestId: string,
+  deps: V2RouterDeps,
+): Promise<ApiResponseEnvelope> {
   const parsed = conversationAddRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodError(parsed.error), requestId);
   const { session_id, messages } = parsed.data;
 
   // Enforce three-dim isolation. user_id / agent_id come from request body
   // or x-tdai-* headers (resolved in dispatchV2Request).  When the gateway's
   // isolationConfig.enforce is on AND legacy_compat_mode is off, missing
   // fields are a 422.
-  if (deps.isolationConfig?.enforce && deps.requestIsolationMissing && deps.requestIsolationMissing.length > 0) {
+  if (
+    deps.isolationConfig?.enforce &&
+    deps.requestIsolationMissing &&
+    deps.requestIsolationMissing.length > 0
+  ) {
     return errorEnvelope(
       422,
       `Tenancy isolation required: missing ${deps.requestIsolationMissing.join(", ")}. ` +
-      `Provide via request body or x-tdai-{user-id,agent-id,session-id} headers.`,
+        `Provide via request body or x-tdai-{user-id,agent-id,session-id} headers.`,
       requestId,
     );
   }
@@ -685,9 +771,16 @@ async function handleConversationAdd(body: unknown, auth: V2AuthContext, request
 
   // Quota check: memory limit
   if (deps.quotaManager) {
-    const check = await deps.quotaManager.checkMemoryQuota(auth.serviceId, messages.length);
+    const check = await deps.quotaManager.checkMemoryQuota(
+      auth.serviceId,
+      messages.length,
+    );
     if (!check.allowed) {
-      return errorEnvelope(4291, `Memory limit exceeded (current=${check.current}, limit=${check.limit})`, requestId);
+      return errorEnvelope(
+        4291,
+        `Memory limit exceeded (current=${check.current}, limit=${check.limit})`,
+        requestId,
+      );
     }
   }
 
@@ -705,7 +798,7 @@ async function handleConversationAdd(body: unknown, auth: V2AuthContext, request
     } catch (err) {
       deps.logger.warn(
         `${TAG} ensureChatMemoryAsset failed (team=${iso.teamId} agent=${iso.agentId}): ` +
-        `${err instanceof Error ? err.message : String(err)}`,
+          `${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
@@ -733,12 +826,18 @@ async function handleConversationAdd(body: unknown, auth: V2AuthContext, request
       role: msg.role,
       messageText: msg.content,
       recordedAt: new Date(recordedAtMs).toISOString(),
-      timestamp: msg.timestamp ? new Date(msg.timestamp).getTime() : recordedAtMs,
+      timestamp: msg.timestamp
+        ? new Date(msg.timestamp).getTime()
+        : recordedAtMs,
     };
 
     let emb: Float32Array | undefined;
     if (embedding) {
-      try { emb = await embedding.embed(msg.content); } catch (e) { console.warn(`[v2-router] L0 embedding failed:`, e); }
+      try {
+        emb = await embedding.embed(msg.content);
+      } catch (e) {
+        console.warn(`[v2-router] L0 embedding failed:`, e);
+      }
     }
 
     await store.upsertL0(record, emb);
@@ -753,10 +852,18 @@ async function handleConversationAdd(body: unknown, auth: V2AuthContext, request
     const rounds = messages.filter((m) => m.role === "user").length;
     if (rounds > 0) {
       try {
-        await deps.notifyPipeline(auth.serviceId, session_id, rounds, iso?.teamId, iso?.agentId);
+        await deps.notifyPipeline(
+          auth.serviceId,
+          session_id,
+          rounds,
+          iso?.teamId,
+          iso?.agentId,
+        );
       } catch (err) {
         // Non-fatal: L0 is already persisted, pipeline will catch up later
-        deps.logger.warn(`${TAG} Pipeline notify failed for ${session_id}: ${err instanceof Error ? err.message : String(err)}`);
+        deps.logger.warn(
+          `${TAG} Pipeline notify failed for ${session_id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
   }
@@ -772,46 +879,64 @@ async function handleConversationAdd(body: unknown, auth: V2AuthContext, request
       try {
         const linesByRecordKey = new Map<string, string[]>();
         for (const record of acceptedRecords) {
-          const recordKey = StoragePaths.conversation(formatLocalDateForJsonl(new Date(record.recordedAt)));
+          const recordKey = StoragePaths.conversation(
+            formatLocalDateForJsonl(new Date(record.recordedAt)),
+          );
           const lines = linesByRecordKey.get(recordKey) ?? [];
-          lines.push(JSON.stringify({
-            id: record.id,
-            sessionKey: record.sessionKey,
-            sessionId: record.sessionId,
-            taskId: record.taskId,
-            teamId: record.teamId,
-            userId: record.userId,
-            agentId: record.agentId,
-            role: record.role,
-            content: record.messageText,
-            recordedAt: record.recordedAt,
-            timestamp: record.timestamp,
-          }));
+          lines.push(
+            JSON.stringify({
+              id: record.id,
+              sessionKey: record.sessionKey,
+              sessionId: record.sessionId,
+              taskId: record.taskId,
+              teamId: record.teamId,
+              userId: record.userId,
+              agentId: record.agentId,
+              role: record.role,
+              content: record.messageText,
+              recordedAt: record.recordedAt,
+              timestamp: record.timestamp,
+            }),
+          );
           linesByRecordKey.set(recordKey, lines);
         }
         for (const [recordKey, lines] of linesByRecordKey) {
           await storage.appendFile(recordKey, `${lines.join("\n")}\n`);
         }
       } catch (err) {
-        deps.logger.warn(`${TAG} JSONL mirror failed for ${session_id}: ${err instanceof Error ? err.message : String(err)}`);
+        deps.logger.warn(
+          `${TAG} JSONL mirror failed for ${session_id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
   }
 
   // Report memory usage (non-fatal)
   if (deps.quotaManager && acceptedIds.length > 0) {
-    deps.quotaManager.reportMemoryAdded(auth.serviceId, acceptedIds.length).catch(() => {});
+    deps.quotaManager
+      .reportMemoryAdded(auth.serviceId, acceptedIds.length)
+      .catch(() => {});
   }
 
   return successEnvelope<ConversationAddData>(
-    { accepted_ids: acceptedIds, accepted_versions: acceptedIds.map(() => "v1"), total_count: acceptedIds.length },
+    {
+      accepted_ids: acceptedIds,
+      accepted_versions: acceptedIds.map(() => "v1"),
+      total_count: acceptedIds.length,
+    },
     requestId,
   );
 }
 
-async function handleConversationQuery(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
+async function handleConversationQuery(
+  body: unknown,
+  _auth: V2AuthContext,
+  requestId: string,
+  deps: V2RouterDeps,
+): Promise<ApiResponseEnvelope> {
   const parsed = conversationQueryRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodError(parsed.error), requestId);
   const { session_id, time_start, time_end } = parsed.data;
   const limit = parsed.data.limit ?? 20;
   const offset = parsed.data.offset ?? 0;
@@ -850,19 +975,33 @@ async function handleConversationQuery(body: unknown, _auth: V2AuthContext, requ
       timestamp: r.recorded_at,
     }));
 
-    return successEnvelope<ConversationQueryData>({ messages, total: result.total }, requestId);
+    return successEnvelope<ConversationQueryData>(
+      { messages, total: result.total },
+      requestId,
+    );
   }
 
   // Fallback: legacy path (capped at 1000 for safety)
   const allRows = await store.queryL0ForL1(session_id ?? "", undefined, 1000);
-  let filtered = session_id ? allRows.filter((r) => r.session_key === session_id || r.session_id === session_id) : allRows;
+  let filtered = session_id
+    ? allRows.filter(
+        (r) => r.session_key === session_id || r.session_id === session_id,
+      )
+    : allRows;
   // Tenancy isolation post-filter for the legacy path.
   if (iso?.teamId) filtered = filtered.filter((r) => r.team_id === iso.teamId);
   if (iso?.userId) filtered = filtered.filter((r) => r.user_id === iso.userId);
-  if (iso?.agentId) filtered = filtered.filter((r) => r.agent_id === iso.agentId);
+  if (iso?.agentId)
+    filtered = filtered.filter((r) => r.agent_id === iso.agentId);
   if (iso?.taskId) filtered = filtered.filter((r) => r.task_id === iso.taskId);
-  if (time_start) { const ms = new Date(time_start).getTime(); filtered = filtered.filter((r) => r.timestamp >= ms); }
-  if (time_end) { const ms = new Date(time_end).getTime(); filtered = filtered.filter((r) => r.timestamp <= ms); }
+  if (time_start) {
+    const ms = new Date(time_start).getTime();
+    filtered = filtered.filter((r) => r.timestamp >= ms);
+  }
+  if (time_end) {
+    const ms = new Date(time_end).getTime();
+    filtered = filtered.filter((r) => r.timestamp <= ms);
+  }
   const total = filtered.length;
   const page = filtered.slice(offset, offset + limit);
   const messages: ConversationItem[] = page.map((r) => ({
@@ -880,9 +1019,15 @@ async function handleConversationQuery(body: unknown, _auth: V2AuthContext, requ
   return successEnvelope<ConversationQueryData>({ messages, total }, requestId);
 }
 
-async function handleConversationCount(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
+async function handleConversationCount(
+  body: unknown,
+  _auth: V2AuthContext,
+  requestId: string,
+  deps: V2RouterDeps,
+): Promise<ApiResponseEnvelope> {
   const parsed = conversationCountRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodError(parsed.error), requestId);
   const { session_id, time_start, time_end } = parsed.data;
 
   const store = deps.getStore();
@@ -902,19 +1047,36 @@ async function handleConversationCount(body: unknown, _auth: V2AuthContext, requ
   return successEnvelope<CountData>({ total }, requestId);
 
   const allRows = await store.queryL0ForL1(session_id ?? "", undefined, 10000);
-  let filtered = session_id ? allRows.filter((r) => r.session_key === session_id || r.session_id === session_id) : allRows;
+  let filtered = session_id
+    ? allRows.filter(
+        (r) => r.session_key === session_id || r.session_id === session_id,
+      )
+    : allRows;
   if (iso?.teamId) filtered = filtered.filter((r) => r.team_id === iso.teamId);
   if (iso?.userId) filtered = filtered.filter((r) => r.user_id === iso.userId);
-  if (iso?.agentId) filtered = filtered.filter((r) => r.agent_id === iso.agentId);
+  if (iso?.agentId)
+    filtered = filtered.filter((r) => r.agent_id === iso.agentId);
   if (iso?.taskId) filtered = filtered.filter((r) => r.task_id === iso.taskId);
-  if (time_start) { const ms = new Date(time_start).getTime(); filtered = filtered.filter((r) => r.timestamp >= ms); }
-  if (time_end) { const ms = new Date(time_end).getTime(); filtered = filtered.filter((r) => r.timestamp <= ms); }
+  if (time_start) {
+    const ms = new Date(time_start).getTime();
+    filtered = filtered.filter((r) => r.timestamp >= ms);
+  }
+  if (time_end) {
+    const ms = new Date(time_end).getTime();
+    filtered = filtered.filter((r) => r.timestamp <= ms);
+  }
   return successEnvelope<CountData>({ total: filtered.length }, requestId);
 }
 
-async function handleConversationSearch(body: unknown, auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
+async function handleConversationSearch(
+  body: unknown,
+  auth: V2AuthContext,
+  requestId: string,
+  deps: V2RouterDeps,
+): Promise<ApiResponseEnvelope> {
   const parsed = conversationSearchRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodError(parsed.error), requestId);
   const { query, session_id } = parsed.data;
   const limit = parsed.data.limit ?? 5;
 
@@ -922,13 +1084,15 @@ async function handleConversationSearch(body: unknown, auth: V2AuthContext, requ
   // Search scenario: Only use explicitly passed isolation dimensions as filter, to avoid default sessionId="default" erroneously filtering real session data.
   // When request misses session_id, search should span sessions; when session_id is passed, filter by sessionKey parameter alone.
   const iso = deps.requestIsolation;
-  const searchFilter = iso ? {
-    ...(iso.teamId ? { teamId: iso.teamId } : {}),
-    ...(iso.userId ? { userId: iso.userId } : {}),
-    ...(iso.agentId ? { agentId: iso.agentId } : {}),
-    ...(iso.taskId ? { taskId: iso.taskId } : {}),
-    // Missed sessionId: global search should not be restricted by default sessionId
-  } : undefined;
+  const searchFilter = iso
+    ? {
+        ...(iso.teamId ? { teamId: iso.teamId } : {}),
+        ...(iso.userId ? { userId: iso.userId } : {}),
+        ...(iso.agentId ? { agentId: iso.agentId } : {}),
+        ...(iso.taskId ? { taskId: iso.taskId } : {}),
+        // Missed sessionId: global search should not be restricted by default sessionId
+      }
+    : undefined;
   const result = await executeConversationSearch({
     query,
     limit,
@@ -945,8 +1109,17 @@ async function handleConversationSearch(body: unknown, auth: V2AuthContext, requ
   try {
     reportRecallMetrics({
       instanceId: auth.serviceId,
-      recalledL1Memories: result.results.map((r) => ({ content: r.content, score: r.score, type: "conversation" })),
-      recallStrategy: result.strategy === "fts" ? "keyword" : result.strategy === "none" ? "skipped" : result.strategy,
+      recalledL1Memories: result.results.map((r) => ({
+        content: r.content,
+        score: r.score,
+        type: "conversation",
+      })),
+      recallStrategy:
+        result.strategy === "fts"
+          ? "keyword"
+          : result.strategy === "none"
+            ? "skipped"
+            : result.strategy,
       recallLatencyMs,
       hasError: false,
     });
@@ -961,15 +1134,24 @@ async function handleConversationSearch(body: unknown, auth: V2AuthContext, requ
     if (activeSpan) {
       activeSpan.setAttribute("tdai.recall.query", query);
       activeSpan.setAttribute("tdai.recall.hitCount", result.results.length);
-      activeSpan.setAttribute("tdai.recall.strategy", result.strategy || "unknown");
+      activeSpan.setAttribute(
+        "tdai.recall.strategy",
+        result.strategy || "unknown",
+      );
       activeSpan.setAttribute("tdai.recall.level", "l0");
       if (result.results.length > 0) {
-        activeSpan.setAttribute("tdai.recall.topScore", Math.max(...result.results.map(r => r.score)));
-        const truncatedResults = result.results.slice(0, 5).map(r => ({
+        activeSpan.setAttribute(
+          "tdai.recall.topScore",
+          Math.max(...result.results.map((r) => r.score)),
+        );
+        const truncatedResults = result.results.slice(0, 5).map((r) => ({
           content: r.content.substring(0, 200),
           score: r.score,
         }));
-        activeSpan.setAttribute("tdai.recall.results", JSON.stringify(truncatedResults));
+        activeSpan.setAttribute(
+          "tdai.recall.results",
+          JSON.stringify(truncatedResults),
+        );
       } else {
         activeSpan.setAttribute("tdai.recall.results", "[]");
       }
@@ -979,15 +1161,25 @@ async function handleConversationSearch(body: unknown, auth: V2AuthContext, requ
   }
 
   const messages: ConversationSearchHit[] = result.results.map((r) => ({
-    id: r.id, role: r.role as ConversationSearchHit["role"], content: r.content, timestamp: r.recorded_at, score: r.score,
+    id: r.id,
+    role: r.role as ConversationSearchHit["role"],
+    content: r.content,
+    timestamp: r.recorded_at,
+    score: r.score,
   }));
 
   return successEnvelope<ConversationSearchData>({ messages }, requestId);
 }
 
-async function handleConversationDelete(body: unknown, auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
+async function handleConversationDelete(
+  body: unknown,
+  auth: V2AuthContext,
+  requestId: string,
+  deps: V2RouterDeps,
+): Promise<ApiResponseEnvelope> {
   const parsed = conversationDeleteRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodError(parsed.error), requestId);
   // schema is normalized: message_ids / session_ids are both deduplicated arrays (singular session_id merged in).
   const { message_ids, session_ids } = parsed.data;
 
@@ -1000,7 +1192,12 @@ async function handleConversationDelete(body: unknown, auth: V2AuthContext, requ
   // it can only delete current session —— batch deleting multiple sessions silently filtered to 0 entries.
   const iso = deps.requestIsolation;
   const scope = iso
-    ? { teamId: iso.teamId, userId: iso.userId, agentId: iso.agentId, taskId: iso.taskId }
+    ? {
+        teamId: iso.teamId,
+        userId: iso.userId,
+        agentId: iso.agentId,
+        taskId: iso.taskId,
+      }
     : undefined;
 
   // message_ids and session_ids can both be provided; both paths run, use id set deduplication to avoid
@@ -1020,7 +1217,9 @@ async function handleConversationDelete(body: unknown, auth: V2AuthContext, requ
     }
     // Fallback: if store has not implemented delete by session, delete one by one.
     const rows = await store.queryL0ForL1(sessionId, undefined, 10000);
-    const sessionRows = rows.filter((r) => r.session_key === sessionId || r.session_id === sessionId);
+    const sessionRows = rows.filter(
+      (r) => r.session_key === sessionId || r.session_id === sessionId,
+    );
     for (const row of sessionRows) {
       if (deletedRecordIds.has(row.record_id)) continue;
       const ok = await store.deleteL0(row.record_id, scope);
@@ -1035,15 +1234,26 @@ async function handleConversationDelete(body: unknown, auth: V2AuthContext, requ
 
   // Report memory deletion (non-fatal)
   if (deps.quotaManager && deletedCount > 0) {
-    deps.quotaManager.reportMemoryDeleted(auth.serviceId, deletedCount).catch(() => {});
+    deps.quotaManager
+      .reportMemoryDeleted(auth.serviceId, deletedCount)
+      .catch(() => {});
   }
 
-  return successEnvelope<ConversationDeleteData>({ deleted_count: deletedCount }, requestId);
+  return successEnvelope<ConversationDeleteData>(
+    { deleted_count: deletedCount },
+    requestId,
+  );
 }
 
-async function handleAtomicUpdate(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
+async function handleAtomicUpdate(
+  body: unknown,
+  _auth: V2AuthContext,
+  requestId: string,
+  deps: V2RouterDeps,
+): Promise<ApiResponseEnvelope> {
   const parsed = atomicUpdateRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodError(parsed.error), requestId);
   const { id, content, background } = parsed.data;
 
   const store = deps.getStore();
@@ -1064,10 +1274,18 @@ async function handleAtomicUpdate(body: unknown, _auth: V2AuthContext, requestId
   // match the existing row, we treat it as a permission denial.
   const iso = deps.requestIsolation;
   if (iso?.userId && record.user_id && record.user_id !== iso.userId) {
-    return errorEnvelope(403, `Atomic note ${id} belongs to a different user`, requestId);
+    return errorEnvelope(
+      403,
+      `Atomic note ${id} belongs to a different user`,
+      requestId,
+    );
   }
   if (iso?.agentId && record.agent_id && record.agent_id !== iso.agentId) {
-    return errorEnvelope(403, `Atomic note ${id} belongs to a different agent`, requestId);
+    return errorEnvelope(
+      403,
+      `Atomic note ${id} belongs to a different agent`,
+      requestId,
+    );
   }
   const updatedVersion = (record.version ?? 0) + 1;
   const updated: MemoryRecord = {
@@ -1075,7 +1293,8 @@ async function handleAtomicUpdate(body: unknown, _auth: V2AuthContext, requestId
     content,
     type: record.type as any,
     priority: record.priority ?? 50,
-    scene_name: background !== undefined ? background : (record.scene_name ?? ""),
+    scene_name:
+      background === undefined ? (record.scene_name ?? "") : background,
     source_message_ids: [],
     metadata: parseMetadataJson(record.metadata_json),
     timestamps: record.timestamp_str ? [record.timestamp_str] : [],
@@ -1092,7 +1311,13 @@ async function handleAtomicUpdate(body: unknown, _auth: V2AuthContext, requestId
 
   const embedding = deps.getEmbedding();
   let emb: Float32Array | undefined;
-  if (embedding) { try { emb = await embedding.embed(content); } catch (e) { console.warn(`[v2-router] L1 embedding failed:`, e); } }
+  if (embedding) {
+    try {
+      emb = await embedding.embed(content);
+    } catch (e) {
+      console.warn(`[v2-router] L1 embedding failed:`, e);
+    }
+  }
 
   await store.upsertL1(updated, emb);
 
@@ -1107,12 +1332,21 @@ async function handleAtomicUpdate(body: unknown, _auth: V2AuthContext, requestId
     logger: deps.logger,
   });
 
-  return successEnvelope<AtomicUpdateData>({ id, version: `v${updatedVersion}`, updated_at: now }, requestId);
+  return successEnvelope<AtomicUpdateData>(
+    { id, version: `v${updatedVersion}`, updated_at: now },
+    requestId,
+  );
 }
 
-async function handleAtomicQuery(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
+async function handleAtomicQuery(
+  body: unknown,
+  _auth: V2AuthContext,
+  requestId: string,
+  deps: V2RouterDeps,
+): Promise<ApiResponseEnvelope> {
   const parsed = atomicQueryRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodError(parsed.error), requestId);
   const { type, time_start, time_end } = parsed.data;
   const limit = parsed.data.limit ?? 20;
   const offset = parsed.data.offset ?? 0;
@@ -1126,20 +1360,33 @@ async function handleAtomicQuery(body: unknown, _auth: V2AuthContext, requestId:
   // Use paginated query if available
   if (store.queryL1Paginated) {
     const result = await store.queryL1Paginated({
-      type, timeStart: time_start, timeEnd: time_end, limit, offset,
-      teamId: iso?.teamId, userId: iso?.userId, agentId: iso?.agentId, taskId: iso?.taskId,
+      type,
+      timeStart: time_start,
+      timeEnd: time_end,
+      limit,
+      offset,
+      teamId: iso?.teamId,
+      userId: iso?.userId,
+      agentId: iso?.agentId,
+      taskId: iso?.taskId,
     });
     const items: AtomicDetail[] = result.rows.map((r) => ({
-      id: r.record_id, type: r.type, content: r.content,
+      id: r.record_id,
+      type: r.type,
+      content: r.content,
       background: r.scene_name || undefined,
       version: r.version ?? 0,
       team_id: r.team_id,
       user_id: r.user_id,
       agent_id: r.agent_id,
       task_id: r.task_id,
-      created_at: r.created_time, updated_at: r.updated_time,
+      created_at: r.created_time,
+      updated_at: r.updated_time,
     }));
-    return successEnvelope<AtomicQueryData>({ items, total: result.total }, requestId);
+    return successEnvelope<AtomicQueryData>(
+      { items, total: result.total },
+      requestId,
+    );
   }
 
   // Fallback: legacy
@@ -1148,29 +1395,40 @@ async function handleAtomicQuery(body: unknown, _auth: V2AuthContext, requestId:
   if (type) filtered = filtered.filter((r) => r.type === type);
   if (iso?.teamId) filtered = filtered.filter((r) => r.team_id === iso.teamId);
   if (iso?.userId) filtered = filtered.filter((r) => r.user_id === iso.userId);
-  if (iso?.agentId) filtered = filtered.filter((r) => r.agent_id === iso.agentId);
+  if (iso?.agentId)
+    filtered = filtered.filter((r) => r.agent_id === iso.agentId);
   if (iso?.taskId) filtered = filtered.filter((r) => r.task_id === iso.taskId);
-  if (time_start) filtered = filtered.filter((r) => r.updated_time >= time_start);
+  if (time_start)
+    filtered = filtered.filter((r) => r.updated_time >= time_start);
   if (time_end) filtered = filtered.filter((r) => r.updated_time <= time_end);
   const total = filtered.length;
   const page = filtered.slice(offset, offset + limit);
   const items: AtomicDetail[] = page.map((r) => ({
-    id: r.record_id, type: r.type, content: r.content,
+    id: r.record_id,
+    type: r.type,
+    content: r.content,
     background: r.scene_name || undefined,
     version: r.version ?? 0,
     team_id: r.team_id,
     user_id: r.user_id,
     agent_id: r.agent_id,
     task_id: r.task_id,
-    created_at: r.created_time, updated_at: r.updated_time,
+    created_at: r.created_time,
+    updated_at: r.updated_time,
   }));
 
   return successEnvelope<AtomicQueryData>({ items, total }, requestId);
 }
 
-async function handleAtomicCount(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
+async function handleAtomicCount(
+  body: unknown,
+  _auth: V2AuthContext,
+  requestId: string,
+  deps: V2RouterDeps,
+): Promise<ApiResponseEnvelope> {
   const parsed = atomicCountRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodError(parsed.error), requestId);
   const { type, time_start, time_end } = parsed.data;
 
   const store = deps.getStore();
@@ -1189,9 +1447,15 @@ async function handleAtomicCount(body: unknown, _auth: V2AuthContext, requestId:
   return successEnvelope<CountData>({ total }, requestId);
 }
 
-async function handleAtomicSearch(body: unknown, auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
+async function handleAtomicSearch(
+  body: unknown,
+  auth: V2AuthContext,
+  requestId: string,
+  deps: V2RouterDeps,
+): Promise<ApiResponseEnvelope> {
   const parsed = atomicSearchRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodError(parsed.error), requestId);
   const { query, type } = parsed.data;
   const limit = parsed.data.limit ?? 5;
 
@@ -1200,15 +1464,19 @@ async function handleAtomicSearch(body: unknown, auth: V2AuthContext, requestId:
   // **without sessionId**, otherwise it will filter out L1 memories written by other sessions, causing
   // new session unable to recall history memories (consistent with conversation/search handling).
   const iso = deps.requestIsolation;
-  const searchFilter = iso ? {
-    ...(iso.teamId ? { teamId: iso.teamId } : {}),
-    ...(iso.userId ? { userId: iso.userId } : {}),
-    ...(iso.agentId ? { agentId: iso.agentId } : {}),
-    ...(iso.taskId ? { taskId: iso.taskId } : {}),
-    // Missed sessionId: L1 recall should span session (agent dimension)
-  } : undefined;
+  const searchFilter = iso
+    ? {
+        ...(iso.teamId ? { teamId: iso.teamId } : {}),
+        ...(iso.userId ? { userId: iso.userId } : {}),
+        ...(iso.agentId ? { agentId: iso.agentId } : {}),
+        ...(iso.taskId ? { taskId: iso.taskId } : {}),
+        // Missed sessionId: L1 recall should span session (agent dimension)
+      }
+    : undefined;
   const result = await executeMemorySearch({
-    query, limit, type,
+    query,
+    limit,
+    type,
     filter: searchFilter,
     vectorStore: deps.getStore(),
     embeddingService: deps.getEmbedding(),
@@ -1220,8 +1488,17 @@ async function handleAtomicSearch(body: unknown, auth: V2AuthContext, requestId:
   try {
     reportRecallMetrics({
       instanceId: auth.serviceId,
-      recalledL1Memories: result.results.map((r) => ({ content: r.content, score: r.score, type: r.type })),
-      recallStrategy: result.strategy === "fts" ? "keyword" : result.strategy === "none" ? "skipped" : result.strategy,
+      recalledL1Memories: result.results.map((r) => ({
+        content: r.content,
+        score: r.score,
+        type: r.type,
+      })),
+      recallStrategy:
+        result.strategy === "fts"
+          ? "keyword"
+          : result.strategy === "none"
+            ? "skipped"
+            : result.strategy,
       recallLatencyMs,
       hasError: false,
     });
@@ -1229,10 +1506,13 @@ async function handleAtomicSearch(body: unknown, auth: V2AuthContext, requestId:
     // Silent failure
   }
 
-// Non-invasive record of recall query and results on current Span, for online evaluation system consumption
+  // Non-invasive record of recall query and results on current Span, for online evaluation system consumption
   try {
-    const { getObservabilityBackend } = await import("../core/report/factory.js");
-    const ctx = getObservabilityBackend().tracePropagation.serializeTraceContext();
+    const { getObservabilityBackend } = await import(
+      "../core/report/factory.js"
+    );
+    const ctx =
+      getObservabilityBackend().tracePropagation.serializeTraceContext();
     if (ctx && (ctx as any)._traceId) {
       // Add attributes to current span via OTel API
       try {
@@ -1240,21 +1520,36 @@ async function handleAtomicSearch(body: unknown, auth: V2AuthContext, requestId:
         const activeSpan = otelApi.trace.getSpan(otelApi.context.active());
         if (activeSpan) {
           activeSpan.setAttribute("tdai.recall.query", query);
-          activeSpan.setAttribute("tdai.recall.hitCount", result.results.length);
-          activeSpan.setAttribute("tdai.recall.strategy", result.strategy || "unknown");
+          activeSpan.setAttribute(
+            "tdai.recall.hitCount",
+            result.results.length,
+          );
+          activeSpan.setAttribute(
+            "tdai.recall.strategy",
+            result.strategy || "unknown",
+          );
           if (result.results.length > 0) {
-            activeSpan.setAttribute("tdai.recall.topScore", Math.max(...result.results.map(r => r.score)));
+            activeSpan.setAttribute(
+              "tdai.recall.topScore",
+              Math.max(...result.results.map((r) => r.score)),
+            );
             // Limit results attribute length (OTel attributes shouldn	 be too long), at most first 5 entries
-            const truncatedResults = result.results.slice(0, 5).map(r => ({
+            const truncatedResults = result.results.slice(0, 5).map((r) => ({
               content: r.content.substring(0, 200),
               score: r.score,
               type: r.type,
             }));
-            activeSpan.setAttribute("tdai.recall.results", JSON.stringify(truncatedResults));
+            activeSpan.setAttribute(
+              "tdai.recall.results",
+              JSON.stringify(truncatedResults),
+            );
           } else {
             activeSpan.setAttribute("tdai.recall.results", "[]");
           }
-          activeSpan.setAttribute("tdai.recall.level", type === "l0" ? "l0" : "l1");
+          activeSpan.setAttribute(
+            "tdai.recall.level",
+            type === "l0" ? "l0" : "l1",
+          );
         }
       } catch {
         // Silent degradation when OTel API unavailable
@@ -1265,22 +1560,32 @@ async function handleAtomicSearch(body: unknown, auth: V2AuthContext, requestId:
   }
 
   const items: AtomicSearchHit[] = result.results.map((r) => ({
-    id: r.id, type: r.type, content: r.content,
+    id: r.id,
+    type: r.type,
+    content: r.content,
     background: r.scene_name || undefined,
     version: r.version ?? 0,
     team_id: r.team_id,
     user_id: r.user_id,
     agent_id: r.agent_id,
     task_id: r.task_id,
-    created_at: r.created_at, updated_at: r.updated_at, score: r.score,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+    score: r.score,
   }));
 
   return successEnvelope<AtomicSearchData>({ items }, requestId);
 }
 
-async function handleAtomicDelete(body: unknown, auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
+async function handleAtomicDelete(
+  body: unknown,
+  auth: V2AuthContext,
+  requestId: string,
+  deps: V2RouterDeps,
+): Promise<ApiResponseEnvelope> {
   const parsed = atomicDeleteRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodError(parsed.error), requestId);
   const { ids } = parsed.data;
 
   const store = deps.getStore();
@@ -1291,13 +1596,15 @@ async function handleAtomicDelete(body: unknown, auth: V2AuthContext, requestId:
   // When deleting by id, only use explicitly passed isolation dimension as filter.
   // Avoid default sessionId="default" causing real sessions L1 records unable to delete.
   const iso = deps.requestIsolation;
-  const deleteFilter = iso ? {
-    ...(iso.teamId ? { teamId: iso.teamId } : {}),
-    ...(iso.userId ? { userId: iso.userId } : {}),
-    ...(iso.agentId ? { agentId: iso.agentId } : {}),
-    ...(iso.taskId ? { taskId: iso.taskId } : {}),
-    // Missed sessionId: deletion by id should not be restricted by default sessionId
-  } : undefined;
+  const deleteFilter = iso
+    ? {
+        ...(iso.teamId ? { teamId: iso.teamId } : {}),
+        ...(iso.userId ? { userId: iso.userId } : {}),
+        ...(iso.agentId ? { agentId: iso.agentId } : {}),
+        ...(iso.taskId ? { taskId: iso.taskId } : {}),
+        // Missed sessionId: deletion by id should not be restricted by default sessionId
+      }
+    : undefined;
   let deletedCount = 0;
   const deletedIds: string[] = [];
   for (const id of ids) {
@@ -1323,234 +1630,55 @@ async function handleAtomicDelete(body: unknown, auth: V2AuthContext, requestId:
 
   // Report memory deletion (non-fatal)
   if (deps.quotaManager && deletedCount > 0) {
-    deps.quotaManager.reportMemoryDeleted(auth.serviceId, deletedCount).catch(() => {});
+    deps.quotaManager
+      .reportMemoryDeleted(auth.serviceId, deletedCount)
+      .catch(() => {});
   }
 
-  return successEnvelope<AtomicDeleteData>({ deleted_count: deletedCount }, requestId);
+  return successEnvelope<AtomicDeleteData>(
+    { deleted_count: deletedCount },
+    requestId,
+  );
 }
 
 // ============================
 // Entity Metadata Handlers (Team / User / Agent / Task)
 // ============================
 
-type EntityStore = IMemoryStore & {
-  createTeam?: (input: any) => TeamData | Promise<TeamData>;
-  getTeam?: (id: string) => TeamData | null | Promise<TeamData | null>;
-  updateTeam?: (id: string, patch: any) => TeamData | null | Promise<TeamData | null>;
-  deleteTeams?: (ids: string[]) => BatchDeleteResult | Promise<BatchDeleteResult>;
-  createUser?: (input: any) => UserData | Promise<UserData>;
-  getUser?: (id: string) => UserData | null | Promise<UserData | null>;
-  updateUser?: (id: string, patch: any) => UserData | null | Promise<UserData | null>;
-  deleteUsers?: (ids: string[]) => BatchDeleteResult | Promise<BatchDeleteResult>;
-  createAgent?: (input: any) => AgentData | Promise<AgentData>;
-  getAgent?: (id: string) => AgentData | null | Promise<AgentData | null>;
-  updateAgent?: (id: string, patch: any) => AgentData | null | Promise<AgentData | null>;
-  deleteAgents?: (ids: string[]) => BatchDeleteResult | Promise<BatchDeleteResult>;
-  createTask?: (input: any) => TaskData | Promise<TaskData>;
-  getTask?: (id: string) => TaskData | null | Promise<TaskData | null>;
-  updateTask?: (id: string, patch: any) => TaskData | null | Promise<TaskData | null>;
-  deleteTasks?: (ids: string[]) => BatchDeleteResult | Promise<BatchDeleteResult>;
-};
-
-function getEntityStore(deps: V2RouterDeps): EntityStore | undefined {
-  return deps.getStore() as EntityStore | undefined;
-}
-
-function missingEntityStore(requestId: string): ApiResponseEnvelope {
-  return errorEnvelope(503, "Entity metadata store not available", requestId);
-}
-
-/* ============================================================================
- * @deprecated v2 entity handlers (team/user/agent/task, 16 below).
- *
- * These handlers use old entity_* aggregate array model (EntityStore optional method). Metadata migrated to
- * v3 normalized model (/v3/meta/* + MetadataService), control panel remote mode connects v3 directly.
- * Retaining these handlers only for compatibility with existing network callers, **behavior frozen, no longer evolving**; new integrators uniformly use v3.
- * Plan: after confirming no external callers, delete altogether with corresponding entries in routeTable and entity_* table.
- * Decision (2026-06-26, per user): Mark as deprecated + temporarily retain code, do not adapt MetadataService.
- * ========================================================================== */
-
-/** @deprecated Switch to /v3/meta/team/create (MetadataService.createTeam). */
-async function handleTeamCreate(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
-  const parsed = teamCreateRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
-  const store = getEntityStore(deps);
-  if (!store?.createTeam) return missingEntityStore(requestId);
-  return successEnvelope<TeamData>(await store.createTeam(parsed.data), requestId);
-}
-
-/** @deprecated Switch to /v3/meta/team/get. */
-async function handleTeamGet(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
-  const parsed = teamGetRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
-  const store = getEntityStore(deps);
-  if (!store?.getTeam) return missingEntityStore(requestId);
-  const data = await store.getTeam(parsed.data.team_id);
-  return data ? successEnvelope<TeamData>(data, requestId) : errorEnvelope(404, "Team not found", requestId);
-}
-
-/** @deprecated Switch to /v3/meta/team/update. */
-async function handleTeamUpdate(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
-  const parsed = teamUpdateRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
-  const { team_id, ...patch } = parsed.data;
-  const store = getEntityStore(deps);
-  if (!store?.updateTeam) return missingEntityStore(requestId);
-  const data = await store.updateTeam(team_id, patch);
-  return data ? successEnvelope<TeamData>(data, requestId) : errorEnvelope(404, "Team not found", requestId);
-}
-
-/** @deprecated Switch to /v3/meta/team/delete. */
-async function handleTeamDelete(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
-  const parsed = teamBatchDeleteRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
-  const store = getEntityStore(deps);
-  if (!store?.deleteTeams) return missingEntityStore(requestId);
-  return successEnvelope<BatchDeleteResult>(await store.deleteTeams(parsed.data.team_ids), requestId);
-}
-
-/** @deprecated Switch to /v3/meta/user/create. */
-async function handleUserCreate(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
-  const parsed = userCreateRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
-  const store = getEntityStore(deps);
-  if (!store?.createUser) return missingEntityStore(requestId);
-  return successEnvelope<UserData>(await store.createUser(parsed.data), requestId);
-}
-
-/** @deprecated Switch to /v3/meta/user/get. */
-async function handleUserGet(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
-  const parsed = userGetRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
-  const store = getEntityStore(deps);
-  if (!store?.getUser) return missingEntityStore(requestId);
-  const data = await store.getUser(parsed.data.user_id);
-  return data ? successEnvelope<UserData>(data, requestId) : errorEnvelope(404, "User not found", requestId);
-}
-
-/** @deprecated Switch to /v3/meta/user/update. */
-async function handleUserUpdate(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
-  const parsed = userUpdateRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
-  const { user_id, ...patch } = parsed.data;
-  const store = getEntityStore(deps);
-  if (!store?.updateUser) return missingEntityStore(requestId);
-  const data = await store.updateUser(user_id, patch);
-  return data ? successEnvelope<UserData>(data, requestId) : errorEnvelope(404, "User not found", requestId);
-}
-
-/** @deprecated Switch to /v3/meta/user/delete. */
-async function handleUserDelete(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
-  const parsed = userBatchDeleteRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
-  const store = getEntityStore(deps);
-  if (!store?.deleteUsers) return missingEntityStore(requestId);
-  return successEnvelope<BatchDeleteResult>(await store.deleteUsers(parsed.data.user_ids), requestId);
-}
-
-/** @deprecated Switch to /v3/meta/agent/create. */
-async function handleAgentCreate(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
-  const parsed = agentCreateRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
-  const store = getEntityStore(deps);
-  if (!store?.createAgent) return missingEntityStore(requestId);
-  return successEnvelope<AgentData>(await store.createAgent(parsed.data), requestId);
-}
-
-/** @deprecated Switch to /v3/meta/agent/get. */
-async function handleAgentGet(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
-  const parsed = agentGetRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
-  const store = getEntityStore(deps);
-  if (!store?.getAgent) return missingEntityStore(requestId);
-  const data = await store.getAgent(parsed.data.agent_id);
-  if (!data) return errorEnvelope(404, "Agent not found", requestId);
-  if (parsed.data.team_id && data.team_id !== parsed.data.team_id) return errorEnvelope(403, "Agent team_id mismatch", requestId);
-  return successEnvelope<AgentData>(data, requestId);
-}
-
-/** @deprecated Switch to /v3/meta/agent/update. */
-async function handleAgentUpdate(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
-  const parsed = agentUpdateRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
-  const { agent_id, team_id, ...patch } = parsed.data;
-  const store = getEntityStore(deps);
-  if (!store?.updateAgent) return missingEntityStore(requestId);
-  const current = store.getAgent ? await store.getAgent(agent_id) : null;
-  if (!current) return errorEnvelope(404, "Agent not found", requestId);
-  if (team_id && current.team_id !== team_id) return errorEnvelope(403, "Agent team_id mismatch", requestId);
-  const data = await store.updateAgent(agent_id, patch);
-  return data ? successEnvelope<AgentData>(data, requestId) : errorEnvelope(404, "Agent not found", requestId);
-}
-
-/** @deprecated Switch to /v3/meta/agent/delete. */
-async function handleAgentDelete(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
-  const parsed = agentBatchDeleteRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
-  const store = getEntityStore(deps);
-  if (!store?.deleteAgents) return missingEntityStore(requestId);
-  return successEnvelope<BatchDeleteResult>(await store.deleteAgents(parsed.data.agent_ids), requestId);
-}
-
-/** @deprecated Switch to /v3/meta/task/create. */
-async function handleTaskCreate(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
-  const parsed = taskCreateRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
-  const store = getEntityStore(deps);
-  if (!store?.createTask) return missingEntityStore(requestId);
-  return successEnvelope<TaskData>(await store.createTask(parsed.data), requestId);
-}
-
-/** @deprecated Switch to /v3/meta/task/get. */
-async function handleTaskGet(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
-  const parsed = taskGetRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
-  const store = getEntityStore(deps);
-  if (!store?.getTask) return missingEntityStore(requestId);
-  const data = await store.getTask(parsed.data.task_id);
-  return data ? successEnvelope<TaskData>(data, requestId) : errorEnvelope(404, "Task not found", requestId);
-}
-
-/** @deprecated Switch to /v3/meta/task/update. */
-async function handleTaskUpdate(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
-  const parsed = taskUpdateRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
-  const { task_id, ...patch } = parsed.data;
-  const store = getEntityStore(deps);
-  if (!store?.updateTask) return missingEntityStore(requestId);
-  const data = await store.updateTask(task_id, patch);
-  return data ? successEnvelope<TaskData>(data, requestId) : errorEnvelope(404, "Task not found", requestId);
-}
-
-/** @deprecated Switch to /v3/meta/task/delete. */
-async function handleTaskDelete(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
-  const parsed = taskBatchDeleteRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
-  const store = getEntityStore(deps);
-  if (!store?.deleteTasks) return missingEntityStore(requestId);
-  return successEnvelope<BatchDeleteResult>(await store.deleteTasks(parsed.data.task_ids), requestId);
-}
-
 // ============================
 // L2/L3 Profile Sync Helpers (write-through to VDB)
 // ============================
 
-type RequestIsolation = { teamId?: string; userId: string; agentId: string; sessionId: string; taskId?: string };
+type RequestIsolation = {
+  teamId?: string;
+  userId: string;
+  agentId: string;
+  sessionId: string;
+  taskId?: string;
+};
 
 function buildIsolationScope(isolation?: RequestIsolation): string {
-  return isolation ? buildProfileIsolationScope(isolation) : DEFAULT_PROFILE_SCOPE;
+  return isolation
+    ? buildProfileIsolationScope(isolation)
+    : DEFAULT_PROFILE_SCOPE;
 }
 
 function buildIsolationStoragePrefix(isolation: RequestIsolation): string {
   return `profiles/${encodeURIComponent(buildIsolationScope(isolation))}/`;
 }
 
-function scopedProfileStorage(storage: StorageAdapter, isolation?: RequestIsolation): StorageAdapter {
+function scopedProfileStorage(
+  storage: StorageAdapter,
+  isolation?: RequestIsolation,
+): StorageAdapter {
   // Direct unit callers may not go through handleV2Route and therefore do not
   // have requestIsolation attached. Keep that legacy path at root; real HTTP
   // requests always resolve to either explicit ids or the `default` bucket.
   if (!isolation) return storage;
-  return createScopedStorageAdapter(storage, buildIsolationStoragePrefix(isolation));
+  return createScopedStorageAdapter(
+    storage,
+    buildIsolationStoragePrefix(isolation),
+  );
 }
 
 function md5Hex(text: string): string {
@@ -1561,7 +1689,9 @@ function parseMetadataJson(raw: string | undefined): MemoryRecord["metadata"] {
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as MemoryRecord["metadata"] : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as MemoryRecord["metadata"])
+      : {};
   } catch {
     return {};
   }
@@ -1646,7 +1776,9 @@ async function syncProfileToVdb(
     // Try to extract created time from META in content
     let createdAtMs = createdAtOverride ?? 0;
     if (!createdAtMs) {
-      const metaMatch = content.match(/^-----META-START-----\n([\s\S]*?)\n-----META-END-----/);
+      const metaMatch = content.match(
+        /^-----META-START-----\n([\s\S]*?)\n-----META-END-----/,
+      );
       if (metaMatch) {
         for (const line of metaMatch[1].split("\n")) {
           if (line.startsWith("created: ")) {
@@ -1688,13 +1820,18 @@ async function syncProfileToVdb(
         }
       }
     } catch (err) {
-      logger.warn(`${TAG} [profile-sync] probe failed for ${filename}: ${err instanceof Error ? err.message : String(err)}`);
+      logger.warn(
+        `${TAG} [profile-sync] probe failed for ${filename}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
     const contentMd5 = md5Hex(content);
-    const nextVersion = currentMd5 === contentMd5
-      ? (baselineVersion ?? 0)
-      : (baselineVersion === undefined ? 0 : baselineVersion + 1);
+    const nextVersion =
+      currentMd5 === contentMd5
+        ? (baselineVersion ?? 0)
+        : baselineVersion === undefined
+          ? 0
+          : baselineVersion + 1;
 
     const record: ProfileSyncRecord = {
       id,
@@ -1713,10 +1850,14 @@ async function syncProfileToVdb(
       sessionId: undefined,
     };
     await store.syncProfiles([record]);
-    logger.debug?.(`${TAG} [profile-sync] ${type} upserted to VDB: ${filename} (baselineVersion=${baselineVersion ?? "new"}, version=${nextVersion})`);
+    logger.debug?.(
+      `${TAG} [profile-sync] ${type} upserted to VDB: ${filename} (baselineVersion=${baselineVersion ?? "new"}, version=${nextVersion})`,
+    );
     return nextVersion;
   } catch (err) {
-    logger.warn(`${TAG} [profile-sync] FAILED to sync ${type} profile ${filename} to VDB: ${err instanceof Error ? err.message : String(err)}`);
+    logger.warn(
+      `${TAG} [profile-sync] FAILED to sync ${type} profile ${filename} to VDB: ${err instanceof Error ? err.message : String(err)}`,
+    );
     return 0;
   }
 }
@@ -1729,25 +1870,39 @@ async function deleteProfilesFromVdb(
   logger: Logger,
   isolation?: RequestIsolation,
 ): Promise<void> {
-  if (!store || typeof store.deleteProfiles !== "function" || filenames.length === 0) return;
+  if (
+    !store ||
+    typeof store.deleteProfiles !== "function" ||
+    filenames.length === 0
+  )
+    return;
   try {
     const scope = buildIsolationScope(isolation);
     const ids = filenames.map((fn) => buildProfileStableId(scope, type, fn));
     await store.deleteProfiles(ids);
-    logger.debug?.(`${TAG} [profile-sync] ${type} deleted from VDB: ${filenames.length} files`);
+    logger.debug?.(
+      `${TAG} [profile-sync] ${type} deleted from VDB: ${filenames.length} files`,
+    );
   } catch (err) {
-    logger.warn(`${TAG} [profile-sync] FAILED to delete ${type} profiles from VDB: ${err instanceof Error ? err.message : String(err)}`);
+    logger.warn(
+      `${TAG} [profile-sync] FAILED to delete ${type} profiles from VDB: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 
 /** Best-effort refresh scene_index.json so pipeline sees the user-written L2 files. */
-async function refreshSceneIndex(storage: StorageAdapter, logger: Logger): Promise<void> {
+async function refreshSceneIndex(
+  storage: StorageAdapter,
+  logger: Logger,
+): Promise<void> {
   try {
     const { syncSceneIndex } = await import("../core/scene/scene-index.js");
     // Pass empty dataDir; we only use storage in service mode.
     await syncSceneIndex("", storage);
   } catch (err) {
-    logger.warn(`${TAG} [scene-index] FAILED to refresh scene index: ${err instanceof Error ? err.message : String(err)}`);
+    logger.warn(
+      `${TAG} [scene-index] FAILED to refresh scene index: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 
@@ -1755,25 +1910,36 @@ async function refreshSceneIndex(storage: StorageAdapter, logger: Logger): Promi
 // L2 Scenario Handlers
 // ============================
 
-async function handleScenarioLs(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
+async function handleScenarioLs(
+  body: unknown,
+  _auth: V2AuthContext,
+  requestId: string,
+  deps: V2RouterDeps,
+): Promise<ApiResponseEnvelope> {
   const parsed = scenarioListRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodError(parsed.error), requestId);
   const { path_prefix } = parsed.data;
 
   const baseStorage = deps.getStorage();
-  if (!baseStorage) return errorEnvelope(503, "Storage not available", requestId);
+  if (!baseStorage)
+    return errorEnvelope(503, "Storage not available", requestId);
   const storage = scopedProfileStorage(baseStorage, deps.requestIsolation);
 
   const prefix = path_prefix
     ? `${StoragePaths.sceneBlocksDir}${path_prefix}`
     : StoragePaths.sceneBlocksDir;
 
-  deps.logger.debug?.(`${TAG} [scenario/ls] storage.type=${storage.type}, prefix="${prefix}"`);
+  deps.logger.debug?.(
+    `${TAG} [scenario/ls] storage.type=${storage.type}, prefix="${prefix}"`,
+  );
 
   // One-shot full listing (no pagination; marker-based pagination planned for phase 2)
   const backend = storage.getBackend();
   const result = await backend.listObjects(prefix, { recursive: true });
-  deps.logger.debug?.(`${TAG} [scenario/ls] listObjects returned ${result.entries.length} entries`);
+  deps.logger.debug?.(
+    `${TAG} [scenario/ls] listObjects returned ${result.entries.length} entries`,
+  );
   const allEntries = result.entries;
 
   // Read scene_index.json for summary + created/updated lookup
@@ -1782,18 +1948,28 @@ async function handleScenarioLs(body: unknown, _auth: V2AuthContext, requestId: 
   const indexMap = new Map(sceneIndex.map((e) => [e.filename, e]));
 
   // Batch get all L2 file profile versions (one query, avoid N+1)
-  const l2Filenames = allEntries.filter((e) => !e.isDirectory).map((e) => {
-    return e.key.startsWith(StoragePaths.sceneBlocksDir)
-      ? e.key.slice(StoragePaths.sceneBlocksDir.length)
-      : e.key;
-  });
-  const versionMap = await getProfileVersionBatch(deps.getStore(), "l2", l2Filenames, deps.requestIsolation);
+  const l2Filenames = allEntries
+    .filter((e) => !e.isDirectory)
+    .map((e) => {
+      return e.key.startsWith(StoragePaths.sceneBlocksDir)
+        ? e.key.slice(StoragePaths.sceneBlocksDir.length)
+        : e.key;
+    });
+  const versionMap = await getProfileVersionBatch(
+    deps.getStore(),
+    "l2",
+    l2Filenames,
+    deps.requestIsolation,
+  );
 
   const entries: ScenarioEntry[] = allEntries.map((e) => {
     const externalPath = e.key.startsWith(StoragePaths.sceneBlocksDir)
       ? e.key.slice(StoragePaths.sceneBlocksDir.length)
       : e.key;
-    const displayPath = e.isDirectory && !externalPath.endsWith("/") ? `${externalPath}/` : externalPath;
+    const displayPath =
+      e.isDirectory && !externalPath.endsWith("/")
+        ? `${externalPath}/`
+        : externalPath;
     const indexEntry = indexMap.get(externalPath);
     const fallbackTime = e.lastModified.toISOString();
     return {
@@ -1810,9 +1986,15 @@ async function handleScenarioLs(body: unknown, _auth: V2AuthContext, requestId: 
   return successEnvelope({ entries, total: entries.length }, requestId);
 }
 
-async function handleScenarioCount(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
+async function handleScenarioCount(
+  body: unknown,
+  _auth: V2AuthContext,
+  requestId: string,
+  deps: V2RouterDeps,
+): Promise<ApiResponseEnvelope> {
   const parsed = scenarioCountRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodError(parsed.error), requestId);
   const { path_prefix } = parsed.data;
 
   const store = deps.getStore();
@@ -1821,30 +2003,42 @@ async function handleScenarioCount(body: unknown, _auth: V2AuthContext, requestI
       type: "l2",
       pathPrefix: path_prefix,
       teamId: deps.requestIsolation?.teamId,
-      userId: deps.requestIsolation?.teamId ? undefined : deps.requestIsolation?.userId,
+      userId: deps.requestIsolation?.teamId
+        ? undefined
+        : deps.requestIsolation?.userId,
       agentId: deps.requestIsolation?.agentId,
     });
     return successEnvelope<CountData>({ total }, requestId);
   }
 
   const baseStorage = deps.getStorage();
-  if (!baseStorage) return errorEnvelope(503, "Storage not available", requestId);
+  if (!baseStorage)
+    return errorEnvelope(503, "Storage not available", requestId);
   const storage = scopedProfileStorage(baseStorage, deps.requestIsolation);
   const prefix = path_prefix
     ? `${StoragePaths.sceneBlocksDir}${path_prefix}`
     : StoragePaths.sceneBlocksDir;
-  const result = await storage.getBackend().listObjects(prefix, { recursive: true });
+  const result = await storage
+    .getBackend()
+    .listObjects(prefix, { recursive: true });
   const total = result.entries.filter((e) => !e.isDirectory).length;
   return successEnvelope<CountData>({ total }, requestId);
 }
 
-async function handleScenarioRead(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
+async function handleScenarioRead(
+  body: unknown,
+  _auth: V2AuthContext,
+  requestId: string,
+  deps: V2RouterDeps,
+): Promise<ApiResponseEnvelope> {
   const parsed = scenarioReadRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodError(parsed.error), requestId);
   const { path } = parsed.data;
 
   const baseStorage = deps.getStorage();
-  if (!baseStorage) return errorEnvelope(503, "Storage not available", requestId);
+  if (!baseStorage)
+    return errorEnvelope(503, "Storage not available", requestId);
   const storage = scopedProfileStorage(baseStorage, deps.requestIsolation);
 
   const key = `${StoragePaths.sceneBlocksDir}${path}`;
@@ -1852,12 +2046,16 @@ async function handleScenarioRead(body: unknown, _auth: V2AuthContext, requestId
 
   // File not found → return 200 with null content (not 404)
   if (content === null) {
-    return successEnvelope<ScenarioFile>({
-      path,
-      content: null as unknown as string,
-      created_at: null as unknown as string,
-      updated_at: null as unknown as string,
-    }, requestId);
+    return successEnvelope<ScenarioFile>(
+      {
+        path,
+        // SAFETY: string-typed fields intentionally null here to signal "not found" over HTTP 200; callers check content === null before use.
+        content: null as unknown as string,
+        created_at: null as unknown as string,
+        updated_at: null as unknown as string,
+      },
+      requestId,
+    );
   }
 
   // Parse META for created/updated
@@ -1865,7 +2063,9 @@ async function handleScenarioRead(body: unknown, _auth: V2AuthContext, requestId
   let createdAt = now;
   let updatedAt = now;
 
-  const metaMatch = content.match(/^-----META-START-----\n([\s\S]*?)\n-----META-END-----/);
+  const metaMatch = content.match(
+    /^-----META-START-----\n([\s\S]*?)\n-----META-END-----/,
+  );
   if (metaMatch) {
     for (const line of metaMatch[1].split("\n")) {
       const idx = line.indexOf(": ");
@@ -1893,36 +2093,55 @@ async function handleScenarioRead(body: unknown, _auth: V2AuthContext, requestId
     }
   }
 
-  return successEnvelope<ScenarioFile>({
-    path, content,
-    version: await getProfileVersion(deps.getStore(), "l2", path, deps.requestIsolation),
-    team_id: deps.requestIsolation?.teamId,
-    agent_id: deps.requestIsolation?.agentId,
-    created_at: createdAt,
-    updated_at: updatedAt,
-  }, requestId);
+  return successEnvelope<ScenarioFile>(
+    {
+      path,
+      content,
+      version: await getProfileVersion(
+        deps.getStore(),
+        "l2",
+        path,
+        deps.requestIsolation,
+      ),
+      team_id: deps.requestIsolation?.teamId,
+      agent_id: deps.requestIsolation?.agentId,
+      created_at: createdAt,
+      updated_at: updatedAt,
+    },
+    requestId,
+  );
 }
 
-async function handleScenarioWrite(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
+async function handleScenarioWrite(
+  body: unknown,
+  _auth: V2AuthContext,
+  requestId: string,
+  deps: V2RouterDeps,
+): Promise<ApiResponseEnvelope> {
   const parsed = scenarioWriteRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodError(parsed.error), requestId);
   const { path, content, summary } = parsed.data;
 
   const baseStorage = deps.getStorage();
-  if (!baseStorage) return errorEnvelope(503, "Storage not available", requestId);
+  if (!baseStorage)
+    return errorEnvelope(503, "Storage not available", requestId);
   const storage = scopedProfileStorage(baseStorage, deps.requestIsolation);
 
   const key = `${StoragePaths.sceneBlocksDir}${path}`;
 
   // Existence check: path must already exist (no upsert/create)
   const existing = await storage.readFile(key);
-  if (existing === null) return errorEnvelope(404, `Scenario file not found: ${path}`, requestId);
+  if (existing === null)
+    return errorEnvelope(404, `Scenario file not found: ${path}`, requestId);
 
   // Parse existing META to preserve created + update updated/summary
   const now = new Date().toISOString();
   let finalContent: string;
 
-  const metaMatch = existing.match(/^-----META-START-----\n([\s\S]*?)\n-----META-END-----\n?/);
+  const metaMatch = existing.match(
+    /^-----META-START-----\n([\s\S]*?)\n-----META-END-----\n?/,
+  );
   if (metaMatch) {
     // Parse existing META fields
     const metaBlock = metaMatch[1];
@@ -1936,14 +2155,13 @@ async function handleScenarioWrite(body: unknown, _auth: V2AuthContext, requestI
     metaFields["updated"] = now;
     if (summary !== undefined) metaFields["summary"] = summary;
 
-    const newMeta = Object.entries(metaFields).map(([k, v]) => `${k}: ${v}`).join("\n");
+    const newMeta = Object.entries(metaFields)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join("\n");
     finalContent = `-----META-START-----\n${newMeta}\n-----META-END-----\n\n${content}`;
   } else {
     // META missing or corrupted — rebuild
-    const metaLines = [
-      `created: ${now}`,
-      `updated: ${now}`,
-    ];
+    const metaLines = [`created: ${now}`, `updated: ${now}`];
     if (summary !== undefined) metaLines.push(`summary: ${summary}`);
     finalContent = `-----META-START-----\n${metaLines.join("\n")}\n-----META-END-----\n\n${content}`;
   }
@@ -1952,7 +2170,15 @@ async function handleScenarioWrite(body: unknown, _auth: V2AuthContext, requestI
 
   // Sync L2 to VDB profiles + refresh scene index (best-effort)
   const store = deps.getStore();
-  const version = await syncProfileToVdb(store, "l2", path, finalContent, deps.logger, undefined, deps.requestIsolation);
+  const version = await syncProfileToVdb(
+    store,
+    "l2",
+    path,
+    finalContent,
+    deps.logger,
+    undefined,
+    deps.requestIsolation,
+  );
   await refreshSceneIndex(storage, deps.logger);
 
   // Audit: L2 update — record_id uses path (L2 primary key = file path)
@@ -1966,22 +2192,32 @@ async function handleScenarioWrite(body: unknown, _auth: V2AuthContext, requestI
     logger: deps.logger,
   });
 
-  return successEnvelope<ScenarioWriteData>({
-    path,
-    updated_at: now,
-    version,
-    team_id: deps.requestIsolation?.teamId,
-    agent_id: deps.requestIsolation?.agentId,
-  }, requestId);
+  return successEnvelope<ScenarioWriteData>(
+    {
+      path,
+      updated_at: now,
+      version,
+      team_id: deps.requestIsolation?.teamId,
+      agent_id: deps.requestIsolation?.agentId,
+    },
+    requestId,
+  );
 }
 
-async function handleScenarioRm(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
+async function handleScenarioRm(
+  body: unknown,
+  _auth: V2AuthContext,
+  requestId: string,
+  deps: V2RouterDeps,
+): Promise<ApiResponseEnvelope> {
   const parsed = scenarioRmRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodError(parsed.error), requestId);
   const { path } = parsed.data;
 
   const baseStorage = deps.getStorage();
-  if (!baseStorage) return errorEnvelope(503, "Storage not available", requestId);
+  if (!baseStorage)
+    return errorEnvelope(503, "Storage not available", requestId);
   const storage = scopedProfileStorage(baseStorage, deps.requestIsolation);
 
   const key = `${StoragePaths.sceneBlocksDir}${path}`;
@@ -1991,7 +2227,9 @@ async function handleScenarioRm(body: unknown, _auth: V2AuthContext, requestId: 
     try {
       const names = await storage.readdirNames(key, ".md");
       removedFilenames = names.map((name) => `${path}${name}`);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     await storage.rmdir(key);
   } else {
     removedFilenames = [path];
@@ -2000,7 +2238,13 @@ async function handleScenarioRm(body: unknown, _auth: V2AuthContext, requestId: 
 
   // Delete L2 profiles from VDB (best-effort)
   const store = deps.getStore();
-  await deleteProfilesFromVdb(store, "l2", removedFilenames, deps.logger, deps.requestIsolation);
+  await deleteProfilesFromVdb(
+    store,
+    "l2",
+    removedFilenames,
+    deps.logger,
+    deps.requestIsolation,
+  );
   await refreshSceneIndex(storage, deps.logger);
 
   // Audit: L2 delete — one row per deleted path
@@ -2023,71 +2267,109 @@ async function handleScenarioRm(body: unknown, _auth: V2AuthContext, requestId: 
 // L3 Core Handlers
 // ============================
 
-async function handleCoreRead(_body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
+async function handleCoreRead(
+  _body: unknown,
+  _auth: V2AuthContext,
+  requestId: string,
+  deps: V2RouterDeps,
+): Promise<ApiResponseEnvelope> {
   const baseStorage = deps.getStorage();
-  if (!baseStorage) return errorEnvelope(503, "Storage not available", requestId);
+  if (!baseStorage)
+    return errorEnvelope(503, "Storage not available", requestId);
   const storage = scopedProfileStorage(baseStorage, deps.requestIsolation);
 
-  deps.logger.debug?.(`${TAG} [core/read] storage.type=${storage.type}, key="${StoragePaths.persona}"`);
+  deps.logger.debug?.(
+    `${TAG} [core/read] storage.type=${storage.type}, key="${StoragePaths.persona}"`,
+  );
   const content = await storage.readFile(StoragePaths.persona);
-  deps.logger.debug?.(`${TAG} [core/read] readFile result: ${content === null ? "null (not found)" : `${content.length} chars`}`);
+  deps.logger.debug?.(
+    `${TAG} [core/read] readFile result: ${content === null ? "null (not found)" : `${content.length} chars`}`,
+  );
 
   // File not found → return 200 with null content (not 404)
   if (content === null) {
-    return successEnvelope<CoreFile>({
-      content: null as unknown as string,
-      created_at: null as unknown as string,
-      updated_at: null as unknown as string,
-    }, requestId);
+    return successEnvelope<CoreFile>(
+      {
+        // SAFETY: string-typed fields intentionally null here to signal "not found" over HTTP 200; callers check content === null before use.
+        content: null as unknown as string,
+        created_at: null as unknown as string,
+        updated_at: null as unknown as string,
+      },
+      requestId,
+    );
   }
 
   const stat = await storage.stat(StoragePaths.persona);
   const now = new Date().toISOString();
 
-  return successEnvelope<CoreFile>({
-    content,
-    version: await getProfileVersion(deps.getStore(), "l3", StoragePaths.persona, deps.requestIsolation),
-    team_id: deps.requestIsolation?.teamId,
-    agent_id: deps.requestIsolation?.agentId,
-    created_at: stat ? new Date(stat.createdAt).toISOString() : now,
-    updated_at: stat ? new Date(stat.lastModified).toISOString() : now,
-  }, requestId);
+  return successEnvelope<CoreFile>(
+    {
+      content,
+      version: await getProfileVersion(
+        deps.getStore(),
+        "l3",
+        StoragePaths.persona,
+        deps.requestIsolation,
+      ),
+      team_id: deps.requestIsolation?.teamId,
+      agent_id: deps.requestIsolation?.agentId,
+      created_at: stat ? new Date(stat.createdAt).toISOString() : now,
+      updated_at: stat ? new Date(stat.lastModified).toISOString() : now,
+    },
+    requestId,
+  );
 }
 
-async function handleCoreCount(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
+async function handleCoreCount(
+  body: unknown,
+  _auth: V2AuthContext,
+  requestId: string,
+  deps: V2RouterDeps,
+): Promise<ApiResponseEnvelope> {
   const parsed = coreCountRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodError(parsed.error), requestId);
   const store = deps.getStore();
   if (typeof store?.countProfiles === "function") {
     const total = await store.countProfiles({
       type: "l3",
       teamId: deps.requestIsolation?.teamId,
-      userId: deps.requestIsolation?.teamId ? undefined : deps.requestIsolation?.userId,
+      userId: deps.requestIsolation?.teamId
+        ? undefined
+        : deps.requestIsolation?.userId,
       agentId: deps.requestIsolation?.agentId,
     });
     return successEnvelope<CountData>({ total }, requestId);
   }
 
   const baseStorage = deps.getStorage();
-  if (!baseStorage) return errorEnvelope(503, "Storage not available", requestId);
+  if (!baseStorage)
+    return errorEnvelope(503, "Storage not available", requestId);
   const storage = scopedProfileStorage(baseStorage, deps.requestIsolation);
   const content = await storage.readFile(StoragePaths.persona);
   return successEnvelope<CountData>({ total: content ? 1 : 0 }, requestId);
 }
 
-async function handleCoreWrite(body: unknown, _auth: V2AuthContext, requestId: string, deps: V2RouterDeps): Promise<ApiResponseEnvelope> {
+async function handleCoreWrite(
+  body: unknown,
+  _auth: V2AuthContext,
+  requestId: string,
+  deps: V2RouterDeps,
+): Promise<ApiResponseEnvelope> {
   const parsed = coreWriteRequestSchema.safeParse(body);
-  if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
+  if (!parsed.success)
+    return errorEnvelope(400, formatZodError(parsed.error), requestId);
   const { content } = parsed.data;
 
   const baseStorage = deps.getStorage();
-  if (!baseStorage) return errorEnvelope(503, "Storage not available", requestId);
+  if (!baseStorage)
+    return errorEnvelope(503, "Storage not available", requestId);
   const storage = scopedProfileStorage(baseStorage, deps.requestIsolation);
 
   // Normalize before persistence: persona body must NOT contain Scene Navigation
   // (a derived section rebuilt from scene_index.json) or stray surrounding
   // whitespace. Both COS and VDB get the *exact* same bytes so md5(content) is
-  // a stable identity across stores. Without this, /v2/core/write callers that
+  // a stable identity across stores. Without this, /v3/core/write callers that
   // post the raw round-tripped body (which includes the navigation footer and
   // a trailing newline appended by refreshPersonaNavigation) would write a
   // mismatched copy to each store, and pullProfilesToLocal would later treat
@@ -2098,7 +2380,15 @@ async function handleCoreWrite(body: unknown, _auth: V2AuthContext, requestId: s
 
   // Sync L3 persona to VDB profiles (best-effort)
   const store = deps.getStore();
-  const version = await syncProfileToVdb(store, "l3", StoragePaths.persona, personaBody, deps.logger, undefined, deps.requestIsolation);
+  const version = await syncProfileToVdb(
+    store,
+    "l3",
+    StoragePaths.persona,
+    personaBody,
+    deps.logger,
+    undefined,
+    deps.requestIsolation,
+  );
 
   // Audit: L3 update — record_id uses personas storage path
   await recordAudit(store, {
@@ -2111,16 +2401,19 @@ async function handleCoreWrite(body: unknown, _auth: V2AuthContext, requestId: s
     logger: deps.logger,
   });
 
-  return successEnvelope<CoreWriteData>({
-    updated_at: new Date().toISOString(),
-    version,
-    team_id: deps.requestIsolation?.teamId,
-    agent_id: deps.requestIsolation?.agentId,
-  }, requestId);
+  return successEnvelope<CoreWriteData>(
+    {
+      updated_at: new Date().toISOString(),
+      version,
+      team_id: deps.requestIsolation?.teamId,
+      agent_id: deps.requestIsolation?.agentId,
+    },
+    requestId,
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// /v2/pipeline/status — standalone-only introspection.
+// /v3/pipeline/status — standalone-only introspection.
 // Returns per-L-type queue/in-flight stats by reading the in-memory task
 // queue (LocalStateBackend.listQueuedTasks) and worker's running set
 // (PipelineWorker.getRunningTasks). idle = queued===0 && running===0.
@@ -2150,7 +2443,13 @@ interface PipelineStatusData {
 }
 
 function emptyLayer(): LayerStatus {
-  return { queued: 0, running: 0, queued_sessions: [], running_sessions: [], idle: true };
+  return {
+    queued: 0,
+    running: 0,
+    queued_sessions: [],
+    running_sessions: [],
+    idle: true,
+  };
 }
 
 async function handlePipelineStatus(
@@ -2166,7 +2465,11 @@ async function handlePipelineStatus(
 
   // Legacy standalone (no stateBackend / no worker) — pipeline isn't running.
   if (!deps.stateBackend || !deps.pipelineWorker) {
-    return errorEnvelope(503, "Pipeline not running (legacy standalone mode)", requestId);
+    return errorEnvelope(
+      503,
+      "Pipeline not running (legacy standalone mode)",
+      requestId,
+    );
   }
 
   // listQueuedTasks is optional on IStateBackend; LocalStateBackend implements
@@ -2275,21 +2578,5 @@ export {
   handleCoreRead,
   handleCoreWrite,
   handleCoreCount,
-  handleTeamCreate,
-  handleTeamGet,
-  handleTeamUpdate,
-  handleTeamDelete,
-  handleUserCreate,
-  handleUserGet,
-  handleUserUpdate,
-  handleUserDelete,
-  handleAgentCreate,
-  handleAgentGet,
-  handleAgentUpdate,
-  handleAgentDelete,
-  handleTaskCreate,
-  handleTaskGet,
-  handleTaskUpdate,
-  handleTaskDelete,
   handlePipelineStatus,
 };

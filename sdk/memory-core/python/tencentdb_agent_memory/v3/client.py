@@ -12,7 +12,7 @@ Differences with v2
       For governance panel features such as layer-counts, cross-session L0/L1 lists, etc.).
     - L2/L3 are inherently team+agent-level profile aggregations and do not consume session_id.
 - HTTP paths use ``/v3/...``; the server validates according to the same rules (422 if any of team/agent/user is missing).
-- Non-L0–L3 interfaces such as ``offload`` / ``read_file`` are not exposed in v3 — continue using the v2 client.
+- ``offload_*`` helpers (``/v3/offload/*``) and ``read_file`` (direct COS read, unversioned) are also exposed here.
 
 >>> from tencentdb_agent_memory.v3 import MemoryClient
 >>> # Typical usage: team+agent+user are defined at construction time, and session follows the specific session
@@ -32,10 +32,17 @@ Differences with v2
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from collections.abc import Sequence
+from typing import Any
 
 from .._http import Stub
 from .._v3_http import AsyncHttpStub, HttpStub
+from ..cos import (
+    AsyncMemoryFileReader,
+    AsyncStsCredentialManager,
+    MemoryFileReader,
+    StsCredentialManager,
+)
 from ..errors import ParamError
 
 logger = logging.getLogger(__name__)
@@ -45,15 +52,15 @@ _V3 = "/v3"
 _UNSET = object()
 
 
-def _strip_none(d: Dict[str, Any]) -> Dict[str, Any]:
+def _strip_none(d: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in d.items() if v is not None}
 
 
 def _normalize_delete_ids(
     field: str,
-    raw: Optional[List[str]],
+    raw: Sequence[str] | None,
     max_items: int,
-) -> Optional[List[str]]:
+) -> list[str] | None:
     """Normalize the id list for batch deletion: validate non-empty strings, deduplicate (preserve order), check the limit.
 
     Block destructive operation inputs at the client, exposing issues earlier than waiting for the server to return 400,
@@ -68,7 +75,7 @@ def _normalize_delete_ids(
     if any(not isinstance(item, str) or not item.strip() for item in raw):
         raise ParamError(f"{field} must contain only non-empty strings")
 
-    seen: Dict[str, None] = {}
+    seen: dict[str, None] = {}
     for item in raw:
         seen.setdefault(item.strip(), None)
     deduped = list(seen.keys())
@@ -106,8 +113,8 @@ class _IsolationCtx:
         team_id: str,
         agent_id: str,
         user_id: str,
-        session_id: Optional[str] = None,
-        task_id: Optional[str] = None,
+        session_id: str | None = None,
+        task_id: str | None = None,
     ) -> None:
         self.team_id = team_id
         self.agent_id = agent_id
@@ -115,9 +122,9 @@ class _IsolationCtx:
         self.session_id = session_id
         self.task_id = task_id
 
-    def base_body(self) -> Dict[str, Any]:
+    def base_body(self) -> dict[str, Any]:
         """team + agent + user (+ optional task); excludes session_id. Used for L2/L3 calls."""
-        body: Dict[str, Any] = {
+        body: dict[str, Any] = {
             "team_id": self.team_id,
             "agent_id": self.agent_id,
             "user_id": self.user_id,
@@ -126,7 +133,7 @@ class _IsolationCtx:
             body["task_id"] = self.task_id
         return body
 
-    def resolve_session(self, override: Optional[str]) -> Optional[str]:
+    def resolve_session(self, override: str | None) -> str | None:
         """L0/L1 call: override > session_id at construction.
 
         v3 server session_id optional: if passed, converge by session, otherwise by (team,agent,user)
@@ -136,7 +143,7 @@ class _IsolationCtx:
         """
         return override or self.session_id
 
-    def resolve_session_for_write(self, override: Optional[str]) -> str:
+    def resolve_session_for_write(self, override: str | None) -> str:
         """Write path specific: ``add_conversation`` must get a non-empty session_id.
 
         raise ``ParamError`` —— avoid silently merging writes without a session on the server
@@ -169,17 +176,17 @@ class MemoryClient:
         self,
         endpoint: str = "",
         api_key: str = "",
-        service_id: Optional[str] = None,
+        service_id: str | None = None,
         *,
         team_id: str = "",
         agent_id: str = "",
         user_id: str = "",
-        session_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-        user_key: Optional[str] = None,
+        session_id: str | None = None,
+        task_id: str | None = None,
+        user_key: str | None = None,
         timeout: float = 30,
         verify: bool = True,
-        stub: Optional[Stub] = None,
+        stub: Stub | None = None,
     ) -> None:
         _validate_construction(team_id, agent_id, user_id)
         if stub is not None:
@@ -195,17 +202,21 @@ class MemoryClient:
             )
         self._iso = _IsolationCtx(team_id, agent_id, user_id, session_id, task_id)
 
+        # Memory file reader (lazy init on first read_file call)
+        self._cos_reader: MemoryFileReader | None = None
+        self._sts_manager: StsCredentialManager | None = None
+
     # -- isolation overrides ------------------------------------------------
 
     def with_isolation(
         self,
         *,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
         session_id: Any = _UNSET,
         task_id: Any = _UNSET,
-    ) -> "MemoryClient":
+    ) -> MemoryClient:
         """Return a clone sharing the transport with selected isolation fields overridden.
 
         Pass ``session_id=None`` or ``task_id=None`` to explicitly clear a bound
@@ -228,10 +239,10 @@ class MemoryClient:
 
     def add_conversation(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         *,
-        session_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/conversation/add`` — Write required session_id (either construct or call)."""
         return self._stub.post(
             f"{_V3}/conversation/add",
@@ -245,12 +256,12 @@ class MemoryClient:
     def query_conversation(
         self,
         *,
-        session_id: Optional[str] = None,
-        limit: Optional[int] = None,
-        offset: Optional[int] = None,
-        time_start: Optional[str] = None,
-        time_end: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        session_id: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        time_start: str | None = None,
+        time_end: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/conversation/query``"""
         return self._stub.post(
             f"{_V3}/conversation/query",
@@ -268,11 +279,11 @@ class MemoryClient:
         self,
         query: str,
         *,
-        limit: Optional[int] = None,
-        session_id: Optional[str] = None,
-        time_start: Optional[str] = None,
-        time_end: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        limit: int | None = None,
+        session_id: str | None = None,
+        time_start: str | None = None,
+        time_end: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/conversation/search``"""
         return self._stub.post(
             f"{_V3}/conversation/search",
@@ -289,10 +300,10 @@ class MemoryClient:
     def delete_conversation(
         self,
         *,
-        message_ids: Optional[List[str]] = None,
-        session_ids: Optional[List[str]] = None,
-        session_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        message_ids: list[str] | None = None,
+        session_ids: list[str] | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/conversation/delete`` — Batch delete L0.
 
         ``message_ids`` (≤5000) and ``session_ids`` (≤100) must be provided at least one, and can be provided simultaneously.
@@ -333,10 +344,10 @@ class MemoryClient:
     def count_conversation(
         self,
         *,
-        session_id: Optional[str] = None,
-        time_start: Optional[str] = None,
-        time_end: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        session_id: str | None = None,
+        time_start: str | None = None,
+        time_end: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/conversation/count`` — Same filters as query, only returns ``{total}``."""
         return self._stub.post(
             f"{_V3}/conversation/count",
@@ -355,9 +366,9 @@ class MemoryClient:
         id: str,
         content: str,
         *,
-        background: Optional[str] = None,
-        session_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        background: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/atomic/update``"""
         return self._stub.post(
             f"{_V3}/atomic/update",
@@ -373,13 +384,13 @@ class MemoryClient:
     def query_atomic(
         self,
         *,
-        type: Optional[str] = None,
-        limit: Optional[int] = None,
-        offset: Optional[int] = None,
-        time_start: Optional[str] = None,
-        time_end: Optional[str] = None,
-        session_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        type: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        time_start: str | None = None,
+        time_end: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/atomic/query``"""
         return self._stub.post(
             f"{_V3}/atomic/query",
@@ -398,12 +409,12 @@ class MemoryClient:
         self,
         query: str,
         *,
-        limit: Optional[int] = None,
-        type: Optional[str] = None,
-        time_start: Optional[str] = None,
-        time_end: Optional[str] = None,
-        session_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        limit: int | None = None,
+        type: str | None = None,
+        time_start: str | None = None,
+        time_end: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/atomic/search``"""
         return self._stub.post(
             f"{_V3}/atomic/search",
@@ -420,10 +431,10 @@ class MemoryClient:
 
     def delete_atomic(
         self,
-        ids: List[str],
+        ids: list[str],
         *,
-        session_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/atomic/delete`` — ids required, up to 5000 entries per request."""
         normalized = _normalize_delete_ids("ids", ids, 5000)
         if not normalized:
@@ -440,11 +451,11 @@ class MemoryClient:
     def count_atomic(
         self,
         *,
-        type: Optional[str] = None,
-        time_start: Optional[str] = None,
-        time_end: Optional[str] = None,
-        session_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        type: str | None = None,
+        time_start: str | None = None,
+        time_end: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/atomic/count`` — Same filters as query, only returns ``{total}``."""
         return self._stub.post(
             f"{_V3}/atomic/count",
@@ -459,14 +470,14 @@ class MemoryClient:
 
     # -- L2 Scenario (team+agent level, no session_id needed) -------------------
 
-    def list_scenarios(self, *, path_prefix: Optional[str] = None) -> Dict[str, Any]:
+    def list_scenarios(self, *, path_prefix: str | None = None) -> dict[str, Any]:
         """``POST /v3/scenario/ls``"""
         return self._stub.post(
             f"{_V3}/scenario/ls",
             _strip_none({**self._iso.base_body(), "path_prefix": path_prefix}),
         )
 
-    def read_scenario(self, path: str) -> Dict[str, Any]:
+    def read_scenario(self, path: str) -> dict[str, Any]:
         """``POST /v3/scenario/read``"""
         return self._stub.post(
             f"{_V3}/scenario/read",
@@ -478,8 +489,8 @@ class MemoryClient:
         path: str,
         content: str,
         *,
-        summary: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        summary: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/scenario/write``"""
         return self._stub.post(
             f"{_V3}/scenario/write",
@@ -491,14 +502,14 @@ class MemoryClient:
             }),
         )
 
-    def rm_scenario(self, path: str) -> Dict[str, Any]:
+    def rm_scenario(self, path: str) -> dict[str, Any]:
         """``POST /v3/scenario/rm``"""
         return self._stub.post(
             f"{_V3}/scenario/rm",
             {**self._iso.base_body(), "path": path},
         )
 
-    def count_scenario(self, *, path_prefix: Optional[str] = None) -> Dict[str, Any]:
+    def count_scenario(self, *, path_prefix: str | None = None) -> dict[str, Any]:
         """``POST /v3/scenario/count`` — Same filters as ls, only returns ``{total}``."""
         return self._stub.post(
             f"{_V3}/scenario/count",
@@ -507,24 +518,24 @@ class MemoryClient:
 
     # -- L3 Core (team+agent level, no session_id needed) -----------------------
 
-    def read_core(self) -> Dict[str, Any]:
+    def read_core(self) -> dict[str, Any]:
         """``POST /v3/core/read``"""
         return self._stub.post(f"{_V3}/core/read", self._iso.base_body())
 
-    def write_core(self, content: str) -> Dict[str, Any]:
+    def write_core(self, content: str) -> dict[str, Any]:
         """``POST /v3/core/write``"""
         return self._stub.post(
             f"{_V3}/core/write",
             {**self._iso.base_body(), "content": content},
         )
 
-    def count_core(self) -> Dict[str, Any]:
+    def count_core(self) -> dict[str, Any]:
         """``POST /v3/core/count`` — Count the number of core memory files."""
         return self._stub.post(f"{_V3}/core/count", self._iso.base_body())
 
     # -- Chat Memory (asset-level) -----------------------------------------
 
-    def clear_chat_memory(self, memory_ids: List[str]) -> Dict[str, Any]:
+    def clear_chat_memory(self, memory_ids: list[str]) -> dict[str, Any]:
         """``POST /v3/chat-memory/clear`` — Clear all chat memory content, keep assets.
 
         Clear scope: L0 / L1 / L2 / L3 + vector + files.
@@ -551,15 +562,92 @@ class MemoryClient:
         # Note: no isolation triple -- scope is determined by memory_ids.
         return self._stub.post(f"{_V3}/chat-memory/clear", {"memory_ids": normalized})
 
+    # -- Offload ---------------------------------------------------------------
+
+    def offload_ingest(
+        self,
+        session_id: str,
+        tool_pairs: list[dict[str, Any]],
+        *,
+        prompt: str | None = None,
+        recent_messages: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """``POST /v3/offload/ingest`` — report tool call pairs to trigger async L1 processing."""
+        return self._stub.post(
+            f"{_V3}/offload/ingest",
+            _strip_none({
+                "session_id": session_id,
+                "tool_pairs": tool_pairs,
+                "prompt": prompt,
+                "recent_messages": recent_messages,
+            }),
+        )
+
+    def offload_compact(
+        self,
+        session_id: str,
+        messages: list[dict[str, Any]],
+        ratio: float,
+        total_tokens: int,
+        *,
+        context_window: int | None = None,
+        message_tokens: list[int] | None = None,
+    ) -> dict[str, Any]:
+        """``POST /v3/offload/compact`` — server-side context compaction."""
+        return self._stub.post(
+            f"{_V3}/offload/compact",
+            _strip_none({
+                "session_id": session_id,
+                "messages": messages,
+                "ratio": ratio,
+                "total_tokens": total_tokens,
+                "context_window": context_window,
+                "message_tokens": message_tokens,
+            }),
+        )
+
+    def offload_query_mmd(
+        self,
+        session_id: str,
+        *,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """``POST /v3/offload/query-mmd`` — query the session task flow chart (MMD)."""
+        return self._stub.post(
+            f"{_V3}/offload/query-mmd",
+            _strip_none({
+                "session_id": session_id,
+                "limit": limit,
+            }),
+        )
+
+    # -- File read (memory pipeline artifacts, via COS) --------------------
+
+    def read_file(self, path: str) -> str:
+        """Read a memory pipeline artifact (e.g. ``persona.md``) by relative path.
+
+        Reads COS storage directly (unversioned) — no gateway API version involved.
+        """
+        if self._cos_reader is None:
+            self._sts_manager = StsCredentialManager(
+                endpoint=self._stub.endpoint,
+                api_key=self._stub.headers["Authorization"].removeprefix("Bearer "),
+                service_id=self._stub.headers["x-tdai-service-id"],
+            )
+            self._cos_reader = MemoryFileReader(self._sts_manager)
+        return self._cos_reader.read(path)
+
     # -- Lifecycle ---------------------------------------------------------
 
     def close(self) -> None:
+        if self._cos_reader is not None:
+            self._cos_reader.close()
         self._stub.close()
 
-    def __enter__(self) -> "MemoryClient":
+    def __enter__(self) -> MemoryClient:
         return self
 
-    def __exit__(self, *exc: Any) -> None:
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
         self.close()
 
 
@@ -578,17 +666,17 @@ class AsyncMemoryClient:
         self,
         endpoint: str = "",
         api_key: str = "",
-        service_id: Optional[str] = None,
+        service_id: str | None = None,
         *,
         team_id: str = "",
         agent_id: str = "",
         user_id: str = "",
-        session_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-        user_key: Optional[str] = None,
+        session_id: str | None = None,
+        task_id: str | None = None,
+        user_key: str | None = None,
         timeout: float = 30,
         verify: bool = True,
-        stub: Optional[Stub] = None,
+        stub: Stub | None = None,
     ) -> None:
         _validate_construction(team_id, agent_id, user_id)
         if stub is not None:
@@ -603,15 +691,19 @@ class AsyncMemoryClient:
             )
         self._iso = _IsolationCtx(team_id, agent_id, user_id, session_id, task_id)
 
+        # Memory file reader (lazy init on first read_file call)
+        self._cos_reader: AsyncMemoryFileReader | None = None
+        self._sts_manager: AsyncStsCredentialManager | None = None
+
     def with_isolation(
         self,
         *,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
         session_id: Any = _UNSET,
         task_id: Any = _UNSET,
-    ) -> "AsyncMemoryClient":
+    ) -> AsyncMemoryClient:
         """Clone this client; pass ``None`` to clear a bound session/task."""
         new_team = self._iso.team_id if team_id is None else team_id
         new_agent = self._iso.agent_id if agent_id is None else agent_id
@@ -630,10 +722,10 @@ class AsyncMemoryClient:
 
     async def add_conversation(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         *,
-        session_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/conversation/add`` — Write required session_id (either construct or call)."""
         return await self._stub.post(
             f"{_V3}/conversation/add",
@@ -647,12 +739,12 @@ class AsyncMemoryClient:
     async def query_conversation(
         self,
         *,
-        session_id: Optional[str] = None,
-        limit: Optional[int] = None,
-        offset: Optional[int] = None,
-        time_start: Optional[str] = None,
-        time_end: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        session_id: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        time_start: str | None = None,
+        time_end: str | None = None,
+    ) -> dict[str, Any]:
         return await self._stub.post(
             f"{_V3}/conversation/query",
             _strip_none({
@@ -667,11 +759,11 @@ class AsyncMemoryClient:
         self,
         query: str,
         *,
-        limit: Optional[int] = None,
-        session_id: Optional[str] = None,
-        time_start: Optional[str] = None,
-        time_end: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        limit: int | None = None,
+        session_id: str | None = None,
+        time_start: str | None = None,
+        time_end: str | None = None,
+    ) -> dict[str, Any]:
         return await self._stub.post(
             f"{_V3}/conversation/search",
             _strip_none({
@@ -685,10 +777,10 @@ class AsyncMemoryClient:
     async def delete_conversation(
         self,
         *,
-        message_ids: Optional[List[str]] = None,
-        session_ids: Optional[List[str]] = None,
-        session_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        message_ids: list[str] | None = None,
+        session_ids: list[str] | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/conversation/delete`` (async). Semantics are the same as the synchronous version."""
         normalized_messages = _normalize_delete_ids("message_ids", message_ids, 5000)
         normalized_sessions = _normalize_delete_ids("session_ids", session_ids, 100)
@@ -719,10 +811,10 @@ class AsyncMemoryClient:
     async def count_conversation(
         self,
         *,
-        session_id: Optional[str] = None,
-        time_start: Optional[str] = None,
-        time_end: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        session_id: str | None = None,
+        time_start: str | None = None,
+        time_end: str | None = None,
+    ) -> dict[str, Any]:
         return await self._stub.post(
             f"{_V3}/conversation/count",
             _strip_none({
@@ -740,9 +832,9 @@ class AsyncMemoryClient:
         id: str,
         content: str,
         *,
-        background: Optional[str] = None,
-        session_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        background: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
         return await self._stub.post(
             f"{_V3}/atomic/update",
             _strip_none({
@@ -755,13 +847,13 @@ class AsyncMemoryClient:
     async def query_atomic(
         self,
         *,
-        type: Optional[str] = None,
-        limit: Optional[int] = None,
-        offset: Optional[int] = None,
-        time_start: Optional[str] = None,
-        time_end: Optional[str] = None,
-        session_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        type: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        time_start: str | None = None,
+        time_end: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
         return await self._stub.post(
             f"{_V3}/atomic/query",
             _strip_none({
@@ -776,12 +868,12 @@ class AsyncMemoryClient:
         self,
         query: str,
         *,
-        limit: Optional[int] = None,
-        type: Optional[str] = None,
-        time_start: Optional[str] = None,
-        time_end: Optional[str] = None,
-        session_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        limit: int | None = None,
+        type: str | None = None,
+        time_start: str | None = None,
+        time_end: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
         return await self._stub.post(
             f"{_V3}/atomic/search",
             _strip_none({
@@ -794,10 +886,10 @@ class AsyncMemoryClient:
 
     async def delete_atomic(
         self,
-        ids: List[str],
+        ids: list[str],
         *,
-        session_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/atomic/delete`` (async). ids is required, up to 5000 entries per request."""
         normalized = _normalize_delete_ids("ids", ids, 5000)
         if not normalized:
@@ -814,11 +906,11 @@ class AsyncMemoryClient:
     async def count_atomic(
         self,
         *,
-        type: Optional[str] = None,
-        time_start: Optional[str] = None,
-        time_end: Optional[str] = None,
-        session_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        type: str | None = None,
+        time_start: str | None = None,
+        time_end: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
         return await self._stub.post(
             f"{_V3}/atomic/count",
             _strip_none({
@@ -832,13 +924,13 @@ class AsyncMemoryClient:
 
     # -- L2 Scenario (team+agent level, no session_id needed) -------------------
 
-    async def list_scenarios(self, *, path_prefix: Optional[str] = None) -> Dict[str, Any]:
+    async def list_scenarios(self, *, path_prefix: str | None = None) -> dict[str, Any]:
         return await self._stub.post(
             f"{_V3}/scenario/ls",
             _strip_none({**self._iso.base_body(), "path_prefix": path_prefix}),
         )
 
-    async def read_scenario(self, path: str) -> Dict[str, Any]:
+    async def read_scenario(self, path: str) -> dict[str, Any]:
         return await self._stub.post(
             f"{_V3}/scenario/read",
             {**self._iso.base_body(), "path": path},
@@ -849,8 +941,8 @@ class AsyncMemoryClient:
         path: str,
         content: str,
         *,
-        summary: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        summary: str | None = None,
+    ) -> dict[str, Any]:
         return await self._stub.post(
             f"{_V3}/scenario/write",
             _strip_none({
@@ -859,13 +951,13 @@ class AsyncMemoryClient:
             }),
         )
 
-    async def rm_scenario(self, path: str) -> Dict[str, Any]:
+    async def rm_scenario(self, path: str) -> dict[str, Any]:
         return await self._stub.post(
             f"{_V3}/scenario/rm",
             {**self._iso.base_body(), "path": path},
         )
 
-    async def count_scenario(self, *, path_prefix: Optional[str] = None) -> Dict[str, Any]:
+    async def count_scenario(self, *, path_prefix: str | None = None) -> dict[str, Any]:
         return await self._stub.post(
             f"{_V3}/scenario/count",
             _strip_none({**self._iso.base_body(), "path_prefix": path_prefix}),
@@ -873,21 +965,21 @@ class AsyncMemoryClient:
 
     # -- L3 Core (team+agent level, no session_id needed) -----------------------
 
-    async def read_core(self) -> Dict[str, Any]:
+    async def read_core(self) -> dict[str, Any]:
         return await self._stub.post(f"{_V3}/core/read", self._iso.base_body())
 
-    async def write_core(self, content: str) -> Dict[str, Any]:
+    async def write_core(self, content: str) -> dict[str, Any]:
         return await self._stub.post(
             f"{_V3}/core/write",
             {**self._iso.base_body(), "content": content},
         )
 
-    async def count_core(self) -> Dict[str, Any]:
+    async def count_core(self) -> dict[str, Any]:
         return await self._stub.post(f"{_V3}/core/count", self._iso.base_body())
 
     # -- Chat Memory (asset-level) -----------------------------------------
 
-    async def clear_chat_memory(self, memory_ids: List[str]) -> Dict[str, Any]:
+    async def clear_chat_memory(self, memory_ids: list[str]) -> dict[str, Any]:
         """``POST /v3/chat-memory/clear`` (async). Same semantics as the synchronous version."""
         normalized = _normalize_delete_ids("memory_ids", memory_ids, 100)
         if not normalized:
@@ -895,10 +987,90 @@ class AsyncMemoryClient:
         # Note: no isolation triple -- scope is determined by memory_ids.
         return await self._stub.post(f"{_V3}/chat-memory/clear", {"memory_ids": normalized})
 
+    # -- Offload ---------------------------------------------------------------
+
+    async def offload_ingest(
+        self,
+        session_id: str,
+        tool_pairs: list[dict[str, Any]],
+        *,
+        prompt: str | None = None,
+        recent_messages: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """``POST /v3/offload/ingest`` (async) — report tool call pairs to trigger async L1 processing."""
+        # type: ignore[reportGeneralTypeIssues]  // Stub.post is sync-typed; the async transport returns a coroutine here.
+        return await self._stub.post(
+            f"{_V3}/offload/ingest",
+            _strip_none({
+                "session_id": session_id,
+                "tool_pairs": tool_pairs,
+                "prompt": prompt,
+                "recent_messages": recent_messages,
+            }),
+        )
+
+    async def offload_compact(
+        self,
+        session_id: str,
+        messages: list[dict[str, Any]],
+        ratio: float,
+        total_tokens: int,
+        *,
+        context_window: int | None = None,
+        message_tokens: list[int] | None = None,
+    ) -> dict[str, Any]:
+        """``POST /v3/offload/compact`` (async) — server-side context compaction."""
+        # type: ignore[reportGeneralTypeIssues]  // Stub.post is sync-typed; the async transport returns a coroutine here.
+        return await self._stub.post(
+            f"{_V3}/offload/compact",
+            _strip_none({
+                "session_id": session_id,
+                "messages": messages,
+                "ratio": ratio,
+                "total_tokens": total_tokens,
+                "context_window": context_window,
+                "message_tokens": message_tokens,
+            }),
+        )
+
+    async def offload_query_mmd(
+        self,
+        session_id: str,
+        *,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """``POST /v3/offload/query-mmd`` (async) — query the session task flow chart (MMD)."""
+        # type: ignore[reportGeneralTypeIssues]  // Stub.post is sync-typed; the async transport returns a coroutine here.
+        return await self._stub.post(
+            f"{_V3}/offload/query-mmd",
+            _strip_none({
+                "session_id": session_id,
+                "limit": limit,
+            }),
+        )
+
+    # -- File read (memory pipeline artifacts, via COS) --------------------
+
+    async def read_file(self, path: str) -> str:
+        """Read a memory pipeline artifact (e.g. ``persona.md``) by relative path.
+
+        Reads COS storage directly (unversioned) — no gateway API version involved.
+        """
+        if self._cos_reader is None:
+            self._sts_manager = AsyncStsCredentialManager(
+                endpoint=self._stub.endpoint,
+                api_key=self._stub.headers["Authorization"].removeprefix("Bearer "),
+                service_id=self._stub.headers["x-tdai-service-id"],
+            )
+            self._cos_reader = AsyncMemoryFileReader(self._sts_manager)
+        return await self._cos_reader.read(path)
+
     async def close(self) -> None:
+        if self._cos_reader is not None:
+            await self._cos_reader.close()
         await self._stub.close()
 
-    async def __aenter__(self) -> "AsyncMemoryClient":
+    async def __aenter__(self) -> AsyncMemoryClient:
         return self
 
     async def __aexit__(self, *exc: Any) -> None:

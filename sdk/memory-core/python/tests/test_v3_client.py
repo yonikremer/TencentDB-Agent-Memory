@@ -1,4 +1,5 @@
 import pytest
+from fakes import FakeAsyncReader, FakeAsyncStub, FakeReader, FakeStsMgr, FakeStub
 
 import tencentdb_agent_memory.v3.client as v3mod
 from tencentdb_agent_memory.errors import ParamError
@@ -10,7 +11,6 @@ from tencentdb_agent_memory.v3.client import (
     _strip_none,
     _validate_construction,
 )
-from fakes import FakeAsyncStub, FakeStub
 
 KW = dict(team_id="t1", agent_id="a1", user_id="u1")
 
@@ -19,7 +19,7 @@ def _sync(**kw):
     args = dict(KW)
     args.update(kw)
     stub = FakeStub()
-    return MemoryClient(endpoint="http://e", api_key="k", service_id="s", stub=stub, **args), stub
+    return MemoryClient(endpoint="http://e", api_key="k", service_id="s", stub=stub, **args), stub  # type: ignore[call-arg]  // FakeStub is runtime-compatible; **args unpacking defeats narrowing.
 
 
 def test_helpers_and_validation():
@@ -29,7 +29,7 @@ def test_helpers_and_validation():
     assert _normalize_delete_ids("f", ("x",), 5) == ["x"]
     for bad in ("nope", ["ok", ""], ["ok", 1], ["  "], None.__class__):
         with pytest.raises(ParamError):
-            _normalize_delete_ids("f", bad, 5)
+            _normalize_delete_ids("f", bad, 5)  # type: ignore[arg-type]  // intentional invalid input.
     with pytest.raises(ParamError):
         _normalize_delete_ids("f", [f"m{i}" for i in range(6)], 5)
     for missing in (dict(team_id="", agent_id="a", user_id="u"),
@@ -58,7 +58,7 @@ def test_init_variants():
         MemoryClient(endpoint="http://e", api_key="k", team_id="t", agent_id="a", user_id="u")
     real = MemoryClient(endpoint="http://e", api_key="k", service_id="s", **KW)
     real.close()
-    with MemoryClient(endpoint="http://e", api_key="k", service_id="s", stub=FakeStub(), **KW) as c:
+    with MemoryClient(endpoint="http://e", api_key="k", service_id="s", stub=FakeStub(), **KW) as c:  # type: ignore[call-arg]  // FakeStub is runtime-compatible.
         assert isinstance(c, MemoryClient)
 
 
@@ -113,7 +113,7 @@ def test_delete_conversation():
     with pytest.raises(ParamError):
         c.delete_conversation(session_id="")
     with pytest.raises(ParamError):
-        c.delete_conversation(session_id=123)
+        c.delete_conversation(session_id=123)  # type: ignore[arg-type]  // intentional invalid input.
     c.close()
 
 
@@ -153,7 +153,7 @@ def test_l2_l3_and_clear():
     with pytest.raises(ParamError):
         c.clear_chat_memory([])
     with pytest.raises(ParamError):
-        c.clear_chat_memory("nope")
+        c.clear_chat_memory("nope")  # type: ignore[arg-type]  // intentional invalid input.
     c.close()
 
 
@@ -164,7 +164,7 @@ async def test_async_mirror():
                           team_id="t", agent_id="", user_id="u")
     with pytest.raises(ParamError):
         AsyncMemoryClient(endpoint="http://e", api_key="k", team_id="t", agent_id="a", user_id="u")
-    c = AsyncMemoryClient(endpoint="http://e", api_key="k", service_id="s", stub=FakeAsyncStub(), **KW)
+    c = AsyncMemoryClient(endpoint="http://e", api_key="k", service_id="s", stub=FakeAsyncStub(), **KW)  # type: ignore[call-arg]  // FakeAsyncStub is runtime-compatible.
     stub = c._stub
     c2 = c.with_isolation(session_id=None)
     await c2.query_conversation()
@@ -173,7 +173,7 @@ async def test_async_mirror():
         c.with_isolation(user_id="")
     with pytest.raises(ParamError):
         await AsyncMemoryClient(endpoint="http://e", api_key="k", service_id="s",
-                                stub=FakeAsyncStub(), **KW).add_conversation([{"m": 1}])
+                                stub=FakeAsyncStub(), **KW).add_conversation([{"m": 1}])  # type: ignore[call-arg]  // FakeAsyncStub is runtime-compatible.
     await c.add_conversation([{"m": 1}], session_id="s1")
     await c.query_conversation()
     await c.search_conversation("q")
@@ -207,4 +207,47 @@ async def test_async_mirror():
         await c.clear_chat_memory([])
     async with c:
         pass
+    assert stub.closed
+
+
+def test_offload_paths():
+    c, stub = _sync()
+    c.offload_ingest("s", [{"tool_name": "t"}], prompt="p", recent_messages=[{"role": "user"}])
+    assert stub.calls[-1][1] == "/v3/offload/ingest"
+    c.offload_compact("s", [{"m": 1}], 0.9, 100, context_window=1000, message_tokens=[10])
+    assert stub.calls[-1][1] == "/v3/offload/compact"
+    c.offload_query_mmd("s", limit=1)
+    assert stub.calls[-1][2] == {"session_id": "s", "limit": 1}
+    c.offload_query_mmd("s")
+    assert stub.calls[-1][2] == {"session_id": "s"}
+    c.close()
+
+
+def test_read_file_lazy_and_cached(monkeypatch):
+    monkeypatch.setattr(v3mod, "StsCredentialManager", FakeStsMgr)
+    monkeypatch.setattr(v3mod, "MemoryFileReader", FakeReader)
+    c, stub = _sync()
+    assert c.read_file("persona.md") == "content:persona.md"
+    first = c._cos_reader
+    assert c.read_file("a.md") == "content:a.md"
+    assert c._cos_reader is first
+    assert c._sts_manager.kwargs["service_id"] == "s"  # type: ignore[union-attr]  // monkeypatched FakeStsMgr carries kwargs.
+    c.close()
+    assert first.closed and stub.closed  # type: ignore[union-attr]  // monkeypatched FakeReader carries closed.
+
+
+@pytest.mark.asyncio
+async def test_async_offload_and_read_file(monkeypatch):
+    monkeypatch.setattr(v3mod, "AsyncStsCredentialManager", FakeStsMgr)
+    monkeypatch.setattr(v3mod, "AsyncMemoryFileReader", FakeAsyncReader)
+    c = AsyncMemoryClient(endpoint="http://e", api_key="k", service_id="s", stub=FakeAsyncStub(), **KW)  # type: ignore[call-arg]  // FakeAsyncStub is runtime-compatible.
+    stub = c._stub
+    await c.offload_ingest("s", [])
+    await c.offload_compact("s", [], 0.5, 10)
+    await c.offload_query_mmd("s")
+    assert [call[1] for call in stub.calls] == [
+        "/v3/offload/ingest", "/v3/offload/compact", "/v3/offload/query-mmd",
+    ]
+    assert await c.read_file("persona.md") == "content:persona.md"
+    await c.close()
     assert stub.closed

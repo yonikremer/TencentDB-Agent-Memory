@@ -106,23 +106,23 @@ asyncio.run(main())
 
 | Layer | Method | Endpoint |
 |-------|--------|----------|
-| L0 | `add_conversation()` | `POST /v2/conversation/add` |
-| L0 | `query_conversation()` | `POST /v2/conversation/query` |
-| L0 | `search_conversation()` | `POST /v2/conversation/search` |
-| L0 | `delete_conversation()` | `POST /v2/conversation/delete` |
-| L1 | `update_atomic()` | `POST /v2/atomic/update` |
-| L1 | `query_atomic()` | `POST /v2/atomic/query` |
-| L1 | `search_atomic()` | `POST /v2/atomic/search` |
-| L1 | `delete_atomic()` | `POST /v2/atomic/delete` |
-| L2 | `list_scenarios()` | `POST /v2/scenario/ls` |
-| L2 | `read_scenario()` | `POST /v2/scenario/read` |
-| L2 | `write_scenario()` | `POST /v2/scenario/write` |
-| L2 | `rm_scenario()` | `POST /v2/scenario/rm` |
-| L3 | `read_core()` | `POST /v2/core/read` |
-| L3 | `write_core()` | `POST /v2/core/write` |
-| Offload | `offload_ingest()` | `POST /v2/offload/ingest` |
-| Offload | `offload_compact()` | `POST /v2/offload/compact` |
-| Offload | `offload_query_mmd()` | `POST /v2/offload/query-mmd` |
+| L0 | `add_conversation()` | `POST /v3/conversation/add` |
+| L0 | `query_conversation()` | `POST /v3/conversation/query` |
+| L0 | `search_conversation()` | `POST /v3/conversation/search` |
+| L0 | `delete_conversation()` | `POST /v3/conversation/delete` |
+| L1 | `update_atomic()` | `POST /v3/atomic/update` |
+| L1 | `query_atomic()` | `POST /v3/atomic/query` |
+| L1 | `search_atomic()` | `POST /v3/atomic/search` |
+| L1 | `delete_atomic()` | `POST /v3/atomic/delete` |
+| L2 | `list_scenarios()` | `POST /v3/scenario/ls` |
+| L2 | `read_scenario()` | `POST /v3/scenario/read` |
+| L2 | `write_scenario()` | `POST /v3/scenario/write` |
+| L2 | `rm_scenario()` | `POST /v3/scenario/rm` |
+| L3 | `read_core()` | `POST /v3/core/read` |
+| L3 | `write_core()` | `POST /v3/core/write` |
+| Offload | `offload_ingest()` | `POST /v3/offload/ingest` |
+| Offload | `offload_compact()` | `POST /v3/offload/compact` |
+| Offload | `offload_query_mmd()` | `POST /v3/offload/query-mmd` |
 
 ### v3 batch delete and clear
 

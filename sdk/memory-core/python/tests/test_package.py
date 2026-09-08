@@ -1,17 +1,13 @@
 import tencentdb_agent_memory as top
-import tencentdb_agent_memory.v2 as v2mod
 import tencentdb_agent_memory.v3 as v3mod
-from tencentdb_agent_memory.v2.client import AsyncMemoryClient as V2Async
-from tencentdb_agent_memory.v2.client import MemoryClient as V2Sync
 from tencentdb_agent_memory.v3.client import AsyncMemoryClient as V3Async
 from tencentdb_agent_memory.v3.client import MemoryClient as V3Sync
 
 
-def test_top_level_is_v2():
-    assert top.MemoryClient is V2Sync
-    assert top.AsyncMemoryClient is V2Async
+def test_top_level_is_v3():
+    assert top.MemoryClient is V3Sync
+    assert top.AsyncMemoryClient is V3Async
     assert set(top.__all__) == {"MemoryClient", "AsyncMemoryClient", "TDAMError", "ParamError"}
-    assert set(v2mod.__all__) == {"MemoryClient", "AsyncMemoryClient"}
 
 
 def test_v3_exports():

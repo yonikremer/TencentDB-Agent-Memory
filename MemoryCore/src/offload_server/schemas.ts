@@ -54,16 +54,8 @@ const CompactionMessageSchema = z
     { message: "Each message must have a non-empty 'role' field" },
   );
 
-export const CompactionRequestSchema = z.object({
-  session_id: safeSessionId,
-  messages: z.array(CompactionMessageSchema),
-  ratio: z.number().min(0).max(2),
-});
-
-export type CompactionRequest = z.infer<typeof CompactionRequestSchema>;
-
 /** Extended compaction schema with token metadata for L3 compression. */
-export const CompactionRequestSchemaV2 = z.object({
+export const CompactionRequestSchema = z.object({
   session_id: safeSessionId,
   messages: z.array(CompactionMessageSchema),
   ratio: z.number().min(0).max(2),
@@ -72,7 +64,7 @@ export const CompactionRequestSchemaV2 = z.object({
   message_tokens: z.array(z.number()).optional(),
 });
 
-export type CompactionRequestV2 = z.infer<typeof CompactionRequestSchemaV2>;
+export type CompactionRequest = z.infer<typeof CompactionRequestSchema>;
 
 export const MmdQuerySchema = z.object({
   session_id: safeSessionId,

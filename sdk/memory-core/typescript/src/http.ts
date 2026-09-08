@@ -1,5 +1,5 @@
 /**
- * Low-level HTTP transport for the TencentDB Agent Memory v2 API.
+ * Low-level HTTP transport for the TencentDB Agent Memory v3 API.
  *
  * - Auth: `Authorization: Bearer {apiKey}` + `x-tdai-service-id` + optional `x-tdai-user-key`
  * - Envelope unwrap: `code === 0` → return `data`; else throw `TDAMError`

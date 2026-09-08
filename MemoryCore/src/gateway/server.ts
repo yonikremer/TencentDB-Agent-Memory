@@ -173,7 +173,7 @@ const MAX_BODY_BYTES = resolveMaxBodyBytes();
 
 /**
  * Thrown by `parseJsonBody` when the incoming body exceeds `MAX_BODY_BYTES`.
- * Caught at the top-level request handler (and v2 router) and translated
+ * Caught at the top-level request handler (and data-plane router) and translated
  * to HTTP 413 instead of being conflated with HTTP 500.
  */
 export class PayloadTooLargeError extends Error {
@@ -620,7 +620,7 @@ export class TdaiGateway {
     // ── Org-hierarchy sync (env-gated; never blocks boot) ──
     await this.startGroupySync();
 
-    // ── Initialize StorageAdapter for v2 API ──
+    // ── Initialize StorageAdapter for v3 API ──
     // In standalone mode, use LocalStorageBackend pointing to dataDir.
     // In service mode, CosStorageBackend was already injected above.
     if (!this.core.getStorage()) {
@@ -843,25 +843,16 @@ export class TdaiGateway {
     }
 
     try {
-      // ── /v2/instance/destroy — admin endpoint, gated by the v1-style
-      //    Bearer apiKey only (no service-id / per-request envelope).
+      // ── /v3/instance/destroy — admin endpoint, gated by the
+      //    Bearer apiKey only (no service-id / per-request envelope,
+      //    not going through tenant x-tdai-user-key).
       //    When `server.apiKey` is unset this is open by default, matching
       //    the pre-existing behaviour; operators see the "auth disabled"
-      //    WARN at startup.
-      if (method === "POST" && pathname === "/v2/instance/destroy") {
-        if (!this.checkAuth(req, res)) return;
-        return await this.handleInstanceDestroy(req, res);
-      }
-
-      // ── /v3/instance/destroy — v3 compatible version.
-      //    Request/response contract is consistent with v2; authentication is the same as v2 (Bearer apiKey, ops interface,
-      //     not going through tenant x-tdai-user-key).
-      //    Implement by first reusing v2's general cleanup (state / store / cos / quota), then reserving
-      //    v3 exclusive metadata cleanup (team/user/asset/acl, etc.), later handled by the person responsible for v3
-      //    fill in by the metadata team. No full reuse here to avoid missing silent cleanups on the v3 side.
+      //    WARN at startup. Runs general cleanup (state / store / cos / quota)
+      //    plus v3 metadata cleanup (team/user/asset/acl, etc.).
       if (method === "POST" && pathname === "/v3/instance/destroy") {
         if (!this.checkAuth(req, res)) return;
-        return await this.handleInstanceDestroyV3(req, res);
+        return await this.handleInstanceDestroy(req, res);
       }
 
       // ── v3 internal metadata (/v3/internal/meta/*, Bearer only) ──
@@ -878,7 +869,7 @@ export class TdaiGateway {
       }
 
       // ── v3 metadata routes (/v3/meta/*) ──
-      // Layer 1: same Bearer apiKey gate as v2. Layer 3 (x-tdai-user-key) in handleV3MetaRoute.
+      // Layer 1: Bearer apiKey gate. Layer 3 (x-tdai-user-key) in handleV3MetaRoute.
       if (pathname.startsWith(`${V3_PREFIX}/`)) {
         if (!this.checkAuthForV2(req, res)) return;
         const handledV3 = await handleV3MetaRoute(req, res, pathname, method, parseJsonBody, sendJson, {
@@ -888,18 +879,16 @@ export class TdaiGateway {
         if (handledV3) return;
       }
 
-      // ── v2 / v3 API routes ──
-      // /v2 = existing data plane + management plane entry (team/agent optional, user fallback).
-      // /v3 = L0–L3 data plane "strict isolation version" (team/agent/user/session required), sharing the same set of handler implementations,
-      //        with an additional validation layer only at the dispatch layer. See the comments in v2-router.ts for V3_PREFIX/V3_ALLOWED_SUBPATHS.
+      // ── v3 API routes (strict isolation data plane + skill/knowledge/chat-memory) ──
+      // See the comments in v2-router.ts for V3_PREFIX/V3_ALLOWED_SUBPATHS.
       //
-      // Apply the develop-introduced apiKey gate first so v2/v3 inherits the
-      // optional shared-secret protection. v2's own `parseV2Auth` (Bearer +
+      // Apply the develop-introduced apiKey gate first so v3 inherits the
+      // optional shared-secret protection. `parseV2Auth` (Bearer +
       // x-tdai-service-id) still runs inside `handleV2Route`, preserving
       // its existing semantics. When `server.apiKey` is unset, this gate
       // is a no-op (default-open), matching the develop_server_test
       // baseline.
-      if (pathname.startsWith("/v2/") || pathname.startsWith("/v3/")) {
+      if (pathname.startsWith("/v3/")) {
         if (!this.checkAuthForV2(req, res)) return;
       }
 
@@ -908,7 +897,7 @@ export class TdaiGateway {
         getEmbedding: () => this.core.getEmbeddingService(),
         getStorage: () => this.core.getStorage(),
         deployMode: this.config.deployMode,
-        // Inject pipeline introspection deps for /v2/pipeline/status (standalone-only).
+        // Inject pipeline introspection deps for /v3/pipeline/status (standalone-only).
         // Both can be undefined in legacy standalone (no stateBackend configured) —
         // the handler returns 503 in that case.
         stateBackend: this.stateBackend ?? undefined,
@@ -1210,11 +1199,14 @@ export class TdaiGateway {
   // ============================
 
   /**
-   * POST /v2/instance/destroy — Purge all data for a destroyed instance.
+   * POST /v3/instance/destroy — Purge all data for a destroyed instance.
    * Intended for trusted internal callers only.
    *
    * Request body: { instance_id: string }
    * Response: { code, message, data: { instance_id, cleaned: { ... } } }
+   *
+   * Drops the instance metadata database on top of the general cleanup
+   * (v3.0 sharded database: `MetadataStorePool.purgeInstance`).
    */
   private async handleInstanceDestroy(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const body = await parseJsonBody<{ instance_id?: string }>(req);
@@ -1226,33 +1218,7 @@ export class TdaiGateway {
     }
 
     this.logger.info(`[instance/destroy] Purging instance: ${instanceId}`);
-    const cleaned = await this.purgeInstanceCommon(instanceId, "v2");
-
-    sendJson(res, 200, {
-      code: 0,
-      message: "ok",
-      data: { instance_id: instanceId, cleaned },
-    });
-  }
-
-  /**
-   * POST /v3/instance/destroy — v3 compatible route.
-   *
-   * Request/response contract is completely consistent with v2, and the caller can switch with zero changes.
-   *
-   * Drop this instance metadata database on top of the general cleanup (v3.0 sharded database: `MetadataStorePool.purgeInstance`).
-   */
-  private async handleInstanceDestroyV3(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    const body = await parseJsonBody<{ instance_id?: string }>(req);
-    const instanceId = body?.instance_id;
-
-    if (!instanceId || typeof instanceId !== "string") {
-      sendJson(res, 400, { code: 400, message: "Missing required field: instance_id" });
-      return;
-    }
-
-    this.logger.info(`[instance/destroy] [v3] Purging instance: ${instanceId}`);
-    const cleaned = await this.purgeInstanceCommon(instanceId, "v3");
+    const cleaned = await this.purgeInstanceCommon(instanceId);
 
     cleaned.v3_metadata = await this.purgeV3Metadata(instanceId);
 
@@ -1264,14 +1230,12 @@ export class TdaiGateway {
   }
 
   /**
-   * General cleanup steps (state / store / cos / quota), shared by v2 and v3.
-   * @param source used only as a log prefix to distinguish the caller.
+   * General cleanup steps (state / store / cos / quota).
    */
   private async purgeInstanceCommon(
     instanceId: string,
-    source: "v2" | "v3",
   ): Promise<Record<string, unknown>> {
-    const tag = `[instance/destroy] [${source}]`;
+    const tag = "[instance/destroy]";
     const cleaned: Record<string, unknown> = {};
 
     // 1. Purge state backend (timers, sessions, buffers, pending tasks)
@@ -1560,6 +1524,7 @@ export class TdaiGateway {
 
     // Merge config overrides if provided
     // Start with the base memory config + inject llm config from gateway settings
+    // SAFETY: gateway memory config is a validated superset of the seed plugin config shape; spread into an untyped record for plugin overrides.
     const baseConfig = this.config.memory as unknown as Record<string, unknown>;
     let pluginConfig: Record<string, unknown> = {
       ...baseConfig,
@@ -2132,6 +2097,7 @@ export class TdaiGateway {
     // Redis backend: directly get the ioredis client from stateBackend for SCAN
     const redisClient = this.getSharedIoRedisClient();
     if (redisClient && queue instanceof RedisSkillAgentTaskQueue) {
+      // SAFETY: redisClient is the shared ioredis instance null-checked above; the structural type lists only the SCAN-family commands this purge uses.
       const client = redisClient as unknown as {
         sscan(k: string, cursor: string, ...args: (string | number)[]): Promise<[string, string[]]>;
         scan(cursor: string, ...args: (string | number)[]): Promise<[string, string[]]>;
@@ -2449,7 +2415,7 @@ export class TdaiGateway {
    *     LocalStorageBackend rooted at data.baseDir.
    *   - Service: per-instance CosStorageBackend with `${pathPrefix}/${instanceId}/`.
    *
-   * Both `/v2/*` (memory) and `/v3/skill/conversation/add` need per-instance
+   * Both `/v3/*` (memory) and `/v3/skill/conversation/add` need per-instance
    * storage; keeping this in one method keeps the fallback semantics identical
    * on both paths.
    */
@@ -2500,6 +2466,7 @@ export class TdaiGateway {
   private getSharedIoRedisClient(): SkillAgentTaskQueueRedisLike | null {
     if (!this.stateBackend) return null;
     // duck-type: only RedisStateBackend has getClient()
+    // SAFETY: duck-type probe only — getClient existence is checked before use, so this never yields a false-typed value.
     const maybe = this.stateBackend as unknown as { getClient?: () => unknown };
     if (typeof maybe.getClient !== "function") return null;
     try {

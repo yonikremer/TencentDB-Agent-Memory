@@ -203,51 +203,6 @@ export interface CoreWriteData extends Omit<GeneratedCoreWriteData, "version"> {
   agent_id?: string;
 }
 
-// ============================
-// Entity metadata schemas (Team / User / Agent / Task)
-// ============================
-
-const stringArray = z.array(z.string()).max(100).default([]);
-const teamStatusSchema = z.enum(["active", "archived"]);
-const userStatusSchema = z.enum(["active", "inactive"]);
-const agentStatusSchema = z.enum(["active", "inactive"]);
-const agentVisibilitySchema = z.enum(["team", "restricted"]);
-const taskSourceTypeSchema = z.enum(["manual", "github", "tapd", "other"]);
-
-export interface BatchDeleteResult { deleted_ids: string[]; failed: Array<{ id: string; reason: string }> }
-
-export interface TeamData {
-  team_id: string; name: string; description?: string; owner_user_id: string; status: "active" | "archived";
-  user_ids?: string[]; agent_ids?: string[]; task_ids?: string[]; created_at: string; updated_at: string;
-}
-export const teamCreateRequestSchema = z.object({ name: z.string().min(1), description: z.string().optional(), owner_user_id: z.string().min(1) });
-export const teamGetRequestSchema = z.object({ team_id: z.string().min(1) });
-export const teamUpdateRequestSchema = z.object({ team_id: z.string().min(1), name: z.string().min(1).optional(), description: z.string().optional(), owner_user_id: z.string().min(1).optional(), user_ids: z.array(z.string()).max(200).optional(), agent_ids: z.array(z.string()).max(200).optional(), status: teamStatusSchema.optional() });
-export const teamBatchDeleteRequestSchema = z.object({ team_ids: z.array(z.string().min(1)).min(1).max(100) });
-
-export interface UserData {
-  user_id: string; name: string; job_description?: string; team_ids: string[]; task_ids: string[]; owned_agent_ids: string[]; task_agent_ids?: string[]; status: "active" | "inactive"; created_at: string; updated_at?: string;
-}
-export const userCreateRequestSchema = z.object({ name: z.string().min(1), job_description: z.string().optional() });
-export const userGetRequestSchema = z.object({ user_id: z.string().min(1) });
-export const userUpdateRequestSchema = z.object({ user_id: z.string().min(1), name: z.string().min(1).optional(), job_description: z.string().optional(), status: userStatusSchema.optional() });
-export const userBatchDeleteRequestSchema = z.object({ user_ids: z.array(z.string().min(1)).min(1).max(100) });
-
-export interface AgentData {
-  agent_id: string; team_id: string; name: string; description?: string; prompt?: string; owner_user_id?: string; visibility: "team" | "restricted"; status: "active" | "inactive"; task_ids?: string[]; created_at: string; updated_at: string;
-}
-export const agentCreateRequestSchema = z.object({ team_id: z.string().min(1), name: z.string().min(1), description: z.string().optional(), prompt: z.string().optional(), owner_user_id: z.string().optional(), visibility: agentVisibilitySchema.optional() });
-export const agentGetRequestSchema = z.object({ agent_id: z.string().min(1), team_id: z.string().min(1).optional() });
-export const agentUpdateRequestSchema = z.object({ agent_id: z.string().min(1), team_id: z.string().min(1).optional(), name: z.string().min(1).optional(), description: z.string().optional(), prompt: z.string().optional(), owner_user_id: z.string().optional(), visibility: agentVisibilitySchema.optional(), status: agentStatusSchema.optional() });
-export const agentBatchDeleteRequestSchema = z.object({ agent_ids: z.array(z.string().min(1)).min(1).max(100) });
-
-export interface TaskData {
-  task_id: string; team_id: string; creator_user_id: string; title?: string; description?: string; source_type: "manual" | "github" | "tapd" | "other"; source_url?: string; agent_ids: string[]; user_ids: string[]; created_at: string; updated_at: string;
-}
-export const taskCreateRequestSchema = z.object({ team_id: z.string().min(1), creator_user_id: z.string().min(1), title: z.string().optional(), description: z.string().optional(), source_type: taskSourceTypeSchema.optional(), source_url: z.string().optional(), agent_ids: stringArray.optional(), user_ids: stringArray.optional() });
-export const taskGetRequestSchema = z.object({ task_id: z.string().min(1) });
-export const taskUpdateRequestSchema = z.object({ task_id: z.string().min(1), title: z.string().optional(), description: z.string().optional(), source_type: taskSourceTypeSchema.optional(), source_url: z.string().optional(), agent_ids: stringArray.optional(), user_ids: stringArray.optional() });
-export const taskBatchDeleteRequestSchema = z.object({ task_ids: z.array(z.string().min(1)).min(1).max(100) });
 
 // ============================
 // Override: safe path (prevent path traversal)

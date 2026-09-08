@@ -1,5 +1,5 @@
 /**
- * offload-client — HTTP client for Offload Server v2 API.
+ * offload-client — HTTP client for Offload Server v3 API.
  */
 import type { OffloadClientConfig, ToolPairPayload, RecentMessage, CompactionResult, Logger } from "./types.js";
 
@@ -9,12 +9,12 @@ export class OffloadApiClient {
     private logger: Logger,
   ) {}
 
-  /** Health check: GET /v2/offload/health. Returns true if server is reachable (any HTTP response = reachable). */
+  /** Health check: GET /v3/offload/health. Returns true if server is reachable (any HTTP response = reachable). */
   async checkHealth(): Promise<boolean> {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
-      const res = await fetch(`${this.config.serverUrl}/v2/offload/health`, {
+      const res = await fetch(`${this.config.serverUrl}/v3/offload/health`, {
         method: "GET",
         headers: { Authorization: `Bearer ${this.config.apiKey}` },
         signal: controller.signal,
@@ -45,7 +45,7 @@ export class OffloadApiClient {
     prompt?: string,
     recentMessages?: RecentMessage[],
   ): Promise<void> {
-    const url = `${this.config.serverUrl}/v2/offload/ingest`;
+    const url = `${this.config.serverUrl}/v3/offload/ingest`;
     const payload: Record<string, unknown> = {
       session_id: sessionId,
       tool_pairs: toolPairs.map((tp) => ({
@@ -84,7 +84,7 @@ export class OffloadApiClient {
    * Sends prompt + recentMessages (empty toolPairs) to activate the L1.5 path on the server.
    */
   async ingestL15(sessionId: string, prompt: string, recentMessages?: RecentMessage[]): Promise<void> {
-    const url = `${this.config.serverUrl}/v2/offload/ingest`;
+    const url = `${this.config.serverUrl}/v3/offload/ingest`;
     const payload: Record<string, unknown> = {
       session_id: sessionId,
       tool_pairs: [],
@@ -126,7 +126,7 @@ export class OffloadApiClient {
     totalTokens: number;
     messageTokens?: number[];
   }): Promise<CompactionResult | null> {
-    const url = `${this.config.serverUrl}/v2/offload/compact`;
+    const url = `${this.config.serverUrl}/v3/offload/compact`;
     const body = JSON.stringify({
       session_id: req.sessionId,
       messages: req.messages,

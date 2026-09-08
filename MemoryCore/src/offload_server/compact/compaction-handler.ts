@@ -10,7 +10,7 @@ import type { StorageAdapter } from "../../core/storage/adapter.js";
 import type { OffloadEntry, OffloadState, OffloadExecutorConfig, CompactState } from "../types.js";
 import { defaultOffloadState, defaultCompactState } from "../types.js";
 import { parseJsonl } from "../parsers/json-utils.js";
-import { CompactionRequestSchemaV2 } from "../schemas.js";
+import { CompactionRequestSchema } from "../schemas.js";
 import { buildOffloadBasePath } from "../session-utils.js";
 import { applyFastPath } from "./fast-path.js";
 import { injectActiveMmd, injectHistoryMmds } from "./mmd-injector.js";
@@ -38,12 +38,12 @@ export interface CompactionReport {
 }
 
 /**
- * Handle POST /v2/offload/compact.
+ * Handle POST /v3/offload/compact.
  */
 export async function handleCompaction(
   req: http.IncomingMessage,
   res: http.ServerResponse,
-  auth: { serviceId: string },
+  _auth: { serviceId: string },
   deps: CompactionDeps,
   requestId: string,
   parseJsonBody: <T>(req: http.IncomingMessage) => Promise<T>,
@@ -52,7 +52,7 @@ export async function handleCompaction(
   errorEnvelope: (code: number, message: string, requestId: string) => unknown,
 ): Promise<void> {
   const body = await parseJsonBody(req);
-  const parsed = CompactionRequestSchemaV2.safeParse(body);
+  const parsed = CompactionRequestSchema.safeParse(body);
   if (!parsed.success) {
     sendJson(res, 400, errorEnvelope(400, parsed.error.message, requestId));
     return;
@@ -244,6 +244,7 @@ export async function handleCompaction(
     totalTokensAfter: remainingTokens,
     originalMsgCount: originalCount,
     compactedMsgCount: messages.length,
+    // SAFETY: CompactionReport is JSON-serializable counters/strings; the trace payload takes an untyped record, so this double-cast is lossless.
     report: report as unknown as Record<string, unknown>,
     messages: messages as unknown[],
     durationMs: Date.now() - compactionStartMs,
