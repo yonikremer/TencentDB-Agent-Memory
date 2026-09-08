@@ -448,15 +448,20 @@ async function triggerWorkbuddyArchiveHooks(
  *   - only input       → return body.input directly
  *   - neither present  → return undefined (langfuse does not write the input field)
  */
-function buildWorkbuddyLangfuseInput(body: Record<string, unknown>): unknown {
-  const hasInput = Array.isArray(body.input);
+/** Langfuse input payload for workbuddy turns (combination strategy, see above). */
+export type WorkbuddyLangfuseInput =
+  | { input?: unknown; instructions?: unknown }
+  | unknown[]
+  | undefined;
+
+function buildWorkbuddyLangfuseInput(body: Record<string, unknown>): WorkbuddyLangfuseInput {
   const hasInstructions =
     typeof body.instructions === "string" && (body.instructions as string).length > 0;
-  if (!hasInput && !hasInstructions) return undefined;
-  if (hasInput && hasInstructions) {
+  if (!Array.isArray(body.input) && !hasInstructions) return undefined;
+  if (Array.isArray(body.input) && hasInstructions) {
     return { input: body.input, instructions: body.instructions };
   }
-  return hasInput ? body.input : { instructions: body.instructions };
+  return Array.isArray(body.input) ? body.input : { instructions: body.instructions };
 }
 
 function buildUpstreamHeaders(c: Context, config: ProxyConfig): Record<string, string> {
@@ -498,6 +503,7 @@ async function forwardToUpstream(
   // ── Per-agent upstream override ──
   // Aligned with codexHandler: supports config.upstream.agents?.workbuddy to point at its own
   // URL/apiKey; falls back to the global config.upstream.{url,apiKey} when unset.
+  // SAFETY: validated JSON config; structural read of the optional per-agent override map.
   const perAgent = (config.upstream as unknown as {
     agents?: { workbuddy?: { url?: string; apiKey?: string } };
   }).agents?.workbuddy;
@@ -946,7 +952,9 @@ export async function handleWorkbuddyEndpoint(
         // ── Force-archive the old agent's skill buffer (best-effort) ──
         const oldState = store.get(compositeKey);
         if (oldState?.status === "initialized" && oldState.sessionInfo && config.coreSkill?.endpoint) {
-          const si = oldState.sessionInfo as Record<string, string>;
+          // SAFETY: sessionInfo is a JSON-decoded plain object at runtime; treating it as a
+          // string record for field extraction is sound (all reads are guarded by truthiness).
+          const si = oldState.sessionInfo as unknown as Record<string, string>;
           if (si.space_id && si.user_id && si.team_id && si.agent_id) {
             import("./skill/core-client.js").then(({ getCoreSkillClient }) => {
               const client = getCoreSkillClient(config.coreSkill!);
@@ -1205,13 +1213,16 @@ export async function handleWorkbuddyEndpoint(
       cachedAgentDetail = initResult.agentDetail ?? null;
       cachedTaskDetail = initResult.taskDetail ?? null;
 
+      // SAFETY: sessionInfo is a JSON-decoded plain object at runtime; string-keyed reads
+      // with optional chaining are sound (missing keys yield undefined, handled by ?:).
+      const sessionFields = initResult.sessionInfo as unknown as Record<string, unknown> | null | undefined;
       if (initResult.resetFlow && initResult.justRegistered && !initResult.bypassed) {
         _resetFlowResult = {
           agentName: initResult.agentDetail?.name ?? "Unknown",
-          agentIdShort: (initResult.sessionInfo as Record<string, unknown>)?.agent_id
-            ? String((initResult.sessionInfo as Record<string, unknown>).agent_id).slice(-8) : "",
-          teamId: (initResult.sessionInfo as Record<string, unknown>)?.team_id
-            ? String((initResult.sessionInfo as Record<string, unknown>).team_id).slice(-8) : "",
+          agentIdShort: sessionFields?.agent_id
+            ? String(sessionFields.agent_id).slice(-8) : "",
+          teamId: sessionFields?.team_id
+            ? String(sessionFields.team_id).slice(-8) : "",
           taskName: initResult.taskDetail?.name,
         };
       }

@@ -333,7 +333,9 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
       // Pull the full list with pagination: truncating to 20 per page will cause the "My Agents" list to be incomplete when the team has more than 20 agents
       let agentListError: MetaEnvelope<unknown> | null = null;
       const agents = (
-        await fetchAllMetaListItems<AgentRaw & { name: string; description?: string }>(
+        await fetchAllMetaListItems<
+          AgentRaw & { name: string; description?: string }
+        >(
           deps,
           ctx,
           "agent/list",
@@ -1604,7 +1606,8 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
       if (layerRaw !== "L1" && layerRaw !== "L2" && layerRaw !== "L3")
         return respondControlError(c, 400, "INVALID_LAYER");
       const layer = layerRaw as "L1" | "L2" | "L3";
-      if (content === null) return respondControlError(c, 400, "MISSING_CONTENT");
+      if (content === null)
+        return respondControlError(c, 400, "MISSING_CONTENT");
       // L1 (records primary key) / L2 (file path) both need to locate a single record; L3 is the entire persona, no id needed.
       if ((layer === "L1" || layer === "L2") && !itemId)
         return respondControlError(c, 400, "MISSING_ITEM_ID");
@@ -1656,7 +1659,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
               ...idFields,
               path: itemId,
               content: stripScenarioMeta(content),
-              ...(summary !== undefined ? { summary } : {}),
+              ...(summary === undefined ? {} : { summary }),
             },
             cred,
           );
@@ -1755,9 +1758,9 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
           messages?: unknown[];
         }>("/v3/conversation/search", { ...noSid, query, limit }, cred);
         if (env.code !== 0) return respondEnvelope(c, env);
-        const data =
-          (env.data as { messages?: Array<Record<string, unknown>> } | null) ??
-          { messages: [] };
+        const data = (env.data as {
+          messages?: Array<Record<string, unknown>>;
+        } | null) ?? { messages: [] };
         const items = (data.messages ?? []).map((m) => ({
           id: (m.id ?? "") as string,
           role: typeof m.role === "string" ? m.role : "msg",
@@ -1788,10 +1791,11 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
         cred,
       );
       if (env.code !== 0) return respondEnvelope(c, env);
-      const data =
-        (env.data as { items?: Array<Record<string, unknown>> } | null) ?? {
-          items: [],
-        };
+      const data = (env.data as {
+        items?: Array<Record<string, unknown>>;
+      } | null) ?? {
+        items: [],
+      };
       const items = (data.items ?? []).map((r) => ({
         // The search result id is the L1 record primary key (can be used directly for /chat-memory/layer-update).
         id: (r.id ?? r.record_id ?? "") as string,
@@ -1805,10 +1809,7 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
           msToIso(r.created_time_ms) ||
           (typeof r.updated_at === "string" ? r.updated_at : undefined),
       }));
-      return respondEnvelope(
-        c,
-        okEnvelope(c, { items, total: items.length }),
-      );
+      return respondEnvelope(c, okEnvelope(c, { items, total: items.length }));
     } catch (err) {
       return respondControlError(
         c,
@@ -2052,12 +2053,10 @@ async function authorizeChatMemoryRead(
   try {
     // Paginate to full data: truncating single page of 20 items causes borrowing determination to miss agents ranked 21+, leading to false permission denial
     const myAgents = (
-      await fetchAllMetaListItems<AgentRaw>(
-        deps,
-        ctx,
-        "agent/list",
-        { team_id: asset.team_id, status: "active" },
-      )
+      await fetchAllMetaListItems<AgentRaw>(deps, ctx, "agent/list", {
+        team_id: asset.team_id,
+        status: "active",
+      })
     ).filter((a) => a.owner_user_id === meUserId);
     for (const a of myAgents) {
       // Pagination to fetch full list: if this asset is ranked 21+ in agent binding, the single-page list will miss it and incorrectly judge no permission.

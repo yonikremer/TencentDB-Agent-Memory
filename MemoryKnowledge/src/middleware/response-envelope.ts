@@ -39,13 +39,17 @@ export function accessLog(): MiddlewareHandler {
 
     // Cache request body (body can only be read once, used for logging on failure)
     // Hono's bodyCache expects Promise (c.req.json()/text() calls .then() on cached value)
-    let reqBody: unknown = undefined;
+    let reqBody: unknown ;
     if (c.req.method === 'POST' || c.req.method === 'PUT') {
       try {
         const raw = await c.req.text();
         reqBody = raw ? JSON.parse(raw) : undefined;
-        c.req.bodyCache.text = Promise.resolve(raw);
-        if (reqBody) c.req.bodyCache.json = Promise.resolve(reqBody);
+        // SAFETY: hono@4.13.5 request.js treats bodyCache values as promises
+        // (cachedBody(...).then(...)); the published BodyCache type describes the
+        // fetch Body mixin instead. Pre-seeding avoids re-reading the stream.
+        const cache = c.req.bodyCache as unknown as Record<string, unknown>;
+        cache.text = Promise.resolve(raw);
+        if (reqBody) cache.json = Promise.resolve(reqBody);
       } catch {
         // Non-JSON body, ignore
       }

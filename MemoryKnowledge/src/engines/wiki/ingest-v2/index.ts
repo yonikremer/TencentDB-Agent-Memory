@@ -11,7 +11,7 @@
 import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import type { LimitFunction } from "p-limit";
-import { createLlmClient, type LlmClient, type RawLlmConfig } from "./llm.js";
+import { createLlmClient, normalizeLlmConfig, type LlmClient, type RawLlmConfig } from "./llm.js";
 import { loadTemplate } from "./template.js";
 import {
   buildSystemPrompt,
@@ -44,7 +44,7 @@ export function dumpGenerateFailure(args: {
   try {
     const debugDir = join(projectPath, "_debug");
     mkdirSync(debugDir, { recursive: true });
-    const safeSource = sourceName.replace(/[^\w.\-]+/g, "_");
+    const safeSource = sourceName.replace(/[^\w.-]+/g, "_");
     const safeChunk = chunkTag.replace(/[^\w.\-#]+/g, "_");
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
     const file = join(debugDir, `generate-fail-${safeSource}-${safeChunk}-${ts}.txt`);
@@ -129,7 +129,7 @@ export async function extractSource(
   const sourceName = basename(sourcePath);
   if (!sourceText.trim()) throw new Error(`Source file is empty: ${sourceName}`);
 
-  const llm = options.llm ?? createLlmClient(llmConfig);
+  const llm = options.llm ?? createLlmClient(normalizeLlmConfig(llmConfig));
   const template = loadTemplate(projectPath);
   const systemPrompt = buildSystemPrompt(template);
   const mode = options.mode ?? "two-stage";
@@ -314,7 +314,7 @@ export async function ingestSource(
 ): Promise<string[]> {
   const existingPages = scanExistingPages(projectPath);
   const candidates = await extractSource(projectPath, sourcePath, llmConfig, existingPages, options);
-  const llm = options.llm ?? createLlmClient(llmConfig);
+  const llm = options.llm ?? createLlmClient(normalizeLlmConfig(llmConfig));
   const sourceName = basename(sourcePath);
   const { written } = await commitCandidates(
     projectPath,

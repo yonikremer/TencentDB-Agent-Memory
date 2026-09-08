@@ -32,7 +32,11 @@ import { KvVersionPinRepo } from "./kv-version-pin-repo.js";
 import { getProxyStorage } from "../storage/factory.js";
 import { getMetadataClient } from "../meta/client.js";
 import type { ProxyConfig } from "../types.js";
-import { emitBridgeToolCallTelemetry, emitBridgeRejectTelemetry, agentSourceFromSessionKey } from "../memory/bridge-telemetry.js";
+import {
+  emitBridgeToolCallTelemetry,
+  emitBridgeRejectTelemetry,
+  agentSourceFromSessionKey,
+} from "../memory/bridge-telemetry.js";
 import { getCoreSkillClient, type CoreSkillClient } from "./core-client.js";
 
 /**
@@ -93,8 +97,9 @@ interface PinRepoLike {
 function adaptRedisPinRepo(inner: VersionPinRepo): PinRepoLike {
   return {
     getVersion: (_space, u, a, s, sk) => inner.getVersion(u, a, s, sk),
-    pinMany:    (_space, u, a, s, pairs) => inner.pinMany(u, a, s, pairs),
-    upsertVersion: (_space, u, a, s, sk, v) => inner.upsertVersion(u, a, s, sk, v),
+    pinMany: (_space, u, a, s, pairs) => inner.pinMany(u, a, s, pairs),
+    upsertVersion: (_space, u, a, s, sk, v) =>
+      inner.upsertVersion(u, a, s, sk, v),
   };
 }
 
@@ -135,7 +140,9 @@ function resolveBacking(config: ProxyConfig): SkillBackingBundle {
   const redis = config.redis?.enabled ? getRedisClient(config.redis) : null;
   return {
     redis,
-    pinRepo: redis ? adaptRedisPinRepo(new VersionPinRepo(redis, config.redis?.ttlSeconds)) : null,
+    pinRepo: redis
+      ? adaptRedisPinRepo(new VersionPinRepo(redis, config.redis?.ttlSeconds))
+      : null,
     bindingRepo: bindingRepo ?? (redis ? new RedisBindingRepo(redis) : null),
   };
 }
@@ -254,13 +261,15 @@ function stateToIdFields(
   state: import("../session/types.js").SessionInitState | undefined,
   matchedKey: string,
 ): SessionIdFields | null {
-  if (!state || state.status !== "initialized" || !state.sessionInfo) return null;
+  if (!state || state.status !== "initialized" || !state.sessionInfo)
+    return null;
   const s = state.sessionInfo;
   if (!s.user_id || !s.team_id || !s.agent_id) return null;
   // agentSource is reverse-derived from matchedKey (a hit L1 key looks like `${agentSource}:${sessionId}`);
   // the L2b branch takes it straight from binding.agentSource (see bindingToIdFields).
   const colonIdx = matchedKey.indexOf(":");
-  const agentSource = colonIdx > 0 ? matchedKey.slice(0, colonIdx) : "claude-code";
+  const agentSource =
+    colonIdx > 0 ? matchedKey.slice(0, colonIdx) : "claude-code";
   return {
     user_id: s.user_id,
     team_id: s.team_id,
@@ -336,7 +345,9 @@ async function loadSessionIdsL2(
     if (!binding) return null;
     return bindingToIdFields(binding, spaceId, sessionId);
   } catch (err) {
-    console.warn(`${TAG} L2 getBinding error space=${spaceId} sid=${sessionId}: ${(err as Error).message}`);
+    console.warn(
+      `${TAG} L2 getBinding error space=${spaceId} sid=${sessionId}: ${(err as Error).message}`,
+    );
     return null;
   }
 }
@@ -474,23 +485,33 @@ export function createSkillBridgeHandler(
     // (the helper falls back to agentSource='unknown').
     if (!sub) {
       emitBridgeRejectTelemetry({
-        sessionKey: "", bridgeSource: "skill-bridge",
-        rejectReason: "unknown_path", httpStatus: 404,
+        sessionKey: "",
+        bridgeSource: "skill-bridge",
+        rejectReason: "unknown_path",
+        httpStatus: 404,
       });
       return envelope(40401, `${TAG} unknown path ${path}`, 404);
     }
     if (!ALLOWED_SUBPATHS.has(sub)) {
       emitBridgeRejectTelemetry({
-        sessionKey: "", bridgeSource: "skill-bridge",
-        rejectReason: "subpath_forbidden", httpStatus: 403,
+        sessionKey: "",
+        bridgeSource: "skill-bridge",
+        rejectReason: "subpath_forbidden",
+        httpStatus: 403,
         executedEndpoint: sub,
       });
-      return envelope(40301, `${TAG} subpath '${sub}' not allowed via bridge`, 403);
+      return envelope(
+        40301,
+        `${TAG} subpath '${sub}' not allowed via bridge`,
+        403,
+      );
     }
     if (c.req.method !== "POST") {
       emitBridgeRejectTelemetry({
-        sessionKey: "", bridgeSource: "skill-bridge",
-        rejectReason: "method_not_allowed", httpStatus: 405,
+        sessionKey: "",
+        bridgeSource: "skill-bridge",
+        rejectReason: "method_not_allowed",
+        httpStatus: 405,
         executedEndpoint: sub,
       });
       return envelope(40501, `${TAG} method ${c.req.method} not allowed`, 405);
@@ -499,11 +520,17 @@ export function createSkillBridgeHandler(
     const ct = c.req.header("content-type") ?? "";
     if (!ct.toLowerCase().includes("application/json")) {
       emitBridgeRejectTelemetry({
-        sessionKey: "", bridgeSource: "skill-bridge",
-        rejectReason: "content_type_invalid", httpStatus: 415,
+        sessionKey: "",
+        bridgeSource: "skill-bridge",
+        rejectReason: "content_type_invalid",
+        httpStatus: 415,
         executedEndpoint: sub,
       });
-      return envelope(41501, `${TAG} content-type must be application/json`, 415);
+      return envelope(
+        41501,
+        `${TAG} content-type must be application/json`,
+        415,
+      );
     }
 
     // Session must be initialized — IdFields come from there.
@@ -512,16 +539,23 @@ export function createSkillBridgeHandler(
     const sessionKey = deriveSessionId(c);
     if (!sessionKey) {
       emitBridgeRejectTelemetry({
-        sessionKey: "", bridgeSource: "skill-bridge",
-        rejectReason: "missing_conversation_id", httpStatus: 401,
+        sessionKey: "",
+        bridgeSource: "skill-bridge",
+        rejectReason: "missing_conversation_id",
+        httpStatus: 401,
         executedEndpoint: sub,
       });
-      return envelope(40101, `${TAG} missing x-conversation-id (or x-session-id / x-chat-id / x-thread-id) header`, 401);
+      return envelope(
+        40101,
+        `${TAG} missing x-conversation-id (or x-session-id / x-chat-id / x-thread-id) header`,
+        401,
+      );
     }
-    const spaceId = c.req.header("x-tdai-service-id")
-      ?? config.tdai?.serviceId
-      ?? config.coreSkill?.serviceId
-      ?? "";
+    const spaceId =
+      c.req.header("x-tdai-service-id") ??
+      config.tdai?.serviceId ??
+      config.coreSkill?.serviceId ??
+      "";
 
     // Backing storage for extract trigger + version pin.
     // When storage.enabled + mode!=off → ProxyStorage (Kv* repos).
@@ -532,16 +566,25 @@ export function createSkillBridgeHandler(
 
     let ids = loadSessionIdsL1(sessionKey);
     if (!ids && bindingRepoInline && spaceId) {
-      console.log(`${TAG} session=${sessionKey} L1 miss → L2 binding lookup (space=${spaceId})`);
+      console.log(
+        `${TAG} session=${sessionKey} L1 miss → L2 binding lookup (space=${spaceId})`,
+      );
       ids = await loadSessionIdsL2(bindingRepoInline, spaceId, sessionKey);
     }
     if (!ids) {
       emitBridgeRejectTelemetry({
-        sessionKey, bridgeSource: "skill-bridge",
-        rejectReason: "session_not_initialized", httpStatus: 401,
-        executedEndpoint: sub, spaceId,
+        sessionKey,
+        bridgeSource: "skill-bridge",
+        rejectReason: "session_not_initialized",
+        httpStatus: 401,
+        executedEndpoint: sub,
+        spaceId,
       });
-      return envelope(40101, `${TAG} session not initialized; cannot derive identity`, 401);
+      return envelope(
+        40101,
+        `${TAG} session not initialized; cannot derive identity`,
+        401,
+      );
     }
     // backing.redis used to serve the legacy SkillExtractTrigger path, which is gone;
     // this function no longer touches redis directly. It is kept on the backing struct
@@ -551,13 +594,22 @@ export function createSkillBridgeHandler(
     const allowLlmWrite = config.skillRuntime?.allowLlmWrite ?? false;
     if (!allowLlmWrite && WRITE_SUBPATHS.has(sub)) {
       emitBridgeRejectTelemetry({
-        sessionKey, bridgeSource: "skill-bridge",
-        rejectReason: "write_ops_disabled", httpStatus: 403,
+        sessionKey,
+        bridgeSource: "skill-bridge",
+        rejectReason: "write_ops_disabled",
+        httpStatus: 403,
         executedEndpoint: sub,
-        spaceId: ids.space_id, userId: ids.user_id, teamId: ids.team_id,
-        agentId: ids.agent_id, agentSource: ids.agent_source,
+        spaceId: ids.space_id,
+        userId: ids.user_id,
+        teamId: ids.team_id,
+        agentId: ids.agent_id,
+        agentSource: ids.agent_source,
       });
-      return envelope(40302, `${TAG} LLM write access to skill is disabled (skillRuntime.allowLlmWrite=false)`, 403);
+      return envelope(
+        40302,
+        `${TAG} LLM write access to skill is disabled (skillRuntime.allowLlmWrite=false)`,
+        403,
+      );
     }
 
     // Parse body. Empty body → {}. Malformed → 400.
@@ -570,24 +622,39 @@ export function createSkillBridgeHandler(
           inboundBody = parsed as Record<string, unknown>;
         } else {
           emitBridgeRejectTelemetry({
-            sessionKey, bridgeSource: "skill-bridge",
-            rejectReason: "body_not_object", httpStatus: 400,
-            executedEndpoint: sub, requestBody: raw.slice(0, 512),
-            spaceId: ids.space_id, userId: ids.user_id, teamId: ids.team_id,
-            agentId: ids.agent_id, agentSource: ids.agent_source,
+            sessionKey,
+            bridgeSource: "skill-bridge",
+            rejectReason: "body_not_object",
+            httpStatus: 400,
+            executedEndpoint: sub,
+            requestBody: raw.slice(0, 512),
+            spaceId: ids.space_id,
+            userId: ids.user_id,
+            teamId: ids.team_id,
+            agentId: ids.agent_id,
+            agentSource: ids.agent_source,
           });
           return envelope(40001, `${TAG} body must be a JSON object`, 400);
         }
       }
     } catch (err) {
       emitBridgeRejectTelemetry({
-        sessionKey, bridgeSource: "skill-bridge",
-        rejectReason: "invalid_json_body", httpStatus: 400,
+        sessionKey,
+        bridgeSource: "skill-bridge",
+        rejectReason: "invalid_json_body",
+        httpStatus: 400,
         executedEndpoint: sub,
-        spaceId: ids.space_id, userId: ids.user_id, teamId: ids.team_id,
-        agentId: ids.agent_id, agentSource: ids.agent_source,
+        spaceId: ids.space_id,
+        userId: ids.user_id,
+        teamId: ids.team_id,
+        agentId: ids.agent_id,
+        agentSource: ids.agent_source,
       });
-      return envelope(40001, `${TAG} invalid JSON body: ${(err as Error).message}`, 400);
+      return envelope(
+        40001,
+        `${TAG} invalid JSON body: ${(err as Error).message}`,
+        400,
+      );
     }
 
     // ── files/download: read from core, decode, return raw bytes ──────
@@ -601,7 +668,7 @@ export function createSkillBridgeHandler(
       };
       const upstreamUrl = `${config.coreSkill.endpoint.replace(/\/$/, "")}/v3/skill/files/read`;
       const headers: Record<string, string> = {
-        "Authorization": `Bearer ${config.coreSkill.serviceToken}`,
+        Authorization: `Bearer ${config.coreSkill.serviceToken}`,
         // Single identity plane: the session user_key is the credential; Bearer is legacy transport only.
         "x-tdai-user-key": ids.user_key ?? "",
         // Prefer session-derived tenant; fall back to config for legacy sessions.
@@ -616,10 +683,14 @@ export function createSkillBridgeHandler(
           method: "POST",
           headers,
           body: dlOutboundBody,
-          signal: AbortSignal.timeout(Math.max(5000, config.coreSkill.timeoutMs * 4)),
+          signal: AbortSignal.timeout(
+            Math.max(5000, config.coreSkill.timeoutMs * 4),
+          ),
         });
       } catch (err) {
-        console.warn(`${TAG} files/download upstream fetch failed: ${(err as Error).message}`);
+        console.warn(
+          `${TAG} files/download upstream fetch failed: ${(err as Error).message}`,
+        );
         // Telemetry parity: like the main :822 path, an upstream non-response still
         // counts as a call. This catch branch used to return silently, so CH was one
         // row short from curl's "made N calls" perspective.
@@ -637,26 +708,47 @@ export function createSkillBridgeHandler(
           upstreamStatus: 0,
           elapsedMs: (deps.now ?? Date.now)() - dlCallStart,
         });
-        return envelope(50301, `${TAG} upstream unavailable: ${(err as Error).message}`, 502);
+        return envelope(
+          50301,
+          `${TAG} upstream unavailable: ${(err as Error).message}`,
+          502,
+        );
       }
       const coreText = await coreResp.text().catch(() => "");
       const elapsed = (deps.now ?? Date.now)() - t0;
-      console.log(`${TAG} sub=files/download status=${coreResp.status} elapsed=${elapsed}ms`);
+      console.log(
+        `${TAG} sub=files/download status=${coreResp.status} elapsed=${elapsed}ms`,
+      );
 
       // Core error → pass through as JSON envelope
       if (coreResp.status < 200 || coreResp.status >= 300) {
         return new Response(coreText, {
           status: coreResp.status,
-          headers: { "content-type": coreResp.headers.get("content-type") ?? "application/json" },
+          headers: {
+            "content-type":
+              coreResp.headers.get("content-type") ?? "application/json",
+          },
         });
       }
 
       // Parse envelope, extract file content
-      let parsed: { code?: number; data?: { content?: string; encoding?: string; mime_type?: string; size_bytes?: number } };
+      let parsed: {
+        code?: number;
+        data?: {
+          content?: string;
+          encoding?: string;
+          mime_type?: string;
+          size_bytes?: number;
+        };
+      };
       try {
         parsed = JSON.parse(coreText);
       } catch {
-        return envelope(50001, `${TAG} files/download: failed to parse core response`, 502);
+        return envelope(
+          50001,
+          `${TAG} files/download: failed to parse core response`,
+          502,
+        );
       }
       if (parsed.code !== 0 || !parsed.data?.content) {
         return new Response(coreText, {
@@ -666,9 +758,10 @@ export function createSkillBridgeHandler(
       }
 
       const { content, encoding, mime_type } = parsed.data;
-      const rawBytes = encoding === "base64"
-        ? Buffer.from(content, "base64")
-        : Buffer.from(content, "utf-8");
+      const rawBytes =
+        encoding === "base64"
+          ? Buffer.from(content, "base64")
+          : Buffer.from(content, "utf-8");
 
       return new Response(rawBytes, {
         status: 200,
@@ -718,9 +811,10 @@ export function createSkillBridgeHandler(
       // messages / task_id sent by the agent are never forwarded (irrelevant from the
       // agent's perspective; implicit in the session).
       upstreamSubpathOverride = "conversation/force-archive";
-      const reason = typeof inboundBody.reason === "string" && inboundBody.reason.trim()
-        ? inboundBody.reason.trim().slice(0, 2000)
-        : undefined;
+      const reason =
+        typeof inboundBody.reason === "string" && inboundBody.reason.trim()
+          ? inboundBody.reason.trim().slice(0, 2000)
+          : undefined;
       outbound = {
         space_id: ids.space_id || config.coreSkill.serviceId,
         user_id: ids.user_id,
@@ -767,8 +861,14 @@ export function createSkillBridgeHandler(
         //   - Non-empty whitelist → overfetch top_k=PLUGIN_SEARCH_HARD_TOPK,
         //     filter response items by whitelist, slice back to caller's top_k.
         if (!ids.user_key) {
-          console.error(`${TAG} team search: session lacks user_key — session-init should have stored it (sessionKey=${sessionKey})`);
-          return envelope(50001, `${TAG} team search misconfigured: session has no user_key`, 500);
+          console.error(
+            `${TAG} team search: session lacks user_key — session-init should have stored it (sessionKey=${sessionKey})`,
+          );
+          return envelope(
+            50001,
+            `${TAG} team search misconfigured: session has no user_key`,
+            500,
+          );
         }
 
         // Whitelist = A ∪ B (see docs/design/2026-08-10-skill-search-scope-fix.md §4):
@@ -784,30 +884,36 @@ export function createSkillBridgeHandler(
         // Failure degradation strategy:
         //   A fails → fail-closed, return empty (safe fallback: never let the LLM see unfiltered results)
         //   B fails → treat as empty set, degrade to A alone (roughly pre-fix behavior)
-        const coreClient = deps.coreClient ?? getCoreSkillClient(config.coreSkill);
-        const resolver = deps.resolveVisibleSkillIds
-          ?? defaultVisibleSkillIdsResolver(config);
+        const coreClient =
+          deps.coreClient ?? getCoreSkillClient(config.coreSkill);
+        const resolver =
+          deps.resolveVisibleSkillIds ?? defaultVisibleSkillIdsResolver(config);
 
         const promiseA = resolver({
           user_id: ids.user_id,
           team_id: ids.team_id,
           user_key: ids.user_key,
           space_id: ids.space_id,
-        }).then(r => ({ ok: true as const, ids: r.ids }))
-          .catch(err => ({ ok: false as const, err: err as Error }));
+        })
+          .then((r) => ({ ok: true as const, ids: r.ids }))
+          .catch((err) => ({ ok: false as const, err: err as Error }));
 
         // B limit=1000 is the cap of core listRequestSchema (paginationSchema.limit.max(1000)).
         // A single agent's own skills never approach 1000, so fetch them all in one page.
-        const promiseB = coreClient.listSkills(
-          {
-            team_id: ids.team_id,
-            agent_id: ids.agent_id,
-            pagination: { limit: 1000 },
-          },
-          { serviceId: ids.space_id },
-        ).then(r => r.items.map(s => s.skill_id))
-          .catch(err => {
-            console.warn(`${TAG} team search B (list) failed, treating as empty: ${(err as Error).message}`);
+        const promiseB = coreClient
+          .listSkills(
+            {
+              team_id: ids.team_id,
+              agent_id: ids.agent_id,
+              pagination: { limit: 1000 },
+            },
+            { serviceId: ids.space_id },
+          )
+          .then((r) => r.items.map((s) => s.skill_id))
+          .catch((err) => {
+            console.warn(
+              `${TAG} team search B (list) failed, treating as empty: ${(err as Error).message}`,
+            );
             return [] as string[];
           });
 
@@ -815,23 +921,37 @@ export function createSkillBridgeHandler(
 
         if (!aResult.ok) {
           // Fail-closed: if A is down, never degrade to an unfiltered search.
-          console.warn(`${TAG} team search whitelist resolver (A) failed, fail-closed: ${aResult.err.message}`);
+          console.warn(
+            `${TAG} team search whitelist resolver (A) failed, fail-closed: ${aResult.err.message}`,
+          );
           return new Response(
-            JSON.stringify({ code: 0, message: "ok", request_id: `bridge-${(deps.now ?? Date.now)()}`, data: { items: [] } }),
+            JSON.stringify({
+              code: 0,
+              message: "ok",
+              request_id: `bridge-${(deps.now ?? Date.now)()}`,
+              data: { items: [] },
+            }),
             { status: 200, headers: { "content-type": "application/json" } },
           );
         }
 
-        const whitelist: string[] = Array.from(new Set<string>([...aResult.ids, ...bIds]));
+        const whitelist: string[] = Array.from(
+          new Set<string>([...aResult.ids, ...bIds]),
+        );
         console.log(
-          `${TAG} team search whitelist A=${aResult.ids.length} B=${bIds.length}`
-            + ` merged=${whitelist.length} user=${ids.user_id} team=${ids.team_id}`,
+          `${TAG} team search whitelist A=${aResult.ids.length} B=${bIds.length}` +
+            ` merged=${whitelist.length} user=${ids.user_id} team=${ids.team_id}`,
         );
 
         if (whitelist.length === 0) {
           // Short-circuit: no visible skill IDs → 0 matches guaranteed. Skip upstream.
           return new Response(
-            JSON.stringify({ code: 0, message: "ok", request_id: `bridge-${(deps.now ?? Date.now)()}`, data: { items: [] } }),
+            JSON.stringify({
+              code: 0,
+              message: "ok",
+              request_id: `bridge-${(deps.now ?? Date.now)()}`,
+              data: { items: [] },
+            }),
             { status: 200, headers: { "content-type": "application/json" } },
           );
         }
@@ -847,7 +967,8 @@ export function createSkillBridgeHandler(
         searchVisibleIds = new Set(whitelist);
         searchOriginalTopK = DEFAULT_SEARCH_TOPK;
 
-        const query = typeof inboundBody.query === "string" ? inboundBody.query : "";
+        const query =
+          typeof inboundBody.query === "string" ? inboundBody.query : "";
         outbound = {
           query,
           team_id: ids.team_id,
@@ -866,11 +987,23 @@ export function createSkillBridgeHandler(
       // Read (get/files_read): inject `version` → plugin returns pinned version's content
       // Write (update/patch/files_write/files_remove): inject `expected_version` → optimistic lock
       // First-access is not pinned yet → falls through to head; lazy-pin captures the version afterwards.
-      if (pinRepoInline && (READ_VERSION_OPS.has(sub) || WRITE_LOCK_OPS.has(sub))) {
-        const skillId = typeof inboundBody.skill_id === "string" ? inboundBody.skill_id : undefined;
+      if (
+        pinRepoInline &&
+        (READ_VERSION_OPS.has(sub) || WRITE_LOCK_OPS.has(sub))
+      ) {
+        const skillId =
+          typeof inboundBody.skill_id === "string"
+            ? inboundBody.skill_id
+            : undefined;
         if (skillId) {
           const pinRepo = pinRepoInline;
-          const pinned = await pinRepo.getVersion(ids.space_id ?? "", ids.user_id, ids.agent_source, sessionKey, skillId);
+          const pinned = await pinRepo.getVersion(
+            ids.space_id ?? "",
+            ids.user_id,
+            ids.agent_source,
+            sessionKey,
+            skillId,
+          );
           if (pinned !== null && pinned !== undefined) {
             if (READ_VERSION_OPS.has(sub)) {
               outbound.version = pinned;
@@ -886,7 +1019,7 @@ export function createSkillBridgeHandler(
     const upstreamSub = upstreamSubpathOverride ?? sub;
     const upstreamUrl = `${config.coreSkill.endpoint.replace(/\/$/, "")}/v3/skill/${upstreamSub}`;
     const headers: Record<string, string> = {
-      "Authorization": `Bearer ${config.coreSkill.serviceToken}`,
+      Authorization: `Bearer ${config.coreSkill.serviceToken}`,
       // Single identity plane: the session user_key is the credential; Bearer is legacy transport only.
       "x-tdai-user-key": ids.user_key ?? "",
       // Prefer session-derived tenant; fall back to config for legacy sessions.
@@ -902,7 +1035,9 @@ export function createSkillBridgeHandler(
         method: "POST",
         headers,
         body: outboundBody,
-        signal: AbortSignal.timeout(Math.max(5000, config.coreSkill.timeoutMs * 4)),
+        signal: AbortSignal.timeout(
+          Math.max(5000, config.coreSkill.timeoutMs * 4),
+        ),
       });
     } catch (err) {
       console.warn(
@@ -924,14 +1059,16 @@ export function createSkillBridgeHandler(
         upstreamStatus: 0,
         elapsedMs: (deps.now ?? Date.now)() - callStart,
       });
-      return envelope(50301, `${TAG} upstream unavailable: ${(err as Error).message}`, 502);
+      return envelope(
+        50301,
+        `${TAG} upstream unavailable: ${(err as Error).message}`,
+        502,
+      );
     }
 
     const respText = await resp.text().catch(() => "");
     const elapsed = (deps.now ?? Date.now)() - t0;
-    console.log(
-      `${TAG} sub=${sub} status=${resp.status} elapsed=${elapsed}ms`,
-    );
+    console.log(`${TAG} sub=${sub} status=${resp.status} elapsed=${elapsed}ms`);
 
     // Telemetry: upstream responded (incl. 4xx/5xx); record the actual status and elapsed.
     const emitKey = ids.composite_key ?? sessionKey;
@@ -961,19 +1098,31 @@ export function createSkillBridgeHandler(
     // only records versions the caller actually gets to see.
     let finalRespText = respText;
     if (
-      isTeamWideSearch
-      && searchVisibleIds
-      && resp.status >= 200
-      && resp.status < 300
+      isTeamWideSearch &&
+      searchVisibleIds &&
+      resp.status >= 200 &&
+      resp.status < 300
     ) {
-      finalRespText = filterTeamSearchResponse(respText, searchVisibleIds, searchOriginalTopK);
+      finalRespText = filterTeamSearchResponse(
+        respText,
+        searchVisibleIds,
+        searchOriginalTopK,
+      );
     }
 
     // ── Lazy-pin: extract version from response and record in pin repo ──
     // Only on 2xx success; failures don't advance the pin. Use the FILTERED
     // response so we don't pin versions of skills the caller can't see.
     if (pinRepoInline && resp.status >= 200 && resp.status < 300) {
-      await tryLazyPin(sub, finalRespText, ids.space_id ?? "", ids.user_id, ids.agent_source, sessionKey, pinRepoInline).catch(() => {});
+      await tryLazyPin(
+        sub,
+        finalRespText,
+        ids.space_id ?? "",
+        ids.user_id,
+        ids.agent_source,
+        sessionKey,
+        pinRepoInline,
+      ).catch(() => {});
     }
 
     return new Response(finalRespText, {
@@ -1000,7 +1149,11 @@ export function createSkillBridgeHandler(
  *
  * Pure function; unit-testable without a fetcher.
  */
-function filterTeamSearchResponse(respText: string, visible: Set<string>, topK: number): string {
+function filterTeamSearchResponse(
+  respText: string,
+  visible: Set<string>,
+  topK: number,
+): string {
   let parsed: unknown;
   try {
     parsed = JSON.parse(respText);
@@ -1009,15 +1162,18 @@ function filterTeamSearchResponse(respText: string, visible: Set<string>, topK: 
   }
   if (!parsed || typeof parsed !== "object") return respText;
   const env = parsed as { code?: number; data?: unknown };
-  if (env.code !== 0) return respText;                       // never mask upstream errors
+  if (env.code !== 0) return respText; // never mask upstream errors
   if (!env.data || typeof env.data !== "object") return respText;
   const data = env.data as { items?: unknown };
   if (!Array.isArray(data.items)) return respText;
 
   const filtered = (data.items as unknown[])
-    .filter((it): it is Record<string, unknown> =>
-      !!it && typeof it === "object" && typeof (it as Record<string, unknown>).skill_id === "string"
-      && visible.has((it as Record<string, unknown>).skill_id as string),
+    .filter(
+      (it): it is Record<string, unknown> =>
+        !!it &&
+        typeof it === "object" &&
+        typeof (it as Record<string, unknown>).skill_id === "string" &&
+        visible.has((it as Record<string, unknown>).skill_id as string),
     )
     .slice(0, Math.max(0, topK));
 
@@ -1090,7 +1246,9 @@ async function tryLazyPin(
     const id = data.skill_id;
     const v = data.version;
     if (typeof id === "string" && typeof v === "number") {
-      await pinRepo.pinMany(spaceId, userId, agentSource, sessionKey, [{ skillId: id, version: v }]);
+      await pinRepo.pinMany(spaceId, userId, agentSource, sessionKey, [
+        { skillId: id, version: v },
+      ]);
     }
     return;
   }
@@ -1110,7 +1268,14 @@ async function tryLazyPin(
     const id = data.skill_id;
     const v = data.version;
     if (typeof id === "string" && typeof v === "number") {
-      await pinRepo.upsertVersion(spaceId, userId, agentSource, sessionKey, id, v);
+      await pinRepo.upsertVersion(
+        spaceId,
+        userId,
+        agentSource,
+        sessionKey,
+        id,
+        v,
+      );
     }
     return;
   }

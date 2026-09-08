@@ -26,16 +26,18 @@ and are validated locally before a request is sent.
 from __future__ import annotations
 
 import base64
-from typing import Any, Dict, Iterable, List, Optional, Union
+import builtins
+from collections.abc import Iterable
+from typing import Any
 
-from .._http import Stub
+from .._http import AsyncStub, Stub
 from .._v3_http import AsyncHttpStub, HttpStub
 from ..errors import ParamError
 
 _V3 = "/v3/skill"
 
 # ── Numeric error codes returned in envelope.code for /v3/skill/*. ──
-SKILL_ERROR_CODE: Dict[str, int] = {
+SKILL_ERROR_CODE: dict[str, int] = {
     "BAD_REQUEST": 40001,
     "NOT_OWNER": 40301,
     "TEAM_MISMATCH": 40302,
@@ -54,11 +56,11 @@ SKILL_ERROR_CODE: Dict[str, int] = {
 }
 
 
-def _strip_none(d: Dict[str, Any]) -> Dict[str, Any]:
+def _strip_none(d: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in d.items() if v is not None}
 
 
-def _validate_extract(messages: List[Dict[str, Any]], isolation: Dict[str, Any]) -> None:
+def _validate_extract(messages: list[dict[str, Any]], isolation: dict[str, Any]) -> None:
     if not isinstance(messages, list) or not messages:
         raise ParamError("extract requires at least one message")
     missing = [
@@ -69,7 +71,7 @@ def _validate_extract(messages: List[Dict[str, Any]], isolation: Dict[str, Any])
         raise ParamError(f"extract requires non-empty {', '.join(missing)}")
 
 
-def _validate_conversation_add(messages: List[Dict[str, Any]], isolation: Dict[str, Any]) -> None:
+def _validate_conversation_add(messages: list[dict[str, Any]], isolation: dict[str, Any]) -> None:
     if not isinstance(messages, list) or not messages:
         raise ParamError("conversation_add requires at least one message")
     missing = [
@@ -80,7 +82,7 @@ def _validate_conversation_add(messages: List[Dict[str, Any]], isolation: Dict[s
         raise ParamError(f"conversation_add requires non-empty {', '.join(missing)}")
 
 
-def _validate_force_archive(isolation: Dict[str, Any]) -> None:
+def _validate_force_archive(isolation: dict[str, Any]) -> None:
     """All five isolation fields (incl. ``space_id``) are required by
     ``forceArchiveRequestSchema``."""
     missing = [
@@ -100,10 +102,10 @@ class _SkillDefaults:
 
     def __init__(
         self,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
     ) -> None:
         self.team_id = team_id
         self.agent_id = agent_id
@@ -112,11 +114,11 @@ class _SkillDefaults:
 
     def merge(
         self,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """Merge per-call overrides with defaults; returns a body-ready dict of id fields."""
         return {
             "team_id": team_id if team_id is not None else self.team_id,
@@ -134,9 +136,9 @@ def encode_utf8(
     path: str,
     content: str,
     *,
-    mime_type: Optional[str] = None,
-    is_executable: Optional[bool] = None,
-) -> Dict[str, Any]:
+    mime_type: str | None = None,
+    is_executable: bool | None = None,
+) -> dict[str, Any]:
     """Build a utf-8 SkillResourcePayload for uploads (create / files/write)."""
     return _strip_none({
         "path": path,
@@ -149,11 +151,11 @@ def encode_utf8(
 
 def encode_base64(
     path: str,
-    data: Union[bytes, bytearray, memoryview, str],
+    data: bytes | bytearray | memoryview | str,
     *,
-    mime_type: Optional[str] = None,
-    is_executable: Optional[bool] = None,
-) -> Dict[str, Any]:
+    mime_type: str | None = None,
+    is_executable: bool | None = None,
+) -> dict[str, Any]:
     """Build a base64 SkillResourcePayload from raw bytes or a pre-encoded base64 string."""
     if isinstance(data, str):
         encoded = data
@@ -179,15 +181,15 @@ class SkillClient:
         self,
         endpoint: str = "",
         api_key: str = "",
-        service_id: Optional[str] = None,
+        service_id: str | None = None,
         *,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
         timeout: float = 30,
         verify: bool = True,
-        stub: Optional[Stub] = None,
+        stub: Stub | None = None,
     ) -> None:
         if stub is not None:
             self._stub = stub
@@ -202,11 +204,11 @@ class SkillClient:
     def with_defaults(
         self,
         *,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> "SkillClient":
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> SkillClient:
         """Return a clone sharing the transport but with overridden defaults."""
         clone = object.__new__(SkillClient)
         clone._stub = self._stub
@@ -229,13 +231,13 @@ class SkillClient:
         *,
         name: str,
         content: str,
-        resources: Optional[Iterable[Dict[str, Any]]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        resources: Iterable[dict[str, Any]] | None = None,
+        metadata: dict[str, Any] | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/skill/create``"""
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
@@ -252,11 +254,11 @@ class SkillClient:
         *,
         expected_version: int,
         content: str,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/skill/update``"""
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
@@ -273,12 +275,12 @@ class SkillClient:
         expected_version: int,
         old_string: str,
         new_string: str,
-        replace_all: Optional[bool] = None,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        replace_all: bool | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/skill/patch``"""
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
@@ -295,11 +297,11 @@ class SkillClient:
         skill_id: str,
         *,
         expected_version: int,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/skill/delete``"""
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
@@ -312,14 +314,14 @@ class SkillClient:
         self,
         skill_id: str,
         *,
-        version: Optional[int] = None,
-        include_content: Optional[bool] = None,
-        include_manifest: Optional[bool] = None,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        version: int | None = None,
+        include_content: bool | None = None,
+        include_manifest: bool | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/skill/get``"""
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
@@ -336,12 +338,12 @@ class SkillClient:
         *,
         team_id: str,
         agent_id: str,
-        version: Optional[int] = None,
-        include_content: Optional[bool] = None,
-        include_manifest: Optional[bool] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        version: int | None = None,
+        include_content: bool | None = None,
+        include_manifest: bool | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/skill/get-by-name`` — locate a skill by ``(team_id,
         agent_id, skill_name)`` in a single call.
 
@@ -375,13 +377,13 @@ class SkillClient:
     def list(
         self,
         *,
-        filters: Optional[Dict[str, Any]] = None,
-        pagination: Optional[Dict[str, Any]] = None,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        filters: dict[str, Any] | None = None,
+        pagination: dict[str, Any] | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/skill/list``"""
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
@@ -394,14 +396,14 @@ class SkillClient:
         self,
         query: str,
         *,
-        top_k: Optional[int] = None,
-        mode: Optional[str] = None,
-        scope: Optional[str] = None,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        top_k: int | None = None,
+        mode: str | None = None,
+        scope: str | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/skill/search`` — ``mode`` ∈ {bm25, embedding, hybrid}; ``scope`` = "team" to drop agent filter."""
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
@@ -416,12 +418,12 @@ class SkillClient:
         self,
         skill_id: str,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/skill/versions``"""
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
@@ -437,12 +439,12 @@ class SkillClient:
         skill_id: str,
         *,
         expected_version: int,
-        files: Iterable[Dict[str, Any]],
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        files: Iterable[dict[str, Any]],
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/skill/files/write``"""
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
@@ -458,11 +460,11 @@ class SkillClient:
         *,
         expected_version: int,
         paths: Iterable[str],
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/skill/files/remove``"""
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
@@ -477,13 +479,13 @@ class SkillClient:
         skill_id: str,
         path: str,
         *,
-        version: Optional[int] = None,
-        encoding: Optional[str] = None,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        version: int | None = None,
+        encoding: str | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/skill/files/read``"""
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
@@ -498,13 +500,13 @@ class SkillClient:
         self,
         skill_id: str,
         *,
-        version: Optional[int] = None,
-        format: Optional[str] = None,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        version: int | None = None,
+        format: str | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/skill/export`` — download the skill (SKILL.md +
         resources) as a ZIP.
 
@@ -526,13 +528,13 @@ class SkillClient:
     def listing(
         self,
         *,
-        query: Optional[str] = None,
-        char_budget: Optional[int] = None,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        query: str | None = None,
+        char_budget: int | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/skill/listing`` — render ``<available_skills>`` block."""
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
@@ -543,17 +545,17 @@ class SkillClient:
 
     def extract(
         self,
-        messages: List[Dict[str, Any]],
+        messages: builtins.list[dict[str, Any]],
         *,
-        session_id: Optional[str] = None,
-        reason: Optional[str] = None,
-        options: Optional[Dict[str, Any]] = None,
-        space_id: Optional[str] = None,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        session_id: str | None = None,
+        reason: str | None = None,
+        options: dict[str, Any] | None = None,
+        space_id: str | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/skill/extract`` — fire-and-forget async extract.
 
         Returns ``{ok, task_id, archived_at_ms, archive_key}`` immediately
@@ -586,10 +588,10 @@ class SkillClient:
         user_id: str,
         team_id: str,
         agent_id: str,
-        messages: List[Dict[str, Any]],
-        space_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        messages: builtins.list[dict[str, Any]],
+        space_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/skill/conversation/add`` — append this turn's messages
         to the session buffer.
 
@@ -630,9 +632,9 @@ class SkillClient:
         team_id: str,
         agent_id: str,
         space_id: str,
-        reason: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        reason: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/skill/conversation/force-archive`` — manually archive
         the current session buffer, bypassing the tool_call / bytes
         thresholds. The third trigger condition alongside
@@ -674,7 +676,7 @@ class SkillClient:
     def close(self) -> None:
         self._stub.close()
 
-    def __enter__(self) -> "SkillClient":
+    def __enter__(self) -> SkillClient:
         return self
 
     def __exit__(self, *exc: Any) -> None:
@@ -692,15 +694,15 @@ class AsyncSkillClient:
         self,
         endpoint: str = "",
         api_key: str = "",
-        service_id: Optional[str] = None,
+        service_id: str | None = None,
         *,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
         timeout: float = 30,
         verify: bool = True,
-        stub: Optional[Stub] = None,
+        stub: AsyncStub | None = None,
     ) -> None:
         if stub is not None:
             self._stub = stub
@@ -713,11 +715,11 @@ class AsyncSkillClient:
     def with_defaults(
         self,
         *,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> "AsyncSkillClient":
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> AsyncSkillClient:
         clone = object.__new__(AsyncSkillClient)
         clone._stub = self._stub
         clone._defaults = _SkillDefaults(
@@ -738,13 +740,13 @@ class AsyncSkillClient:
         *,
         name: str,
         content: str,
-        resources: Optional[Iterable[Dict[str, Any]]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        resources: Iterable[dict[str, Any]] | None = None,
+        metadata: dict[str, Any] | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
             "name": name,
@@ -760,11 +762,11 @@ class AsyncSkillClient:
         *,
         expected_version: int,
         content: str,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
             "skill_id": skill_id,
@@ -780,12 +782,12 @@ class AsyncSkillClient:
         expected_version: int,
         old_string: str,
         new_string: str,
-        replace_all: Optional[bool] = None,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        replace_all: bool | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
             "skill_id": skill_id,
@@ -801,11 +803,11 @@ class AsyncSkillClient:
         skill_id: str,
         *,
         expected_version: int,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
             "skill_id": skill_id,
@@ -817,14 +819,14 @@ class AsyncSkillClient:
         self,
         skill_id: str,
         *,
-        version: Optional[int] = None,
-        include_content: Optional[bool] = None,
-        include_manifest: Optional[bool] = None,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        version: int | None = None,
+        include_content: bool | None = None,
+        include_manifest: bool | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
             "skill_id": skill_id,
@@ -840,12 +842,12 @@ class AsyncSkillClient:
         *,
         team_id: str,
         agent_id: str,
-        version: Optional[int] = None,
-        include_content: Optional[bool] = None,
-        include_manifest: Optional[bool] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        version: int | None = None,
+        include_content: bool | None = None,
+        include_manifest: bool | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """``POST /v3/skill/get-by-name`` — locate a skill by ``(team_id,
         agent_id, skill_name)`` in a single call.
 
@@ -875,13 +877,13 @@ class AsyncSkillClient:
     async def list(
         self,
         *,
-        filters: Optional[Dict[str, Any]] = None,
-        pagination: Optional[Dict[str, Any]] = None,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        filters: dict[str, Any] | None = None,
+        pagination: dict[str, Any] | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
             "filters": filters,
@@ -893,14 +895,14 @@ class AsyncSkillClient:
         self,
         query: str,
         *,
-        top_k: Optional[int] = None,
-        mode: Optional[str] = None,
-        scope: Optional[str] = None,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        top_k: int | None = None,
+        mode: str | None = None,
+        scope: str | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
             "query": query,
@@ -914,12 +916,12 @@ class AsyncSkillClient:
         self,
         skill_id: str,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
             "skill_id": skill_id,
@@ -934,12 +936,12 @@ class AsyncSkillClient:
         skill_id: str,
         *,
         expected_version: int,
-        files: Iterable[Dict[str, Any]],
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        files: Iterable[dict[str, Any]],
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
             "skill_id": skill_id,
@@ -954,11 +956,11 @@ class AsyncSkillClient:
         *,
         expected_version: int,
         paths: Iterable[str],
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
             "skill_id": skill_id,
@@ -972,13 +974,13 @@ class AsyncSkillClient:
         skill_id: str,
         path: str,
         *,
-        version: Optional[int] = None,
-        encoding: Optional[str] = None,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        version: int | None = None,
+        encoding: str | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
             "skill_id": skill_id,
@@ -992,13 +994,13 @@ class AsyncSkillClient:
         self,
         skill_id: str,
         *,
-        version: Optional[int] = None,
-        format: Optional[str] = None,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        version: int | None = None,
+        format: str | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """See :meth:`SkillClient.export_skill` for the contract."""
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
@@ -1013,13 +1015,13 @@ class AsyncSkillClient:
     async def listing(
         self,
         *,
-        query: Optional[str] = None,
-        char_budget: Optional[int] = None,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        query: str | None = None,
+        char_budget: int | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
             "query": query,
@@ -1029,17 +1031,17 @@ class AsyncSkillClient:
 
     async def extract(
         self,
-        messages: List[Dict[str, Any]],
+        messages: builtins.list[dict[str, Any]],
         *,
-        session_id: Optional[str] = None,
-        reason: Optional[str] = None,
-        options: Optional[Dict[str, Any]] = None,
-        space_id: Optional[str] = None,
-        team_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        session_id: str | None = None,
+        reason: str | None = None,
+        options: dict[str, Any] | None = None,
+        space_id: str | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """See :meth:`SkillClient.extract` for parameter and response docs."""
         body = _strip_none({
             **self._defaults.merge(team_id, agent_id, user_id, task_id),
@@ -1059,10 +1061,10 @@ class AsyncSkillClient:
         user_id: str,
         team_id: str,
         agent_id: str,
-        messages: List[Dict[str, Any]],
-        space_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        messages: builtins.list[dict[str, Any]],
+        space_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """See :meth:`SkillClient.conversation_add` for the contract."""
         body = _strip_none({
             "session_id": session_id,
@@ -1084,9 +1086,9 @@ class AsyncSkillClient:
         team_id: str,
         agent_id: str,
         space_id: str,
-        reason: Optional[str] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        reason: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """See :meth:`SkillClient.conversation_force_archive` for the contract."""
         body = _strip_none({
             "session_id": session_id,
@@ -1105,7 +1107,7 @@ class AsyncSkillClient:
     async def close(self) -> None:
         await self._stub.close()
 
-    async def __aenter__(self) -> "AsyncSkillClient":
+    async def __aenter__(self) -> AsyncSkillClient:
         return self
 
     async def __aexit__(self, *exc: Any) -> None:

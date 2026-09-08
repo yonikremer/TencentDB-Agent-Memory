@@ -100,7 +100,6 @@ export function createLlmClient(config: NormalizedLlmConfig): LlmClient {
       : createOpenAI({
           apiKey: config.apiKey,
           baseURL: config.baseUrl,
-          compatibility: "compatible",
         });
 
   return {
@@ -130,7 +129,7 @@ export function createLlmClient(config: NormalizedLlmConfig): LlmClient {
           system: params.system,
           prompt: params.prompt,
           maxOutputTokens: params.maxOutputTokens ?? config.maxTokens,
-          ...(params.temperature !== undefined ? { temperature: params.temperature } : {}),
+          ...(params.temperature === undefined ? {} : { temperature: params.temperature }),
           abortSignal: signal,
           experimental_telemetry: {
             isEnabled: true,

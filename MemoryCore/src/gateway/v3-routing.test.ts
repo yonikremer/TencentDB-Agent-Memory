@@ -17,10 +17,18 @@ function req(pathname: string, headers: Record<string, string> = {}) {
     headers: {
       authorization: "Bearer k",
       "x-tdai-service-id": "svc",
+      // Single identity plane: data-plane dispatch verifies this key first.
+      "x-tdai-user-key": "test-key",
       ...headers,
     },
   } as never;
 }
+
+// In-memory user verifier for dispatch tests (no metadata store needed).
+const fakeUserService = {
+  verifyAuth: async () => ({ user_id: "u-test", user_type: "normal" }),
+  isConfiguredMemorySystemUserKey: () => false,
+};
 
 interface Seen {
   status: number;

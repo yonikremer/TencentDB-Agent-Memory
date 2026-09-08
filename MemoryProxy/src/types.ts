@@ -922,6 +922,8 @@ export interface RequestLogEntry {
    * upstream did not return one. Used for cross-system tracing/audit.
    */
   upstreamRequestId?: string;
+  /** Proxy-side turn trace id (uuidv7) for correlating log lines of one turn. */
+  traceId?: string;
 }
 
 /** usage event — written after LLM response is received. */

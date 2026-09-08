@@ -17,7 +17,7 @@
  * See appendix of docs/design/2026-07-30-cc-request-routing-plan.md and the commit message of this submission for details.
  */
 
-import type { CcRequestKind } from "./cc-request-classifier.js";
+import type { RequestKind } from "../agent-adapters/index.js";
 import { findLastCacheControlIndex } from "./cc-request-classifier.js";
 
 // ─── Whitelist and Truncation Limits ────────────────────────────────────────────────────────
@@ -45,7 +45,7 @@ export function buildLangfuseInputChat(
   messages: unknown[],
   debug: boolean,
   fallback: (m: unknown[]) => unknown[],
-): unknown {
+): unknown[] {
   if (debug) {
     // Directly return original messages array —— retain role/content native structure.
     return messages;
@@ -59,7 +59,7 @@ export interface RequestDebugMetadataInput {
   body: Record<string, unknown>;
   headers?: Record<string, string>;
   agentSource?: string;
-  requestKind?: CcRequestKind;
+  requestKind?: RequestKind;
   spaceId?: string;
   turnSeq?: number;
   requestPath?: string;

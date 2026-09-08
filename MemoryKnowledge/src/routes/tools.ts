@@ -270,6 +270,7 @@ export function createToolsRoutes(deps: ToolsRouteDeps): Hono {
     if (typeof knowledgeId !== "string" || !knowledgeId) {
       return c.json(wrapError(400, "knowledge_id is required"), 400);
     }
+    const toolName = body.tool_name;
     const callGate = extractRequesterTeam(body);
     if (callGate.invalid) return c.json(wrapError(400, "team_id is invalid"), 400);
     if (typeof toolName !== "string" || !toolName) {

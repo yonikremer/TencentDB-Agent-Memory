@@ -29,7 +29,11 @@ export interface OffloadV3Deps {
   stateBackend?: IStateBackend;
   config?: OffloadExecutorConfig;
   /** Single identity plane: verifies x-tdai-user-key against the user table. */
-  getMetadataService?: (instanceId: string) => Promise<import("../metadata/service/metadata-service.js").MetadataService>;
+  getMetadataService?: (
+    instanceId: string,
+  ) => Promise<
+    import("../metadata/service/metadata-service.js").MetadataService
+  >;
 }
 
 /**
@@ -54,7 +58,14 @@ export async function handleOffloadV3Route(
 
   // Single identity plane: offload storage is tenant-scoped, so every caller
   // authenticates as a user. (Identity is not yet threaded into offload payloads.)
-  const verified = await verifyDataPlaneUser(req, res, auth.serviceId, deps, requestId, sendJson);
+  const verified = await verifyDataPlaneUser(
+    req,
+    res,
+    auth.serviceId,
+    deps,
+    requestId,
+    sendJson,
+  );
   if (!verified) return true; // 401/503 already sent
 
   // Resolve storage

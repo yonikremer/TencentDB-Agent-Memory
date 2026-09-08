@@ -156,7 +156,7 @@ export function buildProgressFn(
  * Reads page titles + descriptions, asks LLM for a ≤100 char Chinese summary.
  * Reuse createLlmClient(Automatically follow the correct protocol openai/anthropic + Langfuse track + timeout processing).
  */
-import { createLlmClient } from "./engines/wiki/ingest-v2/llm.js";
+import { createLlmClient, normalizeLlmConfig } from "./engines/wiki/ingest-v2/llm.js";
 
 export async function generateWikiSummary(
   wikiId: string,
@@ -187,7 +187,7 @@ ${pageList}`;
     `${TAG} wiki summary LLM call start for ${wikiId} (model=${llm.model}, protocol=${llm.protocol}, pages=${pages.length})`,
   );
   try {
-    const client = createLlmClient(llm);
+    const client = createLlmClient(normalizeLlmConfig(llm));
     const text = await client.chat({
       system:
         "You are a knowledge base summary generator. Output only the summary text and nothing else.",

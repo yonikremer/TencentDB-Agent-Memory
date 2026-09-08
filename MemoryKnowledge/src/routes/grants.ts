@@ -13,7 +13,7 @@
 import { Hono } from "hono";
 
 import type { WikiService, CodeGraphService } from "../store/index.js";
-import { wrapOk, wrapError, isValidIdSegment, extractRequesterTeam } from "../api-helpers.js";
+import { wrapOk, wrapError, isValidIdSegment } from "../api-helpers.js";
 import type { GrantType, SetGrantInput } from "../store/types.js";
 
 export interface GrantsRouteDeps {

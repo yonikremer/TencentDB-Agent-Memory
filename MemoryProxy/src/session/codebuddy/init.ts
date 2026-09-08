@@ -39,7 +39,6 @@ import {
 } from "./extractor.js";
 import { getLastUserMessageText } from "./cleaner.js";
 import { emitSessionInitTelemetryIfCompleted } from "../init-telemetry.js";
-import { isDshRuntimeContextSnapshot } from "../../common/user-query-extractor.js";
 import {
   CODEX_MORE_LABEL,
   DEFAULT_GATE_PREFIX,
@@ -119,6 +118,8 @@ export interface SessionInitResult {
    * this field — `response` is already the complete response in their protocol.
    */
   formData?: FormData;
+  /** This registration was triggered by session-reset (pre-hook sets resetFlow=true → preserved until completeRegistration). */
+  resetFlow?: boolean;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -238,38 +239,6 @@ function detectWorkbuddyMorePage(
   // a solo-page assertion; aligns with safeNextPage wrap-around logic in claude-code/init.ts.
   const totalPages = computeCCPagination(Math.max(0, total), 0).totalPages;
   return nextPage > totalPages - 1 ? 0 : nextPage;
-}
-
-/** Determines whether this is a "brand new" CodeBuddy / dsh conversation (at most one real user message, no assistant/tool).
- *
- * dsh (deepseek-harness) stuffs 3 role=user metadata entries that are **not user input** into the first-frame body:
- *   - <system-reminder> workspace instructions
- *   - the "Current runtime context." snapshot
- *   - the <available_skills> list (<system-reminder>\nA skill is a reusable...)
- * Counting them verbatim would misjudge the dsh first frame as "not new" → the upstream safety-net would skip session-init.
- * Here, when counting, skip user messages that carry the dsh metadata signature (str content starting with a known anchor).
- * See MemoryProxy/docs/dsh-recon/2026-08-14-dsh-capture-analysis.md §2.3.
- */
-function isFreshCBConversation(messages: MessageArr): boolean {
-  let userCount = 0;
-  for (const m of messages) {
-    const role = (m.role as string) ?? "";
-    if (role === "assistant" || role === "tool") return false;
-    if (role !== "user") continue;
-    // dsh-metadata user messages don't count as real user input
-    const c = (m as { content?: unknown }).content;
-    if (typeof c === "string") {
-      if (
-        c.startsWith("<system-reminder>") ||
-        isDshRuntimeContextSnapshot(c)
-      ) {
-        continue;
-      }
-    }
-    userCount++;
-    if (userCount > 1) return false;
-  }
-  return userCount <= 1;
 }
 
 async function fetchTeamsAndAgents(

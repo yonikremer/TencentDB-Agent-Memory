@@ -26,9 +26,9 @@ Coverage
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
-from .._http import Stub
+from .._http import AsyncStub, Stub
 from .._v3_http import AsyncHttpStub, HttpStub
 from ..errors import ParamError
 
@@ -36,17 +36,17 @@ _V3 = "/v3/meta"
 _V3_KNOWLEDGE = "/v3/knowledge"
 
 
-def _strip_none(d: Dict[str, Any]) -> Dict[str, Any]:
+def _strip_none(d: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in d.items() if v is not None}
 
 
-def _body(p: Dict[str, Any]) -> Dict[str, Any]:
+def _body(p: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(p, dict):
         raise ParamError("request payload must be a dict")
     return _strip_none(p)
 
 
-def _require_any(payload: Dict[str, Any], fields: tuple[str, ...], operation: str) -> None:
+def _require_any(payload: dict[str, Any], fields: tuple[str, ...], operation: str) -> None:
     if not any(isinstance(payload.get(field), str) and payload[field].strip() for field in fields):
         raise ParamError(f"{operation} requires one of {', '.join(fields)}")
 
@@ -54,74 +54,74 @@ def _require_any(payload: Dict[str, Any], fields: tuple[str, ...], operation: st
 class _MetadataMethodsMixin:
     """Shared path/body mapping for sync and async metadata clients."""
 
-    _stub: Stub
+    _stub: Stub | AsyncStub
 
     # ── User ──
 
-    def _create_user(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _create_user(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/user/create", _body(p))
 
-    def _get_user(self, query: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+    def _get_user(self, query: str | dict[str, Any]) -> dict[str, Any]:
         payload = {"user_id": query} if isinstance(query, str) else query
         return self._stub.post(f"{_V3}/user/get", _body(payload))
 
-    def _delete_users(self, user_ids: List[str]) -> Dict[str, Any]:
+    def _delete_users(self, user_ids: list[str]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/user/delete", {"user_ids": user_ids})
 
     def _list_users(
         self,
-        team_id_or_request: Union[str, Dict[str, Any], None] = None,
+        team_id_or_request: str | dict[str, Any] | None = None,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         if isinstance(team_id_or_request, str):
             return self._stub.post(f"{_V3}/user/list", _body({"team_id": team_id_or_request, **(pagination or {})}))
         return self._stub.post(f"{_V3}/user/list", _body(team_id_or_request or {}))
 
     # ── UserKey ──
 
-    def _create_user_key(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _create_user_key(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/user-key/create", _body(p))
 
     def _list_user_keys(
         self,
-        user_id_or_request: Union[str, Dict[str, Any], None] = None,
+        user_id_or_request: str | dict[str, Any] | None = None,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         if isinstance(user_id_or_request, str):
             return self._stub.post(f"{_V3}/user-key/list", _body({"user_id": user_id_or_request, **(pagination or {})}))
         return self._stub.post(f"{_V3}/user-key/list", _body(user_id_or_request or {}))
 
-    def _get_user_key(self, key_id: str) -> Dict[str, Any]:
+    def _get_user_key(self, key_id: str) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/user-key/get", {"key_id": key_id})
 
-    def _revoke_user_key(self, key_id: str) -> Dict[str, Any]:
+    def _revoke_user_key(self, key_id: str) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/user-key/revoke", {"key_id": key_id})
 
-    def _update_user_key(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _update_user_key(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/user-key/update", _body(p))
 
     # ── Team ──
 
-    def _create_team(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _create_team(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/team/create", _body(p))
 
-    def _get_team(self, team_id: str) -> Dict[str, Any]:
+    def _get_team(self, team_id: str) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/team/get", {"team_id": team_id})
 
-    def _update_team(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _update_team(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/team/update", _body(p))
 
-    def _delete_teams(self, team_ids: List[str]) -> Dict[str, Any]:
+    def _delete_teams(self, team_ids: list[str]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/team/delete", {"team_ids": team_ids})
 
     def _list_teams(
         self,
-        user_id_or_request: Union[str, Dict[str, Any], None] = None,
+        user_id_or_request: str | dict[str, Any] | None = None,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         payload = (
             {"user_id": user_id_or_request, **(pagination or {})}
             if isinstance(user_id_or_request, str)
@@ -133,64 +133,64 @@ class _MetadataMethodsMixin:
 
     # ── TeamMember ──
 
-    def _add_team_member(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _add_team_member(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/team-member/add", _body(p))
 
-    def _remove_team_member(self, team_id: str, user_id: str) -> Dict[str, Any]:
+    def _remove_team_member(self, team_id: str, user_id: str) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/team-member/remove", {"team_id": team_id, "user_id": user_id})
 
     def _list_team_members(
         self,
         team_id: str,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/team-member/list", _body({"team_id": team_id, **(pagination or {})}))
 
-    def _get_team_member(self, team_id: str, user_id: str) -> Dict[str, Any]:
+    def _get_team_member(self, team_id: str, user_id: str) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/team-member/get", {"team_id": team_id, "user_id": user_id})
 
     # ── Agent ──
 
-    def _create_agent(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _create_agent(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/agent/create", _body(p))
 
-    def _get_agent(self, agent_id: str) -> Dict[str, Any]:
+    def _get_agent(self, agent_id: str) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/agent/get", {"agent_id": agent_id})
 
-    def _update_agent(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _update_agent(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/agent/update", _body(p))
 
-    def _delete_agents(self, agent_ids: List[str]) -> Dict[str, Any]:
+    def _delete_agents(self, agent_ids: list[str]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/agent/delete", {"agent_ids": agent_ids})
 
-    def _list_agents(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _list_agents(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/agent/list", _body(p))
 
-    def _archive_agent(self, agent_id: str) -> Dict[str, Any]:
+    def _archive_agent(self, agent_id: str) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/agent/archive", {"agent_id": agent_id})
 
     # ── Task ──
 
-    def _create_task(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _create_task(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/task/create", _body(p))
 
-    def _get_task(self, task_id: str) -> Dict[str, Any]:
+    def _get_task(self, task_id: str) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/task/get", {"task_id": task_id})
 
-    def _update_task(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _update_task(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/task/update", _body(p))
 
-    def _delete_tasks(self, task_ids: List[str]) -> Dict[str, Any]:
+    def _delete_tasks(self, task_ids: list[str]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/task/delete", {"task_ids": task_ids})
 
     def _list_tasks(
         self,
-        team_id_or_request: Union[str, Dict[str, Any], None] = None,
+        team_id_or_request: str | dict[str, Any] | None = None,
         *,
-        status: Optional[str] = None,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        status: str | None = None,
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         payload = (
             {"team_id": team_id_or_request, "status": status, **(pagination or {})}
             if isinstance(team_id_or_request, str)
@@ -200,7 +200,7 @@ class _MetadataMethodsMixin:
         _require_any(payload, ("team_id", "creator_user_id", "creator_user_key"), "list_tasks")
         return self._stub.post(f"{_V3}/task/list", payload)
 
-    def _archive_task(self, task_id: str) -> Dict[str, Any]:
+    def _archive_task(self, task_id: str) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/task/archive", {"task_id": task_id})
 
     # ── TaskAgent ──
@@ -209,130 +209,130 @@ class _MetadataMethodsMixin:
         self,
         task_id: str,
         agent_id: str,
-        role_in_task: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        role_in_task: str | None = None,
+    ) -> dict[str, Any]:
         return self._stub.post(
             f"{_V3}/task-agent/link",
             _body({"task_id": task_id, "agent_id": agent_id, "role_in_task": role_in_task}),
         )
 
-    def _unlink_task_agent(self, task_id: str, agent_id: str) -> Dict[str, Any]:
+    def _unlink_task_agent(self, task_id: str, agent_id: str) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/task-agent/unlink", {"task_id": task_id, "agent_id": agent_id})
 
     def _list_task_agents(
         self,
         task_id: str,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/task-agent/list", _body({"task_id": task_id, **(pagination or {})}))
 
     # ── ParticipationLog ──
 
-    def _append_participation_log(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _append_participation_log(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/participation-log/append", _body(p))
 
-    def _list_participation_logs(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _list_participation_logs(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/participation-log/list", _body(p))
 
     # ── Asset ──
 
-    def _create_asset(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _create_asset(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/asset/create", _body(p))
 
-    def _get_asset(self, asset_id: str) -> Dict[str, Any]:
+    def _get_asset(self, asset_id: str) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/asset/get", {"asset_id": asset_id})
 
-    def _update_asset(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _update_asset(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/asset/update", _body(p))
 
-    def _delete_assets(self, asset_ids: List[str]) -> Dict[str, Any]:
+    def _delete_assets(self, asset_ids: list[str]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/asset/delete", {"asset_ids": asset_ids})
 
-    def _list_assets(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _list_assets(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/asset/list", _body(p))
 
-    def _list_accessible_assets(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _list_accessible_assets(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/asset/list-accessible", _body(p))
 
-    def _touch_asset_usage(self, asset_id: str) -> Dict[str, Any]:
+    def _touch_asset_usage(self, asset_id: str) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/asset/touch-usage", {"asset_id": asset_id})
 
     # ── AgentFixedAsset ──
 
-    def _set_agent_fixed_assets(self, agent_id: str, bindings: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _set_agent_fixed_assets(self, agent_id: str, bindings: list[dict[str, Any]]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/agent-fixed-asset/set", {"agent_id": agent_id, "bindings": bindings})
 
     def _list_agent_fixed_assets(
         self,
         agent_id: str,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/agent-fixed-asset/list", _body({"agent_id": agent_id, **(pagination or {})}))
 
-    def _list_agent_fixed_assets_with_detail(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _list_agent_fixed_assets_with_detail(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/agent-fixed-asset/list-with-detail", _body(p))
 
-    def _summarize_agent_fixed_assets_by_agents(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _summarize_agent_fixed_assets_by_agents(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/agent-fixed-asset/summary-by-agents", _body(p))
 
     # ── ACL ──
 
-    def _grant_acl(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _grant_acl(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/acl/grant", _body(p))
 
-    def _revoke_acl(self, acl_id: str) -> Dict[str, Any]:
+    def _revoke_acl(self, acl_id: str) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/acl/revoke", {"id": acl_id})
 
     def _list_acl(
         self,
         asset_id: str,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/acl/list", _body({"asset_id": asset_id, **(pagination or {})}))
 
-    def _check_acl(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _check_acl(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/acl/check", _body(p))
 
     # ── Auth ──
 
-    def _verify_auth(self, user_key: str) -> Dict[str, Any]:
+    def _verify_auth(self, user_key: str) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/auth/verify", {"user_key": user_key})
 
     # ── ConfigParam ──
 
-    def _get_instance_quota(self) -> Dict[str, Any]:
+    def _get_instance_quota(self) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/instance-quota/get", {})
 
-    def _get_user_config(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _get_user_config(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/config/user/get", _body(p))
 
-    def _set_user_config(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _set_user_config(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3}/config/user/set", _body(p))
 
     # ── Knowledge ──
 
-    def _create_knowledge(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _create_knowledge(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3_KNOWLEDGE}/create", _body(p))
 
-    def _get_knowledge(self, knowledge_id: str, team_id: Optional[str] = None) -> Dict[str, Any]:
+    def _get_knowledge(self, knowledge_id: str, team_id: str | None = None) -> dict[str, Any]:
         return self._stub.post(
             f"{_V3_KNOWLEDGE}/get",
             _body({"knowledge_id": knowledge_id, "team_id": team_id}),
         )
 
-    def _update_knowledge(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _update_knowledge(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3_KNOWLEDGE}/update", _body(p))
 
-    def _delete_knowledge(self, knowledge_ids: List[str], team_id: Optional[str] = None) -> Dict[str, Any]:
+    def _delete_knowledge(self, knowledge_ids: list[str], team_id: str | None = None) -> dict[str, Any]:
         return self._stub.post(
             f"{_V3_KNOWLEDGE}/delete",
             _body({"knowledge_ids": knowledge_ids, "team_id": team_id}),
         )
 
-    def _list_knowledge(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def _list_knowledge(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._stub.post(f"{_V3_KNOWLEDGE}/list", _body(p))
 
 
@@ -343,12 +343,12 @@ class MetadataClient(_MetadataMethodsMixin):
         self,
         endpoint: str = "",
         api_key: str = "",
-        service_id: Optional[str] = None,
+        service_id: str | None = None,
         *,
-        user_key: Optional[str] = None,
+        user_key: str | None = None,
         timeout: float = 30,
         verify: bool = True,
-        stub: Optional[Stub] = None,
+        stub: Stub | None = None,
     ) -> None:
         if stub is not None:
             self._stub = stub
@@ -364,130 +364,130 @@ class MetadataClient(_MetadataMethodsMixin):
 
     # ── User ──
 
-    def create_user(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def create_user(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._create_user(p)
 
-    def get_user(self, query: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+    def get_user(self, query: str | dict[str, Any]) -> dict[str, Any]:
         return self._get_user(query)
 
-    def delete_users(self, user_ids: List[str]) -> Dict[str, Any]:
+    def delete_users(self, user_ids: list[str]) -> dict[str, Any]:
         return self._delete_users(user_ids)
 
     def list_users(
         self,
-        team_id_or_request: Union[str, Dict[str, Any], None] = None,
+        team_id_or_request: str | dict[str, Any] | None = None,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return self._list_users(team_id_or_request, pagination=pagination)
 
     # ── UserKey ──
 
-    def create_user_key(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def create_user_key(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._create_user_key(p)
 
     def list_user_keys(
         self,
-        user_id_or_request: Union[str, Dict[str, Any], None] = None,
+        user_id_or_request: str | dict[str, Any] | None = None,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return self._list_user_keys(user_id_or_request, pagination=pagination)
 
-    def get_user_key(self, key_id: str) -> Dict[str, Any]:
+    def get_user_key(self, key_id: str) -> dict[str, Any]:
         return self._get_user_key(key_id)
 
-    def revoke_user_key(self, key_id: str) -> Dict[str, Any]:
+    def revoke_user_key(self, key_id: str) -> dict[str, Any]:
         return self._revoke_user_key(key_id)
 
-    def update_user_key(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def update_user_key(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._update_user_key(p)
 
     # ── Team ──
 
-    def create_team(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def create_team(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._create_team(p)
 
-    def get_team(self, team_id: str) -> Dict[str, Any]:
+    def get_team(self, team_id: str) -> dict[str, Any]:
         return self._get_team(team_id)
 
-    def update_team(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def update_team(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._update_team(p)
 
-    def delete_teams(self, team_ids: List[str]) -> Dict[str, Any]:
+    def delete_teams(self, team_ids: list[str]) -> dict[str, Any]:
         return self._delete_teams(team_ids)
 
     def list_teams(
         self,
-        user_id_or_request: Union[str, Dict[str, Any], None] = None,
+        user_id_or_request: str | dict[str, Any] | None = None,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return self._list_teams(user_id_or_request, pagination=pagination)
 
     # ── TeamMember ──
 
-    def add_team_member(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def add_team_member(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._add_team_member(p)
 
-    def remove_team_member(self, team_id: str, user_id: str) -> Dict[str, Any]:
+    def remove_team_member(self, team_id: str, user_id: str) -> dict[str, Any]:
         return self._remove_team_member(team_id, user_id)
 
     def list_team_members(
         self,
         team_id: str,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return self._list_team_members(team_id, pagination=pagination)
 
-    def get_team_member(self, team_id: str, user_id: str) -> Dict[str, Any]:
+    def get_team_member(self, team_id: str, user_id: str) -> dict[str, Any]:
         return self._get_team_member(team_id, user_id)
 
     # ── Agent ──
 
-    def create_agent(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def create_agent(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._create_agent(p)
 
-    def get_agent(self, agent_id: str) -> Dict[str, Any]:
+    def get_agent(self, agent_id: str) -> dict[str, Any]:
         return self._get_agent(agent_id)
 
-    def update_agent(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def update_agent(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._update_agent(p)
 
-    def delete_agents(self, agent_ids: List[str]) -> Dict[str, Any]:
+    def delete_agents(self, agent_ids: list[str]) -> dict[str, Any]:
         return self._delete_agents(agent_ids)
 
-    def list_agents(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def list_agents(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._list_agents(p)
 
-    def archive_agent(self, agent_id: str) -> Dict[str, Any]:
+    def archive_agent(self, agent_id: str) -> dict[str, Any]:
         return self._archive_agent(agent_id)
 
     # ── Task ──
 
-    def create_task(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def create_task(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._create_task(p)
 
-    def get_task(self, task_id: str) -> Dict[str, Any]:
+    def get_task(self, task_id: str) -> dict[str, Any]:
         return self._get_task(task_id)
 
-    def update_task(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def update_task(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._update_task(p)
 
-    def delete_tasks(self, task_ids: List[str]) -> Dict[str, Any]:
+    def delete_tasks(self, task_ids: list[str]) -> dict[str, Any]:
         return self._delete_tasks(task_ids)
 
     def list_tasks(
         self,
-        team_id_or_request: Union[str, Dict[str, Any], None] = None,
+        team_id_or_request: str | dict[str, Any] | None = None,
         *,
-        status: Optional[str] = None,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        status: str | None = None,
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return self._list_tasks(team_id_or_request, status=status, pagination=pagination)
 
-    def archive_task(self, task_id: str) -> Dict[str, Any]:
+    def archive_task(self, task_id: str) -> dict[str, Any]:
         return self._archive_task(task_id)
 
     # ── TaskAgent ──
@@ -496,127 +496,127 @@ class MetadataClient(_MetadataMethodsMixin):
         self,
         task_id: str,
         agent_id: str,
-        role_in_task: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        role_in_task: str | None = None,
+    ) -> dict[str, Any]:
         return self._link_task_agent(task_id, agent_id, role_in_task)
 
-    def unlink_task_agent(self, task_id: str, agent_id: str) -> Dict[str, Any]:
+    def unlink_task_agent(self, task_id: str, agent_id: str) -> dict[str, Any]:
         return self._unlink_task_agent(task_id, agent_id)
 
     def list_task_agents(
         self,
         task_id: str,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return self._list_task_agents(task_id, pagination=pagination)
 
     # ── ParticipationLog ──
 
-    def append_participation_log(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def append_participation_log(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._append_participation_log(p)
 
-    def list_participation_logs(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def list_participation_logs(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._list_participation_logs(p)
 
     # ── Asset ──
 
-    def create_asset(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def create_asset(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._create_asset(p)
 
-    def get_asset(self, asset_id: str) -> Dict[str, Any]:
+    def get_asset(self, asset_id: str) -> dict[str, Any]:
         return self._get_asset(asset_id)
 
-    def update_asset(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def update_asset(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._update_asset(p)
 
-    def delete_assets(self, asset_ids: List[str]) -> Dict[str, Any]:
+    def delete_assets(self, asset_ids: list[str]) -> dict[str, Any]:
         return self._delete_assets(asset_ids)
 
-    def list_assets(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def list_assets(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._list_assets(p)
 
-    def list_accessible_assets(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def list_accessible_assets(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._list_accessible_assets(p)
 
-    def touch_asset_usage(self, asset_id: str) -> Dict[str, Any]:
+    def touch_asset_usage(self, asset_id: str) -> dict[str, Any]:
         return self._touch_asset_usage(asset_id)
 
     # ── AgentFixedAsset ──
 
-    def set_agent_fixed_assets(self, agent_id: str, bindings: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def set_agent_fixed_assets(self, agent_id: str, bindings: list[dict[str, Any]]) -> dict[str, Any]:
         return self._set_agent_fixed_assets(agent_id, bindings)
 
     def list_agent_fixed_assets(
         self,
         agent_id: str,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return self._list_agent_fixed_assets(agent_id, pagination=pagination)
 
-    def list_agent_fixed_assets_with_detail(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def list_agent_fixed_assets_with_detail(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._list_agent_fixed_assets_with_detail(p)
 
-    def summarize_agent_fixed_assets_by_agents(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def summarize_agent_fixed_assets_by_agents(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._summarize_agent_fixed_assets_by_agents(p)
 
     # ── ACL ──
 
-    def grant_acl(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def grant_acl(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._grant_acl(p)
 
-    def revoke_acl(self, acl_id: str) -> Dict[str, Any]:
+    def revoke_acl(self, acl_id: str) -> dict[str, Any]:
         return self._revoke_acl(acl_id)
 
     def list_acl(
         self,
         asset_id: str,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return self._list_acl(asset_id, pagination=pagination)
 
-    def check_acl(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def check_acl(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._check_acl(p)
 
     # ── Auth ──
 
-    def verify_auth(self, user_key: str) -> Dict[str, Any]:
+    def verify_auth(self, user_key: str) -> dict[str, Any]:
         return self._verify_auth(user_key)
 
     # ── ConfigParam ──
 
-    def get_instance_quota(self) -> Dict[str, Any]:
+    def get_instance_quota(self) -> dict[str, Any]:
         return self._get_instance_quota()
 
-    def get_user_config(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def get_user_config(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._get_user_config(p)
 
-    def set_user_config(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def set_user_config(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._set_user_config(p)
 
     # ── Knowledge ──
 
-    def create_knowledge(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def create_knowledge(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._create_knowledge(p)
 
-    def get_knowledge(self, knowledge_id: str, team_id: Optional[str] = None) -> Dict[str, Any]:
+    def get_knowledge(self, knowledge_id: str, team_id: str | None = None) -> dict[str, Any]:
         return self._get_knowledge(knowledge_id, team_id)
 
-    def update_knowledge(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def update_knowledge(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._update_knowledge(p)
 
-    def delete_knowledge(self, knowledge_ids: List[str], team_id: Optional[str] = None) -> Dict[str, Any]:
+    def delete_knowledge(self, knowledge_ids: list[str], team_id: str | None = None) -> dict[str, Any]:
         return self._delete_knowledge(knowledge_ids, team_id)
 
-    def list_knowledge(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    def list_knowledge(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._list_knowledge(p)
 
     def close(self) -> None:
         self._stub.close()
 
-    def __enter__(self) -> "MetadataClient":
+    def __enter__(self) -> MetadataClient:
         return self
 
     def __exit__(self, *exc: Any) -> None:
@@ -630,12 +630,12 @@ class AsyncMetadataClient(_MetadataMethodsMixin):
         self,
         endpoint: str = "",
         api_key: str = "",
-        service_id: Optional[str] = None,
+        service_id: str | None = None,
         *,
-        user_key: Optional[str] = None,
+        user_key: str | None = None,
         timeout: float = 30,
         verify: bool = True,
-        stub: Optional[Any] = None,
+        stub: Any | None = None,
     ) -> None:
         if stub is not None:
             self._stub = stub
@@ -649,233 +649,233 @@ class AsyncMetadataClient(_MetadataMethodsMixin):
                 timeout=timeout, verify=verify, user_key=user_key,
             )
 
-    async def create_user(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def create_user(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._create_user(p)
 
-    async def get_user(self, query: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+    async def get_user(self, query: str | dict[str, Any]) -> dict[str, Any]:
         return await self._get_user(query)
 
-    async def delete_users(self, user_ids: List[str]) -> Dict[str, Any]:
+    async def delete_users(self, user_ids: list[str]) -> dict[str, Any]:
         return await self._delete_users(user_ids)
 
     async def list_users(
         self,
-        team_id_or_request: Union[str, Dict[str, Any], None] = None,
+        team_id_or_request: str | dict[str, Any] | None = None,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return await self._list_users(team_id_or_request, pagination=pagination)
 
-    async def create_user_key(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def create_user_key(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._create_user_key(p)
 
     async def list_user_keys(
         self,
-        user_id_or_request: Union[str, Dict[str, Any], None] = None,
+        user_id_or_request: str | dict[str, Any] | None = None,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return await self._list_user_keys(user_id_or_request, pagination=pagination)
 
-    async def get_user_key(self, key_id: str) -> Dict[str, Any]:
+    async def get_user_key(self, key_id: str) -> dict[str, Any]:
         return await self._get_user_key(key_id)
 
-    async def revoke_user_key(self, key_id: str) -> Dict[str, Any]:
+    async def revoke_user_key(self, key_id: str) -> dict[str, Any]:
         return await self._revoke_user_key(key_id)
 
-    async def update_user_key(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def update_user_key(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._update_user_key(p)
 
-    async def create_team(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def create_team(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._create_team(p)
 
-    async def get_team(self, team_id: str) -> Dict[str, Any]:
+    async def get_team(self, team_id: str) -> dict[str, Any]:
         return await self._get_team(team_id)
 
-    async def update_team(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def update_team(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._update_team(p)
 
-    async def delete_teams(self, team_ids: List[str]) -> Dict[str, Any]:
+    async def delete_teams(self, team_ids: list[str]) -> dict[str, Any]:
         return await self._delete_teams(team_ids)
 
     async def list_teams(
         self,
-        user_id_or_request: Union[str, Dict[str, Any], None] = None,
+        user_id_or_request: str | dict[str, Any] | None = None,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return await self._list_teams(user_id_or_request, pagination=pagination)
 
-    async def add_team_member(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def add_team_member(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._add_team_member(p)
 
-    async def remove_team_member(self, team_id: str, user_id: str) -> Dict[str, Any]:
+    async def remove_team_member(self, team_id: str, user_id: str) -> dict[str, Any]:
         return await self._remove_team_member(team_id, user_id)
 
     async def list_team_members(
         self,
         team_id: str,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return await self._list_team_members(team_id, pagination=pagination)
 
-    async def get_team_member(self, team_id: str, user_id: str) -> Dict[str, Any]:
+    async def get_team_member(self, team_id: str, user_id: str) -> dict[str, Any]:
         return await self._get_team_member(team_id, user_id)
 
-    async def create_agent(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def create_agent(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._create_agent(p)
 
-    async def get_agent(self, agent_id: str) -> Dict[str, Any]:
+    async def get_agent(self, agent_id: str) -> dict[str, Any]:
         return await self._get_agent(agent_id)
 
-    async def update_agent(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def update_agent(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._update_agent(p)
 
-    async def delete_agents(self, agent_ids: List[str]) -> Dict[str, Any]:
+    async def delete_agents(self, agent_ids: list[str]) -> dict[str, Any]:
         return await self._delete_agents(agent_ids)
 
-    async def list_agents(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def list_agents(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._list_agents(p)
 
-    async def archive_agent(self, agent_id: str) -> Dict[str, Any]:
+    async def archive_agent(self, agent_id: str) -> dict[str, Any]:
         return await self._archive_agent(agent_id)
 
-    async def create_task(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def create_task(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._create_task(p)
 
-    async def get_task(self, task_id: str) -> Dict[str, Any]:
+    async def get_task(self, task_id: str) -> dict[str, Any]:
         return await self._get_task(task_id)
 
-    async def update_task(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def update_task(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._update_task(p)
 
-    async def delete_tasks(self, task_ids: List[str]) -> Dict[str, Any]:
+    async def delete_tasks(self, task_ids: list[str]) -> dict[str, Any]:
         return await self._delete_tasks(task_ids)
 
     async def list_tasks(
         self,
-        team_id_or_request: Union[str, Dict[str, Any], None] = None,
+        team_id_or_request: str | dict[str, Any] | None = None,
         *,
-        status: Optional[str] = None,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        status: str | None = None,
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return await self._list_tasks(team_id_or_request, status=status, pagination=pagination)
 
-    async def archive_task(self, task_id: str) -> Dict[str, Any]:
+    async def archive_task(self, task_id: str) -> dict[str, Any]:
         return await self._archive_task(task_id)
 
     async def link_task_agent(
         self,
         task_id: str,
         agent_id: str,
-        role_in_task: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        role_in_task: str | None = None,
+    ) -> dict[str, Any]:
         return await self._link_task_agent(task_id, agent_id, role_in_task)
 
-    async def unlink_task_agent(self, task_id: str, agent_id: str) -> Dict[str, Any]:
+    async def unlink_task_agent(self, task_id: str, agent_id: str) -> dict[str, Any]:
         return await self._unlink_task_agent(task_id, agent_id)
 
     async def list_task_agents(
         self,
         task_id: str,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return await self._list_task_agents(task_id, pagination=pagination)
 
-    async def append_participation_log(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def append_participation_log(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._append_participation_log(p)
 
-    async def list_participation_logs(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def list_participation_logs(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._list_participation_logs(p)
 
-    async def create_asset(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def create_asset(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._create_asset(p)
 
-    async def get_asset(self, asset_id: str) -> Dict[str, Any]:
+    async def get_asset(self, asset_id: str) -> dict[str, Any]:
         return await self._get_asset(asset_id)
 
-    async def update_asset(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def update_asset(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._update_asset(p)
 
-    async def delete_assets(self, asset_ids: List[str]) -> Dict[str, Any]:
+    async def delete_assets(self, asset_ids: list[str]) -> dict[str, Any]:
         return await self._delete_assets(asset_ids)
 
-    async def list_assets(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def list_assets(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._list_assets(p)
 
-    async def list_accessible_assets(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def list_accessible_assets(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._list_accessible_assets(p)
 
-    async def touch_asset_usage(self, asset_id: str) -> Dict[str, Any]:
+    async def touch_asset_usage(self, asset_id: str) -> dict[str, Any]:
         return await self._touch_asset_usage(asset_id)
 
-    async def set_agent_fixed_assets(self, agent_id: str, bindings: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def set_agent_fixed_assets(self, agent_id: str, bindings: list[dict[str, Any]]) -> dict[str, Any]:
         return await self._set_agent_fixed_assets(agent_id, bindings)
 
     async def list_agent_fixed_assets(
         self,
         agent_id: str,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return await self._list_agent_fixed_assets(agent_id, pagination=pagination)
 
-    async def list_agent_fixed_assets_with_detail(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def list_agent_fixed_assets_with_detail(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._list_agent_fixed_assets_with_detail(p)
 
-    async def summarize_agent_fixed_assets_by_agents(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def summarize_agent_fixed_assets_by_agents(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._summarize_agent_fixed_assets_by_agents(p)
 
-    async def grant_acl(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def grant_acl(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._grant_acl(p)
 
-    async def revoke_acl(self, acl_id: str) -> Dict[str, Any]:
+    async def revoke_acl(self, acl_id: str) -> dict[str, Any]:
         return await self._revoke_acl(acl_id)
 
     async def list_acl(
         self,
         asset_id: str,
         *,
-        pagination: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        pagination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return await self._list_acl(asset_id, pagination=pagination)
 
-    async def check_acl(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def check_acl(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._check_acl(p)
 
-    async def verify_auth(self, user_key: str) -> Dict[str, Any]:
+    async def verify_auth(self, user_key: str) -> dict[str, Any]:
         return await self._verify_auth(user_key)
 
-    async def get_instance_quota(self) -> Dict[str, Any]:
+    async def get_instance_quota(self) -> dict[str, Any]:
         return await self._get_instance_quota()
 
-    async def get_user_config(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def get_user_config(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._get_user_config(p)
 
-    async def set_user_config(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def set_user_config(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._set_user_config(p)
 
-    async def create_knowledge(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def create_knowledge(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._create_knowledge(p)
 
-    async def get_knowledge(self, knowledge_id: str, team_id: Optional[str] = None) -> Dict[str, Any]:
+    async def get_knowledge(self, knowledge_id: str, team_id: str | None = None) -> dict[str, Any]:
         return await self._get_knowledge(knowledge_id, team_id)
 
-    async def update_knowledge(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def update_knowledge(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._update_knowledge(p)
 
-    async def delete_knowledge(self, knowledge_ids: List[str], team_id: Optional[str] = None) -> Dict[str, Any]:
+    async def delete_knowledge(self, knowledge_ids: list[str], team_id: str | None = None) -> dict[str, Any]:
         return await self._delete_knowledge(knowledge_ids, team_id)
 
-    async def list_knowledge(self, p: Dict[str, Any]) -> Dict[str, Any]:
+    async def list_knowledge(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._list_knowledge(p)
 
     async def close(self) -> None:
         await self._stub.close()
 
-    async def __aenter__(self) -> "AsyncMetadataClient":
+    async def __aenter__(self) -> AsyncMetadataClient:
         return self
 
     async def __aexit__(self, *exc: Any) -> None:

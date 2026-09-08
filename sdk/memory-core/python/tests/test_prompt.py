@@ -1,8 +1,11 @@
 import pytest
+from fakes import FakeAsyncPostOnly, FakeAsyncStub, FakeStub, PostOnlyStub
 
 from tencentdb_agent_memory.errors import ParamError
-from tencentdb_agent_memory.v3.memory_prompt import AsyncMemoryPromptClient, MemoryPromptClient
-from fakes import FakeAsyncPostOnly, FakeAsyncStub, FakeStub, PostOnlyStub
+from tencentdb_agent_memory.v3.memory_prompt import (
+    AsyncMemoryPromptClient,
+    MemoryPromptClient,
+)
 
 
 def _sync(**kw):
@@ -110,7 +113,6 @@ async def test_async_mirror():
         AsyncMemoryPromptClient(endpoint="http://e", api_key="k")
     c = AsyncMemoryPromptClient(endpoint="http://e", api_key="k", service_id="s",
                                 stub=FakeAsyncStub(), team_id="t", agent_id="a")
-    stub = c._stub
     await c.create(name="n", layer="l1", prompt="p")
     with pytest.raises(ParamError):
         await c.create(name="", layer="l1", prompt="p")

@@ -1217,16 +1217,12 @@ export async function handleChatCompletions(
         sessionJustRegistered = true;
 
       // Case 1.5: Bypass path → skip ALL injection hooks
-      // SAFETY: resetFlow is set at runtime by the session-init state machine on the
-      // bypass path; the static SessionInitResult type predates that field.
-      const resetFlow = (initResult as unknown as { resetFlow?: boolean })
-        .resetFlow;
       if (initResult.bypassed) {
         injectedSkipped = true;
         console.log(
           `[session-init] session=${sessionKey} bypassed → skipping all injection`,
         );
-        if (resetFlow) {
+        if (initResult.resetFlow) {
           _resetFlowResult = {
             agentName: "",
             agentIdShort: "",
@@ -1381,7 +1377,7 @@ export async function handleChatCompletions(
         | Record<string, unknown>
         | null
         | undefined;
-      if (resetFlow && initResult.justRegistered && !initResult.bypassed) {
+      if (initResult.resetFlow && initResult.justRegistered && !initResult.bypassed) {
         _resetFlowResult = {
           agentName: initResult.agentDetail?.name ?? "Unknown",
           agentIdShort: sessionFields?.agent_id

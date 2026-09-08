@@ -40,7 +40,6 @@ import {
   codexFormAnswersAsMessages,
 } from "./session/codex/form.js";
 import { buildCodexInjectionBlock, type CodexInjectionInput } from "./common/codex-injection.js";
-import { log } from "./report/log.js";
 import {
   langfuseReportGeneration,
   langfuseReportFailure,
@@ -379,7 +378,6 @@ export async function handleCodexEndpoint(
   let sessionInfo: Record<string, unknown> | null | undefined;
   let assetCapabilities: import("./injection/types.js").AssetCapabilityFlags | undefined;
   let injectionSkipped = false;
-  let sessionJustRegistered = false;
   let _resetFlowResult: { agentName: string; agentIdShort: string; teamId: string; taskName?: string | null; bypassed?: boolean } | null = null;
   // Store initResult agent/task detail for § 9 injection phase to construct <session_context>.
   // handleSessionInit originally inserts session_context via messages[0], but that messages
@@ -408,7 +406,9 @@ export async function handleCodexEndpoint(
         // ── Force archive old agent skill buffer (best-effort) ──
         const oldState = store.get(compositeKey);
         if (oldState?.status === "initialized" && oldState.sessionInfo && config.coreSkill?.endpoint) {
-          const si = oldState.sessionInfo as Record<string, string>;
+          // SAFETY: sessionInfo is a JSON-decoded plain object at runtime; treating it as a
+          // string record for field extraction is sound (all reads are guarded by truthiness).
+          const si = oldState.sessionInfo as unknown as Record<string, string>;
           if (si.space_id && si.user_id && si.team_id && si.agent_id) {
             import("./skill/core-client.js").then(({ getCoreSkillClient }) => {
               const client = getCoreSkillClient(config.coreSkill!);
@@ -586,7 +586,6 @@ export async function handleCodexEndpoint(
         });
       }
 
-      if (initResult.justRegistered) sessionJustRegistered = true;
       if (initResult.bypassed) {
         injectionSkipped = true;
         console.log(`[codex] session=${sessionKey} bypassed → skipping all injection`);
@@ -673,13 +672,16 @@ export async function handleCodexEndpoint(
       cachedTaskDetail = initResult.taskDetail ?? null;
 
       // Record resetFlow to outer scope for confirmation response return
+      // SAFETY: sessionInfo is a JSON-decoded plain object at runtime; string-keyed reads
+      // with optional chaining are sound (missing keys yield undefined, handled by ?:).
+      const sessionFields = initResult.sessionInfo as unknown as Record<string, unknown> | null | undefined;
       if (initResult.resetFlow && initResult.justRegistered && !initResult.bypassed) {
         _resetFlowResult = {
           agentName: initResult.agentDetail?.name ?? "Unknown",
-          agentIdShort: (initResult.sessionInfo as Record<string, unknown>)?.agent_id
-            ? String((initResult.sessionInfo as Record<string, unknown>).agent_id).slice(-8) : "",
-          teamId: (initResult.sessionInfo as Record<string, unknown>)?.team_id
-            ? String((initResult.sessionInfo as Record<string, unknown>).team_id).slice(-8) : "",
+          agentIdShort: sessionFields?.agent_id
+            ? String(sessionFields.agent_id).slice(-8) : "",
+          teamId: sessionFields?.team_id
+            ? String(sessionFields.team_id).slice(-8) : "",
           taskName: initResult.taskDetail?.name,
         };
       }
@@ -1220,7 +1222,7 @@ export function countHumanTurnsCodex(input: unknown): number {
  * to clearly display input for this invocation). instructions block attached separately to complete context
  * (codex system prompt is in body.instructions rather than input).
  */
-function buildCodexLangfuseInput(body: Record<string, unknown>): unknown {
+function buildCodexLangfuseInput(body: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { input: body.input };
   if (typeof body.instructions === "string" && body.instructions.length > 0) {
     out.instructions = body.instructions;
@@ -1262,7 +1264,7 @@ export function consumeCodexStream(stream: ReadableStream<Uint8Array>, ctx: Code
   (async () => {
     const decoder = new TextDecoder();
     let sseBuf = "";
-    let usage: Record<string, unknown> = {};
+    const usage: Record<string, unknown> = {};
     let outputText = "";
     let toolUseCount = 0;
     let stopReason: string | undefined;

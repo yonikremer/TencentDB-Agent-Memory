@@ -394,7 +394,9 @@ export function parseV3Auth(
     );
     return null;
   }
-  const apiKey = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+  const apiKey = authHeader.startsWith("Bearer ")
+    ? authHeader.slice(7).trim()
+    : "";
 
   return { apiKey, serviceId: serviceId.trim() };
 }
@@ -423,29 +425,56 @@ export async function verifyDataPlaneUser(
   const raw = req.headers["x-tdai-user-key"];
   const userKey = (Array.isArray(raw) ? raw[0] : (raw ?? "")).trim();
   if (!userKey) {
-    sendJsonFn(res, 401, errorEnvelope(401, "Missing x-tdai-user-key header: authenticate with a per-user key", requestId));
+    sendJsonFn(
+      res,
+      401,
+      errorEnvelope(
+        401,
+        "Missing x-tdai-user-key header: authenticate with a per-user key",
+        requestId,
+      ),
+    );
     return null;
   }
   if (!deps.getMetadataService) {
-    sendJsonFn(res, 503, errorEnvelope(503, "User store unavailable", requestId));
+    sendJsonFn(
+      res,
+      503,
+      errorEnvelope(503, "User store unavailable", requestId),
+    );
     return null;
   }
   const svc = await deps.getMetadataService(serviceId);
   if (!svc) {
-    sendJsonFn(res, 503, errorEnvelope(503, "User store unavailable", requestId));
+    sendJsonFn(
+      res,
+      503,
+      errorEnvelope(503, "User store unavailable", requestId),
+    );
     return null;
   }
   // Memory-system keys (sk-mem-*) are machine credentials, never user identity.
   if (svc.isConfiguredMemorySystemUserKey(userKey)) {
-    sendJsonFn(res, 401, errorEnvelope(401, "Invalid x-tdai-user-key", requestId));
+    sendJsonFn(
+      res,
+      401,
+      errorEnvelope(401, "Invalid x-tdai-user-key", requestId),
+    );
     return null;
   }
   const user = await svc.verifyAuth(userKey);
   if (!user) {
-    sendJsonFn(res, 401, errorEnvelope(401, "Invalid x-tdai-user-key", requestId));
+    sendJsonFn(
+      res,
+      401,
+      errorEnvelope(401, "Invalid x-tdai-user-key", requestId),
+    );
     return null;
   }
-  return { userId: user.user_id, isSystemAdmin: user.user_type === "system_admin" };
+  return {
+    userId: user.user_id,
+    isSystemAdmin: user.user_type === "system_admin",
+  };
 }
 
 // ============================
@@ -627,7 +656,14 @@ export async function handleV3Route(
 
   // Single identity plane: the verified user_id below overrides any body/header
   // claim for the rest of this request (bound into requestIsolation).
-  const verifiedUser = await verifyDataPlaneUser(req, res, auth.serviceId, deps, requestId, sendJson);
+  const verifiedUser = await verifyDataPlaneUser(
+    req,
+    res,
+    auth.serviceId,
+    deps,
+    requestId,
+    sendJson,
+  );
   if (!verifiedUser) return true;
 
   try {
@@ -674,12 +710,21 @@ export async function handleV3Route(
     //
     // /v3 strictly validates: must simultaneously provide team_id + agent_id + user_id + session_id,
     // Missing any directly returns 422, and no fallback to legacyCompatMode.
-    const headers = (req.headers ?? {}) as Record<string, string | string[] | undefined>;
-    const isoLegacyCompat = isV3 ? false : (deps.isolationConfig?.legacyCompatMode ?? false);
-    const isoResolved = resolveIsolation(body as Record<string, unknown> | undefined, headers, {
-      legacyCompatMode: isoLegacyCompat,
-      legacyPlaceholder: deps.isolationConfig?.legacyPlaceholder,
-    });
+    const headers = (req.headers ?? {}) as Record<
+      string,
+      string | string[] | undefined
+    >;
+    const isoLegacyCompat = isV3
+      ? false
+      : (deps.isolationConfig?.legacyCompatMode ?? false);
+    const isoResolved = resolveIsolation(
+      body as Record<string, unknown> | undefined,
+      headers,
+      {
+        legacyCompatMode: isoLegacyCompat,
+        legacyPlaceholder: deps.isolationConfig?.legacyPlaceholder,
+      },
+    );
     // Verified identity wins: a caller cannot act as another user by putting a
     // different user_id in the body or x-tdai-user-id header.
     isoResolved.ctx.userId = verifiedUser.userId;
@@ -696,8 +741,11 @@ export async function handleV3Route(
     if (isV3 && !isV3Extra && v3StrictEnabled && !v3IsolationExempt) {
       const v3Subpath = pathname.slice(V3_PREFIX.length);
       // user_id comes from the verified key, not the body — team/agent stay required.
-      const v3Missing = collectV3Missing(v3Subpath, body as Record<string, unknown> | undefined, headers)
-        .filter((m) => m !== "user_id");
+      const v3Missing = collectV3Missing(
+        v3Subpath,
+        body as Record<string, unknown> | undefined,
+        headers,
+      ).filter((m) => m !== "user_id");
       if (v3Missing.length > 0) {
         sendJson(
           res,
@@ -2092,7 +2140,9 @@ async function handleScenarioRead(
         path,
         // SAFETY: string-typed fields intentionally null here to signal "not found" over HTTP 200; callers check content === null before use.
         content: null as unknown as string,
+        // SAFETY: same absence convention as content.
         created_at: null as unknown as string,
+        // SAFETY: same absence convention as content.
         updated_at: null as unknown as string,
       },
       requestId,
@@ -2335,7 +2385,9 @@ async function handleCoreRead(
       {
         // SAFETY: string-typed fields intentionally null here to signal "not found" over HTTP 200; callers check content === null before use.
         content: null as unknown as string,
+        // SAFETY: same absence convention as content.
         created_at: null as unknown as string,
+        // SAFETY: same absence convention as content.
         updated_at: null as unknown as string,
       },
       requestId,

@@ -18,8 +18,27 @@ const MAX_LOG_FIELD_CHARS = 1_024;
 const MAX_LOG_JSON_CHARS = 8_192;
 
 /** @deprecated Use sanitizeApiPayload; kept for unit test and external import compatibility. */
-export function sanitizeMetaPayload(value: unknown, depth = 0): unknown {
-  return sanitizeApiPayload(value, MAX_LOG_FIELD_CHARS, depth);
+/** JSON-shaped sanitized log payload. */
+export type MetaSanitizedValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | MetaSanitizedValue[]
+  | { [key: string]: MetaSanitizedValue };
+
+export function sanitizeMetaPayload(
+  value: unknown,
+  depth = 0,
+): MetaSanitizedValue {
+  // SAFETY: sanitizeApiPayload preserves JSON shape by contract (only redacts
+  // leaf values); the cast names the domain type TypeScript cannot infer.
+  return sanitizeApiPayload(
+    value,
+    MAX_LOG_FIELD_CHARS,
+    depth,
+  ) as MetaSanitizedValue;
 }
 
 export interface MetaApiTraceContext {
@@ -50,7 +69,8 @@ function durationMs(ctx: MetaApiTraceContext): number {
 
 function resolveActiveTraceId(): string {
   try {
-    const ctx = getObservabilityBackend().tracePropagation.serializeTraceContext();
+    const ctx =
+      getObservabilityBackend().tracePropagation.serializeTraceContext();
     const traceId = (ctx as Record<string, unknown>)._traceId;
     return typeof traceId === "string" ? traceId : "";
   } catch {
@@ -58,7 +78,9 @@ function resolveActiveTraceId(): string {
   }
 }
 
-function baseAttrs(ctx: MetaApiTraceContext): Record<string, string | number | boolean> {
+function baseAttrs(
+  ctx: MetaApiTraceContext,
+): Record<string, string | number | boolean> {
   const cfg = getApiTraceConfig();
   const attrs: Record<string, string | number | boolean> = {
     source_file: ctx.internal ? "internal-meta-router.ts" : "v3-meta-router.ts",
@@ -85,13 +107,19 @@ function serializeBody(value: unknown): string {
   );
 }
 
-function maybeReportOtel(event: string, attrs: Record<string, string | number | boolean>): void {
+function maybeReportOtel(
+  event: string,
+  attrs: Record<string, string | number | boolean>,
+): void {
   if (!getApiTraceConfig().policy.httpOtelReport) return;
   trace.report(event, attrs);
 }
 
 /** Request entering dispatch (after authentication, before handler execution). */
-export function logMetaApiEntry(ctx: MetaApiTraceContext, body?: unknown): void {
+export function logMetaApiEntry(
+  ctx: MetaApiTraceContext,
+  body?: unknown,
+): void {
   const policy = getApiTraceConfig().policy;
   const attrs: Record<string, string | number | boolean> = {
     ...baseAttrs(ctx),
@@ -104,7 +132,11 @@ export function logMetaApiEntry(ctx: MetaApiTraceContext, body?: unknown): void 
 }
 
 /** Normal return of envelope (including business 4xx). */
-export function logMetaApiResponse(ctx: MetaApiTraceContext, envelope: ApiResponseEnvelope, httpStatus: number): void {
+export function logMetaApiResponse(
+  ctx: MetaApiTraceContext,
+  envelope: ApiResponseEnvelope,
+  httpStatus: number,
+): void {
   const success = envelope.code === 0;
   const policy = getApiTraceConfig().policy;
   const attrs: Record<string, string | number | boolean> = {
@@ -117,7 +149,9 @@ export function logMetaApiResponse(ctx: MetaApiTraceContext, envelope: ApiRespon
   if (!success || policy.httpBodyOnSuccess) {
     attrs.response_body = serializeBody(envelope.data ?? {});
   }
-  logApiTrace(success ? "info" : "warn", "api.http.response", attrs, { requestId: ctx.requestId });
+  logApiTrace(success ? "info" : "warn", "api.http.response", attrs, {
+    requestId: ctx.requestId,
+  });
   maybeReportOtel("api.http.response", attrs);
 }
 
@@ -136,19 +170,22 @@ export function logMetaApiError(
     error_message: message,
     success: false,
   };
-  logApiTrace(
-    "error",
-    "api.http.error",
-    attrs,
-    { requestId: ctx.requestId, err: err instanceof Error ? err : undefined },
-  );
+  logApiTrace("error", "api.http.error", attrs, {
+    requestId: ctx.requestId,
+    err: err instanceof Error ? err : undefined,
+  });
   maybeReportOtel("api.http.error", attrs);
 }
 
 /** Early return for auth/param validation etc (no handler execution). */
 export function logMetaApiRejected(
   ctx: MetaApiTraceContext,
-  args: { httpStatus: number; envelopeCode: number; message: string; body?: unknown },
+  args: {
+    httpStatus: number;
+    envelopeCode: number;
+    message: string;
+    body?: unknown;
+  },
 ): void {
   const attrs: Record<string, string | number | boolean> = {
     ...baseAttrs(ctx),

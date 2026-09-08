@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
+from tencentdb_agent_memory._http import AsyncStub
+
 
 class FakeStub:
     """Synchronous fake transport recording (method, path, body)."""
@@ -21,11 +23,15 @@ class FakeStub:
     def _ret(self) -> Any:
         return dict(self.result) if isinstance(self.result, dict) else self.result
 
-    def post(self, path: str, body: Optional[Dict[str, Any]] = None, timeout: Any = None) -> Any:
+    def post(
+        self, path: str, body: dict[str, Any] | None = None, timeout: Any = None
+    ) -> Any:
         self.calls.append(("POST", path, body))
         return self._ret()
 
-    def get(self, path: str, query: Optional[Dict[str, Any]] = None, timeout: Any = None) -> Any:
+    def get(
+        self, path: str, query: dict[str, Any] | None = None, timeout: Any = None
+    ) -> Any:
         self.calls.append(("GET", path, query))
         return self._ret()
 
@@ -33,12 +39,32 @@ class FakeStub:
         self.closed = True
 
 
-class FakeAsyncStub(FakeStub):
-    async def post(self, path: str, body: Optional[Dict[str, Any]] = None, timeout: Any = None) -> Any:
+class FakeAsyncStub(AsyncStub):
+    """Async fake transport. Separate base from FakeStub: async overrides of sync
+    methods would otherwise violate override compatibility."""
+
+    def __init__(self, result: Any = None) -> None:
+        self.calls: list[tuple[str, str, Any]] = []
+        self.result = {} if result is None else result
+        self.closed = False
+        self.endpoint = "http://mem.example.com"
+        self.headers = {
+            "Authorization": "Bearer k",
+            "x-tdai-service-id": "s",
+        }
+
+    def _ret(self) -> Any:
+        return dict(self.result) if isinstance(self.result, dict) else self.result
+
+    async def post(
+        self, path: str, body: dict[str, Any] | None = None, timeout: Any = None
+    ) -> Any:
         self.calls.append(("POST", path, body))
         return self._ret()
 
-    async def get(self, path: str, query: Optional[Dict[str, Any]] = None, timeout: Any = None) -> Any:
+    async def get(
+        self, path: str, query: dict[str, Any] | None = None, timeout: Any = None
+    ) -> Any:
         self.calls.append(("GET", path, query))
         return self._ret()
 
@@ -54,7 +80,9 @@ class FakeAsyncPostOnly:
         self.result = {} if result is None else result
         self.closed = False
 
-    async def post(self, path: str, body: Optional[Dict[str, Any]] = None, timeout: Any = None) -> Any:
+    async def post(
+        self, path: str, body: dict[str, Any] | None = None, timeout: Any = None
+    ) -> Any:
         self.calls.append(("POST", path, body))
         return dict(self.result) if isinstance(self.result, dict) else self.result
 

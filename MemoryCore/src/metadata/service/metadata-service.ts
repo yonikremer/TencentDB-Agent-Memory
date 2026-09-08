@@ -12,7 +12,10 @@
  * Agnostic to specific backend (SQLite / MongoDB), ensuring storage is switchable.
  */
 
-import { DuplicateUserKeyError, type IMetadataStore } from "../store/interface.js";
+import {
+  DuplicateUserKeyError,
+  type IMetadataStore,
+} from "../store/interface.js";
 import type { GroupyScheduler } from "../groupy/scheduler.js";
 import { applyAssetShare as applyGroupyAssetShare } from "../groupy/grant-service.js";
 import {
@@ -24,7 +27,9 @@ import {
   type PermCheckLogger,
 } from "./permission-checker.js";
 import {
-  maskUserKey, isUserKeyExpired, DEFAULT_MAX_ACTIVE_USER_KEYS,
+  maskUserKey,
+  isUserKeyExpired,
+  DEFAULT_MAX_ACTIVE_USER_KEYS,
 } from "../utils/user-key.js";
 import {
   lookupMemorySystemUser,
@@ -90,23 +95,37 @@ import type {
   InstanceUserListFilter,
   UserListFilter,
 } from "../types.js";
-import { formatListResult, paginateArray, resolvePagination, wrapPaginated, DEFAULT_PAGINATION } from "../pagination.js";
+import {
+  formatListResult,
+  paginateArray,
+  resolvePagination,
+  wrapPaginated,
+  DEFAULT_PAGINATION,
+} from "../pagination.js";
 import { generateId, ID_PREFIX } from "../utils/id-generator.js";
-import { buildChatMemoryAssetId, resolveChatMemoryAgentId } from "../utils/chat-memory-asset.js";
+import {
+  buildChatMemoryAssetId,
+  resolveChatMemoryAgentId,
+} from "../utils/chat-memory-asset.js";
 
 // ── Default Agent / Team Constants ──
 
 const DEFAULT_TEAM_NAME = "default-team";
-const DEFAULT_TEAM_DESCRIPTION = "Default team created automatically upon system initialization, used to store default agents";
+const DEFAULT_TEAM_DESCRIPTION =
+  "Default team created automatically upon system initialization, used to store default agents";
 
 const DEFAULT_AGENT_NAME = "default-agent";
-const DEFAULT_AGENT_DESCRIPTION = "Default agent, can handle common development tasks and daily collaboration.";
+const DEFAULT_AGENT_DESCRIPTION =
+  "Default agent, can handle common development tasks and daily collaboration.";
 
 // prompt concatenation format is identical to frontend manual Agent creation:
 // [card.rolePrompt, card.rulesPrompt].filter(Boolean).join('\n\n')
 const DEFAULT_AGENT_ROLE_PROMPT = "";
 const DEFAULT_AGENT_RULES_PROMPT = "";
-const DEFAULT_AGENT_PROMPT = [DEFAULT_AGENT_ROLE_PROMPT, DEFAULT_AGENT_RULES_PROMPT]
+const DEFAULT_AGENT_PROMPT = [
+  DEFAULT_AGENT_ROLE_PROMPT,
+  DEFAULT_AGENT_RULES_PROMPT,
+]
   .filter(Boolean)
   .join("\n\n");
 
@@ -281,12 +300,16 @@ export class MetadataService {
 
   get configParams(): import("./config-param-service.js").IConfigParamService {
     if (!this._configParams) {
-      throw new Error("ConfigParamService not initialized. Call setConfigParamService() after store.init().");
+      throw new Error(
+        "ConfigParamService not initialized. Call setConfigParamService() after store.init().",
+      );
     }
     return this._configParams;
   }
 
-  setConfigParamService(svc: import("./config-param-service.js").IConfigParamService): void {
+  setConfigParamService(
+    svc: import("./config-param-service.js").IConfigParamService,
+  ): void {
     this._configParams = svc;
   }
 
@@ -341,18 +364,23 @@ export class MetadataService {
   /** Validate user existence, otherwise throw not_found. */
   private async requireUser(userId: string): Promise<UserEntity> {
     const user = await this.getUserById(userId);
-    if (!user) throw new MetadataError("user_not_found", `user not found: ${userId}`);
+    if (!user)
+      throw new MetadataError("user_not_found", `user not found: ${userId}`);
     return user;
   }
 
   /** Org-sync control plane (optional env-gated module; set by gateway boot). */
   private _groupyScheduler?: import("../groupy/scheduler.js").GroupyScheduler;
 
-  setGroupyScheduler(sched: import("../groupy/scheduler.js").GroupyScheduler): void {
+  setGroupyScheduler(
+    sched: import("../groupy/scheduler.js").GroupyScheduler,
+  ): void {
     this._groupyScheduler = sched;
   }
 
-  get groupyScheduler(): import("../groupy/scheduler.js").GroupyScheduler | undefined {
+  get groupyScheduler():
+    | import("../groupy/scheduler.js").GroupyScheduler
+    | undefined {
     return this._groupyScheduler;
   }
 
@@ -363,7 +391,10 @@ export class MetadataService {
   private async assertUserQuota(): Promise<void> {
     const count = await this.store.countUsers();
     const limit = this._configParams
-      ? await this._configParams.getEffectiveInt("quota", "max_users_per_instance")
+      ? await this._configParams.getEffectiveInt(
+          "quota",
+          "max_users_per_instance",
+        )
       : this.quota.maxUsersPerInstance;
     if (count >= limit) {
       throw new MetadataError(
@@ -376,7 +407,10 @@ export class MetadataService {
   private async assertTeamQuota(): Promise<void> {
     const count = await this.store.countTeams();
     const limit = this._configParams
-      ? await this._configParams.getEffectiveInt("quota", "max_teams_per_instance")
+      ? await this._configParams.getEffectiveInt(
+          "quota",
+          "max_teams_per_instance",
+        )
       : this.quota.maxTeamsPerInstance;
     if (count >= limit) {
       throw new MetadataError(
@@ -391,10 +425,16 @@ export class MetadataService {
   // ============================================================
   async initAdminUser(input: InitAdminInput): Promise<InitAdminResult> {
     if ((await this.store.countUsers()) > 0) {
-      throw new MetadataError("already_initialized", "system already has users; init-admin requires empty database");
+      throw new MetadataError(
+        "already_initialized",
+        "system already has users; init-admin requires empty database",
+      );
     }
     if ((await this.store.countSystemAdmins()) > 0) {
-      throw new MetadataError("already_initialized", "system_admin already exists");
+      throw new MetadataError(
+        "already_initialized",
+        "system_admin already exists",
+      );
     }
 
     // Core operation: create admin user
@@ -467,7 +507,10 @@ export class MetadataService {
       );
     } catch (err) {
       if (err instanceof DuplicateUserKeyError) {
-        throw new MetadataError("duplicate_user_key", "user_key already exists");
+        throw new MetadataError(
+          "duplicate_user_key",
+          "user_key already exists",
+        );
       }
       throw err;
     }
@@ -483,10 +526,18 @@ export class MetadataService {
       return { ...input, auth_provider: authProvider, external_id: externalId };
     }
     const userId = input.user_id ?? generateId(ID_PREFIX.user);
-    return { ...input, auth_provider: authProvider, user_id: userId, external_id: userId };
+    return {
+      ...input,
+      auth_provider: authProvider,
+      user_id: userId,
+      external_id: userId,
+    };
   }
 
-  private async createUserWithType(input: CreateUserInput, userType: UserType): Promise<CreateUserApiResult> {
+  private async createUserWithType(
+    input: CreateUserInput,
+    userType: UserType,
+  ): Promise<CreateUserApiResult> {
     const resolved = this.resolveCreateUserInput(input);
     await this.assertUserQuota();
     const user = await this.store.createUser({
@@ -506,7 +557,10 @@ export class MetadataService {
     };
   }
 
-  async getUserForCaller(userId: string, ctx: V3AuthContext): Promise<UserPublic> {
+  async getUserForCaller(
+    userId: string,
+    ctx: V3AuthContext,
+  ): Promise<UserPublic> {
     const user = await this.getUserById(userId);
     if (!user || !canViewUser(user, ctx)) {
       throw new MetadataError("user_not_found", `user not found: ${userId}`);
@@ -522,13 +576,22 @@ export class MetadataService {
     return this.store.getUserByKey(userKey);
   }
 
-  async getUserByExternalId(authProvider: string, externalId: string): Promise<UserEntity | null> {
+  async getUserByExternalId(
+    authProvider: string,
+    externalId: string,
+  ): Promise<UserEntity | null> {
     return this.store.getUserByExternalId(authProvider, externalId);
   }
 
-  async deleteUsersForCaller(userIds: string[], ctx: V3AuthContext): Promise<BatchDeleteResult> {
+  async deleteUsersForCaller(
+    userIds: string[],
+    ctx: V3AuthContext,
+  ): Promise<BatchDeleteResult> {
     if (!canManageUsers(ctx)) {
-      throw new MetadataError("permission_denied", "user management requires system admin");
+      throw new MetadataError(
+        "permission_denied",
+        "user management requires system admin",
+      );
     }
     let deletingSystemAdmins = 0;
     for (const id of userIds) {
@@ -537,7 +600,10 @@ export class MetadataService {
     }
     const totalAdmins = await this.store.countSystemAdmins();
     if (totalAdmins > 0 && totalAdmins - deletingSystemAdmins < 1) {
-      throw new MetadataError("last_system_admin", "cannot delete the last system_admin user");
+      throw new MetadataError(
+        "last_system_admin",
+        "cannot delete the last system_admin user",
+      );
     }
     return this.deleteUsers(userIds);
   }
@@ -556,7 +622,10 @@ export class MetadataService {
 
     if (!input.team_id) {
       if (!ctx.isSystemAdmin) {
-        throw new MetadataError("missing_team_id", "team_id is required for non-system-admin callers");
+        throw new MetadataError(
+          "missing_team_id",
+          "team_id is required for non-system-admin callers",
+        );
       }
       const page = await this.store.listUsers(pagination, storeFilter);
       const items = filterVisibleUsers(page.items, ctx);
@@ -566,7 +635,11 @@ export class MetadataService {
     const teamId = input.team_id;
 
     if (ctx.isSystemAdmin) {
-      const page = await this.store.listUsersByTeam(teamId, pagination, storeFilter);
+      const page = await this.store.listUsersByTeam(
+        teamId,
+        pagination,
+        storeFilter,
+      );
       const items = filterVisibleUsers(page.items, ctx);
       return formatListResult({ items, total: page.total }, pagination);
     }
@@ -582,18 +655,30 @@ export class MetadataService {
 
     const isTeamAdmin = member.role === "admin";
     if (isTeamAdmin) {
-      const page = await this.store.listUsersByTeam(teamId, pagination, storeFilter);
-      const items = filterVisibleUsers(page.items, ctx, { allowTeamPeers: true });
+      const page = await this.store.listUsersByTeam(
+        teamId,
+        pagination,
+        storeFilter,
+      );
+      const items = filterVisibleUsers(page.items, ctx, {
+        allowTeamPeers: true,
+      });
       return formatListResult({ items, total: page.total }, pagination);
     }
 
     if (filtersPresent) {
-      throw new MetadataError("filter_not_allowed", "filters are not allowed for normal team members");
+      throw new MetadataError(
+        "filter_not_allowed",
+        "filters are not allowed for normal team members",
+      );
     }
 
     const self = await this.store.getUserById(ctx.userId);
     if (!self) {
-      throw new MetadataError("user_not_found", `user not found: ${ctx.userId}`);
+      throw new MetadataError(
+        "user_not_found",
+        `user not found: ${ctx.userId}`,
+      );
     }
     const visible = filterVisibleUsers([self], ctx);
     if (pagination.offset > 0) {
@@ -602,7 +687,9 @@ export class MetadataService {
     return wrapPaginated(visible, 1, pagination);
   }
 
-  private buildUserListStoreFilter(input: UserListFilter): InstanceUserListFilter | undefined {
+  private buildUserListStoreFilter(
+    input: UserListFilter,
+  ): InstanceUserListFilter | undefined {
     const filter: InstanceUserListFilter = {};
     if (input.user_ids?.length) filter.user_ids = input.user_ids;
     if (input.username) filter.username = input.username;
@@ -618,14 +705,20 @@ export class MetadataService {
     return this.listUsersForCaller({ team_id: teamId }, ctx, pagination);
   }
 
-  async listUsersByTeam(teamId: string, pagination: PaginationParams = DEFAULT_PAGINATION): Promise<PaginatedResult<UserEntity>> {
+  async listUsersByTeam(
+    teamId: string,
+    pagination: PaginationParams = DEFAULT_PAGINATION,
+  ): Promise<PaginatedResult<UserEntity>> {
     const page = await this.store.listUsersByTeam(teamId, pagination);
     return formatListResult(page, pagination);
   }
 
   assertCanManageUsers(ctx: V3AuthContext): void {
     if (!canManageUsers(ctx)) {
-      throw new MetadataError("permission_denied", "user management requires system admin");
+      throw new MetadataError(
+        "permission_denied",
+        "user management requires system admin",
+      );
     }
   }
 
@@ -633,18 +726,32 @@ export class MetadataService {
     return ctx.isAdmin || ctx.isSystemAdmin || ctx.userId === userId;
   }
 
-  assertUserScope(userId: string, callerUserId?: string, isAdmin = false, isSystemAdmin = false): void {
+  assertUserScope(
+    userId: string,
+    callerUserId?: string,
+    isAdmin = false,
+    isSystemAdmin = false,
+  ): void {
     if (isAdmin || isSystemAdmin || userId === callerUserId) return;
-    throw new MetadataError("permission_denied", "cannot access another user's keys");
+    throw new MetadataError(
+      "permission_denied",
+      "cannot access another user's keys",
+    );
   }
 
   assertCallerIsOwner(targetUserId: string, callerId: string): void {
     if (targetUserId !== callerId) {
-      throw new MetadataError("permission_denied", "user_id does not match caller");
+      throw new MetadataError(
+        "permission_denied",
+        "user_id does not match caller",
+      );
     }
   }
 
-  async verifyAuthForCaller(userKey: string, ctx: V3AuthContext): Promise<{ valid: boolean; user: UserPublic | null }> {
+  async verifyAuthForCaller(
+    userKey: string,
+    ctx: V3AuthContext,
+  ): Promise<{ valid: boolean; user: UserPublic | null }> {
     const user = await this.verifyAuth(userKey);
     if (!user) return { valid: false, user: null };
     const visibilityCtx: V3AuthContext = ctx.userId
@@ -658,7 +765,10 @@ export class MetadataService {
     if (!canViewUser(user, visibilityCtx)) {
       return { valid: true, user: null };
     }
-    if (this.memorySystemUser && user.user_id === this.memorySystemUser.userId) {
+    if (
+      this.memorySystemUser &&
+      user.user_id === this.memorySystemUser.userId
+    ) {
       return {
         valid: true,
         user: {
@@ -675,7 +785,11 @@ export class MetadataService {
   /** Validate user_key and return corresponding user (returns null if invalid). */
   async verifyAuth(userKey: string): Promise<UserEntity | null> {
     if (!userKey) return null;
-    const configured = lookupMemorySystemUser(userKey, this.instanceId, this.memorySystemUser);
+    const configured = lookupMemorySystemUser(
+      userKey,
+      this.instanceId,
+      this.memorySystemUser,
+    );
     if (configured) return configured;
     return this.store.getUserByKey(userKey);
   }
@@ -703,7 +817,10 @@ export class MetadataService {
 
     const active = await this.store.countActiveUserKeys(userId);
     if (active >= this.maxActiveUserKeys) {
-      throw new MetadataError("key_limit_exceeded", `active user key limit ${this.maxActiveUserKeys} reached`);
+      throw new MetadataError(
+        "key_limit_exceeded",
+        `active user key limit ${this.maxActiveUserKeys} reached`,
+      );
     }
 
     const entity = await this.store.createUserKey({
@@ -715,7 +832,10 @@ export class MetadataService {
     return { ...this.toPublicUserKey(entity), key_value: entity.key_value };
   }
 
-  async listUserKeys(userId: string, pagination: PaginationParams = DEFAULT_PAGINATION): Promise<PaginatedResult<UserKeyPublic>> {
+  async listUserKeys(
+    userId: string,
+    pagination: PaginationParams = DEFAULT_PAGINATION,
+  ): Promise<PaginatedResult<UserKeyPublic>> {
     await this.requireUser(userId);
     const page = await this.store.listUserKeys(userId, pagination);
     const items = page.items.map((k) => this.toPublicUserKey(k));
@@ -724,7 +844,11 @@ export class MetadataService {
 
   async getUserKey(keyId: string): Promise<UserKeyPublic> {
     const entity = await this.store.getUserKeyById(keyId);
-    if (!entity) throw new MetadataError("user_key_not_found", `user key not found: ${keyId}`);
+    if (!entity)
+      throw new MetadataError(
+        "user_key_not_found",
+        `user key not found: ${keyId}`,
+      );
     return this.toPublicUserKey(entity);
   }
 
@@ -736,30 +860,57 @@ export class MetadataService {
     isSystemAdmin = false,
   ): Promise<UserKeyPublic> {
     const entity = await this.store.getUserKeyById(keyId);
-    if (!entity) throw new MetadataError("user_key_not_found", `user key not found: ${keyId}`);
+    if (!entity)
+      throw new MetadataError(
+        "user_key_not_found",
+        `user key not found: ${keyId}`,
+      );
     const owner = await this.getUserById(entity.user_id);
     if (!owner) {
-      throw new MetadataError("user_key_not_found", `user key not found: ${keyId}`);
+      throw new MetadataError(
+        "user_key_not_found",
+        `user key not found: ${keyId}`,
+      );
     }
     if (!isAdmin && !isSystemAdmin && entity.user_id !== callerUserId) {
-      throw new MetadataError("permission_denied", "cannot access another user's key");
+      throw new MetadataError(
+        "permission_denied",
+        "cannot access another user's key",
+      );
     }
-    if (isSystemAdminUser(owner) && !isAdmin && callerUserId !== owner.user_id) {
-      throw new MetadataError("user_key_not_found", `user key not found: ${keyId}`);
+    if (
+      isSystemAdminUser(owner) &&
+      !isAdmin &&
+      callerUserId !== owner.user_id
+    ) {
+      throw new MetadataError(
+        "user_key_not_found",
+        `user key not found: ${keyId}`,
+      );
     }
     return this.toPublicUserKey(entity);
   }
 
   async revokeUserKey(keyId: string): Promise<void> {
     const entity = await this.store.getUserKeyById(keyId);
-    if (!entity) throw new MetadataError("user_key_not_found", `user key not found: ${keyId}`);
+    if (!entity)
+      throw new MetadataError(
+        "user_key_not_found",
+        `user key not found: ${keyId}`,
+      );
     if (!(await this.getUserById(entity.user_id))) {
-      throw new MetadataError("user_key_not_found", `user key not found: ${keyId}`);
+      throw new MetadataError(
+        "user_key_not_found",
+        `user key not found: ${keyId}`,
+      );
     }
 
     const active = await this.store.countActiveUserKeys(entity.user_id);
     if (active <= 1) {
-      throw new MetadataError("last_key_cannot_revoke", "cannot revoke the last active user key");
+      throw new MetadataError(
+        "last_key_cannot_revoke",
+        "cannot revoke the last active user key",
+      );
     }
 
     console.info(
@@ -773,19 +924,32 @@ export class MetadataService {
     patch: { name?: string | null; expires_at?: string | null },
   ): Promise<UserKeyPublic> {
     const existing = await this.store.getUserKeyById(keyId);
-    if (!existing) throw new MetadataError("user_key_not_found", `user key not found: ${keyId}`);
+    if (!existing)
+      throw new MetadataError(
+        "user_key_not_found",
+        `user key not found: ${keyId}`,
+      );
     if (!(await this.getUserById(existing.user_id))) {
-      throw new MetadataError("user_key_not_found", `user key not found: ${keyId}`);
+      throw new MetadataError(
+        "user_key_not_found",
+        `user key not found: ${keyId}`,
+      );
     }
 
     const updated = await this.store.updateUserKey(keyId, patch);
-    if (!updated) throw new MetadataError("user_key_not_found", `user key not found: ${keyId}`);
+    if (!updated)
+      throw new MetadataError(
+        "user_key_not_found",
+        `user key not found: ${keyId}`,
+      );
     return this.toPublicUserKey(updated);
   }
 
   private get maxActiveUserKeys(): number {
     const fromEnv = Number(process.env.TDAI_USER_KEY_MAX_ACTIVE);
-    return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : DEFAULT_MAX_ACTIVE_USER_KEYS;
+    return Number.isFinite(fromEnv) && fromEnv > 0
+      ? fromEnv
+      : DEFAULT_MAX_ACTIVE_USER_KEYS;
   }
 
   // ============================================================
@@ -800,10 +964,15 @@ export class MetadataService {
     return this.store.getTeamById(teamId);
   }
 
-  async updateTeam(teamId: string, patch: Partial<TeamEntity>): Promise<TeamEntity> {
-    if (!(await this.getTeamById(teamId))) throw new MetadataError("team_not_found", `team not found: ${teamId}`);
+  async updateTeam(
+    teamId: string,
+    patch: Partial<TeamEntity>,
+  ): Promise<TeamEntity> {
+    if (!(await this.getTeamById(teamId)))
+      throw new MetadataError("team_not_found", `team not found: ${teamId}`);
     const updated = await this.store.updateTeam(teamId, patch);
-    if (!updated) throw new MetadataError("team_not_found", `team not found: ${teamId}`);
+    if (!updated)
+      throw new MetadataError("team_not_found", `team not found: ${teamId}`);
     return updated;
   }
 
@@ -811,7 +980,11 @@ export class MetadataService {
     return this.store.deleteTeams(teamIds);
   }
 
-  async listTeamsByUser(userId: string, pagination: PaginationParams = DEFAULT_PAGINATION, filter?: { name?: string }): Promise<PaginatedResult<TeamEntity>> {
+  async listTeamsByUser(
+    userId: string,
+    pagination: PaginationParams = DEFAULT_PAGINATION,
+    filter?: { name?: string },
+  ): Promise<PaginatedResult<TeamEntity>> {
     const page = await this.store.listTeamsByUser(userId, pagination, filter);
     const items = page.items;
     return formatListResult({ items, total: page.total }, pagination);
@@ -822,14 +995,21 @@ export class MetadataService {
   // ============================================================
   async addTeamMember(input: AddTeamMemberInput): Promise<TeamMemberEntity> {
     const team = await this.getTeamById(input.team_id);
-    if (!team) throw new MetadataError("team_not_found", `team not found: ${input.team_id}`);
+    if (!team)
+      throw new MetadataError(
+        "team_not_found",
+        `team not found: ${input.team_id}`,
+      );
     const reqRole = input.role ?? "member";
     // owner is fixed to admin by createTeam; prevent downgrade via add upsert, otherwise
     // 'still owner but role!=admin' happens - 403 when acting as admin or team-member/add.
     if (input.user_id === team.owner_user_id && reqRole !== "admin") {
       throw new MetadataError("permission_denied", "cannot demote team owner");
     }
-    const existing = await this.store.getTeamMember(input.team_id, input.user_id);
+    const existing = await this.store.getTeamMember(
+      input.team_id,
+      input.user_id,
+    );
     if (existing?.status === "active" && existing.role === reqRole) {
       throw new MetadataError(
         "member_already_exists",
@@ -847,12 +1027,18 @@ export class MetadataService {
     await this.store.removeTeamMember(teamId, userId);
   }
 
-  async listTeamMembers(teamId: string, pagination: PaginationParams = DEFAULT_PAGINATION): Promise<PaginatedResult<TeamMemberEntity>> {
+  async listTeamMembers(
+    teamId: string,
+    pagination: PaginationParams = DEFAULT_PAGINATION,
+  ): Promise<PaginatedResult<TeamMemberEntity>> {
     const page = await this.store.listTeamMembers(teamId, pagination);
     return formatListResult(page, pagination);
   }
 
-  async getTeamMember(teamId: string, userId: string): Promise<TeamMemberEntity | null> {
+  async getTeamMember(
+    teamId: string,
+    userId: string,
+  ): Promise<TeamMemberEntity | null> {
     return this.store.getTeamMember(teamId, userId);
   }
 
@@ -880,7 +1066,7 @@ export class MetadataService {
       // use console.warn to be consistent with similar catch in v3-router.handleConversationAdd.
       console.warn(
         `[META] createAgent: ensureChatMemoryAsset failed (agent=${agent.agent_id} team=${agent.team_id}): ` +
-        (err instanceof Error ? err.message : String(err)),
+          (err instanceof Error ? err.message : String(err)),
       );
     }
     return agent;
@@ -890,10 +1076,15 @@ export class MetadataService {
     return this.store.getAgentById(agentId);
   }
 
-  async updateAgent(agentId: string, patch: Partial<AgentEntity>): Promise<AgentEntity> {
-    if (!(await this.getAgentById(agentId))) throw new MetadataError("agent_not_found", `agent not found: ${agentId}`);
+  async updateAgent(
+    agentId: string,
+    patch: Partial<AgentEntity>,
+  ): Promise<AgentEntity> {
+    if (!(await this.getAgentById(agentId)))
+      throw new MetadataError("agent_not_found", `agent not found: ${agentId}`);
     const updated = await this.store.updateAgent(agentId, patch);
-    if (!updated) throw new MetadataError("agent_not_found", `agent not found: ${agentId}`);
+    if (!updated)
+      throw new MetadataError("agent_not_found", `agent not found: ${agentId}`);
     return updated;
   }
 
@@ -939,7 +1130,8 @@ export class MetadataService {
    */
   async archiveAgent(agentId: string): Promise<AgentEntity> {
     const existing = await this.getAgentById(agentId);
-    if (!existing) throw new MetadataError("agent_not_found", `agent not found: ${agentId}`);
+    if (!existing)
+      throw new MetadataError("agent_not_found", `agent not found: ${agentId}`);
     const archived = await this.updateAgent(agentId, { status: "inactive" });
 
     if (this._chatMemoryContentCleaner) {
@@ -949,7 +1141,10 @@ export class MetadataService {
       });
     }
 
-    const selfMemoryAssetId = buildChatMemoryAssetId(existing.team_id, existing.agent_id);
+    const selfMemoryAssetId = buildChatMemoryAssetId(
+      existing.team_id,
+      existing.agent_id,
+    );
     await this.store.deleteAssets([selfMemoryAssetId]);
     return archived;
   }
@@ -962,7 +1157,10 @@ export class MetadataService {
     for (const link of input.linked_agents ?? []) {
       const agent = await this.getAgentById(link.agent_id);
       if (!agent) {
-        throw new MetadataError("agent_not_found", `agent not found: ${link.agent_id}`);
+        throw new MetadataError(
+          "agent_not_found",
+          `agent not found: ${link.agent_id}`,
+        );
       }
       if (agent.team_id !== input.team_id) {
         throw new MetadataError(
@@ -978,10 +1176,15 @@ export class MetadataService {
     return this.store.getTaskById(taskId);
   }
 
-  async updateTask(taskId: string, patch: Partial<TaskEntity>): Promise<TaskEntity> {
-    if (!(await this.getTaskById(taskId))) throw new MetadataError("task_not_found", `task not found: ${taskId}`);
+  async updateTask(
+    taskId: string,
+    patch: Partial<TaskEntity>,
+  ): Promise<TaskEntity> {
+    if (!(await this.getTaskById(taskId)))
+      throw new MetadataError("task_not_found", `task not found: ${taskId}`);
     const updated = await this.store.updateTask(taskId, patch);
-    if (!updated) throw new MetadataError("task_not_found", `task not found: ${taskId}`);
+    if (!updated)
+      throw new MetadataError("task_not_found", `task not found: ${taskId}`);
     return updated;
   }
 
@@ -999,7 +1202,10 @@ export class MetadataService {
     return formatListResult({ items, total: page.total }, pagination);
   }
 
-  async listTasks(filter: TaskFilter, pagination: PaginationParams = DEFAULT_PAGINATION): Promise<PaginatedResult<TaskEntity>> {
+  async listTasks(
+    filter: TaskFilter,
+    pagination: PaginationParams = DEFAULT_PAGINATION,
+  ): Promise<PaginatedResult<TaskEntity>> {
     const page = await this.store.listTasks(filter, pagination);
     const items = page.items;
     return formatListResult({ items, total: page.total }, pagination);
@@ -1013,23 +1219,36 @@ export class MetadataService {
   // ============================================================
   // TaskAgent
   // ============================================================
-  async linkTaskAgent(taskId: string, agentId: string, roleInTask?: string): Promise<TaskAgentEntity> {
+  async linkTaskAgent(
+    taskId: string,
+    agentId: string,
+    roleInTask?: string,
+  ): Promise<TaskAgentEntity> {
     const task = await this.getTaskById(taskId);
-    if (!task) throw new MetadataError("task_not_found", `task not found: ${taskId}`);
+    if (!task)
+      throw new MetadataError("task_not_found", `task not found: ${taskId}`);
     const agent = await this.getAgentById(agentId);
-    if (!agent) throw new MetadataError("agent_not_found", `agent not found: ${agentId}`);
+    if (!agent)
+      throw new MetadataError("agent_not_found", `agent not found: ${agentId}`);
     if (agent.team_id !== task.team_id) {
-      throw new MetadataError("agent_team_mismatch", `agent ${agentId} not in team ${task.team_id}`);
+      throw new MetadataError(
+        "agent_team_mismatch",
+        `agent ${agentId} not in team ${task.team_id}`,
+      );
     }
     return this.store.linkTaskAgent(taskId, agentId, roleInTask);
   }
 
   async unlinkTaskAgent(taskId: string, agentId: string): Promise<void> {
-    if (!(await this.getTaskById(taskId))) throw new MetadataError("task_not_found", `task not found: ${taskId}`);
+    if (!(await this.getTaskById(taskId)))
+      throw new MetadataError("task_not_found", `task not found: ${taskId}`);
     await this.store.unlinkTaskAgent(taskId, agentId);
   }
 
-  async listTaskAgents(taskId: string, pagination: PaginationParams = DEFAULT_PAGINATION): Promise<PaginatedResult<TaskAgentEntity>> {
+  async listTaskAgents(
+    taskId: string,
+    pagination: PaginationParams = DEFAULT_PAGINATION,
+  ): Promise<PaginatedResult<TaskAgentEntity>> {
     const page = await this.store.listTaskAgents(taskId, pagination);
     return formatListResult(page, pagination);
   }
@@ -1037,8 +1256,15 @@ export class MetadataService {
   // ============================================================
   // ParticipationLog
   // ============================================================
-  async appendParticipationLog(input: AppendParticipationLogInput): Promise<ParticipationLogEntity> {
-    await this.assertParticipationContext(input.team_id, input.task_id, input.agent_id, input.user_id);
+  async appendParticipationLog(
+    input: AppendParticipationLogInput,
+  ): Promise<ParticipationLogEntity> {
+    await this.assertParticipationContext(
+      input.team_id,
+      input.task_id,
+      input.agent_id,
+      input.user_id,
+    );
     return this.store.appendParticipationLog(input);
   }
 
@@ -1058,18 +1284,26 @@ export class MetadataService {
   ): Promise<void> {
     await this.assertTeamExists(teamId);
     const task = await this.getTaskById(taskId);
-    if (!task) throw new MetadataError("task_not_found", `task not found: ${taskId}`);
+    if (!task)
+      throw new MetadataError("task_not_found", `task not found: ${taskId}`);
     if (task.team_id !== teamId) {
-      throw new MetadataError("permission_denied", `task ${taskId} not in team ${teamId}`);
+      throw new MetadataError(
+        "permission_denied",
+        `task ${taskId} not in team ${teamId}`,
+      );
     }
     const agent = await this.getAgentById(agentId);
-    if (!agent) throw new MetadataError("agent_not_found", `agent not found: ${agentId}`);
+    if (!agent)
+      throw new MetadataError("agent_not_found", `agent not found: ${agentId}`);
     // if (agent.team_id !== teamId) {
     //   throw new MetadataError("agent_team_mismatch", `agent ${agentId} not in team ${teamId}`);
     // }
     const member = await this.getTeamMember(teamId, userId);
     if (!member || member.status !== "active") {
-      throw new MetadataError("member_not_found", `member not found: ${teamId}/${userId}`);
+      throw new MetadataError(
+        "member_not_found",
+        `member not found: ${teamId}/${userId}`,
+      );
     }
     // const links = await this.store.listTaskAgents(taskId, { limit: 1000, offset: 0 });
     // if (!links.items.some((l) => l.agent_id === agentId)) {
@@ -1089,10 +1323,15 @@ export class MetadataService {
     return this.store.getAssetById(assetId);
   }
 
-  async updateAsset(assetId: string, patch: Partial<AssetEntity>): Promise<AssetEntity> {
-    if (!(await this.getAssetById(assetId))) throw new MetadataError("asset_not_found", `asset not found: ${assetId}`);
+  async updateAsset(
+    assetId: string,
+    patch: Partial<AssetEntity>,
+  ): Promise<AssetEntity> {
+    if (!(await this.getAssetById(assetId)))
+      throw new MetadataError("asset_not_found", `asset not found: ${assetId}`);
     const updated = await this.store.updateAsset(assetId, patch);
-    if (!updated) throw new MetadataError("asset_not_found", `asset not found: ${assetId}`);
+    if (!updated)
+      throw new MetadataError("asset_not_found", `asset not found: ${assetId}`);
     return updated;
   }
 
@@ -1117,7 +1356,8 @@ export class MetadataService {
   }
 
   async touchAssetUsage(assetId: string): Promise<void> {
-    if (!(await this.getAssetById(assetId))) throw new MetadataError("asset_not_found", `asset not found: ${assetId}`);
+    if (!(await this.getAssetById(assetId)))
+      throw new MetadataError("asset_not_found", `asset not found: ${assetId}`);
     await this.store.touchAssetUsage(assetId);
   }
 
@@ -1136,7 +1376,9 @@ export class MetadataService {
   async summarizeAgentFixedAssetsByAgents(
     params: SummarizeAgentFixedAssetsParams,
   ): Promise<AgentFixedAssetSummaryResult> {
-    const agentIds = [...new Set(params.agent_ids.filter((id) => id.length > 0))];
+    const agentIds = [
+      ...new Set(params.agent_ids.filter((id) => id.length > 0)),
+    ];
     if (agentIds.length === 0) {
       return { items: [], total: 0 };
     }
@@ -1179,14 +1421,21 @@ export class MetadataService {
   // ============================================================
   // AgentFixedAsset (canBindAsset validation + detail aggregation)
   // ============================================================
-  async setAgentFixedAssets(agentId: string, bindings: FixedAssetBindingInput[]): Promise<void> {
+  async setAgentFixedAssets(
+    agentId: string,
+    bindings: FixedAssetBindingInput[],
+  ): Promise<void> {
     const agent = await this.getAgentById(agentId);
-    if (!agent) throw new MetadataError("agent_not_found", `agent not found: ${agentId}`);
+    if (!agent)
+      throw new MetadataError("agent_not_found", `agent not found: ${agentId}`);
 
     for (const b of bindings) {
       const asset = await this.getAssetById(b.asset_id);
       if (!asset) {
-        throw new MetadataError("asset_not_found", `asset not found: ${b.asset_id}`);
+        throw new MetadataError(
+          "asset_not_found",
+          `asset not found: ${b.asset_id}`,
+        );
       }
       if (!canBindAsset(agent, asset)) {
         throw new MetadataError(
@@ -1205,11 +1454,19 @@ export class MetadataService {
    * Validation: agent / asset must both be in current instance; canBindAsset must pass.
    * Idempotency: store layer relies on (agent_id, asset_id) unique constraint, repeated calls have no side effects.
    */
-  async addAgentFixedAsset(agentId: string, b: FixedAssetBindingInput): Promise<void> {
+  async addAgentFixedAsset(
+    agentId: string,
+    b: FixedAssetBindingInput,
+  ): Promise<void> {
     const agent = await this.getAgentById(agentId);
-    if (!agent) throw new MetadataError("agent_not_found", `agent not found: ${agentId}`);
+    if (!agent)
+      throw new MetadataError("agent_not_found", `agent not found: ${agentId}`);
     const asset = await this.getAssetById(b.asset_id);
-    if (!asset) throw new MetadataError("asset_not_found", `asset not found: ${b.asset_id}`);
+    if (!asset)
+      throw new MetadataError(
+        "asset_not_found",
+        `asset not found: ${b.asset_id}`,
+      );
     if (!canBindAsset(agent, asset)) {
       throw new MetadataError(
         "asset_not_bindable",
@@ -1267,7 +1524,7 @@ export class MetadataService {
       throw new MetadataError(
         "team_mismatch",
         `cannot ensure chat_memory asset: agent ${params.agent_id} belongs to team ` +
-        `${agent.team_id}, not ${params.team_id}`,
+          `${agent.team_id}, not ${params.team_id}`,
       );
     }
 
@@ -1315,7 +1572,10 @@ export class MetadataService {
   /** LRU-ish record: evict earliest written entry when limit reached. */
   private rememberEnsuredChatMemoryAsset(assetId: string): void {
     if (this.ensuredChatMemoryAssets.has(assetId)) return;
-    if (this.ensuredChatMemoryAssets.size >= MetadataService.CHAT_MEMORY_ENSURE_CACHE_SIZE) {
+    if (
+      this.ensuredChatMemoryAssets.size >=
+      MetadataService.CHAT_MEMORY_ENSURE_CACHE_SIZE
+    ) {
       const oldest = this.ensuredChatMemoryAssets.keys().next().value;
       if (oldest !== undefined) this.ensuredChatMemoryAssets.delete(oldest);
     }
@@ -1373,7 +1633,7 @@ export class MetadataService {
       throw new MetadataError(
         "team_mismatch",
         `cannot ensure skill asset: agent ${params.agent_id} belongs to team ` +
-        `${agent.team_id}, not ${params.team_id}`,
+          `${agent.team_id}, not ${params.team_id}`,
       );
     }
 
@@ -1426,7 +1686,9 @@ export class MetadataService {
   /** LRU-ish record: evict earliest written entry when limit reached. */
   private rememberEnsuredSkillAsset(assetId: string): void {
     if (this.ensuredSkillAssets.has(assetId)) return;
-    if (this.ensuredSkillAssets.size >= MetadataService.SKILL_ENSURE_CACHE_SIZE) {
+    if (
+      this.ensuredSkillAssets.size >= MetadataService.SKILL_ENSURE_CACHE_SIZE
+    ) {
       const oldest = this.ensuredSkillAssets.keys().next().value;
       if (oldest !== undefined) this.ensuredSkillAssets.delete(oldest);
     }
@@ -1437,13 +1699,22 @@ export class MetadataService {
     params: ListWithDetailParams,
   ): Promise<AgentFixedAssetDetailResult> {
     const agent = await this.getAgentById(params.agent_id);
-    if (!agent) throw new MetadataError("agent_not_found", `agent not found: ${params.agent_id}`);
+    if (!agent)
+      throw new MetadataError(
+        "agent_not_found",
+        `agent not found: ${params.agent_id}`,
+      );
 
     const pagination = this.pag(params);
-    const assetTypes = params.asset_types && params.asset_types.length > 0
-      ? params.asset_types
-      : undefined;
-    const bindingPage = await this.store.listAgentFixedAssets(params.agent_id, pagination, { assetTypes });
+    const assetTypes =
+      params.asset_types && params.asset_types.length > 0
+        ? params.asset_types
+        : undefined;
+    const bindingPage = await this.store.listAgentFixedAssets(
+      params.agent_id,
+      pagination,
+      { assetTypes },
+    );
     const items: AgentAssetView[] = [];
 
     for (const b of bindingPage.items) {
@@ -1452,7 +1723,8 @@ export class MetadataService {
 
       if (FILTERED_STATUSES.includes(asset.status)) continue;
 
-      if (params.apply_visibility_filter && !canBindAsset(agent, asset)) continue;
+      if (params.apply_visibility_filter && !canBindAsset(agent, asset))
+        continue;
 
       if (params.touch_usage) {
         await this.store.touchAssetUsage(asset.asset_id);
@@ -1492,7 +1764,11 @@ export class MetadataService {
   // ============================================================
   async grantAcl(input: GrantAclInput): Promise<AclEntity> {
     const asset = await this.getAssetById(input.asset_id);
-    if (!asset) throw new MetadataError("asset_not_found", `asset not found: ${input.asset_id}`);
+    if (!asset)
+      throw new MetadataError(
+        "asset_not_found",
+        `asset not found: ${input.asset_id}`,
+      );
     return this.store.grantAcl(input);
   }
 
@@ -1500,7 +1776,10 @@ export class MetadataService {
     await this.store.revokeAcl(id);
   }
 
-  async listAclByAsset(assetId: string, pagination: PaginationParams = DEFAULT_PAGINATION): Promise<PaginatedResult<AclEntity>> {
+  async listAclByAsset(
+    assetId: string,
+    pagination: PaginationParams = DEFAULT_PAGINATION,
+  ): Promise<PaginatedResult<AclEntity>> {
     const page = await this.store.listAclByAsset(assetId, pagination);
     return formatListResult(page, pagination);
   }
@@ -1508,7 +1787,9 @@ export class MetadataService {
   // ============================================================
   // Permission checking (lazy-loaded ACL)
   // ============================================================
-  async checkAssetPermission(params: CheckPermissionParams): Promise<PermCheckResult> {
+  async checkAssetPermission(
+    params: CheckPermissionParams,
+  ): Promise<PermCheckResult> {
     const userId = await resolveUserId(this, params);
     const asset = await this.getAssetById(params.asset_id);
     if (!asset || asset.status === "archived") {
@@ -1531,7 +1812,8 @@ export class MetadataService {
     let verifiedAgentId: string | undefined;
     if (params.agent_id) {
       const agent = await this.store.getAgentById(params.agent_id);
-      if (agent && agent.owner_user_id === userId) verifiedAgentId = agent.agent_id;
+      if (agent && agent.owner_user_id === userId)
+        verifiedAgentId = agent.agent_id;
     }
     if (asset.visibility === "restricted") {
       const whitelist = await this.allAclRecords(params.asset_id);
@@ -1576,14 +1858,20 @@ export class MetadataService {
   }
 
   /** Filter asset list accessible by user (offset pagination after permission aggregation). */
-  async listAccessibleAssets(params: ListAccessibleAssetsParams): Promise<PaginatedResult<AssetEntity>> {
+  async listAccessibleAssets(
+    params: ListAccessibleAssetsParams,
+  ): Promise<PaginatedResult<AssetEntity>> {
     const userId = await resolveUserId(this, params);
     const action = params.action ?? "read";
     const pagination = this.pag(params);
 
     // visibility whitelist (server-side filtering to prevent frontend from receiving restricted data)
     const visFilter: Set<AssetEntity["visibility"]> | null = params.visibility
-      ? new Set(Array.isArray(params.visibility) ? params.visibility : [params.visibility])
+      ? new Set(
+          Array.isArray(params.visibility)
+            ? params.visibility
+            : [params.visibility],
+        )
       : null;
 
     let teamIds: string[];
@@ -1598,7 +1886,10 @@ export class MetadataService {
       let offset = 0;
       const limit = 100;
       while (true) {
-        const page = await this.store.listTeamsByUser(userId, { limit, offset });
+        const page = await this.store.listTeamsByUser(userId, {
+          limit,
+          offset,
+        });
         allTeams.push(...page.items);
         if (offset + page.items.length >= page.total) break;
         offset += limit;
@@ -1648,7 +1939,8 @@ export class MetadataService {
   // ============================================================
   private async assertTeamExists(teamId: string): Promise<void> {
     const team = await this.store.getTeamById(teamId);
-    if (!team) throw new MetadataError("team_not_found", `team not found: ${teamId}`);
+    if (!team)
+      throw new MetadataError("team_not_found", `team not found: ${teamId}`);
   }
 
   private requireCallerId(ctx: V3AuthContext): string {
@@ -1658,14 +1950,23 @@ export class MetadataService {
     return ctx.userId;
   }
 
-  private assertCallerIsResourceOwner(ctx: V3AuthContext, ownerUserId: string): void {
+  private assertCallerIsResourceOwner(
+    ctx: V3AuthContext,
+    ownerUserId: string,
+  ): void {
     const callerId = this.requireCallerId(ctx);
     if (callerId !== ownerUserId) {
-      throw new MetadataError("permission_denied", "caller is not resource owner");
+      throw new MetadataError(
+        "permission_denied",
+        "caller is not resource owner",
+      );
     }
   }
 
-  private async requireActiveTeamMember(ctx: V3AuthContext, teamId: string): Promise<TeamMemberEntity> {
+  private async requireActiveTeamMember(
+    ctx: V3AuthContext,
+    teamId: string,
+  ): Promise<TeamMemberEntity> {
     const callerId = this.requireCallerId(ctx);
     const member = await this.store.getTeamMember(teamId, callerId);
     if (!member || member.status !== "active") {
@@ -1674,25 +1975,36 @@ export class MetadataService {
     return member;
   }
 
-  private async assertCallerIsTeamAdmin(ctx: V3AuthContext, teamId: string): Promise<void> {
+  private async assertCallerIsTeamAdmin(
+    ctx: V3AuthContext,
+    teamId: string,
+  ): Promise<void> {
     const member = await this.requireActiveTeamMember(ctx, teamId);
     if (member.role !== "admin") {
       throw new MetadataError("permission_denied", "caller is not team admin");
     }
   }
 
-  private async assertCallerIsTeamOwnerOrAdmin(ctx: V3AuthContext, teamId: string): Promise<TeamEntity> {
+  private async assertCallerIsTeamOwnerOrAdmin(
+    ctx: V3AuthContext,
+    teamId: string,
+  ): Promise<TeamEntity> {
     const callerId = this.requireCallerId(ctx);
     const team = await this.getTeamById(teamId);
-    if (!team) throw new MetadataError("team_not_found", `team not found: ${teamId}`);
+    if (!team)
+      throw new MetadataError("team_not_found", `team not found: ${teamId}`);
     if (team.owner_user_id === callerId) return team;
     await this.assertCallerIsTeamAdmin(ctx, teamId);
     return team;
   }
 
-  private async assertCallerIsAgentOwner(ctx: V3AuthContext, agentId: string): Promise<AgentEntity> {
+  private async assertCallerIsAgentOwner(
+    ctx: V3AuthContext,
+    agentId: string,
+  ): Promise<AgentEntity> {
     const agent = await this.getAgentById(agentId);
-    if (!agent) throw new MetadataError("agent_not_found", `agent not found: ${agentId}`);
+    if (!agent)
+      throw new MetadataError("agent_not_found", `agent not found: ${agentId}`);
     this.assertCallerIsResourceOwner(ctx, agent.owner_user_id);
     return agent;
   }
@@ -1702,32 +2014,48 @@ export class MetadataService {
    * Used for cold start scenarios like 'admin mounts default Agent asset for new user' (referencing asset's
    * assertCallerIsAssetOwnerOrTeamAdmin precedent, allows team admin).
    */
-  private async assertCallerIsAgentOwnerOrTeamAdmin(ctx: V3AuthContext, agentId: string): Promise<AgentEntity> {
+  private async assertCallerIsAgentOwnerOrTeamAdmin(
+    ctx: V3AuthContext,
+    agentId: string,
+  ): Promise<AgentEntity> {
     const agent = await this.getAgentById(agentId);
-    if (!agent) throw new MetadataError("agent_not_found", `agent not found: ${agentId}`);
+    if (!agent)
+      throw new MetadataError("agent_not_found", `agent not found: ${agentId}`);
     const callerId = this.requireCallerId(ctx);
     if (agent.owner_user_id === callerId) return agent;
     await this.assertCallerIsTeamAdmin(ctx, agent.team_id);
     return agent;
   }
 
-  private async assertCallerIsTaskCreator(ctx: V3AuthContext, taskId: string): Promise<TaskEntity> {
+  private async assertCallerIsTaskCreator(
+    ctx: V3AuthContext,
+    taskId: string,
+  ): Promise<TaskEntity> {
     const task = await this.getTaskById(taskId);
-    if (!task) throw new MetadataError("task_not_found", `task not found: ${taskId}`);
+    if (!task)
+      throw new MetadataError("task_not_found", `task not found: ${taskId}`);
     this.assertCallerIsResourceOwner(ctx, task.creator_user_id);
     return task;
   }
 
-  private async assertCallerIsAssetOwner(ctx: V3AuthContext, assetId: string): Promise<AssetEntity> {
+  private async assertCallerIsAssetOwner(
+    ctx: V3AuthContext,
+    assetId: string,
+  ): Promise<AssetEntity> {
     const asset = await this.getAssetById(assetId);
-    if (!asset) throw new MetadataError("asset_not_found", `asset not found: ${assetId}`);
+    if (!asset)
+      throw new MetadataError("asset_not_found", `asset not found: ${assetId}`);
     this.assertCallerIsResourceOwner(ctx, asset.owner_user_id);
     return asset;
   }
 
-  private async assertCallerIsAssetOwnerOrTeamAdmin(ctx: V3AuthContext, assetId: string): Promise<AssetEntity> {
+  private async assertCallerIsAssetOwnerOrTeamAdmin(
+    ctx: V3AuthContext,
+    assetId: string,
+  ): Promise<AssetEntity> {
     const asset = await this.getAssetById(assetId);
-    if (!asset) throw new MetadataError("asset_not_found", `asset not found: ${assetId}`);
+    if (!asset)
+      throw new MetadataError("asset_not_found", `asset not found: ${assetId}`);
     const callerId = this.requireCallerId(ctx);
     if (asset.owner_user_id === callerId) return asset;
     await this.assertCallerIsTeamAdmin(ctx, asset.team_id);
@@ -1737,7 +2065,10 @@ export class MetadataService {
   // ============================================================
   // Caller-scoped mutations（L-12 / L-14）
   // ============================================================
-  async createTeamForCaller(input: CreateTeamInput, ctx: V3AuthContext): Promise<TeamEntity> {
+  async createTeamForCaller(
+    input: CreateTeamInput,
+    ctx: V3AuthContext,
+  ): Promise<TeamEntity> {
     this.assertCallerIsResourceOwner(ctx, input.owner_user_id);
     if (input.team_id) await this.assertTeamIdNotGroupyManaged(input.team_id);
     return this.createTeam(input);
@@ -1753,7 +2084,10 @@ export class MetadataService {
     // the id stays reserved even after the org node is gone.
     const nodes = await this.store.listGroupyNodes(true);
     if (nodes.some((n) => n.node_id === teamId)) {
-      throw new MetadataError("groupy_managed_id", `team id is managed by groupy sync: ${teamId}`);
+      throw new MetadataError(
+        "groupy_managed_id",
+        `team id is managed by groupy sync: ${teamId}`,
+      );
     }
   }
 
@@ -1766,27 +2100,41 @@ export class MetadataService {
     return this.updateTeam(teamId, patch);
   }
 
-  async deleteTeamsForCaller(teamIds: string[], ctx: V3AuthContext): Promise<BatchDeleteResult> {
+  async deleteTeamsForCaller(
+    teamIds: string[],
+    ctx: V3AuthContext,
+  ): Promise<BatchDeleteResult> {
     for (const teamId of teamIds) {
       await this.assertCallerIsTeamOwnerOrAdmin(ctx, teamId);
     }
     return this.deleteTeams(teamIds);
   }
 
-  async addTeamMemberForCaller(input: AddTeamMemberInput, ctx: V3AuthContext): Promise<TeamMemberEntity> {
+  async addTeamMemberForCaller(
+    input: AddTeamMemberInput,
+    ctx: V3AuthContext,
+  ): Promise<TeamMemberEntity> {
     await this.assertCallerIsTeamAdmin(ctx, input.team_id);
     const callerId = this.requireCallerId(ctx);
     // 'Add member' shouldn't be used to change own role; selecting self + role=member would downgrade admin.
     if (input.user_id === callerId) {
-      throw new MetadataError("permission_denied", "cannot add yourself as a team member");
+      throw new MetadataError(
+        "permission_denied",
+        "cannot add yourself as a team member",
+      );
     }
     return this.addTeamMember(input);
   }
 
-  async removeTeamMemberForCaller(teamId: string, userId: string, ctx: V3AuthContext): Promise<void> {
+  async removeTeamMemberForCaller(
+    teamId: string,
+    userId: string,
+    ctx: V3AuthContext,
+  ): Promise<void> {
     await this.assertCallerIsTeamAdmin(ctx, teamId);
     const team = await this.getTeamById(teamId);
-    if (!team) throw new MetadataError("team_not_found", `team not found: ${teamId}`);
+    if (!team)
+      throw new MetadataError("team_not_found", `team not found: ${teamId}`);
     if (userId === team.owner_user_id) {
       throw new MetadataError("permission_denied", "cannot remove team owner");
     }
@@ -1799,7 +2147,10 @@ export class MetadataService {
     pagination: PaginationParams = DEFAULT_PAGINATION,
   ): Promise<PaginatedResult<TeamMemberView>> {
     await this.requireActiveTeamMember(ctx, teamId);
-    const page = await this.store.listTeamMembersWithProfile(teamId, pagination);
+    const page = await this.store.listTeamMembersWithProfile(
+      teamId,
+      pagination,
+    );
     return formatListResult(page, pagination);
   }
 
@@ -1811,12 +2162,18 @@ export class MetadataService {
     await this.requireActiveTeamMember(ctx, teamId);
     const member = await this.store.getTeamMemberWithProfile(teamId, userId);
     if (!member) {
-      throw new MetadataError("member_not_found", `member not found: ${teamId}/${userId}`);
+      throw new MetadataError(
+        "member_not_found",
+        `member not found: ${teamId}/${userId}`,
+      );
     }
     return member;
   }
 
-  async createAgentForCaller(input: CreateAgentInput, ctx: V3AuthContext): Promise<AgentEntity> {
+  async createAgentForCaller(
+    input: CreateAgentInput,
+    ctx: V3AuthContext,
+  ): Promise<AgentEntity> {
     await this.assertTeamExists(input.team_id);
     await this.requireActiveTeamMember(ctx, input.team_id);
     // owner themselves, or team admin of the team (admin creating default Agent for new user)
@@ -1836,19 +2193,28 @@ export class MetadataService {
     return this.updateAgent(agentId, patch);
   }
 
-  async deleteAgentsForCaller(agentIds: string[], ctx: V3AuthContext): Promise<BatchDeleteResult> {
+  async deleteAgentsForCaller(
+    agentIds: string[],
+    ctx: V3AuthContext,
+  ): Promise<BatchDeleteResult> {
     for (const agentId of agentIds) {
       await this.assertCallerIsAgentOwner(ctx, agentId);
     }
     return this.deleteAgents(agentIds);
   }
 
-  async archiveAgentForCaller(agentId: string, ctx: V3AuthContext): Promise<AgentEntity> {
+  async archiveAgentForCaller(
+    agentId: string,
+    ctx: V3AuthContext,
+  ): Promise<AgentEntity> {
     await this.assertCallerIsAgentOwner(ctx, agentId);
     return this.archiveAgent(agentId);
   }
 
-  async createTaskForCaller(input: CreateTaskInput, ctx: V3AuthContext): Promise<TaskEntity> {
+  async createTaskForCaller(
+    input: CreateTaskInput,
+    ctx: V3AuthContext,
+  ): Promise<TaskEntity> {
     await this.assertTeamExists(input.team_id);
     await this.requireActiveTeamMember(ctx, input.team_id);
     this.assertCallerIsResourceOwner(ctx, input.creator_user_id);
@@ -1864,14 +2230,20 @@ export class MetadataService {
     return this.updateTask(taskId, patch);
   }
 
-  async deleteTasksForCaller(taskIds: string[], ctx: V3AuthContext): Promise<BatchDeleteResult> {
+  async deleteTasksForCaller(
+    taskIds: string[],
+    ctx: V3AuthContext,
+  ): Promise<BatchDeleteResult> {
     for (const taskId of taskIds) {
       await this.assertCallerIsTaskCreator(ctx, taskId);
     }
     return this.deleteTasks(taskIds);
   }
 
-  async archiveTaskForCaller(taskId: string, ctx: V3AuthContext): Promise<TaskEntity> {
+  async archiveTaskForCaller(
+    taskId: string,
+    ctx: V3AuthContext,
+  ): Promise<TaskEntity> {
     await this.assertCallerIsTaskCreator(ctx, taskId);
     return this.archiveTask(taskId);
   }
@@ -1886,7 +2258,11 @@ export class MetadataService {
     return this.linkTaskAgent(taskId, agentId, roleInTask);
   }
 
-  async unlinkTaskAgentForCaller(taskId: string, agentId: string, ctx: V3AuthContext): Promise<void> {
+  async unlinkTaskAgentForCaller(
+    taskId: string,
+    agentId: string,
+    ctx: V3AuthContext,
+  ): Promise<void> {
     await this.assertCallerIsTaskCreator(ctx, taskId);
     return this.unlinkTaskAgent(taskId, agentId);
   }
@@ -1912,7 +2288,10 @@ export class MetadataService {
     return this.listParticipationLogs(filter, pagination);
   }
 
-  async createAssetForCaller(input: CreateAssetInput, ctx: V3AuthContext): Promise<AssetEntity> {
+  async createAssetForCaller(
+    input: CreateAssetInput,
+    ctx: V3AuthContext,
+  ): Promise<AssetEntity> {
     await this.assertTeamExists(input.team_id);
     await this.requireActiveTeamMember(ctx, input.team_id);
     this.assertCallerIsResourceOwner(ctx, input.owner_user_id);
@@ -1928,7 +2307,10 @@ export class MetadataService {
     return this.updateAsset(assetId, patch);
   }
 
-  async deleteAssetsForCaller(assetIds: string[], ctx: V3AuthContext): Promise<BatchDeleteResult> {
+  async deleteAssetsForCaller(
+    assetIds: string[],
+    ctx: V3AuthContext,
+  ): Promise<BatchDeleteResult> {
     // Skip owner check for non-existent ids (aligned with store layer idempotency success); existing ones must be owner.
     for (const assetId of assetIds) {
       const existing = await this.getAssetById(assetId);
@@ -1938,7 +2320,10 @@ export class MetadataService {
     return this.deleteAssets(assetIds);
   }
 
-  async touchAssetUsageForCaller(assetId: string, ctx: V3AuthContext): Promise<void> {
+  async touchAssetUsageForCaller(
+    assetId: string,
+    ctx: V3AuthContext,
+  ): Promise<void> {
     await this.assertCallerIsAssetOwner(ctx, assetId);
     return this.touchAssetUsage(assetId);
   }
@@ -1960,14 +2345,21 @@ export class MetadataService {
   async resolveChatMemoryTargets(
     assetIds: string[],
   ): Promise<Array<{ asset_id: string; team_id: string; agent_id: string }>> {
-    const targets: Array<{ asset_id: string; team_id: string; agent_id: string }> = [];
+    const targets: Array<{
+      asset_id: string;
+      team_id: string;
+      agent_id: string;
+    }> = [];
     // Agent list for same team will be reused repeatedly in bulk scenario, cache by team once.
     const agentIdsByTeam = new Map<string, string[]>();
 
     for (const assetId of assetIds) {
       const asset = await this.getAssetById(assetId);
       if (!asset) {
-        throw new MetadataError("asset_not_found", `asset not found: ${assetId}`);
+        throw new MetadataError(
+          "asset_not_found",
+          `asset not found: ${assetId}`,
+        );
       }
       if (asset.asset_type !== "chat_memory") {
         throw new MetadataError(
@@ -1982,14 +2374,22 @@ export class MetadataService {
         agentIdsByTeam.set(asset.team_id, agentIds);
       }
 
-      const agentId = resolveChatMemoryAgentId(assetId, asset.team_id, agentIds);
+      const agentId = resolveChatMemoryAgentId(
+        assetId,
+        asset.team_id,
+        agentIds,
+      );
       if (!agentId) {
         throw new MetadataError(
           "agent_not_found",
           `cannot resolve owning agent for chat_memory asset ${assetId} in team ${asset.team_id}`,
         );
       }
-      targets.push({ asset_id: assetId, team_id: asset.team_id, agent_id: agentId });
+      targets.push({
+        asset_id: assetId,
+        team_id: asset.team_id,
+        agent_id: agentId,
+      });
     }
     return targets;
   }
@@ -2003,7 +2403,10 @@ export class MetadataService {
     const MAX_AGENTS = 10_000;
     const ids: string[] = [];
     for (let offset = 0; offset < MAX_AGENTS; offset += PAGE) {
-      const page = await this.store.listAgentsByTeam(teamId, { limit: PAGE, offset });
+      const page = await this.store.listAgentsByTeam(teamId, {
+        limit: PAGE,
+        offset,
+      });
       for (const agent of page.items) ids.push(agent.agent_id);
       if (page.items.length < PAGE) break;
     }
@@ -2024,17 +2427,28 @@ export class MetadataService {
    * asset home-team admin, or system admin. Delegates to groupy/grant-service.
    */
   async applyAssetShareForCaller(
-    input: { asset_id: string; node_id: string; action: "grant" | "revoke"; grant_type?: string },
+    input: {
+      asset_id: string;
+      node_id: string;
+      action: "grant" | "revoke";
+      grant_type?: string;
+    },
     ctx: V3AuthContext,
   ): Promise<import("../groupy/grant-service.js").AssetShareResult> {
     return applyGroupyAssetShare(this, { ...input, ctx });
   }
 
-  async grantAclForCaller(input: GrantAclInput, ctx: V3AuthContext): Promise<AclEntity> {
+  async grantAclForCaller(
+    input: GrantAclInput,
+    ctx: V3AuthContext,
+  ): Promise<AclEntity> {
     await this.assertCallerIsAssetOwner(ctx, input.asset_id);
     const callerId = this.requireCallerId(ctx);
     if (input.granted_by !== callerId) {
-      throw new MetadataError("permission_denied", "granted_by must match caller");
+      throw new MetadataError(
+        "permission_denied",
+        "granted_by must match caller",
+      );
     }
     return this.grantAcl(input);
   }

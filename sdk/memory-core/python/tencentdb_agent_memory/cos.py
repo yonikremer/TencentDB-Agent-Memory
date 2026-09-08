@@ -20,7 +20,7 @@ import logging
 import re
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -78,7 +78,7 @@ class StsCredential:
         "bucket", "region", "prefix", "expires_at_epoch",
     )
 
-    def __init__(self, data: Dict[str, Any]) -> None:
+    def __init__(self, data: dict[str, Any]) -> None:
         self.tmp_secret_id: str = data["TmpSecretId"]
         self.tmp_secret_key: str = data["TmpSecretKey"]
         self.token: str = data.get("TmpToken", "")
@@ -92,7 +92,7 @@ class StsCredential:
         # Parse ISO 8601 → epoch seconds
         expires_str = data.get("ExpirationTime", "")
         if expires_str:
-            from datetime import datetime, timezone
+            from datetime import datetime
             try:
                 dt = datetime.fromisoformat(expires_str.replace("Z", "+00:00"))
                 self.expires_at_epoch = dt.timestamp()
@@ -135,9 +135,9 @@ class StsCredentialManager:
         self._service_id = service_id
         self._buffer = buffer_seconds
         self._timeout = timeout
-        self._credential: Optional[StsCredential] = None
+        self._credential: StsCredential | None = None
         self._lock = threading.Lock()
-        self._client: Optional[httpx.Client] = None
+        self._client: httpx.Client | None = None
 
     def get_credential(self) -> StsCredential:
         """Get a valid STS credential (cached or freshly fetched)."""
@@ -201,10 +201,10 @@ class AsyncStsCredentialManager:
         self._service_id = service_id
         self._buffer = buffer_seconds
         self._timeout = timeout
-        self._credential: Optional[StsCredential] = None
+        self._credential: StsCredential | None = None
         import asyncio
         self._lock = asyncio.Lock()
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: httpx.AsyncClient | None = None
 
     async def get_credential(self) -> StsCredential:
         if self._credential and self._credential.is_valid(self._buffer):
@@ -252,8 +252,8 @@ def _cos_v5_sign(
     method: str,
     path: str,
     host: str,
-    start_time: Optional[int] = None,
-    end_time: Optional[int] = None,
+    start_time: int | None = None,
+    end_time: int | None = None,
 ) -> str:
     """Generate COS V5 Authorization header value for a GET request.
 
@@ -276,6 +276,8 @@ def _cos_v5_sign(
     http_string = f"{method.lower()}\n{path}\n\nhost={host}\n"
 
     # Step 3: StringToSign
+    # nosec B324 — Tencent COS V5 request signing mandates SHA-1 (q-sign-algorithm=sha1);
+    # HMAC-based request authentication, not password storage.
     sha1_http_string = hashlib.sha1(http_string.encode("utf-8")).hexdigest()
     string_to_sign = f"sha1\n{q_sign_time}\n{sha1_http_string}\n"
 
@@ -318,7 +320,7 @@ class MemoryFileReader:
         self,
         sts_manager: StsCredentialManager,
         timeout: float = 30,
-        client: Optional[httpx.Client] = None,
+        client: httpx.Client | None = None,
     ) -> None:
         self._sts = sts_manager
         self._client = client or httpx.Client(timeout=timeout)
@@ -344,7 +346,7 @@ class MemoryFileReader:
             host=host,
         )
 
-        headers: Dict[str, str] = {
+        headers: dict[str, str] = {
             "Host": host,
             "Authorization": auth,
         }
@@ -404,7 +406,7 @@ class AsyncMemoryFileReader:
         self,
         sts_manager: AsyncStsCredentialManager,
         timeout: float = 30,
-        client: Optional[httpx.AsyncClient] = None,
+        client: httpx.AsyncClient | None = None,
     ) -> None:
         self._sts = sts_manager
         self._client = client or httpx.AsyncClient(timeout=timeout)
@@ -423,7 +425,7 @@ class AsyncMemoryFileReader:
             host=host,
         )
 
-        headers: Dict[str, str] = {
+        headers: dict[str, str] = {
             "Host": host,
             "Authorization": auth,
         }

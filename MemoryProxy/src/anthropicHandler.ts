@@ -49,7 +49,7 @@ import type { TdaiIdentity, TdaiMessage } from "./tdai/types.js";
 import { triggerSkillExtractIfReady } from "./skill/handler-glue.js";
 import { emitModelIntentTelemetry } from "./session/model-intent-telemetry.js";
 import { isExtractionAllowed, logExtractionSkipped } from "./extraction-gate.js";
-import type { CcRequestKind } from "./common/cc-request-classifier.js";
+import type { RequestKind } from "./agent-adapters/index.js";
 import { buildRequestDebugMetadata } from "./common/langfuse-debug.js";
 import { resolveAgentAdapter } from "./agent-adapters/index.js";
 import {
@@ -134,7 +134,7 @@ export function buildLangfuseInput(
   messages: unknown[],
   system: unknown,
   debug: boolean,
-): unknown {
+): unknown[] {
   if (debug) {
     // Preserve original shape end-to-end. Prepend a synthetic system message
     // when it's non-empty so the display order matches other consumers.
@@ -566,7 +566,7 @@ export async function handleAnthropicMessages(
     ? _pathPartsEarly[0] : undefined;
   const agentAdapter = resolveAgentAdapter(_agentFromPathEarly ?? "claude-code");
   const ccRoutingEnabled = config.ccRequestRouting?.enabled === true;
-  const requestKind: CcRequestKind = ccRoutingEnabled ? agentAdapter.classifyRequest(body) : "main";
+  const requestKind: RequestKind = ccRoutingEnabled ? agentAdapter.classifyRequest(body) : "main";
 
   // ── Model gate: reject requests whose `model` is not a registered display name ──
   // When pricing table is configured, client `model` must match the `modelName`
@@ -671,7 +671,6 @@ export async function handleAnthropicMessages(
   }
 
   // ── mem:session-reset pre-hook ──
-  let _isSessionResetFlow = false;
   if (config.memCommand?.enabled && requestKind === "main") {
     const { isSessionResetCommand } = await import("./mem-command/pre-intercept.js");
     if (isSessionResetCommand(body as Record<string, unknown>, agentSource)) {
@@ -686,7 +685,9 @@ export async function handleAnthropicMessages(
         // ── Force-archive skill buffer for old agent (best-effort) ──
         const oldState = store.get(compositeKey);
         if (oldState?.status === "initialized" && oldState.sessionInfo && config.coreSkill?.endpoint) {
-          const si = oldState.sessionInfo as Record<string, string>;
+          // SAFETY: sessionInfo is a JSON-decoded plain object at runtime; treating it as a
+          // string record for field extraction is sound (all reads are guarded by truthiness).
+          const si = oldState.sessionInfo as unknown as Record<string, string>;
           if (si.space_id && si.user_id && si.team_id && si.agent_id) {
             import("./skill/core-client.js").then(({ getCoreSkillClient }) => {
               const client = getCoreSkillClient(config.coreSkill!);
@@ -714,7 +715,6 @@ export async function handleAnthropicMessages(
         await store.set(compositeKey, { status: "uninitialized", keyId: sessionKey, startedAt: resetEpoch, attemptCount: 0, userId: userId || "anonymous", resetEpoch, resetFlow: true });
         const bindingRepo = store.getBindingRepo();
         if (bindingRepo) await bindingRepo.deleteBinding(spaceId, sessionKey).catch(() => {});
-        _isSessionResetFlow = true;
         console.log(`[mem-command:pre] session-reset session=${sessionKey} → falling through to pop form`);
       }
     }
@@ -953,13 +953,16 @@ export async function handleAnthropicMessages(
       }
 
       // Record resetFlow to outer scope for returning confirmation response
+      // SAFETY: sessionInfo is a JSON-decoded plain object at runtime; string-keyed reads
+      // with optional chaining are sound (missing keys yield undefined, handled by ?:).
+      const sessionFields = initResult.sessionInfo as unknown as Record<string, unknown> | null | undefined;
       if (initResult.resetFlow && initResult.justRegistered && !initResult.bypassed) {
         _resetFlowResult = {
           agentName: initResult.agentDetail?.name ?? "Unknown",
-          agentIdShort: (initResult.sessionInfo as Record<string, unknown>)?.agent_id
-            ? String((initResult.sessionInfo as Record<string, unknown>).agent_id).slice(-8) : "",
-          teamId: (initResult.sessionInfo as Record<string, unknown>)?.team_id
-            ? String((initResult.sessionInfo as Record<string, unknown>).team_id).slice(-8) : "",
+          agentIdShort: sessionFields?.agent_id
+            ? String(sessionFields.agent_id).slice(-8) : "",
+          teamId: sessionFields?.team_id
+            ? String(sessionFields.team_id).slice(-8) : "",
           taskName: initResult.taskDetail?.name,
         };
       }
@@ -1926,7 +1929,7 @@ interface AnthropicTapContext {
   /** Upstream response header `x-request-id` (empty when not returned). */
   upstreamRequestId?: string;
   /** CC request split kind, determines whether to trigger skill/L0 side effects after stream completes. */
-  requestKind: CcRequestKind;
+  requestKind: RequestKind;
   /** Evaluated config.langfuse.debug === true result, passed through to avoid reading config repeatedly inside stream. */
   langfuseDebug: boolean;
   /** Evaluated result of buildRequestDebugMetadata; {} when debug=false. */
@@ -1944,7 +1947,7 @@ function consumeAnthropicStream(stream: ReadableStream<Uint8Array>, ctx: Anthrop
   (async () => {
     const decoder = new TextDecoder();
     let sseBuf = "";
-    let usage: Record<string, unknown> = {};
+    const usage: Record<string, unknown> = {};
     let outputText = "";
     let toolUseCount = 0;
     let streamCompleted = false;

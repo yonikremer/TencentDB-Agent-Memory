@@ -62,7 +62,11 @@ function dispatchReq(pathname: string, body: unknown): http.IncomingMessage {
   return em as unknown as http.IncomingMessage;
 }
 
-function dispatchRes(): { res: http.ServerResponse; statuses: number[]; bodies: unknown[] } {
+function dispatchRes(): {
+  res: http.ServerResponse;
+  statuses: number[];
+  bodies: unknown[];
+} {
   const statuses: number[] = [];
   const bodies: unknown[] = [];
   const res = {
@@ -81,7 +85,11 @@ function bareGateway(): TdaiGateway {
   const noop = () => {};
   const gw = Object.create(TdaiGateway.prototype) as Record<string, unknown>;
   gw.logger = { info: noop, error: noop, warn: noop, debug: noop };
-  gw.config = { server: { corsOrigins: [] }, deployMode: "standalone", offload: {} };
+  gw.config = {
+    server: { corsOrigins: [] },
+    deployMode: "standalone",
+    offload: {},
+  };
   gw.conversationAddByInstance = new Map<string, unknown>();
   gw.metadataServiceByInstance = new Map<string, unknown>();
   gw.ensureMetadataStorePool = async () => ({
@@ -147,7 +155,9 @@ describe("dispatch wiring (v3-only)", () => {
   }
 
   it("legacy /v2/instance/destroy falls through to 404", async () => {
-    const { statuses } = await dispatch("/v2/instance/destroy", { instance_id: "i1" });
+    const { statuses } = await dispatch("/v2/instance/destroy", {
+      instance_id: "i1",
+    });
     expect(statuses[0]).toBe(404);
   });
 
@@ -158,9 +168,14 @@ describe("dispatch wiring (v3-only)", () => {
   });
 
   it("routes /v3/instance/destroy (200 with instance_id)", async () => {
-    const { statuses, bodies } = await dispatch("/v3/instance/destroy", { instance_id: "i9" });
+    const { statuses, bodies } = await dispatch("/v3/instance/destroy", {
+      instance_id: "i9",
+    });
     expect(statuses[0]).toBe(200);
-    const body = bodies[0] as { code?: number; data?: { instance_id?: string } };
+    const body = bodies[0] as {
+      code?: number;
+      data?: { instance_id?: string };
+    };
     expect(body.code).toBe(0);
     expect(body.data?.instance_id).toBe("i9");
   });
