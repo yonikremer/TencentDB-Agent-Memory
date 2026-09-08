@@ -7,7 +7,13 @@
  * The kernel returns the affected team set atomically with the grant, so the
  * mirror cannot drift from a concurrent org change mid-request.
  *
- * Auth: platform admin on the Panel route (kernel re-checks owner/home-admin).
+ * Auth: any authenticated caller may attempt (missing identity → 401);
+ * the kernel enforces owner / home-team-admin / system-admin (→ 403).
+ *
+ * Partial failure is reported, not hidden: if the kernel write lands but the
+ * KS mirror fails, the response is 502 KS_UNREACHABLE with kernel state live —
+ * rerun (or /groupy/mirror-sync) heals the mirror. Mirror-before-kernel would
+ * leave the symmetric window (KS rows without kernel ACL), so kernel-first stands.
  * POST-only by Panel convention (DESIGN §7 lists GETs; Panel uses POST).
  */
 import type { Hono } from 'hono';

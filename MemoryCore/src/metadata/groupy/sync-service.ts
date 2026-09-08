@@ -146,10 +146,14 @@ export async function runGroupySync(opts: GroupySyncOptions): Promise<GroupySync
   for (const [nodeId, snapshot] of graph) {
     const displayName = snapshot.display_name || snapshot.name || nodeId;
     const description = `${MANAGED_BY_GROUPY_MARKER}: node ${nodeId}`;
-    await store.upsertGroupyNode({
-      node_id: nodeId, name: snapshot.name || nodeId,
-      display_name: displayName, kind: "org", archived: false,
-    });
+    const prev = prevById.get(nodeId);
+    // Conditional write: unchanged nodes are skipped so re-runs touch nothing.
+    if (!prev || prev.name !== (snapshot.name || nodeId) || prev.display_name !== displayName || prev.archived) {
+      await store.upsertGroupyNode({
+        node_id: nodeId, name: snapshot.name || nodeId,
+        display_name: displayName, kind: "org", archived: false,
+      });
+    }
     const team = await opts.service.getTeamById(nodeId);
     if (!team) {
       await opts.service.createTeam({
@@ -240,10 +244,21 @@ export async function runGroupySync(opts: GroupySyncOptions): Promise<GroupySync
       edges.push({ parent_id: snapshot.id, child_id: m.id, child_kind: m.kind });
     }
   }
-  await store.replaceGroupyEdges(edges);
+  // Conditional write: keep the run truly idempotent (no row churn on re-run).
+  const edgeKey = (e: GroupyEdgeEntity): string => `${e.parent_id} ${e.child_id} ${e.child_kind}`;
+  const wantEdges = [...edges].sort((a, b) => (edgeKey(a) < edgeKey(b) ? -1 : 1));
+  const haveEdges = (await store.listGroupyEdges())
+    .sort((a, b) => (edgeKey(a) < edgeKey(b) ? -1 : 1));
+  if (JSON.stringify(wantEdges) !== JSON.stringify(haveEdges)) {
+    await store.replaceGroupyEdges(edges);
+  }
 
-  // ── run row ──
-  const snapshotJson = JSON.stringify({ version: 1, nodes: [...graph.values()] });
+  // ── run row (revoked list persisted for restart-proof summaries) ──
+  const snapshotJson = JSON.stringify({
+    version: 1,
+    nodes: [...graph.values()],
+    summary: { revoked_grants: revokedGrants },
+  });
   const run = await store.recordGroupyRun({
     started_at: startedAt, finished_at: nowIso(), status: "ok",
     nodes_seen: graph.size, members_seen: personIds.length, snapshot_json: snapshotJson,

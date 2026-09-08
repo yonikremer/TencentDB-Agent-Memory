@@ -196,6 +196,32 @@ describe("applyAssetShare", () => {
     expect(denied.allowed).toBe(false);
   });
 
+  it("team_role rows survive; removed members and archived children stay out", async () => {
+    // manual team_role grant + a removed member + archived child setup
+    await ctx.service.grantAcl({
+      asset_id: "ast-skill", subject_type: "team_role", subject_id: "member",
+      permission: "read", granted_by: ctx.adminCtx.userId!,
+    });
+    const alice = (await ctx.store.listUsers({ limit: 5, offset: 0 }, { username: "124alice" })).items[0];
+    await ctx.store.addTeamMember({ team_id: "123teamA", user_id: alice.user_id, role: "member", status: "removed" });
+    // archive teamB, then grant the parent: teamB must not expand
+    const v2 = matrix();
+    v2.delete("123teamB");
+    const px = v2.get("product_x")!;
+    v2.set("product_x", { ...px, members: px.members.filter((m) => m.id !== "123teamB") });
+    ctx.client.setNodes(v2);
+    await runGroupySync({ client: ctx.client, roots: ROOTS, service: ctx.service, retryDelaysMs: [] });
+    const res = await applyAssetShare(ctx.service, {
+      asset_id: "ast-skill", node_id: "product_x", action: "grant", ctx: ctx.adminCtx,
+    });
+    // teamB archived → excluded from subtree (branch was never under product_x)
+    expect(res.teams.sort()).toEqual(["123teamA", "product_x"].sort());
+    const subjects = await aclSubjects(ctx.store, "ast-skill");
+    expect(subjects).toContain("team_role:member:read");
+    const aliceRows = subjects.filter((s) => s.includes(alice.user_id));
+    expect(aliceRows.length).toBeGreaterThan(0); // alice active via teamA still
+  });
+
   it("non-owner non-admin caller is rejected", async () => {
     const stranger = await ctx.service.createNormalUser({ username: "stranger" });
     const strangerCtx: V3AuthContext = { token: "", userId: stranger.user_id, isAdmin: false, isSystemAdmin: false };

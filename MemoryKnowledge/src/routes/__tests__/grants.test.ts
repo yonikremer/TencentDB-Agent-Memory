@@ -186,6 +186,18 @@ describe("wiki grants", () => {
     expect(gl.json.data.grants).toEqual([{ team_id: TEAM_B, grant_type: "viewer" }]);
   });
 
+  it("clear with empty team list clears nothing", async () => {
+    const c = await post("/v3/wiki/create", { team_id: TEAM_A, name: "empty-clear-wiki" });
+    const id = c.json.data.wiki_id;
+    await post("/v3/grants/set", {
+      kind: "wiki", knowledge_id: id, grants: [{ team_id: TEAM_B }],
+    });
+    const clear = await post("/v3/grants/clear", { kind: "wiki", knowledge_id: id, team_ids: [] });
+    expect(clear.json.data.cleared).toBe(0);
+    const listed = await post("/v3/wiki/list", { team_id: TEAM_B });
+    expect(listed.json.data.items.map((w: any) => w.wiki_id)).toContain(id);
+  });
+
   it("validation: bad kind / grant_type / unknown id", async () => {
     expect((await post("/v3/grants/set", {
       kind: "nope", knowledge_id: "wiki-x", grants: [{ team_id: TEAM_B }],

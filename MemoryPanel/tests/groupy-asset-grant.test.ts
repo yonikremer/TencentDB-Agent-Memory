@@ -38,6 +38,7 @@ let yonikId = "";
 let fixturePath = "";
 const ksCalls: Array<{ method: string; kind: string; id: string; arg: unknown }> = [];
 const ksState = new Map<string, Array<{ team_id: string; grant_type: string }>>();
+const ksFailIds = new Set<string>();
 const WIKI = "wiki-grant00";
 const SKILL = "skill-grant00";
 
@@ -171,6 +172,7 @@ beforeAll(async () => {
       return { kind, knowledge_id: id, cleared: n };
     },
     async grantsList(kind: string, id: string) {
+      if (ksFailIds.has(id)) throw new Error("KS down");
       return { kind, knowledge_id: id, grants: ksState.get(`${kind}:${id}`) ?? [] };
     },
   } as unknown as KnowledgeClientPort;
@@ -274,6 +276,31 @@ describe("panel asset grant (instant share)", () => {
     const rows = ksState.get(`wiki:${WIKI}`) ?? [];
     expect(rows.map((g) => g.team_id).sort()).toEqual(["120data_branch", "123teamA"].sort());
     expect(new Set(rows.map((g) => g.grant_type))).toEqual(new Set(["editor"]));
+    await post("/api/v1/asset/grant", { asset_id: WIKI, node_id: "120data_branch", action: "revoke" });
+  });
+
+  it("mirror-sync skips failed assets and heals the rest", async () => {
+    await post("/api/v1/asset/grant", {
+      asset_id: WIKI, node_id: "120data_branch", action: "grant", grant_type: "editor",
+    });
+    const second = await svc.createAsset({
+      asset_id: "wiki-grant01", team_id: "123teamA", asset_type: "llm_wiki",
+      name: "second wiki", owner_user_id: yonikId, source_type: "test",
+    });
+    await post("/api/v1/asset/grant", {
+      asset_id: second.asset_id, node_id: "120data_branch", action: "grant",
+    });
+    ksState.set(`wiki:${second.asset_id}`, []);
+    ksFailIds.add(second.asset_id);
+    const r = await post("/api/v1/groupy/mirror-sync", {});
+    ksFailIds.delete(second.asset_id);
+    expect(r.json.code).toBe(0);
+    const entry = r.json.data.assets.find((a: any) => a.asset_id === second.asset_id);
+    expect(entry.skipped).toBe("KS unreachable");
+    // first asset still healed in the same run
+    const rows = ksState.get(`wiki:${WIKI}`) ?? [];
+    expect(rows.length).toBeGreaterThan(0);
+    await post("/api/v1/asset/grant", { asset_id: second.asset_id, node_id: "120data_branch", action: "revoke" });
     await post("/api/v1/asset/grant", { asset_id: WIKI, node_id: "120data_branch", action: "revoke" });
   });
 

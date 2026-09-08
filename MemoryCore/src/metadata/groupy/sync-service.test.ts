@@ -85,6 +85,18 @@ describe("runGroupySync", () => {
     expect((await store.getLatestGroupyRun())?.status).toBe("ok");
   });
 
+  it("re-run touches no rows (updated_at stable)", async () => {
+    const { store, service, client } = ctx;
+    await runGroupySync({ client, roots: ROOTS, service, retryDelaysMs: [] });
+    const nodeBefore = (await store.listGroupyNodes(true)).map((n) => `${n.node_id}=${n.updated_at}`).sort();
+    const teamBefore = (await store.getTeamById("123teamA"))!.updated_at;
+    await new Promise((r) => setTimeout(r, 5));
+    await runGroupySync({ client, roots: ROOTS, service, retryDelaysMs: [] });
+    const nodeAfter = (await store.listGroupyNodes(true)).map((n) => `${n.node_id}=${n.updated_at}`).sort();
+    expect(nodeAfter).toEqual(nodeBefore);
+    expect((await store.getTeamById("123teamA"))!.updated_at).toBe(teamBefore);
+  });
+
   it("re-run is idempotent (zero changes)", async () => {
     const { service, client } = ctx;
     await runGroupySync({ client, roots: ROOTS, service, retryDelaysMs: [] });

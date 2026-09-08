@@ -11,7 +11,7 @@ import { MetadataError, type MetadataService } from "../service/metadata-service
 import { GroupyClient } from "./groupy-client.js";
 import { MockGroupyClient } from "./mock-groupy-client.js";
 import { HttpGroupyClient } from "./http-groupy-client.js";
-import { runGroupySync, type GroupySyncSummary, type GroupyPostApplyResult, type GroupyPostApplyContext } from "./sync-service.js";
+import { runGroupySync, DEFAULT_GROUPY_RETRY_DELAYS_MS, type GroupySyncSummary, type GroupyPostApplyResult, type GroupyPostApplyContext } from "./sync-service.js";
 import type { GroupyConfig } from "./sync-config.js";
 import type { GroupyRunEntity, GroupyNodeEntity, GroupyEdgeEntity } from "../types.js";
 import type { SyncLogger } from "./sync-service.js";
@@ -94,7 +94,7 @@ export function defaultMakeClient(config: GroupyConfig): GroupyClient {
 
 export class GroupyScheduler {
   private timer?: ReturnType<typeof setInterval>;
-  private pending: Promise<void> | null = null;
+  private inFlight: Promise<GroupySyncSummary> | null = null;
   private lastFireKey = "";
   private running = false;
   private lastSummary: GroupySyncSummary | null = null;
@@ -126,14 +126,29 @@ export class GroupyScheduler {
 
   /** Resolves when any in-flight run settles (test hook). */
   async settled(): Promise<void> {
-    await this.pending;
+    await this.inFlight;
   }
 
-  /** Manual trigger — throws groupy_disabled unless enabled. */
-  async runNow(): Promise<GroupySyncSummary> {
+  /**
+   * Manual trigger — throws groupy_disabled unless enabled.
+   * Concurrent callers coalesce onto the in-flight run (no fetch stampede
+   * from parallel POST /groupy/sync). Manual runs fail fast (no 30-min
+   * retry sleeps inside the request); the nightly tick retries in background.
+   */
+  async runNow(options: { retryDelaysMs?: number[] } = {}): Promise<GroupySyncSummary> {
     if (!this.enabled) {
       throw new MetadataError("groupy_disabled", "groupy sync is not enabled (GROUPY_ENABLED/GROUPY_ROOTS)");
     }
+    if (this.inFlight) return this.inFlight;
+    let p: Promise<GroupySyncSummary>;
+    p = this.executeRun(options.retryDelaysMs ?? []).finally(() => {
+      if (this.inFlight === p) this.inFlight = null;
+    });
+    this.inFlight = p;
+    return p;
+  }
+
+  private async executeRun(retryDelaysMs: number[]): Promise<GroupySyncSummary> {
     const summary = await runGroupySync({
       client: this.opts.makeClient
         ? this.opts.makeClient(this.opts.config)
@@ -141,6 +156,7 @@ export class GroupyScheduler {
       roots: this.opts.config.roots,
       service: this.opts.service,
       logger: this.opts.logger,
+      retryDelaysMs,
       onMembershipApplied: this.opts.onMembershipApplied,
     });
     this.lastSummary = summary;
@@ -175,13 +191,25 @@ export class GroupyScheduler {
     const archived = (await store.listGroupyNodes(true))
       .filter((n) => n.archived)
       .map((n) => n.node_id);
-    const revoked =
-      latest && this.lastSummary?.run_id === latest.id ? this.lastSummary.revoked_grants : [];
+    // Prefer the persisted snapshot (restart-proof) over in-memory state.
+    let revoked: string[] = [];
+    try {
+      const snap = JSON.parse(latest?.snapshot_json ?? "{}") as {
+        summary?: { revoked_grants?: unknown };
+      };
+      const list = snap?.summary?.revoked_grants;
+      if (Array.isArray(list)) revoked = list.filter((x): x is string => typeof x === "string");
+    } catch { /* corrupt snapshot reads as empty */ }
+    if (latest && this.lastSummary?.run_id === latest.id && this.lastSummary.revoked_grants.length > 0) {
+      revoked = this.lastSummary.revoked_grants;
+    }
     return { latest_run: latest, archived_nodes: archived, revoked_grants: revoked };
   }
 
   private trigger(): void {
-    this.pending = this.runNow().then(
+    // Nightly/background path keeps the 30-min retry policy (harmless here,
+    // unlike inside a request handler).
+    this.runNow({ retryDelaysMs: DEFAULT_GROUPY_RETRY_DELAYS_MS }).then(
       () => undefined,
       (err) => this.opts.logger?.error?.(`[groupy-sync] background run failed: ${(err as Error).message}`),
     );

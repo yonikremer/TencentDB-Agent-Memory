@@ -2023,7 +2023,7 @@ export class MetadataService {
    * asset home-team admin, or system admin. Delegates to groupy/grant-service.
    */
   async applyAssetShareForCaller(
-    input: { asset_id: string; node_id: string; action: "grant" | "revoke" },
+    input: { asset_id: string; node_id: string; action: "grant" | "revoke"; grant_type?: string },
     ctx: V3AuthContext,
   ): Promise<import("../groupy/grant-service.js").AssetShareResult> {
     return applyGroupyAssetShare(this, { ...input, ctx });

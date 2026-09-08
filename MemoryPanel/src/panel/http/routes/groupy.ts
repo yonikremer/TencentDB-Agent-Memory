@@ -119,7 +119,13 @@ export function registerGroupyRoutes(api: Hono, deps: PanelDeps): void {
       });
       const desired = new Map<string, string>();
       for (const n of live) {
+        // Kernel-stored types are validated: an invalid value skips the node
+        // instead of aborting the whole heal (KS would 400 mid-loop).
         const gt = share.grant_types?.[n] ?? 'viewer';
+        if (gt !== 'viewer' && gt !== 'editor' && gt !== 'owner') {
+          report.push({ asset_id: share.asset_id, set: 0, cleared: 0, skipped: `bad grant_type for ${n}` });
+          continue;
+        }
         for (const t of subtreeOf(n)) desired.set(t, gt);
       }
       let assetEnv;
@@ -142,7 +148,8 @@ export function registerGroupyRoutes(api: Hono, deps: PanelDeps): void {
       try {
         current = await kc.grantsList(kind, share.asset_id);
       } catch {
-        return respondControlError(c, 502, 'KS_UNREACHABLE');
+        report.push({ asset_id: share.asset_id, set: 0, cleared: 0, skipped: 'KS unreachable' });
+        continue;
       }
       const have = new Map((current.grants ?? []).map((g) => [g.team_id, g.grant_type]));
       const missing = [...desired.entries()].filter(([t, gt]) => have.get(t) !== gt);
@@ -159,7 +166,8 @@ export function registerGroupyRoutes(api: Hono, deps: PanelDeps): void {
           cleared = (await kc.grantsClear(kind, share.asset_id, extra)).cleared;
         }
       } catch {
-        return respondControlError(c, 502, 'KS_UNREACHABLE');
+        report.push({ asset_id: share.asset_id, set, cleared, skipped: 'KS write failed' });
+        continue;
       }
       report.push({ asset_id: share.asset_id, set, cleared });
     }

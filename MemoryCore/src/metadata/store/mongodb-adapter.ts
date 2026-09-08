@@ -1346,10 +1346,15 @@ export class MongoMetadataStore implements IMetadataStore {
   }
 
   async replaceGroupyEdges(edges: GroupyEdgeEntity[]): Promise<void> {
-    await this.col("meta_groupy_edges").deleteMany({});
-    if (edges.length > 0) {
-      await this.col("meta_groupy_edges").insertMany(edges as unknown as Document[]);
-    }
+    // Atomic like the sqlite BEGIN/COMMIT path: a crash must not leave an
+    // empty edge table behind. Falls back to plain writes without replica-set.
+    await this.withTx(async (session) => {
+      const opts = session ? { session } : {};
+      await this.col("meta_groupy_edges").deleteMany({}, opts);
+      if (edges.length > 0) {
+        await this.col("meta_groupy_edges").insertMany(edges as unknown as Document[], opts);
+      }
+    });
   }
 
   async listGroupyEdges(): Promise<GroupyEdgeEntity[]> {

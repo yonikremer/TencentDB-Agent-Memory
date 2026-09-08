@@ -377,7 +377,7 @@ export const internalListUsersByInstanceSchema = z.object({
   user_ids: optionalUserIdsFilter,
 }).merge(paginationInputSchema);
 
-/** Route → schema mapping (55 public APIs). */
+/** Route → schema mapping (one entry per public API). */
 // ── ConfigParam（v3.2）──
 export const instanceQuotaGetSchema = z.object({});
 

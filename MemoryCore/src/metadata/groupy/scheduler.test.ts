@@ -55,6 +55,33 @@ async function setup(cfg: GroupyConfig, client: StubClient): Promise<GroupySched
 }
 
 describe("GroupyScheduler", () => {
+  it("concurrent runNow coalesces onto one run", async () => {
+    const client = new StubClient();
+    const sched = await setup(enabledCfg(), client);
+    const [a, b] = await Promise.all([sched.runNow(), sched.runNow()]);
+    expect(a.run_id).toBe(b.run_id);
+    expect(client.runs).toBe(1);
+    sched.stop();
+  });
+
+  it("summary survives restart via persisted snapshot", async () => {
+    const store = new SqliteMetadataStore(":memory:");
+    store.init();
+    const service = new MetadataService(store);
+    const client = new StubClient();
+    const mk = () => new GroupyScheduler({
+      service,
+      config: enabledCfg(),
+      makeClient: () => client,
+      onMembershipApplied: async () => ({ revokedGrants: ["gone-node"] }),
+    });
+    await mk().runNow();
+    const fresh = mk();
+    const summary = await fresh.getSummary();
+    expect(summary.revoked_grants).toEqual(["gone-node"]);
+    fresh.stop();
+  });
+
   it("disabled scheduler neither boots nor runs", async () => {
     const client = new StubClient();
     const sched = await setup(enabledCfg({ enabled: false }), client);

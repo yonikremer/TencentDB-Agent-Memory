@@ -296,6 +296,8 @@ export class SqliteKnowledgeStore implements IKnowledgeStore {
 
   clearCodeGraphGrants(serviceId: string, codeGraphId: string, teamIds?: string[]): number {
     if (!this.getCodeGraphById(serviceId, codeGraphId)) return 0;
+    // Empty team list clears nothing (drizzle inArray([]) would misfire).
+    if (teamIds && teamIds.length === 0) return 0;
     const conds = [eq(knowledgeCodeGraphGrant.codeGraphId, codeGraphId)];
     if (teamIds) conds.push(inArray(knowledgeCodeGraphGrant.teamId, teamIds));
     return this.db.delete(knowledgeCodeGraphGrant).where(and(...conds)).run().changes;
@@ -562,6 +564,9 @@ export class SqliteKnowledgeStore implements IKnowledgeStore {
   }
 
   clearWikiGrants(serviceId: string, wikiId: string, teamIds?: string[]): number {
+    if (!this.getWikiById(serviceId, wikiId)) return 0;
+    // Empty team list clears nothing (drizzle inArray([]) would misfire).
+    if (teamIds && teamIds.length === 0) return 0;
     if (!this.getWikiById(serviceId, wikiId)) return 0;
     const conds = [eq(knowledgeWikiGrant.wikiId, wikiId)];
     if (teamIds) conds.push(inArray(knowledgeWikiGrant.teamId, teamIds));

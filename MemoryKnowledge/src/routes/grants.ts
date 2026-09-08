@@ -13,7 +13,7 @@
 import { Hono } from "hono";
 
 import type { WikiService, CodeGraphService } from "../store/index.js";
-import { wrapOk, wrapError, isValidIdSegment } from "../api-helpers.js";
+import { wrapOk, wrapError, isValidIdSegment, extractRequesterTeam } from "../api-helpers.js";
 import type { GrantType, SetGrantInput } from "../store/types.js";
 
 export interface GrantsRouteDeps {
@@ -25,14 +25,6 @@ type GrantKind = "wiki" | "code-graph";
 
 const GRANT_TYPES: GrantType[] = ["viewer", "editor", "owner"];
 const MAX_GRANTS = 100;
-
-/** Optional requester team for grant enforcement on id-only mutation routes. */
-export function extractRequesterTeam(body: Record<string, unknown>): { team?: string; invalid: boolean } {
-  const t = body.team_id;
-  if (t === undefined) return { invalid: false };
-  if (!isValidIdSegment(t)) return { invalid: true };
-  return { team: t as string, invalid: false };
-}
 
 export function createGrantsRoutes(deps: GrantsRouteDeps): Hono {
   const app = new Hono();

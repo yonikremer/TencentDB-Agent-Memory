@@ -54,14 +54,23 @@ export interface AssetShareResult {
   agents: number;
 }
 
-/** Rebuild the snapshot graph from persisted nodes+edges (instant path input). */
+/**
+ * Rebuild the snapshot graph from persisted nodes+edges (instant path input).
+ * Archived nodes are excluded entirely: granting to a parent must not expand
+ * into archived children (ACL rows or mirror teams).
+ */
 export async function buildGraphFromStore(service: MetadataService): Promise<GroupyGraphSnapshot> {
   const store = service.rawStore;
   const graph: GroupyGraphSnapshot = new Map();
+  const live = new Set<string>();
   for (const n of await store.listGroupyNodes(true)) {
+    if (n.archived) continue;
+    live.add(n.node_id);
     graph.set(n.node_id, { id: n.node_id, name: n.name, display_name: n.display_name, members: [] });
   }
   for (const e of await store.listGroupyEdges()) {
+    if (!live.has(e.parent_id)) continue;
+    if (e.child_kind === "org" && !live.has(e.child_id)) continue;
     graph.get(e.parent_id)?.members.push({ id: e.child_id, kind: e.child_kind });
   }
   return graph;
@@ -123,7 +132,9 @@ export async function expandShareTargets(
     for (;;) {
       const page = await service.rawStore.listTeamMembers(homeTeamId, { limit, offset });
       for (const m of page.items) {
-        if (m.user_id !== syncOwnerId) userIds.add(m.user_id);
+        // Backend-agnostic: only active memberships expand (removed rows stay out).
+        if (m.status !== "active" || m.user_id === syncOwnerId) continue;
+        userIds.add(m.user_id);
       }
       if (offset + page.items.length >= page.total) break;
       offset += page.items.length;
@@ -184,6 +195,9 @@ async function rewriteAcl(
   const desired = desiredRows(targets);
   const existing = await allAssetAcl(service, assetId);
   for (const row of existing) {
+    // Only sync-owned subject kinds are rewritten; team_role (manual) and any
+    // other rows are preserved untouched.
+    if (row.subject_type !== "user" && row.subject_type !== "agent") continue;
     if (row.effect === "allow" && !desired.some((w) => sameRow(w, row))) {
       await service.rawStore.revokeAcl(row.id);
     }
@@ -228,20 +242,20 @@ export async function applyAssetShare(
   const caller = await assertCanShare(service, asset, req.ctx);
   const grantType = resolveGrantType(req.grant_type);
   const store = service.rawStore;
+  const archived = new Set(
+    (await store.listGroupyNodes(true)).filter((n) => n.archived).map((n) => n.node_id),
+  );
+  if (req.action === "grant" && archived.has(req.node_id)) {
+    throw new MetadataError("groupy_node_archived", `groupy node archived: ${req.node_id}`);
+  }
   const graph = await buildGraphFromStore(service);
   if (!graph.has(req.node_id)) {
     throw new MetadataError("groupy_node_not_found", `groupy node not found: ${req.node_id}`);
   }
-  const archived = new Set(
-    (await store.listGroupyNodes(true)).filter((n) => n.archived).map((n) => n.node_id),
-  );
   const share = await store.getGroupyShare(req.asset_id);
   const storedTypes: Record<string, string> = { ...(share?.grant_types ?? {}) };
   let nodes: string[];
   if (req.action === "grant") {
-    if (archived.has(req.node_id)) {
-      throw new MetadataError("groupy_node_archived", `groupy node archived: ${req.node_id}`);
-    }
     nodes = [...new Set([...(share?.node_ids ?? []), req.node_id])]
       .filter((n) => graph.has(n) && !archived.has(n));
     storedTypes[req.node_id] = grantType;
@@ -300,7 +314,6 @@ export interface RecomputeInput {
   service: MetadataService;
   graph: GroupyGraphSnapshot;
   closure: Map<string, Set<string>>;
-  archivedNodes: string[];
 }
 
 async function resolveSyncOwnerId(service: MetadataService, fallback: string): Promise<string> {

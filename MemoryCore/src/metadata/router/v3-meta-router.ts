@@ -1,5 +1,5 @@
 /**
- * v3 metadata routing (/v3/meta/*, 59 APIs).
+ * v3 metadata routing (/v3/meta/*).
  *
  * Corresponds to design doc §7 + implementation plan M3.3. Mirrors v2-router dispatch pattern:
  *   - POST only, prefix /v3/meta
@@ -84,6 +84,15 @@ const OK = { ok: true } as const;
 function requireGroupy(svc: MetadataService): import("../groupy/scheduler.js").GroupyScheduler {
   const sched = svc.groupyScheduler;
   if (!sched || !sched.enabled) {
+    throw new MetadataError("groupy_disabled", "groupy sync is not enabled (GROUPY_ENABLED/GROUPY_ROOTS)");
+  }
+  return sched;
+}
+
+/** Scheduler wiring check only (status/tree/summary stay readable when disabled). */
+function requireGroupyWired(svc: MetadataService): import("../groupy/scheduler.js").GroupyScheduler {
+  const sched = svc.groupyScheduler;
+  if (!sched) {
     throw new MetadataError("groupy_disabled", "groupy sync is not enabled (GROUPY_ENABLED/GROUPY_ROOTS)");
   }
   return sched;
@@ -327,21 +336,15 @@ const routeTable: Record<string, Handler> = {
   }),
   [`${V3_PREFIX}/groupy/status`]: bind(S.groupyStatusSchema, async (_d, c, s) => {
     s.assertCanManageUsers(c);
-    const sched = s.groupyScheduler;
-    if (!sched) throw new MetadataError("groupy_disabled", "groupy sync is not enabled (GROUPY_ENABLED/GROUPY_ROOTS)");
-    return sched.getStatus();
+    return requireGroupyWired(s).getStatus();
   }),
   [`${V3_PREFIX}/groupy/tree`]: bind(S.groupyTreeSchema, async (_d, c, s) => {
     s.assertCanManageUsers(c);
-    const sched = s.groupyScheduler;
-    if (!sched) throw new MetadataError("groupy_disabled", "groupy sync is not enabled (GROUPY_ENABLED/GROUPY_ROOTS)");
-    return sched.getTree();
+    return requireGroupyWired(s).getTree();
   }),
   [`${V3_PREFIX}/groupy/summary`]: bind(S.groupySummarySchema, async (_d, c, s) => {
     s.assertCanManageUsers(c);
-    const sched = s.groupyScheduler;
-    if (!sched) throw new MetadataError("groupy_disabled", "groupy sync is not enabled (GROUPY_ENABLED/GROUPY_ROOTS)");
-    return sched.getSummary();
+    return requireGroupyWired(s).getSummary();
   }),
   [`${V3_PREFIX}/groupy/asset-grant`]: bind(S.assetGrantSchema, (d, c, s) =>
     s.applyAssetShareForCaller(d, c),
@@ -389,7 +392,7 @@ function mapErrorCode(code: string): number {
     case "user_key_not_found":
       return 404;
     case "groupy_node_archived":
-      return 404;
+      return 410;
     case "groupy_disabled":
       return 503;
     default:

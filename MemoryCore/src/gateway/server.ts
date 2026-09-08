@@ -1651,7 +1651,7 @@ export class TdaiGateway {
         config,
         logger: this.logger,
         onMembershipApplied: (c) => recomputeGroupyShares({
-          service: c.service, graph: c.graph, closure: c.closure, archivedNodes: c.archivedNodes,
+          service: c.service, graph: c.graph, closure: c.closure,
         }),
       });
       svc.setGroupyScheduler(scheduler);
