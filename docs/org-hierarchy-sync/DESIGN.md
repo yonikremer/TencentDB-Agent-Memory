@@ -272,6 +272,14 @@ List/tools queries transparently union owner + grants (no new request fields).
 - Groupy ids are validated (`[A-Za-z0-9_-]{1,200}`, fail-closed) before becoming team_ids;
   walk (5000 nodes), share subtrees (1000 teams) and node members (5000) are capped.
 - Team-create squat guard covers archived node ids too.
+- Editor/owner grant_types require the asset owner or system admin (home-team
+  admins share as viewer). Revoke restores pre-share visibility only when the
+  share still owns it; revoke of an archived node is always allowed (cleanup).
+- KS grants routes are control-plane only (Panel/admin service callers) — same
+  trust as all other KS mutation routes; no per-user proof exists at KS by design.
+- Read/query plane (get/search/graph/page/read, codegraph query, team-less
+  tools/list+call) stays legacy-open by design; mutations on shared resources
+  require team_id. Locking reads is future work, not this feature.
 - Mock adapter only active when `GROUPY_MOCK_FILE` set (explicit opt-in; never in prod default).
 
 ## 10. Testing strategy

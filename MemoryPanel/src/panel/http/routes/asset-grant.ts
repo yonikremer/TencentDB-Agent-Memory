@@ -57,6 +57,9 @@ export function registerAssetGrantRoutes(api: Hono, deps: PanelDeps): void {
     if (grantEnv.code !== 0) return respondEnvelope(c, grantEnv);
     const grant = grantEnv.data as { visibility: string; nodes: string[]; teams: string[] } | null;
     const teams = grant?.teams ?? [];
+    // Full revoke (no nodes left, e.g. archived node dropped from the graph)
+    // clears the whole mirror: per-team clear with an empty set would no-op
+    // and leave stale KS rows behind.
 
     // KS mirror (wiki/code-graph only): kernel asset types map 1:1, and the
     // kernel asset_id doubles as the KS knowledge_id (see allocate flow).
@@ -68,7 +71,9 @@ export function registerAssetGrantRoutes(api: Hono, deps: PanelDeps): void {
         mirror =
           action === 'grant'
             ? await kc.grantsSet(kind, assetId, teams.map((t) => ({ team_id: t, grant_type: grantType })))
-            : await kc.grantsClear(kind, assetId, teams);
+            : (grant?.nodes.length
+              ? await kc.grantsClear(kind, assetId, teams)
+              : await kc.grantsClear(kind, assetId));
       } catch {
         return respondControlError(c, 502, 'KS_UNREACHABLE');
       }

@@ -1524,19 +1524,20 @@ export class MetadataService {
     // permission-checker.matchRestrictedWhitelist. An explicit user/agent
     // allow-row grants access WITHOUT home-team membership, so a share to a
     // matrix node reaches users outside the asset's home team. Agent rows only
-    // match when the caller owns the agent (no impersonation by agent_id).
+    // match when the caller owns the agent (verified once here and used by
+    // BOTH the whitelist and the fallthrough path — no impersonation).
     // (Team admins keep the role-default bypass below; team_role subjects
     // still require home membership via the fallthrough path.)
+    let verifiedAgentId: string | undefined;
+    if (params.agent_id) {
+      const agent = await this.store.getAgentById(params.agent_id);
+      if (agent && agent.owner_user_id === userId) verifiedAgentId = agent.agent_id;
+    }
     if (asset.visibility === "restricted") {
       const whitelist = await this.allAclRecords(params.asset_id);
-      let agentId: string | undefined;
-      if (params.agent_id) {
-        const agent = await this.store.getAgentById(params.agent_id);
-        if (agent && agent.owner_user_id === userId) agentId = agent.agent_id;
-      }
       const hit = matchRestrictedWhitelist({
         userId,
-        agentId,
+        agentId: verifiedAgentId,
         action: params.action,
         aclRecords: whitelist,
       });
@@ -1553,7 +1554,7 @@ export class MetadataService {
       membership,
       action,
       aclRecords: [],
-      agentId: params.agent_id,
+      agentId: verifiedAgentId,
       logger: this.logger,
     });
     if (fast.allowed) return fast;
@@ -1569,7 +1570,7 @@ export class MetadataService {
       membership,
       action,
       aclRecords,
-      agentId: params.agent_id,
+      agentId: verifiedAgentId,
       logger: this.logger,
     });
   }

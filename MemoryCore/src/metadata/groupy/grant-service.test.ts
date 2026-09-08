@@ -184,6 +184,25 @@ describe("applyAssetShare", () => {
     })).rejects.toThrowError(expect.objectContaining({ code: "invalid_grant_type" }));
   });
 
+  it("home-team member cannot use another member's agent (slow path verified)", async () => {
+    await applyAssetShare(ctx.service, {
+      asset_id: "ast-skill", node_id: "120data_branch", action: "grant", ctx: ctx.adminCtx,
+    });
+    const bob = await ctx.service.createNormalUser({ username: "bob-member" });
+    await ctx.store.addTeamMember({ team_id: "123teamA", user_id: bob.user_id, role: "member", status: "active" });
+    const denied = await ctx.service.checkAssetPermission({
+      user_id: bob.user_id, asset_id: "ast-skill",
+      action: "use", agent_id: ctx.ids.aliceAgent,
+    });
+    expect(denied.allowed).toBe(false);
+    // owner of the agent keeps access
+    const allowed = await ctx.service.checkAssetPermission({
+      user_id: ctx.ids["124alice"], asset_id: "ast-skill",
+      action: "use", agent_id: ctx.ids.aliceAgent,
+    });
+    expect(allowed.allowed).toBe(true);
+  });
+
   it("agent rows do not impersonate: stranger with another agent_id is denied", async () => {
     await applyAssetShare(ctx.service, {
       asset_id: "ast-skill", node_id: "120data_branch", action: "grant", ctx: ctx.adminCtx,
@@ -222,6 +241,41 @@ describe("applyAssetShare", () => {
     expect(aliceRows.length).toBeGreaterThan(0); // alice active via teamA still
   });
 
+  it("home-team admin capped at viewer; owner may escalate", async () => {
+    const admin = await ctx.service.createNormalUser({ username: "team-admin" });
+    await ctx.store.addTeamMember({ team_id: "123teamA", user_id: admin.user_id, role: "admin", status: "active" });
+    const adminCtx = { token: "", userId: admin.user_id, isAdmin: false, isSystemAdmin: false };
+    const ok = await applyAssetShare(ctx.service, {
+      asset_id: "ast-skill", node_id: "123teamB", action: "grant", ctx: adminCtx,
+    });
+    expect(ok.grant_type).toBe("viewer");
+    await expect(applyAssetShare(ctx.service, {
+      asset_id: "ast-skill", node_id: "123teamB", action: "grant",
+      grant_type: "owner", ctx: adminCtx,
+    })).rejects.toThrowError(expect.objectContaining({ code: "permission_denied" }));
+    const ownerCtx = { token: "", userId: ctx.ids["123yonik"], isAdmin: false, isSystemAdmin: false };
+    const esc = await applyAssetShare(ctx.service, {
+      asset_id: "ast-skill", node_id: "123teamB", action: "grant",
+      grant_type: "editor", ctx: ownerCtx,
+    });
+    expect(esc.grant_type).toBe("editor");
+    await applyAssetShare(ctx.service, {
+      asset_id: "ast-skill", node_id: "123teamB", action: "revoke", ctx: ownerCtx,
+    });
+  });
+
+  it("revoke restores prev visibility only when still restricted", async () => {
+    await applyAssetShare(ctx.service, {
+      asset_id: "ast-skill", node_id: "123teamB", action: "grant", ctx: ctx.adminCtx,
+    });
+    // admin flips visibility mid-share; revoke must not clobber it
+    await ctx.service.updateAsset("ast-skill", { visibility: "private" });
+    const res = await applyAssetShare(ctx.service, {
+      asset_id: "ast-skill", node_id: "123teamB", action: "revoke", ctx: ctx.adminCtx,
+    });
+    expect(res.visibility).toBe("private");
+  });
+
   it("non-owner non-admin caller is rejected", async () => {
     const stranger = await ctx.service.createNormalUser({ username: "stranger" });
     const strangerCtx: V3AuthContext = { token: "", userId: stranger.user_id, isAdmin: false, isSystemAdmin: false };
@@ -252,6 +306,12 @@ describe("applyAssetShare", () => {
     await expect(applyAssetShare(ctx.service, {
       asset_id: "ast-skill", node_id: "123teamB", action: "grant", ctx: ctx.adminCtx,
     })).rejects.toThrowError(expect.objectContaining({ code: "groupy_node_archived" }));
+    // revoke of an archived node is cleanup: allowed, reports empty teams
+    const cleanup = await applyAssetShare(ctx.service, {
+      asset_id: "ast-skill", node_id: "123teamB", action: "revoke", ctx: ctx.adminCtx,
+    });
+    expect(cleanup.nodes).toEqual([]);
+    expect(cleanup.teams).toEqual([]);
   });
 
   it("nightly recompute auto-revokes archived-node shares and heals drift", async () => {

@@ -223,15 +223,29 @@ describe("panel asset grant (instant share)", () => {
   });
 
   it("revoke restores visibility and clears the mirror", async () => {
+    await post("/api/v1/asset/grant", {
+      asset_id: WIKI, node_id: "123teamB", action: "grant",
+    });
     ksCalls.length = 0;
+    // partial revoke (branch of two nodes) → per-team clear
     const r = await post("/api/v1/asset/grant", {
       asset_id: WIKI, node_id: "120data_branch", action: "revoke",
     });
     expect(r.json.code).toBe(0);
-    expect(r.json.data.asset.visibility).toBe("team");
+    expect(r.json.data.asset.visibility).toBe("restricted");
     expect(ksCalls).toHaveLength(1);
     expect(ksCalls[0].method).toBe("clear");
     expect((ksCalls[0].arg as string[]).sort()).toEqual(["120data_branch", "123teamA"].sort());
+    // final revoke (no nodes left) → full clear
+    ksCalls.length = 0;
+    const r2 = await post("/api/v1/asset/grant", {
+      asset_id: WIKI, node_id: "123teamB", action: "revoke",
+    });
+    expect(r2.json.code).toBe(0);
+    expect(r2.json.data.asset.visibility).toBe("team");
+    expect(ksCalls).toHaveLength(1);
+    expect(ksCalls[0].method).toBe("clear");
+    expect(ksCalls[0].arg).toBeUndefined();
   });
 
   it("skill grant writes kernel ACL only (no KS call)", async () => {
@@ -310,6 +324,22 @@ describe("panel asset grant (instant share)", () => {
       asset_id: WIKI, node_id: "120data_branch", action: "grant",
     }, bob.default_user_key);
     expect(r.status).toBe(403);
+  });
+
+  it("revoking an archived node full-clears the mirror", async () => {
+    await post("/api/v1/asset/grant", { asset_id: WIKI, node_id: "123teamB", action: "grant" });
+    writeFileSync(fixturePath, JSON.stringify(matrix(true)));
+    await post("/api/v1/groupy/sync", {});
+    ksCalls.length = 0;
+    const r = await post("/api/v1/asset/grant", { asset_id: WIKI, node_id: "123teamB", action: "revoke" });
+    expect(r.json.code).toBe(0);
+    // node gone from the graph → teams empty → full clear, not per-team no-op
+    const clear = ksCalls.find((k) => k.method === "clear");
+    expect(clear).toBeTruthy();
+    expect(clear!.arg).toBeUndefined();
+    // restore fixture for later tests
+    writeFileSync(fixturePath, JSON.stringify(matrix(false)));
+    await post("/api/v1/groupy/sync", {});
   });
 
   it("orphans surface archived-node shares", async () => {

@@ -84,6 +84,15 @@ afterAll(async () => {
   await rmRetry(tmp);
 });
 
+async function postAs(svc: string, path: string, body: unknown) {
+  const res = await fetch(base + path, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-tdai-service-id": svc },
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, json: (await res.json()) as { code: number; message: string; data: any } };
+}
+
 describe("wiki grants", () => {
   let wikiId = "";
 
@@ -196,6 +205,20 @@ describe("wiki grants", () => {
     expect(clear.json.data.cleared).toBe(0);
     const listed = await post("/v3/wiki/list", { team_id: TEAM_B });
     expect(listed.json.data.items.map((w: any) => w.wiki_id)).toContain(id);
+  });
+
+  it("foreign service cannot touch grants (tenant guard)", async () => {
+    const c = await post("/v3/wiki/create", { team_id: TEAM_A, name: "tenant-wiki" });
+    const id = c.json.data.wiki_id;
+    const evil = await postAs("svc-other", "/v3/grants/set", {
+      kind: "wiki", knowledge_id: id, grants: [{ team_id: TEAM_B, grant_type: "owner" }],
+    });
+    expect(evil.json.code).toBe(404);
+    expect((await postAs("svc-other", "/v3/grants/clear", { kind: "wiki", knowledge_id: id })).json.code).toBe(404);
+    // owner service unaffected: no rows leaked in
+    const mine = await post("/v3/grants/list", { kind: "wiki", knowledge_id: id });
+    expect(mine.json.data.grants).toEqual([]);
+    await post("/v3/wiki/delete", { wiki_ids: [id], team_id: TEAM_A });
   });
 
   it("validation: bad kind / grant_type / unknown id", async () => {
