@@ -521,6 +521,109 @@ Symptom table:
 - New md batch → upload + ingest again (or `sync` for code-graphs).
 - Researcher leaves → revoke `user_key`, reassign owned agents
   (`owner_user_id`), keep or archive their private wiki.
+- Org changes (team moves, new hires) → automatic if §7 groupy sync is on;
+  otherwise move members manually (`team-member/add` + `remove`).
+- Org changes (team moves, new hires) → automatic if §7 groupy sync is on;
+  otherwise move members manually (`team-member/add` + `remove`).
+- Costs: watch KEY_A (ingest spikes per batch) vs KEY_B (chat tokens in
+  proxy logs) separately.
+- Logs: gateway / KS / panel / `docker logs tdai-proxy` (`write-l0` =
+  capture working, `agentSource=` shows client type).
+
+## 7. Org-hierarchy sync — groupy (optional, off by default)
+
+Your HR system (`groupy`: group name → members, person or sub-group) can
+own team structure instead of you doing step 2.3 by hand. When enabled,
+the gateway mirrors every groupy node into a team (same id) plus
+memberships nightly at 02:00 UTC, and you can share any asset
+(wiki/skill/code-graph/chat-memory) to any org node — access follows the
+matrix (a person sees a shared asset if any node above them is a target).
+
+> Manual teams coexist. Groupy never deletes users or content: removed
+> nodes archive their team, leavers flip to `removed` memberships.
+
+### 7.1 Enable (server `.env` / gateway env)
+
+```bash
+GROUPY_ENABLED=true
+GROUPY_BASE_URL=https://groupy.corp/api   # inside corporate net
+GROUPY_TOKEN=<corpnet token>               # header-only, never logged
+GROUPY_ROOTS=product_x,120data_branch      # walk starts here
+GROUPY_CRON=0\ 2\ *\ *\ *                      # nightly 02:00 UTC (default)
+# GROUPY_MOCK_FILE=/path/fixture.json     # dev/test outside corpnet instead of BASE_URL
+```
+
+Restart the gateway. On boot it syncs once, then on the cron tick.
+Manual run (admin `user_key` in `x-tdai-user-key`):
+
+```bash
+GW=http://127.0.0.1:8420; SID=default; KEY=<admin user_key>
+H1="x-tdai-service-id: $SID"; H2="x-tdai-user-key: $KEY"
+
+curl -s -X POST -H "Content-Type: application/json" -H "$H1" -H "$H2" \
+  $GW/v3/meta/groupy/sync -d '{}'
+# → data: run summary (teams_created/archived, members_added/removed,
+#   users_created, archived_nodes, revoked_grants)
+
+curl -s -X POST -H "Content-Type: application/json" -H "$H1" -H "$H2" \
+  $GW/v3/meta/groupy/status -d '{}'
+# → data: enabled, roots, cron, last_run, last_good_at, healthy
+```
+
+**✅ Verify:** `status` shows `enabled: true`, `last_run.status: "ok"`,
+and Panel → team list contains the mirrored node ids (e.g. `123teamA`).
+Team ids matching live groupy nodes are reserved — manual `team/create`
+with one returns 409 `groupy_managed_id`.
+
+### 7.2 Share an asset to an org node (instant, seconds)
+
+Caller must be the asset owner, a home-team admin, or system admin.
+`grant_type` (`viewer` default, `editor`, `owner`) controls what the
+*granted teams* can do with a wiki/code-graph; only the asset owner (or
+system admin) may set `editor`/`owner`. Skills/chat-memory share via
+kernel ACL only (no KS call).
+
+```bash
+PN=http://127.0.0.1:8123   # Panel API (:8125 serves the web UI)
+PH1="x-tdai-service-id: $SID"; PH2="x-tdai-user-key: $KEY"
+
+# wiki (kernel asset_id doubles as KS knowledge_id — see step 3)
+curl -s -X POST -H "Content-Type: application/json" -H "$PH1" -H "$PH2" \
+  $PN/api/v1/asset/grant \
+  -d '{"asset_id":"'"$WIKI"'","node_id":"120data_branch","action":"grant","grant_type":"editor"}'
+# → data.asset: visibility restricted + affected subtree teams[];
+#   data.ks_mirror: KS rows written per subtree team
+
+# revoke (restores pre-share visibility; full revoke clears the KS mirror)
+curl -s -X POST -H "Content-Type: application/json" -H "$PH1" -H "$PH2" \
+  $PN/api/v1/asset/grant \
+  -d '{"asset_id":"'"$WIKI"'","node_id":"120data_branch","action":"revoke"}'
+```
+
+Direct kernel equivalent (same auth rule, no KS mirror):
+`POST /v3/meta/groupy/asset-grant` with the same body.
+
+**✅ Verify:** as a researcher in a leaf team under the node,
+`POST /v3/wiki/list {"team_id":"<leaf>"}` shows the wiki; a team
+outside the subtree still sees `total: 0`. Granted-team mutations need
+`team_id`: viewer `ingest` → 403, `editor` → 202.
+
+### 7.3 Nightly heal + orphans
+
+Membership drift (people moved since grant day) heals on the next sync
+(kernel ACL) — run Panel mirror-sync on the same cadence for the KS rows:
+
+```bash
+curl -s -X POST -H "Content-Type: application/json" -H "$PH1" -H "$PH2" \
+  $PN/api/v1/groupy/mirror-sync -d '{}'
+# → data.assets: per-asset {set, cleared, skipped}
+
+curl -s -X POST -H "Content-Type: application/json" -H "$PH1" -H "$PH2" \
+  $PN/api/v1/groupy/orphans -d '{}'
+# → assets whose granted node was archived (auto-revoked on sync)
+```
+
+Full API + trust model: [DESIGN.md](./org-hierarchy-sync/DESIGN.md) §7–§9.
 - Costs: watch KEY_A (ingest spikes per batch) vs KEY_B (chat tokens in
   proxy logs) separately.
 - Logs: gateway / KS / panel / `docker logs tdai-proxy` (`write-l0` =
