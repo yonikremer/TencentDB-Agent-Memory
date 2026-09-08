@@ -111,7 +111,9 @@ export const conversationAddRequestSchema = z.object({
   session_id: z.string().min(1).default(DEFAULT_ISOLATION_ID),
   messages: z.array(_conversationItemSchema).min(1).max(100),
 });
-export type ConversationAddRequest = z.infer<typeof conversationAddRequestSchema>;
+export type ConversationAddRequest = z.infer<
+  typeof conversationAddRequestSchema
+>;
 
 // ============================
 // Count endpoints (sdk-v3.yaml)
@@ -126,7 +128,9 @@ export const conversationCountRequestSchema = z.object({
   time_start: z.string().optional(),
   time_end: z.string().optional(),
 });
-export type ConversationCountRequest = z.infer<typeof conversationCountRequestSchema>;
+export type ConversationCountRequest = z.infer<
+  typeof conversationCountRequestSchema
+>;
 
 export const atomicCountRequestSchema = z.object({
   type: z.string().optional(),
@@ -185,7 +189,8 @@ export interface ScenarioFile extends Omit<GeneratedScenarioFile, "version"> {
   agent_id?: string;
 }
 
-export interface ScenarioWriteData extends Omit<GeneratedScenarioWriteData, "version"> {
+export interface ScenarioWriteData
+  extends Omit<GeneratedScenarioWriteData, "version"> {
   version?: number;
   team_id?: string;
   agent_id?: string;
@@ -203,18 +208,24 @@ export interface CoreWriteData extends Omit<GeneratedCoreWriteData, "version"> {
   agent_id?: string;
 }
 
-
 // ============================
 // Override: safe path (prevent path traversal)
 // ============================
 
-const safePath = z.string().min(1).refine(
-  (p) => !p.includes("\0")
-    && !p.includes("\\")
-    && !p.startsWith("/")
-    && !p.split("/").some((part) => part === ".."),
-  { message: "Path must be relative (no '..', no leading '/', no backslash/NUL)" },
-);
+const safePath = z
+  .string()
+  .min(1)
+  .refine(
+    (p) =>
+      !p.includes("\0") &&
+      !p.includes("\\") &&
+      !p.startsWith("/") &&
+      !p.split("/").some((part) => part === ".."),
+    {
+      message:
+        "Path must be relative (no '..', no leading '/', no backslash/NUL)",
+    },
+  );
 
 /** scenarioRead with path traversal prevention. */
 export const scenarioReadRequestSchema = z.object({ path: safePath });
@@ -261,34 +272,49 @@ const dedupeIdList = (ids: string[]): string[] => {
  * Compatibility with old callers: retain singular session_id, normalize to session_ids after parsing,
  * so handler only needs to process the session_ids path.
  */
-export const conversationDeleteRequestSchema = z.object({
-  message_ids: z.array(z.string()).min(1).max(L0_DELETE_MESSAGE_IDS_MAX).optional(),
-  session_ids: z.array(z.string()).min(1).max(L0_DELETE_SESSION_IDS_MAX).optional(),
-  /** @deprecated Use `session_ids` instead; still supported for compatibility with existing callers. */
-  session_id: z.string().optional(),
-}).transform((data) => {
-  const messageIds = dedupeIdList(data.message_ids ?? []);
-  const sessionIds = dedupeIdList([
-    ...(data.session_ids ?? []),
-    ...(data.session_id !== undefined ? [data.session_id] : []),
-  ]);
-  return { message_ids: messageIds, session_ids: sessionIds };
-}).refine(
-  (data) => data.message_ids.length > 0 || data.session_ids.length > 0,
-  { message: "At least one of message_ids or session_ids must be provided" },
-).refine(
-  (data) => data.session_ids.length <= L0_DELETE_SESSION_IDS_MAX,
-  { message: `session_ids must contain at most ${L0_DELETE_SESSION_IDS_MAX} items` },
-);
-export type ConversationDeleteRequest = z.infer<typeof conversationDeleteRequestSchema>;
+export const conversationDeleteRequestSchema = z
+  .object({
+    message_ids: z
+      .array(z.string())
+      .min(1)
+      .max(L0_DELETE_MESSAGE_IDS_MAX)
+      .optional(),
+    session_ids: z
+      .array(z.string())
+      .min(1)
+      .max(L0_DELETE_SESSION_IDS_MAX)
+      .optional(),
+    /** @deprecated Use `session_ids` instead; still supported for compatibility with existing callers. */
+    session_id: z.string().optional(),
+  })
+  .transform((data) => {
+    const messageIds = dedupeIdList(data.message_ids ?? []);
+    const sessionIds = dedupeIdList([
+      ...(data.session_ids ?? []),
+      ...(data.session_id !== undefined ? [data.session_id] : []),
+    ]);
+    return { message_ids: messageIds, session_ids: sessionIds };
+  })
+  .refine(
+    (data) => data.message_ids.length > 0 || data.session_ids.length > 0,
+    { message: "At least one of message_ids or session_ids must be provided" },
+  )
+  .refine((data) => data.session_ids.length <= L0_DELETE_SESSION_IDS_MAX, {
+    message: `session_ids must contain at most ${L0_DELETE_SESSION_IDS_MAX} items`,
+  });
+export type ConversationDeleteRequest = z.infer<
+  typeof conversationDeleteRequestSchema
+>;
 
 /** atomicDelete: ids is required, max 5000 items per request, automatically deduplicated. */
-export const atomicDeleteRequestSchema = z.object({
-  ids: z.array(z.string()).min(1).max(L1_DELETE_IDS_MAX),
-}).transform((data) => ({ ids: dedupeIdList(data.ids) })).refine(
-  (data) => data.ids.length > 0,
-  { message: "ids must contain at least one non-empty id" },
-);
+export const atomicDeleteRequestSchema = z
+  .object({
+    ids: z.array(z.string()).min(1).max(L1_DELETE_IDS_MAX),
+  })
+  .transform((data) => ({ ids: dedupeIdList(data.ids) }))
+  .refine((data) => data.ids.length > 0, {
+    message: "ids must contain at least one non-empty id",
+  });
 export type AtomicDeleteRequest = z.infer<typeof atomicDeleteRequestSchema>;
 
 // ============================
@@ -302,11 +328,13 @@ export type AtomicDeleteRequest = z.infer<typeof atomicDeleteRequestSchema>;
 // so the router can validate body and headers independently.
 
 /** Headers / body fields used to carry the three-dim isolation context. */
-export const isolationFieldsSchema = z.object({
-  user_id: z.string().min(1).default(DEFAULT_ISOLATION_ID),
-  agent_id: z.string().min(1).default(DEFAULT_ISOLATION_ID),
-  session_id: z.string().min(1).default(DEFAULT_ISOLATION_ID),
-}).passthrough();
+export const isolationFieldsSchema = z
+  .object({
+    user_id: z.string().min(1).default(DEFAULT_ISOLATION_ID),
+    agent_id: z.string().min(1).default(DEFAULT_ISOLATION_ID),
+    session_id: z.string().min(1).default(DEFAULT_ISOLATION_ID),
+  })
+  .passthrough();
 export type IsolationFields = z.infer<typeof isolationFieldsSchema>;
 
 /**
@@ -320,30 +348,46 @@ export function resolveIsolation(
   body: Record<string, unknown> | undefined,
   headers: Record<string, string | string[] | undefined>,
   opts: { legacyCompatMode?: boolean; legacyPlaceholder?: string } = {},
-): { ok: true; ctx: { userId: string; agentId: string; sessionId: string; taskId?: string } } {
+): {
+  ok: true;
+  ctx: { userId: string; agentId: string; sessionId: string; taskId?: string };
+} {
   const headerStr = (k: string): string | undefined => {
     const raw = headers[k] ?? headers[k.toLowerCase()];
     if (Array.isArray(raw)) return raw[0];
     return typeof raw === "string" ? raw : undefined;
   };
-  const teamId = (body?.team_id as string | undefined) ?? headerStr("x-tdai-team-id") ?? "";
-  const userId = (body?.user_id as string | undefined) ?? headerStr("x-tdai-user-id") ?? "";
-  const agentId = (body?.agent_id as string | undefined) ?? headerStr("x-tdai-agent-id") ?? "";
+  const teamId =
+    (body?.team_id as string | undefined) ?? headerStr("x-tdai-team-id") ?? "";
+  const userId =
+    (body?.user_id as string | undefined) ?? headerStr("x-tdai-user-id") ?? "";
+  const agentId =
+    (body?.agent_id as string | undefined) ??
+    headerStr("x-tdai-agent-id") ??
+    "";
   const sessionId =
-    (body?.session_id as string | undefined)
-    ?? headerStr("x-tdai-session-id")
-    ?? "";
+    (body?.session_id as string | undefined) ??
+    headerStr("x-tdai-session-id") ??
+    "";
   const taskId =
-    (body?.task_id as string | undefined)
-    ?? headerStr("x-tdai-task-id")
-    ?? undefined;
+    (body?.task_id as string | undefined) ??
+    headerStr("x-tdai-task-id") ??
+    undefined;
   const missing: string[] = [];
   if (!userId) missing.push("user_id");
   if (!agentId) missing.push("agent_id");
   if (!sessionId) missing.push("session_id");
 
-  const ph = opts.legacyCompatMode ? (opts.legacyPlaceholder ?? DEFAULT_ISOLATION_ID) : DEFAULT_ISOLATION_ID;
-  const ctx = { ...(teamId ? { teamId } : {}), userId: userId || ph, agentId: agentId || ph, sessionId: sessionId || ph, ...(taskId ? { taskId } : {}) };
+  const ph = opts.legacyCompatMode
+    ? (opts.legacyPlaceholder ?? DEFAULT_ISOLATION_ID)
+    : DEFAULT_ISOLATION_ID;
+  const ctx = {
+    ...(teamId ? { teamId } : {}),
+    userId: userId || ph,
+    agentId: agentId || ph,
+    sessionId: sessionId || ph,
+    ...(taskId ? { taskId } : {}),
+  };
   return { ok: true, ctx };
 }
 

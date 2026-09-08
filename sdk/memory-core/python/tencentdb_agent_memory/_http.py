@@ -11,6 +11,7 @@ from abc import ABC, abstractmethod
 # Stub abstraction
 # ---------------------------------------------------------------------------
 
+
 class Stub(ABC):
     """Base transport interface."""
 
@@ -18,9 +19,7 @@ class Stub(ABC):
     headers: dict[str, str]
 
     @abstractmethod
-    def post(self, path: str, body: dict, timeout: float | None = None) -> dict:
-        ...
+    def post(self, path: str, body: dict, timeout: float | None = None) -> dict: ...
 
     @abstractmethod
-    def close(self) -> None:
-        ...
+    def close(self) -> None: ...

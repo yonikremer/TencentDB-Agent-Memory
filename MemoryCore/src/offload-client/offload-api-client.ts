@@ -1,7 +1,13 @@
 /**
  * offload-client — HTTP client for Offload Server v3 API.
  */
-import type { OffloadClientConfig, ToolPairPayload, RecentMessage, CompactionResult, Logger } from "./types.js";
+import type {
+  OffloadClientConfig,
+  ToolPairPayload,
+  RecentMessage,
+  CompactionResult,
+  Logger,
+} from "./types.js";
 
 export class OffloadApiClient {
   constructor(
@@ -59,12 +65,16 @@ export class OffloadApiClient {
       })),
     };
     if (prompt) payload.prompt = prompt;
-    if (recentMessages && recentMessages.length > 0) payload.recent_messages = recentMessages;
+    if (recentMessages && recentMessages.length > 0)
+      payload.recent_messages = recentMessages;
     const body = JSON.stringify(payload);
 
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), this.config.ingestTimeoutMs);
+      const timer = setTimeout(
+        () => controller.abort(),
+        this.config.ingestTimeoutMs,
+      );
 
       await fetch(url, {
         method: "POST",
@@ -83,19 +93,27 @@ export class OffloadApiClient {
    * Fire-and-forget: trigger L1.5 task judgment via ingest endpoint.
    * Sends prompt + recentMessages (empty toolPairs) to activate the L1.5 path on the server.
    */
-  async ingestL15(sessionId: string, prompt: string, recentMessages?: RecentMessage[]): Promise<void> {
+  async ingestL15(
+    sessionId: string,
+    prompt: string,
+    recentMessages?: RecentMessage[],
+  ): Promise<void> {
     const url = `${this.config.serverUrl}/v3/offload/ingest`;
     const payload: Record<string, unknown> = {
       session_id: sessionId,
       tool_pairs: [],
       prompt,
     };
-    if (recentMessages && recentMessages.length > 0) payload.recent_messages = recentMessages;
+    if (recentMessages && recentMessages.length > 0)
+      payload.recent_messages = recentMessages;
     const body = JSON.stringify(payload);
 
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), this.config.ingestTimeoutMs);
+      const timer = setTimeout(
+        () => controller.abort(),
+        this.config.ingestTimeoutMs,
+      );
 
       const response = await fetch(url, {
         method: "POST",
@@ -107,7 +125,9 @@ export class OffloadApiClient {
       clearTimeout(timer);
 
       if (!response.ok) {
-        this.logger.warn(`[offload-client] ingestL15 returned ${response.status}`);
+        this.logger.warn(
+          `[offload-client] ingestL15 returned ${response.status}`,
+        );
       }
     } catch (err) {
       this.logger.warn(`[offload-client] ingestL15 failed: ${err}`);
@@ -138,7 +158,10 @@ export class OffloadApiClient {
 
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), this.config.compactionTimeoutMs);
+      const timer = setTimeout(
+        () => controller.abort(),
+        this.config.compactionTimeoutMs,
+      );
 
       const response = await fetch(url, {
         method: "POST",
@@ -150,13 +173,17 @@ export class OffloadApiClient {
       clearTimeout(timer);
 
       if (!response.ok) {
-        this.logger.warn(`[offload-client] compaction returned ${response.status}`);
+        this.logger.warn(
+          `[offload-client] compaction returned ${response.status}`,
+        );
         return null;
       }
 
       const json = (await response.json()) as any;
       if (json.code !== 0 || !json.data) {
-        this.logger.warn(`[offload-client] compaction error: ${json.message ?? "unknown"}`);
+        this.logger.warn(
+          `[offload-client] compaction error: ${json.message ?? "unknown"}`,
+        );
         return null;
       }
 

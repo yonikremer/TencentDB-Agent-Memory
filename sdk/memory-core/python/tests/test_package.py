@@ -5,17 +5,31 @@ from tencentdb_agent_memory.v3.client import MemoryClient as V3Sync
 
 
 def test_top_level_is_v3():
-    assert top.MemoryClient is V3Sync
-    assert top.AsyncMemoryClient is V3Async
-    assert set(top.__all__) == {"MemoryClient", "AsyncMemoryClient", "TDAMError", "ParamError"}
+  assert top.MemoryClient is V3Sync
+  assert top.AsyncMemoryClient is V3Async
+  assert set(top.__all__) == {
+    "MemoryClient",
+    "AsyncMemoryClient",
+    "TDAMError",
+    "ParamError",
+  }
 
 
 def test_v3_exports():
-    assert v3mod.MemoryClient is V3Sync
-    assert v3mod.AsyncMemoryClient is V3Async
-    for name in ("MetadataClient", "AsyncMetadataClient", "MemoryPromptClient",
-                 "AsyncMemoryPromptClient", "MemoryGenerationLogClient",
-                 "AsyncMemoryGenerationLogClient", "SkillClient", "AsyncSkillClient",
-                 "SKILL_ERROR_CODE", "encode_utf8", "encode_base64"):
-        assert name in v3mod.__all__, name
-        assert getattr(v3mod, name) is not None
+  assert v3mod.MemoryClient is V3Sync
+  assert v3mod.AsyncMemoryClient is V3Async
+  for name in (
+    "MetadataClient",
+    "AsyncMetadataClient",
+    "MemoryPromptClient",
+    "AsyncMemoryPromptClient",
+    "MemoryGenerationLogClient",
+    "AsyncMemoryGenerationLogClient",
+    "SkillClient",
+    "AsyncSkillClient",
+    "SKILL_ERROR_CODE",
+    "encode_utf8",
+    "encode_base64",
+  ):
+    assert name in v3mod.__all__, name
+    assert getattr(v3mod, name) is not None

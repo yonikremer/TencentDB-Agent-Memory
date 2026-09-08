@@ -81,7 +81,9 @@ def _normalize_delete_ids(
     deduped = list(seen.keys())
 
     if len(deduped) > max_items:
-        raise ParamError(f"{field} accepts at most {max_items} items, got {len(deduped)}")
+        raise ParamError(
+            f"{field} accepts at most {max_items} items, got {len(deduped)}"
+        )
     return deduped
 
 
@@ -91,11 +93,13 @@ def _validate_construction(team_id: str, agent_id: str, user_id: str) -> None:
     session_id is not strictly validated at construction time (L2/L3 interfaces do not require it); it is validated separately when L0/L1 method calls are made.
     """
     missing = [
-        name for name, val in (
+        name
+        for name, val in (
             ("team_id", team_id),
             ("agent_id", agent_id),
             ("user_id", user_id),
-        ) if not val
+        )
+        if not val
     ]
     if missing:
         raise ParamError(
@@ -164,6 +168,7 @@ class _IsolationCtx:
 # Synchronous client
 # ---------------------------------------------------------------------------
 
+
 class MemoryClient:
     """v3 Sync Client — Strict isolation L0–L3 data plane (including count endpoint).
 
@@ -197,8 +202,12 @@ class MemoryClient:
             # user_key optional: the kernel does not perform user-level authentication, but the front gateway/panel may need to
             # Caller identity, here maintaining the pass-through capability consistent with MetadataClient.
             self._stub = HttpStub(
-                endpoint, api_key, service_id,
-                timeout=timeout, verify=verify, user_key=user_key,
+                endpoint,
+                api_key,
+                service_id,
+                timeout=timeout,
+                verify=verify,
+                user_key=user_key,
             )
         self._iso = _IsolationCtx(team_id, agent_id, user_id, session_id, task_id)
 
@@ -246,11 +255,13 @@ class MemoryClient:
         """``POST /v3/conversation/add`` — Write required session_id (either construct or call)."""
         return self._stub.post(
             f"{_V3}/conversation/add",
-            _strip_none({
-                **self._iso.base_body(),
-                "session_id": self._iso.resolve_session_for_write(session_id),
-                "messages": messages,
-            }),
+            _strip_none(
+                {
+                    **self._iso.base_body(),
+                    "session_id": self._iso.resolve_session_for_write(session_id),
+                    "messages": messages,
+                }
+            ),
         )
 
     def query_conversation(
@@ -265,14 +276,16 @@ class MemoryClient:
         """``POST /v3/conversation/query``"""
         return self._stub.post(
             f"{_V3}/conversation/query",
-            _strip_none({
-                **self._iso.base_body(),
-                "session_id": self._iso.resolve_session(session_id),
-                "limit": limit,
-                "offset": offset,
-                "time_start": time_start,
-                "time_end": time_end,
-            }),
+            _strip_none(
+                {
+                    **self._iso.base_body(),
+                    "session_id": self._iso.resolve_session(session_id),
+                    "limit": limit,
+                    "offset": offset,
+                    "time_start": time_start,
+                    "time_end": time_end,
+                }
+            ),
         )
 
     def search_conversation(
@@ -287,14 +300,16 @@ class MemoryClient:
         """``POST /v3/conversation/search``"""
         return self._stub.post(
             f"{_V3}/conversation/search",
-            _strip_none({
-                **self._iso.base_body(),
-                "session_id": self._iso.resolve_session(session_id),
-                "query": query,
-                "limit": limit,
-                "time_start": time_start,
-                "time_end": time_end,
-            }),
+            _strip_none(
+                {
+                    **self._iso.base_body(),
+                    "session_id": self._iso.resolve_session(session_id),
+                    "query": query,
+                    "limit": limit,
+                    "time_start": time_start,
+                    "time_end": time_end,
+                }
+            ),
         )
 
     def delete_conversation(
@@ -334,11 +349,13 @@ class MemoryClient:
 
         return self._stub.post(
             f"{_V3}/conversation/delete",
-            _strip_none({
-                **self._iso.base_body(),
-                "message_ids": normalized_messages,
-                "session_ids": normalized_sessions,
-            }),
+            _strip_none(
+                {
+                    **self._iso.base_body(),
+                    "message_ids": normalized_messages,
+                    "session_ids": normalized_sessions,
+                }
+            ),
         )
 
     def count_conversation(
@@ -351,12 +368,14 @@ class MemoryClient:
         """``POST /v3/conversation/count`` — Same filters as query, only returns ``{total}``."""
         return self._stub.post(
             f"{_V3}/conversation/count",
-            _strip_none({
-                **self._iso.base_body(),
-                "session_id": self._iso.resolve_session(session_id),
-                "time_start": time_start,
-                "time_end": time_end,
-            }),
+            _strip_none(
+                {
+                    **self._iso.base_body(),
+                    "session_id": self._iso.resolve_session(session_id),
+                    "time_start": time_start,
+                    "time_end": time_end,
+                }
+            ),
         )
 
     # -- L1 Atomic (session_id optional, aggregated across sessions if missing) -----------------
@@ -372,13 +391,15 @@ class MemoryClient:
         """``POST /v3/atomic/update``"""
         return self._stub.post(
             f"{_V3}/atomic/update",
-            _strip_none({
-                **self._iso.base_body(),
-                "session_id": self._iso.resolve_session(session_id),
-                "id": id,
-                "content": content,
-                "background": background,
-            }),
+            _strip_none(
+                {
+                    **self._iso.base_body(),
+                    "session_id": self._iso.resolve_session(session_id),
+                    "id": id,
+                    "content": content,
+                    "background": background,
+                }
+            ),
         )
 
     def query_atomic(
@@ -394,15 +415,17 @@ class MemoryClient:
         """``POST /v3/atomic/query``"""
         return self._stub.post(
             f"{_V3}/atomic/query",
-            _strip_none({
-                **self._iso.base_body(),
-                "session_id": self._iso.resolve_session(session_id),
-                "type": type,
-                "limit": limit,
-                "offset": offset,
-                "time_start": time_start,
-                "time_end": time_end,
-            }),
+            _strip_none(
+                {
+                    **self._iso.base_body(),
+                    "session_id": self._iso.resolve_session(session_id),
+                    "type": type,
+                    "limit": limit,
+                    "offset": offset,
+                    "time_start": time_start,
+                    "time_end": time_end,
+                }
+            ),
         )
 
     def search_atomic(
@@ -418,15 +441,17 @@ class MemoryClient:
         """``POST /v3/atomic/search``"""
         return self._stub.post(
             f"{_V3}/atomic/search",
-            _strip_none({
-                **self._iso.base_body(),
-                "session_id": self._iso.resolve_session(session_id),
-                "query": query,
-                "limit": limit,
-                "type": type,
-                "time_start": time_start,
-                "time_end": time_end,
-            }),
+            _strip_none(
+                {
+                    **self._iso.base_body(),
+                    "session_id": self._iso.resolve_session(session_id),
+                    "query": query,
+                    "limit": limit,
+                    "type": type,
+                    "time_start": time_start,
+                    "time_end": time_end,
+                }
+            ),
         )
 
     def delete_atomic(
@@ -441,11 +466,13 @@ class MemoryClient:
             raise ParamError("delete_atomic requires a non-empty ids list")
         return self._stub.post(
             f"{_V3}/atomic/delete",
-            _strip_none({
-                **self._iso.base_body(),
-                "session_id": self._iso.resolve_session(session_id),
-                "ids": normalized,
-            }),
+            _strip_none(
+                {
+                    **self._iso.base_body(),
+                    "session_id": self._iso.resolve_session(session_id),
+                    "ids": normalized,
+                }
+            ),
         )
 
     def count_atomic(
@@ -459,13 +486,15 @@ class MemoryClient:
         """``POST /v3/atomic/count`` — Same filters as query, only returns ``{total}``."""
         return self._stub.post(
             f"{_V3}/atomic/count",
-            _strip_none({
-                **self._iso.base_body(),
-                "session_id": self._iso.resolve_session(session_id),
-                "type": type,
-                "time_start": time_start,
-                "time_end": time_end,
-            }),
+            _strip_none(
+                {
+                    **self._iso.base_body(),
+                    "session_id": self._iso.resolve_session(session_id),
+                    "type": type,
+                    "time_start": time_start,
+                    "time_end": time_end,
+                }
+            ),
         )
 
     # -- L2 Scenario (team+agent level, no session_id needed) -------------------
@@ -494,12 +523,14 @@ class MemoryClient:
         """``POST /v3/scenario/write``"""
         return self._stub.post(
             f"{_V3}/scenario/write",
-            _strip_none({
-                **self._iso.base_body(),
-                "path": path,
-                "content": content,
-                "summary": summary,
-            }),
+            _strip_none(
+                {
+                    **self._iso.base_body(),
+                    "path": path,
+                    "content": content,
+                    "summary": summary,
+                }
+            ),
         )
 
     def rm_scenario(self, path: str) -> dict[str, Any]:
@@ -575,12 +606,14 @@ class MemoryClient:
         """``POST /v3/offload/ingest`` — report tool call pairs to trigger async L1 processing."""
         return self._stub.post(
             f"{_V3}/offload/ingest",
-            _strip_none({
-                "session_id": session_id,
-                "tool_pairs": tool_pairs,
-                "prompt": prompt,
-                "recent_messages": recent_messages,
-            }),
+            _strip_none(
+                {
+                    "session_id": session_id,
+                    "tool_pairs": tool_pairs,
+                    "prompt": prompt,
+                    "recent_messages": recent_messages,
+                }
+            ),
         )
 
     def offload_compact(
@@ -596,14 +629,16 @@ class MemoryClient:
         """``POST /v3/offload/compact`` — server-side context compaction."""
         return self._stub.post(
             f"{_V3}/offload/compact",
-            _strip_none({
-                "session_id": session_id,
-                "messages": messages,
-                "ratio": ratio,
-                "total_tokens": total_tokens,
-                "context_window": context_window,
-                "message_tokens": message_tokens,
-            }),
+            _strip_none(
+                {
+                    "session_id": session_id,
+                    "messages": messages,
+                    "ratio": ratio,
+                    "total_tokens": total_tokens,
+                    "context_window": context_window,
+                    "message_tokens": message_tokens,
+                }
+            ),
         )
 
     def offload_query_mmd(
@@ -615,10 +650,12 @@ class MemoryClient:
         """``POST /v3/offload/query-mmd`` — query the session task flow chart (MMD)."""
         return self._stub.post(
             f"{_V3}/offload/query-mmd",
-            _strip_none({
-                "session_id": session_id,
-                "limit": limit,
-            }),
+            _strip_none(
+                {
+                    "session_id": session_id,
+                    "limit": limit,
+                }
+            ),
         )
 
     # -- File read (memory pipeline artifacts, via COS) --------------------
@@ -655,6 +692,7 @@ class MemoryClient:
 # Asynchronous client
 # ---------------------------------------------------------------------------
 
+
 class AsyncMemoryClient:
     """v3 Async Client — Strict isolation L0–L3 data plane (including count endpoint, async version).
 
@@ -686,8 +724,12 @@ class AsyncMemoryClient:
                 raise ParamError("service_id must be provided")
             # user_key optional: the kernel does not validate it; the front gateway/panel may require the caller's identity.
             self._stub = AsyncHttpStub(
-                endpoint, api_key, service_id,
-                timeout=timeout, verify=verify, user_key=user_key,
+                endpoint,
+                api_key,
+                service_id,
+                timeout=timeout,
+                verify=verify,
+                user_key=user_key,
             )
         self._iso = _IsolationCtx(team_id, agent_id, user_id, session_id, task_id)
 
@@ -729,11 +771,13 @@ class AsyncMemoryClient:
         """``POST /v3/conversation/add`` — Write required session_id (either construct or call)."""
         return await self._stub.post(
             f"{_V3}/conversation/add",
-            _strip_none({
-                **self._iso.base_body(),
-                "session_id": self._iso.resolve_session_for_write(session_id),
-                "messages": messages,
-            }),
+            _strip_none(
+                {
+                    **self._iso.base_body(),
+                    "session_id": self._iso.resolve_session_for_write(session_id),
+                    "messages": messages,
+                }
+            ),
         )
 
     async def query_conversation(
@@ -747,12 +791,16 @@ class AsyncMemoryClient:
     ) -> dict[str, Any]:
         return await self._stub.post(
             f"{_V3}/conversation/query",
-            _strip_none({
-                **self._iso.base_body(),
-                "session_id": self._iso.resolve_session(session_id),
-                "limit": limit, "offset": offset,
-                "time_start": time_start, "time_end": time_end,
-            }),
+            _strip_none(
+                {
+                    **self._iso.base_body(),
+                    "session_id": self._iso.resolve_session(session_id),
+                    "limit": limit,
+                    "offset": offset,
+                    "time_start": time_start,
+                    "time_end": time_end,
+                }
+            ),
         )
 
     async def search_conversation(
@@ -766,12 +814,16 @@ class AsyncMemoryClient:
     ) -> dict[str, Any]:
         return await self._stub.post(
             f"{_V3}/conversation/search",
-            _strip_none({
-                **self._iso.base_body(),
-                "session_id": self._iso.resolve_session(session_id),
-                "query": query, "limit": limit,
-                "time_start": time_start, "time_end": time_end,
-            }),
+            _strip_none(
+                {
+                    **self._iso.base_body(),
+                    "session_id": self._iso.resolve_session(session_id),
+                    "query": query,
+                    "limit": limit,
+                    "time_start": time_start,
+                    "time_end": time_end,
+                }
+            ),
         )
 
     async def delete_conversation(
@@ -801,11 +853,13 @@ class AsyncMemoryClient:
 
         return await self._stub.post(
             f"{_V3}/conversation/delete",
-            _strip_none({
-                **self._iso.base_body(),
-                "message_ids": normalized_messages,
-                "session_ids": normalized_sessions,
-            }),
+            _strip_none(
+                {
+                    **self._iso.base_body(),
+                    "message_ids": normalized_messages,
+                    "session_ids": normalized_sessions,
+                }
+            ),
         )
 
     async def count_conversation(
@@ -817,12 +871,14 @@ class AsyncMemoryClient:
     ) -> dict[str, Any]:
         return await self._stub.post(
             f"{_V3}/conversation/count",
-            _strip_none({
-                **self._iso.base_body(),
-                "session_id": self._iso.resolve_session(session_id),
-                "time_start": time_start,
-                "time_end": time_end,
-            }),
+            _strip_none(
+                {
+                    **self._iso.base_body(),
+                    "session_id": self._iso.resolve_session(session_id),
+                    "time_start": time_start,
+                    "time_end": time_end,
+                }
+            ),
         )
 
     # -- L1 Atomic (session_id optional, aggregated across sessions if missing) -----------------
@@ -837,11 +893,15 @@ class AsyncMemoryClient:
     ) -> dict[str, Any]:
         return await self._stub.post(
             f"{_V3}/atomic/update",
-            _strip_none({
-                **self._iso.base_body(),
-                "session_id": self._iso.resolve_session(session_id),
-                "id": id, "content": content, "background": background,
-            }),
+            _strip_none(
+                {
+                    **self._iso.base_body(),
+                    "session_id": self._iso.resolve_session(session_id),
+                    "id": id,
+                    "content": content,
+                    "background": background,
+                }
+            ),
         )
 
     async def query_atomic(
@@ -856,12 +916,17 @@ class AsyncMemoryClient:
     ) -> dict[str, Any]:
         return await self._stub.post(
             f"{_V3}/atomic/query",
-            _strip_none({
-                **self._iso.base_body(),
-                "session_id": self._iso.resolve_session(session_id),
-                "type": type, "limit": limit, "offset": offset,
-                "time_start": time_start, "time_end": time_end,
-            }),
+            _strip_none(
+                {
+                    **self._iso.base_body(),
+                    "session_id": self._iso.resolve_session(session_id),
+                    "type": type,
+                    "limit": limit,
+                    "offset": offset,
+                    "time_start": time_start,
+                    "time_end": time_end,
+                }
+            ),
         )
 
     async def search_atomic(
@@ -876,12 +941,17 @@ class AsyncMemoryClient:
     ) -> dict[str, Any]:
         return await self._stub.post(
             f"{_V3}/atomic/search",
-            _strip_none({
-                **self._iso.base_body(),
-                "session_id": self._iso.resolve_session(session_id),
-                "query": query, "limit": limit, "type": type,
-                "time_start": time_start, "time_end": time_end,
-            }),
+            _strip_none(
+                {
+                    **self._iso.base_body(),
+                    "session_id": self._iso.resolve_session(session_id),
+                    "query": query,
+                    "limit": limit,
+                    "type": type,
+                    "time_start": time_start,
+                    "time_end": time_end,
+                }
+            ),
         )
 
     async def delete_atomic(
@@ -896,11 +966,13 @@ class AsyncMemoryClient:
             raise ParamError("delete_atomic requires a non-empty ids list")
         return await self._stub.post(
             f"{_V3}/atomic/delete",
-            _strip_none({
-                **self._iso.base_body(),
-                "session_id": self._iso.resolve_session(session_id),
-                "ids": normalized,
-            }),
+            _strip_none(
+                {
+                    **self._iso.base_body(),
+                    "session_id": self._iso.resolve_session(session_id),
+                    "ids": normalized,
+                }
+            ),
         )
 
     async def count_atomic(
@@ -913,13 +985,15 @@ class AsyncMemoryClient:
     ) -> dict[str, Any]:
         return await self._stub.post(
             f"{_V3}/atomic/count",
-            _strip_none({
-                **self._iso.base_body(),
-                "session_id": self._iso.resolve_session(session_id),
-                "type": type,
-                "time_start": time_start,
-                "time_end": time_end,
-            }),
+            _strip_none(
+                {
+                    **self._iso.base_body(),
+                    "session_id": self._iso.resolve_session(session_id),
+                    "type": type,
+                    "time_start": time_start,
+                    "time_end": time_end,
+                }
+            ),
         )
 
     # -- L2 Scenario (team+agent level, no session_id needed) -------------------
@@ -945,10 +1019,14 @@ class AsyncMemoryClient:
     ) -> dict[str, Any]:
         return await self._stub.post(
             f"{_V3}/scenario/write",
-            _strip_none({
-                **self._iso.base_body(),
-                "path": path, "content": content, "summary": summary,
-            }),
+            _strip_none(
+                {
+                    **self._iso.base_body(),
+                    "path": path,
+                    "content": content,
+                    "summary": summary,
+                }
+            ),
         )
 
     async def rm_scenario(self, path: str) -> dict[str, Any]:
@@ -985,7 +1063,9 @@ class AsyncMemoryClient:
         if not normalized:
             raise ParamError("clear_chat_memory requires a non-empty memory_ids list")
         # Note: no isolation triple -- scope is determined by memory_ids.
-        return await self._stub.post(f"{_V3}/chat-memory/clear", {"memory_ids": normalized})
+        return await self._stub.post(
+            f"{_V3}/chat-memory/clear", {"memory_ids": normalized}
+        )
 
     # -- Offload ---------------------------------------------------------------
 
@@ -1001,12 +1081,14 @@ class AsyncMemoryClient:
         # type: ignore[reportGeneralTypeIssues]  // Stub.post is sync-typed; the async transport returns a coroutine here.
         return await self._stub.post(
             f"{_V3}/offload/ingest",
-            _strip_none({
-                "session_id": session_id,
-                "tool_pairs": tool_pairs,
-                "prompt": prompt,
-                "recent_messages": recent_messages,
-            }),
+            _strip_none(
+                {
+                    "session_id": session_id,
+                    "tool_pairs": tool_pairs,
+                    "prompt": prompt,
+                    "recent_messages": recent_messages,
+                }
+            ),
         )
 
     async def offload_compact(
@@ -1023,14 +1105,16 @@ class AsyncMemoryClient:
         # type: ignore[reportGeneralTypeIssues]  // Stub.post is sync-typed; the async transport returns a coroutine here.
         return await self._stub.post(
             f"{_V3}/offload/compact",
-            _strip_none({
-                "session_id": session_id,
-                "messages": messages,
-                "ratio": ratio,
-                "total_tokens": total_tokens,
-                "context_window": context_window,
-                "message_tokens": message_tokens,
-            }),
+            _strip_none(
+                {
+                    "session_id": session_id,
+                    "messages": messages,
+                    "ratio": ratio,
+                    "total_tokens": total_tokens,
+                    "context_window": context_window,
+                    "message_tokens": message_tokens,
+                }
+            ),
         )
 
     async def offload_query_mmd(
@@ -1043,10 +1127,12 @@ class AsyncMemoryClient:
         # type: ignore[reportGeneralTypeIssues]  // Stub.post is sync-typed; the async transport returns a coroutine here.
         return await self._stub.post(
             f"{_V3}/offload/query-mmd",
-            _strip_none({
-                "session_id": session_id,
-                "limit": limit,
-            }),
+            _strip_none(
+                {
+                    "session_id": session_id,
+                    "limit": limit,
+                }
+            ),
         )
 
     # -- File read (memory pipeline artifacts, via COS) --------------------

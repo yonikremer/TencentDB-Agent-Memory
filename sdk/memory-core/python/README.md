@@ -105,7 +105,7 @@ asyncio.run(main())
 ## API Methods
 
 | Layer | Method | Endpoint |
-|-------|--------|----------|
+| ------- | -------- | ---------- |
 | L0 | `add_conversation()` | `POST /v3/conversation/add` |
 | L0 | `query_conversation()` | `POST /v3/conversation/query` |
 | L0 | `search_conversation()` | `POST /v3/conversation/search` |
@@ -183,7 +183,7 @@ provenance = logs.get_by_memory_id("memory-id", "l1")
 ```
 
 | Method | Endpoint | Purpose |
-|--------|----------|---------|
+| -------- | ---------- | --------- |
 | `create()` | `POST /v3/memory-prompt/create` | Create a Prompt |
 | `get()` / `list()` / `get_effective()` | `GET /v3/memory-prompt/get` | Get one, list Prompts, or resolve the effective Prompt |
 | `update()` | `POST /v3/memory-prompt/update` | Update name/content; identical values are a no-op |
@@ -249,7 +249,7 @@ meta.delete_knowledge(["wiki-docs", "cg-repo-1"], team_id="team-1")
 ```
 
 | Method | Endpoint | Notes |
-|--------|----------|-------|
+| -------- | ---------- | ------- |
 | `create_knowledge(p)` | `POST /v3/knowledge/create` | upsert metadata (idempotent; re-post overwrites) |
 | `get_knowledge(id, team_id=None)` | `POST /v3/knowledge/get` | get one by id |
 | `update_knowledge(p)` | `POST /v3/knowledge/update` | partial update (name/summary/service_url/repo_url/branch) |

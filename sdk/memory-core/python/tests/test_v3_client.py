@@ -19,7 +19,9 @@ def _sync(**kw):
     args = dict(KW)
     args.update(kw)
     stub = FakeStub()
-    return MemoryClient(endpoint="http://e", api_key="k", service_id="s", stub=stub, **args), stub  # type: ignore[call-arg]  // FakeStub is runtime-compatible; **args unpacking defeats narrowing.
+    return MemoryClient(
+        endpoint="http://e", api_key="k", service_id="s", stub=stub, **args
+    ), stub  # type: ignore[call-arg]  // FakeStub is runtime-compatible; **args unpacking defeats narrowing.
 
 
 def test_helpers_and_validation():
@@ -32,9 +34,11 @@ def test_helpers_and_validation():
             _normalize_delete_ids("f", bad, 5)  # type: ignore[arg-type]  // intentional invalid input.
     with pytest.raises(ParamError):
         _normalize_delete_ids("f", [f"m{i}" for i in range(6)], 5)
-    for missing in (dict(team_id="", agent_id="a", user_id="u"),
-                    dict(team_id="t", agent_id="", user_id="u"),
-                    dict(team_id="t", agent_id="a", user_id="")):
+    for missing in (
+        dict(team_id="", agent_id="a", user_id="u"),
+        dict(team_id="t", agent_id="", user_id="u"),
+        dict(team_id="t", agent_id="a", user_id=""),
+    ):
         with pytest.raises(ParamError):
             _validate_construction(**missing)
     _validate_construction("t", "a", "u")
@@ -42,8 +46,17 @@ def test_helpers_and_validation():
 
 def test_isolation_ctx():
     iso = _IsolationCtx("t", "a", "u", "s", "tk")
-    assert iso.base_body() == {"team_id": "t", "agent_id": "a", "user_id": "u", "task_id": "tk"}
-    assert _IsolationCtx("t", "a", "u").base_body() == {"team_id": "t", "agent_id": "a", "user_id": "u"}
+    assert iso.base_body() == {
+        "team_id": "t",
+        "agent_id": "a",
+        "user_id": "u",
+        "task_id": "tk",
+    }
+    assert _IsolationCtx("t", "a", "u").base_body() == {
+        "team_id": "t",
+        "agent_id": "a",
+        "user_id": "u",
+    }
     assert iso.resolve_session(None) == "s"
     assert iso.resolve_session("s2") == "s2"
     assert iso.resolve_session_for_write(None) == "s"
@@ -53,12 +66,23 @@ def test_isolation_ctx():
 
 def test_init_variants():
     with pytest.raises(ParamError):
-        MemoryClient(endpoint="http://e", api_key="k", service_id="s", team_id="", agent_id="a", user_id="u")
+        MemoryClient(
+            endpoint="http://e",
+            api_key="k",
+            service_id="s",
+            team_id="",
+            agent_id="a",
+            user_id="u",
+        )
     with pytest.raises(ParamError):
-        MemoryClient(endpoint="http://e", api_key="k", team_id="t", agent_id="a", user_id="u")
+        MemoryClient(
+            endpoint="http://e", api_key="k", team_id="t", agent_id="a", user_id="u"
+        )
     real = MemoryClient(endpoint="http://e", api_key="k", service_id="s", **KW)
     real.close()
-    with MemoryClient(endpoint="http://e", api_key="k", service_id="s", stub=FakeStub(), **KW) as c:  # type: ignore[call-arg]  // FakeStub is runtime-compatible.
+    with MemoryClient(
+        endpoint="http://e", api_key="k", service_id="s", stub=FakeStub(), **KW
+    ) as c:  # type: ignore[call-arg]  // FakeStub is runtime-compatible.
         assert isinstance(c, MemoryClient)
 
 
@@ -121,7 +145,9 @@ def test_l1():
     c, stub = _sync()
     c.update_atomic("i", "content", background="b", session_id="s")
     assert stub.calls[-1][1] == "/v3/atomic/update"
-    c.query_atomic(type="t", limit=1, offset=0, time_start="a", time_end="b", session_id="s")
+    c.query_atomic(
+        type="t", limit=1, offset=0, time_start="a", time_end="b", session_id="s"
+    )
     assert stub.calls[-1][1] == "/v3/atomic/query"
     c.search_atomic("q", limit=1, type="t", time_start="a", time_end="b")
     assert stub.calls[-1][1] == "/v3/atomic/search"
@@ -145,9 +171,16 @@ def test_l2_l3_and_clear():
     c.write_core("core")
     c.count_core()
     paths = [call[1] for call in stub.calls]
-    assert paths == ["/v3/scenario/ls", "/v3/scenario/read", "/v3/scenario/write",
-                     "/v3/scenario/rm", "/v3/scenario/count", "/v3/core/read",
-                     "/v3/core/write", "/v3/core/count"]
+    assert paths == [
+        "/v3/scenario/ls",
+        "/v3/scenario/read",
+        "/v3/scenario/write",
+        "/v3/scenario/rm",
+        "/v3/scenario/count",
+        "/v3/core/read",
+        "/v3/core/write",
+        "/v3/core/count",
+    ]
     c.clear_chat_memory(["m1", "m1"])
     assert stub.calls[-1] == ("POST", "/v3/chat-memory/clear", {"memory_ids": ["m1"]})
     with pytest.raises(ParamError):
@@ -160,11 +193,21 @@ def test_l2_l3_and_clear():
 @pytest.mark.asyncio
 async def test_async_mirror():
     with pytest.raises(ParamError):
-        AsyncMemoryClient(endpoint="http://e", api_key="k", service_id="s",
-                          team_id="t", agent_id="", user_id="u")
+        AsyncMemoryClient(
+            endpoint="http://e",
+            api_key="k",
+            service_id="s",
+            team_id="t",
+            agent_id="",
+            user_id="u",
+        )
     with pytest.raises(ParamError):
-        AsyncMemoryClient(endpoint="http://e", api_key="k", team_id="t", agent_id="a", user_id="u")
-    c = AsyncMemoryClient(endpoint="http://e", api_key="k", service_id="s", stub=FakeAsyncStub(), **KW)  # type: ignore[call-arg]  // FakeAsyncStub is runtime-compatible.
+        AsyncMemoryClient(
+            endpoint="http://e", api_key="k", team_id="t", agent_id="a", user_id="u"
+        )
+    c = AsyncMemoryClient(
+        endpoint="http://e", api_key="k", service_id="s", stub=FakeAsyncStub(), **KW
+    )  # type: ignore[call-arg]  // FakeAsyncStub is runtime-compatible.
     stub = c._stub
     c2 = c.with_isolation(session_id=None)
     await c2.query_conversation()
@@ -172,8 +215,9 @@ async def test_async_mirror():
     with pytest.raises(ParamError):
         c.with_isolation(user_id="")
     with pytest.raises(ParamError):
-        await AsyncMemoryClient(endpoint="http://e", api_key="k", service_id="s",
-                                stub=FakeAsyncStub(), **KW).add_conversation([{"m": 1}])  # type: ignore[call-arg]  // FakeAsyncStub is runtime-compatible.
+        await AsyncMemoryClient(
+            endpoint="http://e", api_key="k", service_id="s", stub=FakeAsyncStub(), **KW
+        ).add_conversation([{"m": 1}])  # type: ignore[call-arg]  // FakeAsyncStub is runtime-compatible.
     await c.add_conversation([{"m": 1}], session_id="s1")
     await c.query_conversation()
     await c.search_conversation("q")
@@ -212,9 +256,13 @@ async def test_async_mirror():
 
 def test_offload_paths():
     c, stub = _sync()
-    c.offload_ingest("s", [{"tool_name": "t"}], prompt="p", recent_messages=[{"role": "user"}])
+    c.offload_ingest(
+        "s", [{"tool_name": "t"}], prompt="p", recent_messages=[{"role": "user"}]
+    )
     assert stub.calls[-1][1] == "/v3/offload/ingest"
-    c.offload_compact("s", [{"m": 1}], 0.9, 100, context_window=1000, message_tokens=[10])
+    c.offload_compact(
+        "s", [{"m": 1}], 0.9, 100, context_window=1000, message_tokens=[10]
+    )
     assert stub.calls[-1][1] == "/v3/offload/compact"
     c.offload_query_mmd("s", limit=1)
     assert stub.calls[-1][2] == {"session_id": "s", "limit": 1}
@@ -240,13 +288,17 @@ def test_read_file_lazy_and_cached(monkeypatch):
 async def test_async_offload_and_read_file(monkeypatch):
     monkeypatch.setattr(v3mod, "AsyncStsCredentialManager", FakeStsMgr)
     monkeypatch.setattr(v3mod, "AsyncMemoryFileReader", FakeAsyncReader)
-    c = AsyncMemoryClient(endpoint="http://e", api_key="k", service_id="s", stub=FakeAsyncStub(), **KW)  # type: ignore[call-arg]  // FakeAsyncStub is runtime-compatible.
+    c = AsyncMemoryClient(
+        endpoint="http://e", api_key="k", service_id="s", stub=FakeAsyncStub(), **KW
+    )  # type: ignore[call-arg]  // FakeAsyncStub is runtime-compatible.
     stub = c._stub
     await c.offload_ingest("s", [])
     await c.offload_compact("s", [], 0.5, 10)
     await c.offload_query_mmd("s")
     assert [call[1] for call in stub.calls] == [
-        "/v3/offload/ingest", "/v3/offload/compact", "/v3/offload/query-mmd",
+        "/v3/offload/ingest",
+        "/v3/offload/compact",
+        "/v3/offload/query-mmd",
     ]
     assert await c.read_file("persona.md") == "content:persona.md"
     await c.close()

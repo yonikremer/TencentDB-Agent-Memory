@@ -104,7 +104,7 @@ await client.addConversation({
 ### v3 数据面
 
 | 层级 | 方法 | 接口 |
-|------|------|------|
+| ------ | ------ | ------ |
 | L0 | `addConversation()` | `POST /v3/conversation/add` |
 | L0 | `queryConversation()` | `POST /v3/conversation/query` |
 | L0 | `searchConversation()` | `POST /v3/conversation/search` |
@@ -162,7 +162,7 @@ if (!res.all_cleared) {
 ### v2 兼容数据面
 
 | 层级 | 方法 | 接口 |
-|------|------|------|
+| ------ | ------ | ------ |
 | L0 | `addConversation()` | `POST /v3/conversation/add` |
 | L0 | `queryConversation()` | `POST /v3/conversation/query` |
 | L0 | `searchConversation()` | `POST /v3/conversation/search` |
@@ -202,7 +202,7 @@ const provenance = await logs.getByMemoryId("memory-id", "l1");
 ```
 
 | SDK 方法 | 接口 | 说明 |
-|----------|------|------|
+| ---------- | ------ | ------ |
 | `create()` | `POST /v3/memory-prompt/create` | 创建 Prompt |
 | `get()` / `list()` / `getEffective()` | `GET /v3/memory-prompt/get` | 查详情、列表或最终生效 Prompt |
 | `update()` | `POST /v3/memory-prompt/update` | 更新名称/内容；相同值为幂等 no-op |
@@ -235,7 +235,7 @@ const meta = new MetadataClient({
 管理 Knowledge 实体元数据（`wiki` / `code-graph` 两种类型）。注意：这组接口是**管理面 CRUD**，只管元数据；真正去 wiki/code-graph 里搜内容、读页面、同步仓库是 Knowledge Service 数据面的活，不在这个 client 里。
 
 | 方法 | 接口 | 说明 |
-|------|------|------|
+| ------ | ------ | ------ |
 | `createKnowledge()` | `POST /v3/knowledge/create` | upsert 元数据（幂等，重复 post 即覆盖） |
 | `getKnowledge(id, teamId?)` | `POST /v3/knowledge/get` | 单条查询 |
 | `updateKnowledge()` | `POST /v3/knowledge/update` | 部分更新（name/summary/service_url/repo_url/branch） |

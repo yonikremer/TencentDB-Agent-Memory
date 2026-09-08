@@ -109,7 +109,7 @@ asyncio.run(main())
 > v3 与 v2 的主要差异：L0/L1 强制要求 `session_id`（strict session isolation），请求路径从 `/v2/*` 升级为 `/v3/*`，响应包络结构一致。
 
 | 层级 | 方法 | 接口 |
-|------|------|------|
+| ------ | ------ | ------ |
 | L0 | `add_conversation()` | `POST /v3/conversation/add` |
 | L0 | `query_conversation()` | `POST /v3/conversation/query` |
 | L0 | `search_conversation()` | `POST /v3/conversation/search` |
@@ -167,7 +167,7 @@ if not res["all_cleared"]:
 > v2 的 L0/L1 不强制 `session_id`，隔离仅基于 `(team_id, user_id, agent_id)` 三元组。
 
 | 层级 | 方法 | 接口 |
-|------|------|------|
+| ------ | ------ | ------ |
 | L0 | `add_conversation()` | `POST /v3/conversation/add` |
 | L0 | `query_conversation()` | `POST /v3/conversation/query` |
 | L0 | `search_conversation()` | `POST /v3/conversation/search` |
@@ -189,7 +189,7 @@ if not res["all_cleared"]:
 ### v3 vs v2 差异说明
 
 | 维度 | v2 | v3 |
-|------|----|----|
+| ------ | ---- | ---- |
 | 路径前缀 | `/v2/*` | `/v3/*` |
 | L0/L1 隔离 | `(team_id, user_id, agent_id)` 三元组 | 三元组 + `session_id`（strict session isolation） |
 | `session_id` | 可选 | L0/L1 必填，缺失返回 422 |
@@ -212,7 +212,7 @@ provenance = logs.get_by_memory_id("memory-id", "l1")
 ```
 
 | SDK 方法 | 接口 | 说明 |
-|----------|------|------|
+| ---------- | ------ | ------ |
 | `create()` | `POST /v3/memory-prompt/create` | 创建 Prompt |
 | `get()` / `list()` / `get_effective()` | `GET /v3/memory-prompt/get` | 查详情、列表或最终生效 Prompt |
 | `update()` | `POST /v3/memory-prompt/update` | 更新名称/内容；相同值为幂等 no-op |
@@ -267,7 +267,7 @@ meta.delete_knowledge(["wiki-docs", "cg-repo-1"], team_id="team-1")
 ```
 
 | 方法 | 接口 | 说明 |
-|------|------|------|
+| ------ | ------ | ------ |
 | `create_knowledge(p)` | `POST /v3/knowledge/create` | upsert 元数据（幂等，重复 post 即覆盖） |
 | `get_knowledge(id, team_id=None)` | `POST /v3/knowledge/get` | 单条查询 |
 | `update_knowledge(p)` | `POST /v3/knowledge/update` | 部分更新（name/summary/service_url/repo_url/branch） |

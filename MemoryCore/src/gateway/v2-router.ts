@@ -241,9 +241,7 @@ export interface V2RouterDeps {
   // auth.serviceId as the instanceId key, falling back to the static getters above.
 
   /** Resolve IMemoryStore + EmbeddingService for a given instanceId (service mode). */
-  resolveStore?: (
-    instanceId: string,
-  ) => Promise<{
+  resolveStore?: (instanceId: string) => Promise<{
     store: IMemoryStore;
     embedding: EmbeddingService | undefined;
   }>;
