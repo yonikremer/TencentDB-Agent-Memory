@@ -13,6 +13,7 @@ initTelemetry();
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { swaggerUI } from "@hono/swagger-ui";
+import { timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -62,6 +63,32 @@ export function createApp() {
 
   // /v3 prefix applied once here — routes define paths without prefix
   const api = new Hono();
+  // Bearer gate for all /v3/* routes. Opt-in via KNOWLEDGE_API_KEY; unset = legacy
+  // open (internal-network assumption) with a loud startup warning. Health (/health)
+  // and docs (/docs, /openapi.json) stay public by design.
+  if (config.apiKey) {
+    const expected = config.apiKey;
+    api.use("*", async (c, next) => {
+      const header = c.req.header("authorization") ?? "";
+      const provided = header.startsWith("Bearer ")
+        ? header.slice(7).trim()
+        : "";
+      const a = Buffer.from(provided);
+      const b = Buffer.from(expected);
+      if (!provided || a.length !== b.length || !timingSafeEqual(a, b)) {
+        return c.json(
+          { code: 401, message: "Unauthorized: invalid Bearer token" },
+          401,
+        );
+      }
+      await next();
+    });
+    log.info("Knowledge /v3/* Bearer auth ENABLED");
+  } else {
+    log.warn(
+      "KNOWLEDGE_API_KEY is NOT set — all /v3/* routes are open to anyone who can reach this port. Set KNOWLEDGE_API_KEY before exposing beyond loopback.",
+    );
+  }
   // Only Agent tool executions are usage telemetry; health/admin/ingest remain excluded.
   api.use(
     "/tools/call",

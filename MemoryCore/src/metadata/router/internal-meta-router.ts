@@ -10,12 +10,18 @@ import {
   resolveRequestId,
   makeRequestId,
 } from "../../gateway/v3-router.js";
-import { formatZodError, type ApiResponseEnvelope } from "../../gateway/v3-schemas.js";
+import {
+  formatZodError,
+  type ApiResponseEnvelope,
+} from "../../gateway/v3-schemas.js";
 import type { Logger } from "../../core/types.js";
 import { MetadataService, MetadataError } from "../service/metadata-service.js";
 import { extractInstanceId, normalizeInstanceIdForRoute } from "./instance.js";
 import { resolvePagination } from "./pagination.js";
-import { internalListUsersByInstanceSchema, initAdminSchema } from "./v3-meta-schemas.js";
+import {
+  internalListUsersByInstanceSchema,
+  initAdminSchema,
+} from "./v3-meta-schemas.js";
 import {
   createMetaApiTraceContext,
   logMetaApiEntry,
@@ -33,7 +39,9 @@ export const V3_INTERNAL_PREFIX = "/v3/internal/meta";
 const TAG = "[META-V3-INTERNAL]";
 
 export interface InternalMetaRouterDeps {
-  getMetadataService: (instanceId: string) => MetadataService | undefined | Promise<MetadataService | undefined>;
+  getMetadataService: (
+    instanceId: string,
+  ) => MetadataService | undefined | Promise<MetadataService | undefined>;
   logger: Logger;
 }
 
@@ -46,21 +54,35 @@ type InternalHandler = (
 
 function bind<S extends ZodType>(
   schema: S,
-  fn: (data: S["_output"], svc: MetadataService, instanceId: string) => Promise<unknown>,
+  fn: (
+    data: S["_output"],
+    svc: MetadataService,
+    instanceId: string,
+  ) => Promise<unknown>,
 ): InternalHandler {
   return async (body, svc, instanceId, requestId) => {
     const parsed = schema.safeParse(body);
-    if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
+    if (!parsed.success)
+      return errorEnvelope(400, formatZodError(parsed.error), requestId);
     const data = await fn(parsed.data as S["_output"], svc, instanceId);
     return successEnvelope(data, requestId);
   };
 }
 
 const routeTable: Record<string, InternalHandler> = {
-  [`${V3_INTERNAL_PREFIX}/user/init-admin`]: bind(initAdminSchema, (d, svc) => svc.initAdminUser(d)),
+  [`${V3_INTERNAL_PREFIX}/user/init-admin`]: bind(initAdminSchema, (d, svc) =>
+    svc.initAdminUser(d),
+  ),
   [`${V3_INTERNAL_PREFIX}/user/list-by-instance`]: bind(
     internalListUsersByInstanceSchema,
     async (d, svc, instanceId) => {
+      // Bulk user dump on shared L1 only: fail closed unless explicitly enabled on ops hosts.
+      if (process.env.TDAI_ALLOW_INTERNAL_USER_DUMP !== "1") {
+        throw new MetadataError(
+          "permission_denied",
+          "user dump disabled (set TDAI_ALLOW_INTERNAL_USER_DUMP=1 on ops hosts)",
+        );
+      }
       const pagination = resolvePagination(d);
       return svc.listUsersByInstance(instanceId, pagination, {
         status: d.status,
@@ -76,13 +98,23 @@ export const V3_INTERNAL_ROUTES = Object.keys(routeTable);
 function mapErrorCode(code: string): number {
   if (code.endsWith("_not_found")) return 404;
   if (code === "permission_denied") return 403;
-  if (code === "missing_instance_id" || code === "invalid_instance_id") return 400;
-  if (code === "already_initialized" || code === "last_system_admin" || code === "member_already_exists") return 409;
-  if (code === "user_limit_exceeded" || code === "team_limit_exceeded") return 409;
+  if (code === "missing_instance_id" || code === "invalid_instance_id")
+    return 400;
+  if (
+    code === "already_initialized" ||
+    code === "last_system_admin" ||
+    code === "member_already_exists"
+  )
+    return 409;
+  if (code === "user_limit_exceeded" || code === "team_limit_exceeded")
+    return 409;
   return 400;
 }
 
-function resolveInstanceId(req: http.IncomingMessage, bodyInstance?: string): string {
+function resolveInstanceId(
+  req: http.IncomingMessage,
+  bodyInstance?: string,
+): string {
   try {
     const fromHeader = extractInstanceId(req.headers);
     if (fromHeader) return fromHeader;
@@ -104,7 +136,8 @@ export async function handleInternalMetaRoute(
   sendJson: (res: http.ServerResponse, status: number, body: unknown) => void,
   deps: InternalMetaRouterDeps,
 ): Promise<boolean> {
-  if (!pathname.startsWith(V3_INTERNAL_PREFIX) || method !== "POST") return false;
+  if (!pathname.startsWith(V3_INTERNAL_PREFIX) || method !== "POST")
+    return false;
 
   const handler = routeTable[pathname];
   if (!handler) {
@@ -112,8 +145,14 @@ export async function handleInternalMetaRoute(
     return true;
   }
 
-  const requestId = resolveRequestId(req.headers as Record<string, string | string[] | undefined>);
-  const traceCtx = createMetaApiTraceContext({ route: pathname, requestId, internal: true });
+  const requestId = resolveRequestId(
+    req.headers as Record<string, string | string[] | undefined>,
+  );
+  const traceCtx = createMetaApiTraceContext({
+    route: pathname,
+    requestId,
+    internal: true,
+  });
 
   try {
     const body = await parseJsonBody<Record<string, unknown>>(req);
@@ -121,7 +160,9 @@ export async function handleInternalMetaRoute(
       typeof body.instance_id === "string" ? body.instance_id : undefined;
     let instanceId: string;
     try {
-      instanceId = normalizeInstanceIdForRoute(resolveInstanceId(req, bodyInstance));
+      instanceId = normalizeInstanceIdForRoute(
+        resolveInstanceId(req, bodyInstance),
+      );
     } catch (err) {
       if (err instanceof MetadataError) {
         const code = mapErrorCode(err.code);
@@ -146,7 +187,11 @@ export async function handleInternalMetaRoute(
         message: "MetadataService not available",
         body,
       });
-      sendJson(res, 503, errorEnvelope(503, "MetadataService not available", requestId));
+      sendJson(
+        res,
+        503,
+        errorEnvelope(503, "MetadataService not available", requestId),
+      );
       return true;
     }
 
@@ -163,7 +208,12 @@ export async function handleInternalMetaRoute(
         logMetaApiEntry(traceCtx, body);
         deps.logger.debug?.(`${TAG} ${pathname} instance=${instanceId}`);
         const envelope = await handler(body, svc, instanceId, requestId);
-        const httpStatus = envelope.code === 0 ? 200 : envelope.code >= 400 && envelope.code < 600 ? envelope.code : 200;
+        const httpStatus =
+          envelope.code === 0
+            ? 200
+            : envelope.code >= 400 && envelope.code < 600
+              ? envelope.code
+              : 200;
         logMetaApiResponse(traceCtx, envelope, httpStatus);
         sendJson(res, httpStatus, envelope);
       },

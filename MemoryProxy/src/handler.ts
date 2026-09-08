@@ -30,14 +30,23 @@ import {
   reportAnalyzerTrace,
   type ForwardTarget,
 } from "./guard-adapter.js";
-import { hasCostGuardMarker, matchWhitelistEndpoint } from "./routes/whitelist.js";
+import {
+  hasCostGuardMarker,
+  matchWhitelistEndpoint,
+} from "./routes/whitelist.js";
 import { writeRequestLog } from "./requestLog.js";
-import { prepareUpstreamRequest, notifyUpstreamResponse } from "./request-prepare-adapter.js";
-import { tryReportCreditFromPath, extractSpaceIdFromPath } from "./credit-reporter.js";
+import {
+  prepareUpstreamRequest,
+  notifyUpstreamResponse,
+} from "./request-prepare-adapter.js";
+import {
+  tryReportCreditFromPath,
+  extractSpaceIdFromPath,
+} from "./credit-reporter.js";
 import { resolveModelId, isModelInPricing } from "./pricing.js";
 import { inspectAndRecord } from "./identity.js";
 import { writeFailedReportRaw } from "./clickhouse.js";
-import { verifyUserKey } from "./auth.js";
+import { verifyUserKey, isAuthEnabled } from "./auth.js";
 import { matchSystemUserByUserId, hasSystemUsers } from "./systemUser.js";
 import { handleSystemUserPassthrough } from "./systemUserPassthrough.js";
 import { TdaiClient } from "./tdai/client.js";
@@ -47,7 +56,10 @@ import { trackWrite, withL0Retry } from "./tdai/pending-writes.js";
 import type { TdaiIdentity, TdaiMessage } from "./tdai/types.js";
 import { triggerSkillExtractIfReady } from "./skill/handler-glue.js";
 import { emitModelIntentTelemetry } from "./session/model-intent-telemetry.js";
-import { isExtractionAllowed, logExtractionSkipped } from "./extraction-gate.js";
+import {
+  isExtractionAllowed,
+  logExtractionSkipped,
+} from "./extraction-gate.js";
 import {
   enforceRateLimit,
   isRateLimitExceededError,
@@ -60,8 +72,16 @@ import {
  * land on the correct kernel tenant. Falls back to config when the request
  * carries no spaceId (older single-tenant deployments).
  */
-function createTdaiClient(config: ProxyConfig, spaceId?: string): TdaiClient | null {
-  if (!config.tdai.enabled || !config.tdai.memory.enabled || !config.tdai.endpoint) return null;
+function createTdaiClient(
+  config: ProxyConfig,
+  spaceId?: string,
+): TdaiClient | null {
+  if (
+    !config.tdai.enabled ||
+    !config.tdai.memory.enabled ||
+    !config.tdai.endpoint
+  )
+    return null;
   return new TdaiClient({
     enabled: config.tdai.enabled && config.tdai.memory.enabled,
     endpoint: config.tdai.endpoint,
@@ -101,11 +121,22 @@ function flattenMessagesForOpik(messages: unknown[]): unknown[] {
           const fn = t.function as Record<string, unknown> | undefined;
           let argsStr = "";
           if (fn?.arguments) {
-            argsStr = typeof fn.arguments === "string" ? fn.arguments : JSON.stringify(fn.arguments);
+            argsStr =
+              typeof fn.arguments === "string"
+                ? fn.arguments
+                : JSON.stringify(fn.arguments);
           }
           result.push({
             role: "assistant",
-            content: JSON.stringify({ tool_call_id: t.id, tool_name: fn?.name ?? "unknown", arguments: argsStr }, null, 2),
+            content: JSON.stringify(
+              {
+                tool_call_id: t.id,
+                tool_name: fn?.name ?? "unknown",
+                arguments: argsStr,
+              },
+              null,
+              2,
+            ),
           });
         }
         continue;
@@ -132,10 +163,15 @@ function flattenMessagesForOpik(messages: unknown[]): unknown[] {
       }
       for (const tc of toolCalls) {
         const t = tc as Record<string, unknown>;
-        const inputStr = typeof t.input === "string" ? t.input : JSON.stringify(t.input);
+        const inputStr =
+          typeof t.input === "string" ? t.input : JSON.stringify(t.input);
         result.push({
           role: "assistant",
-          content: JSON.stringify({ tool_call_id: t.id, tool_name: t.name, input: inputStr }, null, 2),
+          content: JSON.stringify(
+            { tool_call_id: t.id, tool_name: t.name, input: inputStr },
+            null,
+            2,
+          ),
         });
       }
       const topLevelToolCalls = m.tool_calls;
@@ -145,11 +181,22 @@ function flattenMessagesForOpik(messages: unknown[]): unknown[] {
           const fn = t.function as Record<string, unknown> | undefined;
           let argsStr = "";
           if (fn?.arguments) {
-            argsStr = typeof fn.arguments === "string" ? fn.arguments : JSON.stringify(fn.arguments);
+            argsStr =
+              typeof fn.arguments === "string"
+                ? fn.arguments
+                : JSON.stringify(fn.arguments);
           }
           result.push({
             role: "assistant",
-            content: JSON.stringify({ tool_call_id: t.id, tool_name: fn?.name ?? "unknown", arguments: argsStr }, null, 2),
+            content: JSON.stringify(
+              {
+                tool_call_id: t.id,
+                tool_name: fn?.name ?? "unknown",
+                arguments: argsStr,
+              },
+              null,
+              2,
+            ),
           });
         }
       }
@@ -183,15 +230,25 @@ function flattenMessagesForOpik(messages: unknown[]): unknown[] {
         }
         result.push({
           role: "tool",
-          content: JSON.stringify({ tool_call_id: t.tool_use_id, is_error: t.is_error ?? false, result: resultContent }, null, 2),
+          content: JSON.stringify(
+            {
+              tool_call_id: t.tool_use_id,
+              is_error: t.is_error ?? false,
+              result: resultContent,
+            },
+            null,
+            2,
+          ),
         });
       }
     } else {
-      const merged = content.map((b: unknown) => {
-        const block = b as Record<string, unknown>;
-        if (block.type === "text") return block.text as string;
-        return JSON.stringify(block);
-      }).join("\n");
+      const merged = content
+        .map((b: unknown) => {
+          const block = b as Record<string, unknown>;
+          if (block.type === "text") return block.text as string;
+          return JSON.stringify(block);
+        })
+        .join("\n");
       result.push({ role, content: merged });
     }
   }
@@ -213,7 +270,9 @@ const SKIP_RESPONSE_HEADERS = new Set([
 ]);
 
 /** Extract usage object from a block of OpenAI SSE text. */
-export function extractSseUsage(sseText: string): Record<string, unknown> | null {
+export function extractSseUsage(
+  sseText: string,
+): Record<string, unknown> | null {
   let lastUsage: Record<string, unknown> | null = null;
 
   for (const line of sseText.split("\n")) {
@@ -293,6 +352,28 @@ function buildUpstreamHeaders(
 /**
  * Forward request to upstream and handle retry if retryTarget is set.
  */
+/**
+ * Fail-closed check for outbound upstream URLs.
+ *
+ * Forward targets are built exclusively from operator config (upstream.url /
+ * cost-guard retry targets), never from caller input — but a typo like
+ * `upstream.url: file:///etc/passwd` must not turn the proxy into a generic
+ * fetcher. Only http(s) are ever valid upstream schemes.
+ */
+function assertTrustedUpstreamUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`Refusing to forward to unparseable upstream URL: ${url}`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(
+      `Refusing to forward to non-http(s) upstream URL: ${parsed.protocol}//…`,
+    );
+  }
+}
+
 async function forwardWithRetry(
   target: ForwardTarget,
   upstreamHeaders: Record<string, string>,
@@ -317,7 +398,14 @@ async function forwardWithRetry(
       fs.mkdirSync(dir, { recursive: true });
       const ts = new Date().toISOString().replace(/[:.]/g, "-");
       const fn = `${dir}/${ts}-${sessionKeyForDebug ?? "nosid"}.json`;
-      fs.writeFileSync(fn, JSON.stringify({ url: target.url, headers: upstreamHeaders, body: upstreamBody }, null, 2));
+      fs.writeFileSync(
+        fn,
+        JSON.stringify(
+          { url: target.url, headers: upstreamHeaders, body: upstreamBody },
+          null,
+          2,
+        ),
+      );
       console.log(`[dump-body] wrote ${fn}`);
     } catch (e) {
       console.log(`[dump-body] error: ${(e as Error).message}`);
@@ -328,21 +416,37 @@ async function forwardWithRetry(
   // The openai protocol side has no cache_control concept — only two md5s are computed (sys + the whole messages array).
   if (process.env.PROXY_DEBUG_DUMP_OUTBOUND_MD5) {
     try {
-      const msgs = (upstreamBody as { messages?: Array<{ role?: string; content?: unknown }> }).messages ?? [];
+      const msgs =
+        (
+          upstreamBody as {
+            messages?: Array<{ role?: string; content?: unknown }>;
+          }
+        ).messages ?? [];
       const sysMsg = msgs.find((m) => m.role === "system");
-      const sysStr = typeof sysMsg?.content === "string"
-        ? sysMsg.content
-        : sysMsg?.content ? JSON.stringify(sysMsg.content) : "";
+      const sysStr =
+        typeof sysMsg?.content === "string"
+          ? sysMsg.content
+          : sysMsg?.content
+            ? JSON.stringify(sysMsg.content)
+            : "";
       const msgsFullStr = JSON.stringify(msgs);
-      const sysMd5 = createHash("md5").update(sysStr).digest("hex").slice(0, 12);
-      const msgsFullMd5 = createHash("md5").update(msgsFullStr).digest("hex").slice(0, 12);
+      const sysMd5 = createHash("md5")
+        .update(sysStr)
+        .digest("hex")
+        .slice(0, 12);
+      const msgsFullMd5 = createHash("md5")
+        .update(msgsFullStr)
+        .digest("hex")
+        .slice(0, 12);
       // eslint-disable-next-line no-console
       console.log(
         `[outbound-md5] session=${sessionKeyForDebug ?? "?"} protocol=openai sysBytes=${sysStr.length} sysMd5=${sysMd5} msgsCount=${msgs.length} msgsFullBytes=${msgsFullStr.length} msgsFullMd5=${msgsFullMd5}`,
       );
     } catch (e) {
       // eslint-disable-next-line no-console
-      console.log(`[outbound-md5] session=${sessionKeyForDebug ?? "?"} <error: ${(e as Error).message}>`);
+      console.log(
+        `[outbound-md5] session=${sessionKeyForDebug ?? "?"} <error: ${(e as Error).message}>`,
+      );
     }
   }
 
@@ -363,6 +467,7 @@ async function forwardWithRetry(
       protocol: "openai",
     });
   }
+  assertTrustedUpstreamUrl(target.url);
   try {
     upstreamResp = await fetch(target.url, fetchOpts);
   } catch (err: unknown) {
@@ -378,12 +483,19 @@ async function forwardWithRetry(
     pipe.forwardDone(upstreamResp.status);
   }
 
-  const shouldRetry = target.retryTarget &&
-    (forwardFailed || (upstreamResp && upstreamResp.status >= 400 && upstreamResp.status < 500));
+  const shouldRetry =
+    target.retryTarget &&
+    (forwardFailed ||
+      (upstreamResp &&
+        upstreamResp.status >= 400 &&
+        upstreamResp.status < 500));
 
   if (shouldRetry && target.retryTarget) {
     const reason = forwardFailed ? "timeout/error" : `${upstreamResp!.status}`;
-    pipe.info("RETRY", `Routed model failed (${reason}), retryUrl=${target.retryTarget.url} model=${target.retryTarget.model}`);
+    pipe.info(
+      "RETRY",
+      `Routed model failed (${reason}), retryUrl=${target.retryTarget.url} model=${target.retryTarget.model}`,
+    );
 
     const retryBody = { ...originalBody, model: target.retryTarget.model };
     const retryHeaders: Record<string, string> = { ...originalHeaders };
@@ -409,6 +521,7 @@ async function forwardWithRetry(
       if (forwardTimeoutMs > 0) {
         retryFetchOpts.signal = AbortSignal.timeout(forwardTimeoutMs);
       }
+      assertTrustedUpstreamUrl(target.retryTarget.url);
       upstreamResp = await fetch(target.retryTarget.url, retryFetchOpts);
       if (upstreamResp.ok) {
         pipe.info("RETRY_SUCCESS", `Retry returned ${upstreamResp.status}`);
@@ -418,8 +531,14 @@ async function forwardWithRetry(
       return { resp: upstreamResp, retried: true };
     } catch (retryErr: unknown) {
       if (isRateLimitExceededError(retryErr)) throw retryErr;
-      if (retryErr instanceof DOMException && retryErr.name === "TimeoutError") {
-        pipe.error("RETRY_FORWARD", `Timeout after ${forwardTimeoutMs / 1000}s`);
+      if (
+        retryErr instanceof DOMException &&
+        retryErr.name === "TimeoutError"
+      ) {
+        pipe.error(
+          "RETRY_FORWARD",
+          `Timeout after ${forwardTimeoutMs / 1000}s`,
+        );
       } else {
         pipe.error("RETRY_FORWARD", retryErr);
       }
@@ -450,12 +569,18 @@ export async function handleChatCompletions(
   // Verify BEFORE parsing the body so a rejected caller never triggers body
   // parsing or the alias-gate. `earlyVerify.userId` is reused later for
   // both the systemUser short-circuit and the normal pipeline.
-  const earlyAuthHeader = c.req.header("authorization") ?? c.req.header("Authorization") ?? "";
+  const earlyAuthHeader =
+    c.req.header("authorization") ?? c.req.header("Authorization") ?? "";
   const earlyApiKey = extractBearerToken(earlyAuthHeader);
   const earlySpaceId = extractSpaceIdFromPath(c.req.path) ?? "";
   const earlyVerify = await verifyUserKey(earlyApiKey, earlySpaceId);
   if (earlyVerify.rejected) {
-    return c.json({ error: `Authentication failed: ${earlyVerify.rejectReason ?? "unknown"}` }, 401);
+    return c.json(
+      {
+        error: `Authentication failed: ${earlyVerify.rejectReason ?? "unknown"}`,
+      },
+      401,
+    );
   }
 
   // ── Parse body ──────────────────────────────────────────────────────────
@@ -481,9 +606,15 @@ export async function handleChatCompletions(
       const ts = new Date().toISOString().replace(/[:.]/g, "-");
       const hdrs: Record<string, string> = {};
       for (const [k, v] of c.req.raw.headers.entries()) hdrs[k] = v;
-      const sid = hdrs["x-deepseek-harness-session-id"] ?? hdrs["x-session-id"] ?? "nosid";
+      const sid =
+        hdrs["x-deepseek-harness-session-id"] ??
+        hdrs["x-session-id"] ??
+        "nosid";
       const fn = `${dir}/${ts}-${sid}.json`;
-      fs.writeFileSync(fn, JSON.stringify({ path: c.req.path, headers: hdrs, body }, null, 2));
+      fs.writeFileSync(
+        fn,
+        JSON.stringify({ path: c.req.path, headers: hdrs, body }, null, 2),
+      );
       console.log(`[dump-inbound] wrote ${fn}`);
     } catch (e) {
       console.log(`[dump-inbound] error: ${(e as Error).message}`);
@@ -493,78 +624,85 @@ export async function handleChatCompletions(
   // ── DEBUG: dump tools/instructions/metadata (Phase 1 workbuddy research) ──
   // Enabled only when sessionInit.debugVerboseLogging=true; off by default in production.
   if (config.sessionInit?.debugVerboseLogging) {
-  try {
-    const dbgPath = c.req.path;
-    if (dbgPath.includes("/workbuddy/")) {
-      // Keep only trimmed-down fields (do not dump the raw tools array, to avoid over-length truncation)
-      const dumpKeys = [
-        "tool_choice",
-        "toolset",
-        "tool_config",
-        "response_format",
-        "metadata",
-        "client_metadata",
-      ];
-      const dump: Record<string, unknown> = { path: dbgPath, model: body.model };
-      for (const k of dumpKeys) {
-        if (k in body) dump[k] = (body as Record<string, unknown>)[k];
-      }
-      const toolsField = (body as Record<string, unknown>).tools;
-      if (Array.isArray(toolsField)) {
-        dump.tools_summary = toolsField.map((t: unknown) => {
-          const tt = t as Record<string, unknown>;
-          const fn = (tt as any).function ?? {};
-          const paramProps = fn.parameters?.properties;
-          return {
-            type: tt.type,
-            name: (tt as any).name ?? fn.name,
-            description:
-              typeof (tt as any).description === "string"
-                ? String((tt as any).description).slice(0, 400)
-                : typeof fn.description === "string"
-                  ? String(fn.description).slice(0, 400)
+    try {
+      const dbgPath = c.req.path;
+      if (dbgPath.includes("/workbuddy/")) {
+        // Keep only trimmed-down fields (do not dump the raw tools array, to avoid over-length truncation)
+        const dumpKeys = [
+          "tool_choice",
+          "toolset",
+          "tool_config",
+          "response_format",
+          "metadata",
+          "client_metadata",
+        ];
+        const dump: Record<string, unknown> = {
+          path: dbgPath,
+          model: body.model,
+        };
+        for (const k of dumpKeys) {
+          if (k in body) dump[k] = (body as Record<string, unknown>)[k];
+        }
+        const toolsField = (body as Record<string, unknown>).tools;
+        if (Array.isArray(toolsField)) {
+          dump.tools_summary = toolsField.map((t: unknown) => {
+            const tt = t as Record<string, unknown>;
+            const fn = (tt as any).function ?? {};
+            const paramProps = fn.parameters?.properties;
+            return {
+              type: tt.type,
+              name: (tt as any).name ?? fn.name,
+              description:
+                typeof (tt as any).description === "string"
+                  ? String((tt as any).description).slice(0, 400)
+                  : typeof fn.description === "string"
+                    ? String(fn.description).slice(0, 400)
+                    : undefined,
+              param_keys:
+                paramProps && typeof paramProps === "object"
+                  ? Object.keys(paramProps)
                   : undefined,
-            param_keys: paramProps && typeof paramProps === "object"
-              ? Object.keys(paramProps)
-              : undefined,
-          };
-        });
-      }
-      // If messages[0] is a system message, dump it too (it may declare tool usage)
-      const msgs = (body as Record<string, unknown>).messages;
-      if (Array.isArray(msgs) && msgs.length > 0) {
-        const first = msgs[0] as Record<string, unknown>;
-        if (first?.role === "system") {
-          const content = typeof first.content === "string"
-            ? first.content
-            : JSON.stringify(first.content);
-          dump.system_head = content.slice(0, 2000);
-          dump.system_length = content.length;
+            };
+          });
         }
-        dump.messages_count = msgs.length;
-      }
-      console.log(
-        `[wb-tools-dump] path=${dbgPath} tools_count=${Array.isArray(toolsField) ? toolsField.length : 0}`,
-      );
-      console.log(`[wb-tools-dump-json] ${JSON.stringify(dump).slice(0, 60000)}`);
+        // If messages[0] is a system message, dump it too (it may declare tool usage)
+        const msgs = (body as Record<string, unknown>).messages;
+        if (Array.isArray(msgs) && msgs.length > 0) {
+          const first = msgs[0] as Record<string, unknown>;
+          if (first?.role === "system") {
+            const content =
+              typeof first.content === "string"
+                ? first.content
+                : JSON.stringify(first.content);
+            dump.system_head = content.slice(0, 2000);
+            dump.system_length = content.length;
+          }
+          dump.messages_count = msgs.length;
+        }
+        console.log(
+          `[wb-tools-dump] path=${dbgPath} tools_count=${Array.isArray(toolsField) ? toolsField.length : 0}`,
+        );
+        console.log(
+          `[wb-tools-dump-json] ${JSON.stringify(dump).slice(0, 60000)}`,
+        );
 
-      // Extra: separately dump AskUserQuestion's full schema (key Phase 1 research)
-      if (Array.isArray(toolsField)) {
-        const askTool = toolsField.find((t: unknown) => {
-          const tt = t as any;
-          const name = tt?.name ?? tt?.function?.name;
-          return name === "AskUserQuestion";
-        });
-        if (askTool) {
-          console.log(
-            `[wb-ask-user-schema] ${JSON.stringify(askTool).slice(0, 20000)}`,
-          );
+        // Extra: separately dump AskUserQuestion's full schema (key Phase 1 research)
+        if (Array.isArray(toolsField)) {
+          const askTool = toolsField.find((t: unknown) => {
+            const tt = t as any;
+            const name = tt?.name ?? tt?.function?.name;
+            return name === "AskUserQuestion";
+          });
+          if (askTool) {
+            console.log(
+              `[wb-ask-user-schema] ${JSON.stringify(askTool).slice(0, 20000)}`,
+            );
+          }
         }
       }
+    } catch (e) {
+      console.log(`[wb-tools-dump] error: ${String(e)}`);
     }
-  } catch (e) {
-    console.log(`[wb-tools-dump] error: ${String(e)}`);
-  }
   } // debugVerboseLogging gate
 
   // ── Model gate: reject requests whose `model` is not a registered display name ──
@@ -577,7 +715,8 @@ export async function handleChatCompletions(
   // Internal and external callers are treated alike — internal callers must also
   // request by `modelName`, ensuring upstream ids and billing/observability keys
   // align across all traffic.
-  const requestedModel = typeof body.model === "string" ? body.model : "unknown";
+  const requestedModel =
+    typeof body.model === "string" ? body.model : "unknown";
   if (!isModelInPricing(config.creditPricing, requestedModel)) {
     return c.json(
       {
@@ -597,7 +736,8 @@ export async function handleChatCompletions(
   // routing / logging / forwarding, so model_id stays the canonical identity
   // across the whole pipeline. No-op when `model` is already a real id/unknown.
   const modelId = resolveModelId(config.creditPricing, requestedModel);
-  const modelAliasApplied = typeof body.model === "string" && modelId !== requestedModel;
+  const modelAliasApplied =
+    typeof body.model === "string" && modelId !== requestedModel;
   if (modelAliasApplied) body.model = modelId;
 
   // ── System-user short-circuit ────────────────────────────────────────────
@@ -623,23 +763,37 @@ export async function handleChatCompletions(
   // [debug] Log last 3 message roles and content types to diagnose session-init issues
   if (config.sessionInit?.enabled && messages.length > 2) {
     const tail = messages.slice(-3);
-    const summary = tail.map((m: any, idx: number) => {
-      const role = m.role;
-      const ct = m.content;
-      const contentType = typeof ct === "string" ? `string(${ct.slice(0, 80)})` :
-        Array.isArray(ct) ? `array[${ct.map((b: any) => b.type).join(",")}]` :
-        ct === null ? "null" : typeof ct;
-      const tcid = m.tool_call_id;
-      const tcs = m.tool_calls ? `tool_calls[${m.tool_calls.map((t: any) => t.id).join(",")}]` : "";
-      return `[${idx}]role=${role} content=${contentType} tool_call_id=${tcid} ${tcs}`;
-    }).join(" | ");
-    console.log(`[session-init-debug] raw-tail msgs=${messages.length} ${summary}`);
+    const summary = tail
+      .map((m: any, idx: number) => {
+        const role = m.role;
+        const ct = m.content;
+        const contentType =
+          typeof ct === "string"
+            ? `string(${ct.slice(0, 80)})`
+            : Array.isArray(ct)
+              ? `array[${ct.map((b: any) => b.type).join(",")}]`
+              : ct === null
+                ? "null"
+                : typeof ct;
+        const tcid = m.tool_call_id;
+        const tcs = m.tool_calls
+          ? `tool_calls[${m.tool_calls.map((t: any) => t.id).join(",")}]`
+          : "";
+        return `[${idx}]role=${role} content=${contentType} tool_call_id=${tcid} ${tcs}`;
+      })
+      .join(" | ");
+    console.log(
+      `[session-init-debug] raw-tail msgs=${messages.length} ${summary}`,
+    );
   }
 
   // ── Resolve agent source from URL path (e.g. /claude-code/v1/chat/completions) ──
   const pathParts = c.req.path.split("/").filter(Boolean);
-  const agentFromPath = pathParts[0] && !["v1", "proxy", "skill-bridge", "memory-bridge"].includes(pathParts[0])
-    ? pathParts[0] : undefined;
+  const agentFromPath =
+    pathParts[0] &&
+    !["v1", "proxy", "skill-bridge", "memory-bridge"].includes(pathParts[0])
+      ? pathParts[0]
+      : undefined;
   const agentSource = agentFromPath ?? "claude-code";
 
   // ── Identity inspection ──────────────────────────────────────────────────
@@ -647,10 +801,17 @@ export async function handleChatCompletions(
   for (const [k, v] of c.req.raw.headers.entries()) {
     reqHeaders[k] = v;
   }
-  inspectAndRecord("POST", c.req.path, reqHeaders, body as Record<string, unknown>, agentSource);
+  inspectAndRecord(
+    "POST",
+    c.req.path,
+    reqHeaders,
+    body as Record<string, unknown>,
+    agentSource,
+  );
 
   // ── Resolve apiKey → project name ──────────────────────────────────────
-  const authHeader = c.req.header("authorization") ?? c.req.header("Authorization") ?? "";
+  const authHeader =
+    c.req.header("authorization") ?? c.req.header("Authorization") ?? "";
   const apiKey = extractBearerToken(authHeader);
   let keyId = apiKey ? apiKeyToKeyId(apiKey) : "unknown";
 
@@ -663,28 +824,27 @@ export async function handleChatCompletions(
   // ── Session key: prefer conversation header, fallback to agent profile ───────────
   const { resolveConversationId } = await import("./session/session-key.js");
   const conversationId = resolveConversationId(c);
-  const sessionKey = conversationId ?? resolveSessionKey(config, lcHeaders, c.req.path, body, keyId);
+  const sessionKey =
+    conversationId ??
+    resolveSessionKey(config, lcHeaders, c.req.path, body, keyId);
 
   // ── Auth verification (user_key → user_id) ──────────────────────────────────────
   // Reuse the early verify result — it ran before body parse to decide the
   // system-user short-circuit; running verify again here would double the
   // network round-trip for every request.
   const spaceId = earlySpaceId;
-  let userId = earlyVerify.userId
-    || c.req.header("x-user-id")
-    || c.req.header("x-cb-user-id")
-    || c.req.header("x-tdai-user-token")
-    || "";
-  // DEBUG override: the tokenhub-uid and kernel-uid sent by the client often differ
-  // during local joint debugging. Once sessionInit.debugForceUserId is configured,
-  // substitute the real kernel user_id so the CB state machine can pull assets via
-  // kernel /team/list and pop the form normally.
-  const debugForceUserId = config.sessionInit?.debugForceUserId;
-  if (debugForceUserId) {
-    console.log(
-      `[handler] DEBUG override userId ${userId || "<empty>"} → ${debugForceUserId}`,
-    );
-    userId = debugForceUserId;
+  // ponytail: when auth is on, trust only the verified id; header fallbacks are spoofable.
+  // When auth is off (local dev), headers are accepted but keyId stays hash-based.
+  let userId: string;
+  if (isAuthEnabled()) {
+    userId = earlyVerify.userId || "";
+  } else {
+    userId =
+      earlyVerify.userId ||
+      c.req.header("x-user-id") ||
+      c.req.header("x-cb-user-id") ||
+      c.req.header("x-tdai-user-token") ||
+      "";
   }
   if (userId) keyId = userId;
 
@@ -703,10 +863,16 @@ export async function handleChatCompletions(
   // returns "main", so their behavior is unchanged.
   const { resolveAgentAdapter } = await import("./agent-adapters/index.js");
   const _adapter = resolveAgentAdapter(agentSource);
-  const _requestKind = _adapter.classifyRequest(body as Record<string, unknown>, c.req.path, lcHeaders);
+  const _requestKind = _adapter.classifyRequest(
+    body as Record<string, unknown>,
+    c.req.path,
+    lcHeaders,
+  );
   const isAuxiliary = _requestKind === "auxiliary";
   if (isAuxiliary) {
-    console.log(`[request-classify] session=${sessionKey} agent=${agentSource} → auxiliary (skip session-init/mem/injection/L0/skill)`);
+    console.log(
+      `[request-classify] session=${sessionKey} agent=${agentSource} → auxiliary (skip session-init/mem/injection/L0/skill)`,
+    );
   }
 
   // ── dsh (deepseek-harness) CLI headless / no-preset bypass ──────────────
@@ -726,17 +892,22 @@ export async function handleChatCompletions(
   // session-init branch (see the opencode-specific block below), so it does not need
   // the headless bypass here — opencode can consume plain-text mem-command responses
   // and also needs injection / L0 / skill extraction; it just cannot pop a form.
-  const _dshHeadless = agentSource === "dsh" && (() => {
-    const tools = (body as { tools?: unknown }).tools;
-    if (!Array.isArray(tools) || tools.length === 0) return false;
-    return !tools.some((t) => {
-      const fn = (t as { function?: { name?: string }; name?: string })?.function;
-      const n = fn?.name ?? (t as { name?: string })?.name;
-      return n === "ask_user_question";
-    });
-  })();
+  const _dshHeadless =
+    agentSource === "dsh" &&
+    (() => {
+      const tools = (body as { tools?: unknown }).tools;
+      if (!Array.isArray(tools) || tools.length === 0) return false;
+      return !tools.some((t) => {
+        const fn = (t as { function?: { name?: string }; name?: string })
+          ?.function;
+        const n = fn?.name ?? (t as { name?: string })?.name;
+        return n === "ask_user_question";
+      });
+    })();
   if (_dshHeadless) {
-    console.log(`[request-classify] session=${sessionKey} agent=dsh headless/no-preset (no ask_user_question tool) → bypass session-init, direct passthrough`);
+    console.log(
+      `[request-classify] session=${sessionKey} agent=dsh headless/no-preset (no ask_user_question tool) → bypass session-init, direct passthrough`,
+    );
   }
 
   // ── mem:session-reset pre-hook ──
@@ -747,17 +918,23 @@ export async function handleChatCompletions(
   const _headerOnlyAgents = new Set(["hermes", "openclaw"]);
   const _noFormAgent = _headerOnlyAgents.has(agentSource) || _dshHeadless;
   if (config.memCommand?.enabled && !isAuxiliary && _noFormAgent) {
-    const { isSessionResetCommand } = await import("./mem-command/pre-intercept.js");
+    const { isSessionResetCommand } = await import(
+      "./mem-command/pre-intercept.js"
+    );
     if (isSessionResetCommand(body as Record<string, unknown>, agentSource)) {
-      const { buildMemResponse } = await import("./mem-command/response-builder.js");
-      console.log(`[mem-command:pre] session-reset unsupported for agent=${agentSource} dshHeadless=${_dshHeadless}`);
+      const { buildMemResponse } = await import(
+        "./mem-command/response-builder.js"
+      );
+      console.log(
+        `[mem-command:pre] session-reset unsupported for agent=${agentSource} dshHeadless=${_dshHeadless}`,
+      );
       const msg = _headerOnlyAgents.has(agentSource)
-        ? `⚠️ mem:session-reset is not supported for the ${agentSource} client.\n\n`
-          + `${agentSource} preselects its identity via the x-team-id / x-agent-id / x-task-id request headers, so there is no interactive form entry.\n`
-          + `Switch Team / Agent / Task by changing those request headers directly in your client configuration.`
-        : "⚠️ mem:session-reset is not supported in dsh headless mode.\n\n"
-          + "In headless / no-preset scenarios the dsh client carries no ask_user_question tool, so the asset-selection form cannot be shown.\n"
-          + "Please use it in a dsh environment that ships the ask_user_question preset.";
+        ? `⚠️ mem:session-reset is not supported for the ${agentSource} client.\n\n` +
+          `${agentSource} preselects its identity via the x-team-id / x-agent-id / x-task-id request headers, so there is no interactive form entry.\n` +
+          `Switch Team / Agent / Task by changing those request headers directly in your client configuration.`
+        : "⚠️ mem:session-reset is not supported in dsh headless mode.\n\n" +
+          "In headless / no-preset scenarios the dsh client carries no ask_user_question tool, so the asset-selection form cannot be shown.\n" +
+          "Please use it in a dsh environment that ships the ask_user_question preset.";
       return buildMemResponse(msg, {
         protocol: "openai",
         stream: isStream,
@@ -765,65 +942,124 @@ export async function handleChatCompletions(
       });
     }
   }
-  if (config.memCommand?.enabled && !isAuxiliary && !_dshHeadless && !_headerOnlyAgents.has(agentSource)) {
-    const { isSessionResetCommand } = await import("./mem-command/pre-intercept.js");
+  if (
+    config.memCommand?.enabled &&
+    !isAuxiliary &&
+    !_dshHeadless &&
+    !_headerOnlyAgents.has(agentSource)
+  ) {
+    const { isSessionResetCommand } = await import(
+      "./mem-command/pre-intercept.js"
+    );
     if (isSessionResetCommand(body as Record<string, unknown>, agentSource)) {
-      const { isMemCommandAllowed, parseMemCommand } = await import("./mem-command/index.js");
-      const memCmd = parseMemCommand(body as Record<string, unknown>, agentSource);
+      const { isMemCommandAllowed, parseMemCommand } = await import(
+        "./mem-command/index.js"
+      );
+      const memCmd = parseMemCommand(
+        body as Record<string, unknown>,
+        agentSource,
+      );
       if (memCmd && isMemCommandAllowed(config.memCommand, memCmd.command)) {
         const { getSessionStore } = await import("./session/store.js");
         const store = getSessionStore();
         const compositeKey = `${agentSource}:${sessionKey}`;
-        store.bind(compositeKey, { userId: userId || "anonymous", agentSource, sessionId: sessionKey, spaceId });
+        store.bind(compositeKey, {
+          userId: userId || "anonymous",
+          agentSource,
+          sessionId: sessionKey,
+          spaceId,
+        });
 
         // ── Force-archive the old agent's skill buffer (best-effort) ──
         // Before the reset, the old agent's accumulated conversation fragments may not
         // have reached the threshold; without a flush they would be lost permanently.
         const oldState = store.get(compositeKey);
-        if (oldState?.status === "initialized" && oldState.sessionInfo && config.coreSkill?.endpoint) {
-          const si = oldState.sessionInfo as Record<string, string>;
+        if (
+          oldState?.status === "initialized" &&
+          oldState.sessionInfo &&
+          config.coreSkill?.endpoint
+        ) {
+          // SAFETY: sessionInfo is a JSON-decoded plain object at runtime; treating it as a
+          // string record for field extraction is sound (all reads are guarded by truthiness).
+          const si = oldState.sessionInfo as unknown as Record<string, string>;
           if (si.space_id && si.user_id && si.team_id && si.agent_id) {
-            import("./skill/core-client.js").then(({ getCoreSkillClient }) => {
-              const client = getCoreSkillClient(config.coreSkill!);
-              client.forceArchive(
-                {
-                  space_id: si.space_id,
-                  user_id: si.user_id,
-                  team_id: si.team_id,
-                  agent_id: si.agent_id,
-                  session_id: sessionKey,
-                  task_id: si.task_id || undefined,
-                  reason: "session-reset",
-                },
-                { serviceId: si.space_id },
-              ).then((res) => {
-                console.log(`[session-reset] force-archive old buffer: status=${res.status} session=${sessionKey} agent=${si.agent_id}`);
-              }).catch((err) => {
-                console.warn(`[session-reset] force-archive failed (best-effort): ${err instanceof Error ? err.message : String(err)}`);
-              });
-            }).catch(() => {});
+            import("./skill/core-client.js")
+              .then(({ getCoreSkillClient }) => {
+                const client = getCoreSkillClient(config.coreSkill!);
+                client
+                  .forceArchive(
+                    {
+                      space_id: si.space_id,
+                      user_id: si.user_id,
+                      team_id: si.team_id,
+                      agent_id: si.agent_id,
+                      session_id: sessionKey,
+                      task_id: si.task_id || undefined,
+                      reason: "session-reset",
+                    },
+                    { serviceId: si.space_id },
+                  )
+                  .then((res) => {
+                    console.log(
+                      `[session-reset] force-archive old buffer: status=${res.status} session=${sessionKey} agent=${si.agent_id}`,
+                    );
+                  })
+                  .catch((err) => {
+                    console.warn(
+                      `[session-reset] force-archive failed (best-effort): ${err instanceof Error ? err.message : String(err)}`,
+                    );
+                  });
+              })
+              .catch(() => {});
           }
         }
 
         const resetEpoch = Date.now();
-        await store.set(compositeKey, { status: "uninitialized", keyId: sessionKey, startedAt: resetEpoch, attemptCount: 0, userId: userId || "anonymous", resetEpoch, resetFlow: true });
+        await store.set(compositeKey, {
+          status: "uninitialized",
+          keyId: sessionKey,
+          startedAt: resetEpoch,
+          attemptCount: 0,
+          userId: userId || "anonymous",
+          resetEpoch,
+          resetFlow: true,
+        });
         const bindingRepo = store.getBindingRepo();
-        if (bindingRepo) await bindingRepo.deleteBinding(spaceId, sessionKey).catch(() => {});
-        console.log(`[mem-command:pre] session-reset session=${sessionKey} → falling through to pop form`);
+        if (bindingRepo)
+          await bindingRepo.deleteBinding(spaceId, sessionKey).catch(() => {});
+        console.log(
+          `[mem-command:pre] session-reset session=${sessionKey} → falling through to pop form`,
+        );
       }
     }
   }
 
   // ── Session Init (before injection pipeline) ─────────────────────────────
   let sessionInfo: Record<string, unknown> | null | undefined;
-  let assetCapabilities: import("./injection/types.js").AssetCapabilityFlags | undefined;
+  let assetCapabilities:
+    | import("./injection/types.js").AssetCapabilityFlags
+    | undefined;
   let injectedSkipped = !conversationId || isAuxiliary || _dshHeadless;
   let sessionJustRegistered = false;
-  let _resetFlowResult: { agentName: string; agentIdShort: string; teamId: string; taskName?: string | null; bypassed?: boolean } | null = null;
-  console.log(`[injection-debug] conversationId=${conversationId} sessionKey=${sessionKey} userId=${userId} agentSource=${agentSource} kind=${_requestKind} dshHeadless=${_dshHeadless} sessionInitEnabled=${config.sessionInit?.enabled} injectionEnabled=${config.injection?.enabled} injectors=${JSON.stringify(config.injection?.injectors)} injectedSkipped=${injectedSkipped} spaceId=${spaceId}`);
-  if (config.sessionInit?.enabled && conversationId && !isAuxiliary && !_dshHeadless) {
+  let _resetFlowResult: {
+    agentName: string;
+    agentIdShort: string;
+    teamId: string;
+    taskName?: string | null;
+    bypassed?: boolean;
+  } | null = null;
+  console.log(
+    `[injection-debug] conversationId=${conversationId} sessionKey=${sessionKey} userId=${userId} agentSource=${agentSource} kind=${_requestKind} dshHeadless=${_dshHeadless} sessionInitEnabled=${config.sessionInit?.enabled} injectionEnabled=${config.injection?.enabled} injectors=${JSON.stringify(config.injection?.injectors)} injectedSkipped=${injectedSkipped} spaceId=${spaceId}`,
+  );
+  if (
+    config.sessionInit?.enabled &&
+    conversationId &&
+    !isAuxiliary &&
+    !_dshHeadless
+  ) {
     try {
-      const { getSessionStore, handleSessionInit, parsePresetIdentity } = await import("./session/index.js");
+      const { getSessionStore, handleSessionInit, parsePresetIdentity } =
+        await import("./session/index.js");
       const { getMetadataClient } = await import("./meta/client.js");
       const store = getSessionStore();
       // kernel /v3/meta/* endpoints authenticate via x-tdai-user-key, which needs an
@@ -840,7 +1076,11 @@ export async function handleChatCompletions(
       //     fall back to config.
       // Aligned with the kernelUserKey logic in workbuddyHandler.ts (client-first there too).
       const kernelUserKey = apiKey || config.tdai?.apiKey || "";
-      const metadataClient = getMetadataClient(config.coreSkill, spaceId, kernelUserKey);
+      const metadataClient = getMetadataClient(
+        config.coreSkill,
+        spaceId,
+        kernelUserKey,
+      );
       const presetIdentity = parsePresetIdentity(config.sessionInit, lcHeaders);
 
       // ── Session Recovery: try L2b binding before falling into session-init form ──
@@ -857,7 +1097,7 @@ export async function handleChatCompletions(
       };
       const recovered = await store.getOrRecover(compositeKey, identity, {
         metadataClient,
-        messages: body.messages as Array<Record<string, unknown>> ?? [],
+        messages: (body.messages as Array<Record<string, unknown>>) ?? [],
         presetIdentity,
       });
 
@@ -894,7 +1134,9 @@ export async function handleChatCompletions(
         // so this turn's system message carries agent/task context again.
         // The user's conversation is always kept as-is, including session_init form
         // interactions — nothing is removed.
-        const { injectSessionContextWithToggles } = await import("./session/context-injector.js");
+        const { injectSessionContextWithToggles } = await import(
+          "./session/context-injector.js"
+        );
         const inMsgs = (body.messages as Array<Record<string, unknown>>) ?? [];
         const outMsgs = recovered.bypassed
           ? inMsgs
@@ -923,12 +1165,18 @@ export async function handleChatCompletions(
         // questions field as an array. CB v1.106+ declares it as an array and does a
         // type check; older versions have no schema or no type declaration for questions.
         let questionsAsArray = true; // assume the new version by default
-        const clientTools = Array.isArray(body.tools) ? body.tools as unknown[] : [];
-        const afqTool = clientTools.find((t: any) =>
-          t?.function?.name === "ask_followup_question" || t?.name === "ask_followup_question"
+        const clientTools = Array.isArray(body.tools)
+          ? (body.tools as unknown[])
+          : [];
+        const afqTool = clientTools.find(
+          (t: any) =>
+            t?.function?.name === "ask_followup_question" ||
+            t?.name === "ask_followup_question",
         ) as Record<string, unknown> | undefined;
         if (afqTool) {
-          const params = (afqTool as any).function?.parameters ?? (afqTool as any).parameters;
+          const params =
+            (afqTool as any).function?.parameters ??
+            (afqTool as any).parameters;
           const qType = params?.properties?.questions?.type;
           questionsAsArray = qType === "array";
         } else if (clientTools.length === 0) {
@@ -938,10 +1186,15 @@ export async function handleChatCompletions(
         initResult = await handleSessionInit(
           sessionKey,
           userId || null,
-          body.messages as Array<Record<string, unknown>> ?? [],
+          (body.messages as Array<Record<string, unknown>>) ?? [],
           config.sessionInit,
           store,
-          { stream: isStream, modelId: modelId as string, protocol: "openai", questionsAsArray },
+          {
+            stream: isStream,
+            modelId: modelId as string,
+            protocol: "openai",
+            questionsAsArray,
+          },
           agentSource,
           metadataClient,
           kernelUserKey,
@@ -955,23 +1208,39 @@ export async function handleChatCompletions(
         return initResult.response;
       }
 
-      console.log(`[injection-debug] initResult session=${sessionKey} intercepted=${initResult.intercepted} bypassed=${initResult.bypassed} justRegistered=${initResult.justRegistered} resetFlow=${(initResult as any).resetFlow} hasSessionInfo=${!!initResult.sessionInfo} hasAgentDetail=${!!initResult.agentDetail}`);
+      console.log(
+        `[injection-debug] initResult session=${sessionKey} intercepted=${initResult.intercepted} bypassed=${initResult.bypassed} justRegistered=${initResult.justRegistered} resetFlow=${(initResult as any).resetFlow} hasSessionInfo=${!!initResult.sessionInfo} hasAgentDetail=${!!initResult.agentDetail}`,
+      );
       // See the mirrored spot in anthropicHandler: only inherit when we actually went
       // through the sessionInit state machine.
-      if (wentThroughSessionInitStateMachine && initResult.justRegistered) sessionJustRegistered = true;
+      if (wentThroughSessionInitStateMachine && initResult.justRegistered)
+        sessionJustRegistered = true;
 
       // Case 1.5: Bypass path → skip ALL injection hooks
+      // SAFETY: resetFlow is set at runtime by the session-init state machine on the
+      // bypass path; the static SessionInitResult type predates that field.
+      const resetFlow = (initResult as unknown as { resetFlow?: boolean })
+        .resetFlow;
       if (initResult.bypassed) {
         injectedSkipped = true;
-        console.log(`[session-init] session=${sessionKey} bypassed → skipping all injection`);
-        if (initResult.resetFlow) {
-          _resetFlowResult = { agentName: "", agentIdShort: "", teamId: "", bypassed: true };
+        console.log(
+          `[session-init] session=${sessionKey} bypassed → skipping all injection`,
+        );
+        if (resetFlow) {
+          _resetFlowResult = {
+            agentName: "",
+            agentIdShort: "",
+            teamId: "",
+            bypassed: true,
+          };
         }
       }
 
       if (!initResult.bypassed && initResult.sessionInfo) {
         try {
-          const { fetchAssetCapabilities } = await import("./tdai/capabilities.js");
+          const { fetchAssetCapabilities } = await import(
+            "./tdai/capabilities.js"
+          );
           assetCapabilities = await fetchAssetCapabilities({
             endpoint: config.tdai.endpoint,
             apiKey: config.tdai.apiKey,
@@ -981,9 +1250,13 @@ export async function handleChatCompletions(
             userKey: apiKey || null,
             timeoutMs: config.tdai.memory.timeoutMs,
           });
-          console.log(`[asset-capability] user=${(initResult.sessionInfo as { user_id?: string }).user_id ?? "-"} flags=${JSON.stringify(assetCapabilities)}`);
+          console.log(
+            `[asset-capability] user=${(initResult.sessionInfo as { user_id?: string }).user_id ?? "-"} flags=${JSON.stringify(assetCapabilities)}`,
+          );
         } catch (err) {
-          console.warn(`[asset-capability] resolve failed: ${err instanceof Error ? err.message : String(err)}`);
+          console.warn(
+            `[asset-capability] resolve failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
 
@@ -993,7 +1266,9 @@ export async function handleChatCompletions(
       // kernel tenant via this field, so a missing value at this point
       // silently poisons the prewarm cache with empty results.
       // See BUG-skill-injection-multinode.md §3.3(B).
-      const { restoreSessionSpaceId } = await import("./session/restore-space-id.js");
+      const { restoreSessionSpaceId } = await import(
+        "./session/restore-space-id.js"
+      );
       restoreSessionSpaceId(
         initResult.sessionInfo as Record<string, unknown> | null | undefined,
         spaceId,
@@ -1011,14 +1286,25 @@ export async function handleChatCompletions(
       let memCommandPending = false;
       if (config.memCommand?.enabled && !isAuxiliary && !_dshHeadless) {
         try {
-          const { parseMemCommand, isMemCommandAllowed } = await import("./mem-command/index.js");
-          let peek = parseMemCommand(body as Record<string, unknown>, agentSource);
+          const { parseMemCommand, isMemCommandAllowed } = await import(
+            "./mem-command/index.js"
+          );
+          let peek = parseMemCommand(
+            body as Record<string, unknown>,
+            agentSource,
+          );
           if (!peek && sessionJustRegistered) {
-            peek = parseMemCommand(body as Record<string, unknown>, agentSource, { checkFirst: true });
+            peek = parseMemCommand(
+              body as Record<string, unknown>,
+              agentSource,
+              { checkFirst: true },
+            );
           }
           if (peek && isMemCommandAllowed(config.memCommand, peek.command)) {
             memCommandPending = true;
-            console.log(`[hook-cache] prewarm skipped: mem-command pending (cmd=${peek.command}) session=${sessionKey}`);
+            console.log(
+              `[hook-cache] prewarm skipped: mem-command pending (cmd=${peek.command}) session=${sessionKey}`,
+            );
           }
         } catch (err) {
           console.warn(
@@ -1044,17 +1330,22 @@ export async function handleChatCompletions(
       ) {
         try {
           const mod = await import("./injection/index.js");
-          await mod.prewarmFromConfig(config, {
-            keyId: sessionKey,
-            userId: userId || "anonymous",
-            agentSource,
-            spaceId,
-            sessionInfo: initResult.sessionInfo as import("./session/types.js").SessionInfo,
-            agentDetail: initResult.agentDetail ?? null,
-            taskDetail: initResult.taskDetail ?? null,
-            assetCapabilities,
-            callerUserKey: apiKey ?? undefined,
-          }, { clearBefore: true });
+          await mod.prewarmFromConfig(
+            config,
+            {
+              keyId: sessionKey,
+              userId: userId || "anonymous",
+              agentSource,
+              spaceId,
+              sessionInfo:
+                initResult.sessionInfo as import("./session/types.js").SessionInfo,
+              agentDetail: initResult.agentDetail ?? null,
+              taskDetail: initResult.taskDetail ?? null,
+              assetCapabilities,
+              callerUserKey: apiKey ?? undefined,
+            },
+            { clearBefore: true },
+          );
         } catch (err) {
           console.warn(
             "[hook-cache] handler prewarm error:",
@@ -1071,7 +1362,10 @@ export async function handleChatCompletions(
         messages = initResult.messages as unknown[];
       }
 
-      sessionInfo = initResult.sessionInfo as Record<string, unknown> | null | undefined;
+      sessionInfo = initResult.sessionInfo as
+        | Record<string, unknown>
+        | null
+        | undefined;
       // Belt-and-suspenders: also restore on the local `sessionInfo` alias.
       // In practice this is the same object reference as
       // `initResult.sessionInfo` (already restored above), but the second
@@ -1081,18 +1375,29 @@ export async function handleChatCompletions(
 
       // Record the resetFlow info at the outer scope so the confirmation response can be
       // returned once the session-init block finishes
-      if (initResult.resetFlow && initResult.justRegistered && !initResult.bypassed) {
+      // SAFETY: sessionInfo is a JSON-decoded plain object at runtime; string-keyed reads
+      // with optional chaining are sound (missing keys yield undefined, handled by ?:).
+      const sessionFields = initResult.sessionInfo as unknown as
+        | Record<string, unknown>
+        | null
+        | undefined;
+      if (resetFlow && initResult.justRegistered && !initResult.bypassed) {
         _resetFlowResult = {
           agentName: initResult.agentDetail?.name ?? "Unknown",
-          agentIdShort: (initResult.sessionInfo as Record<string, unknown>)?.agent_id
-            ? String((initResult.sessionInfo as Record<string, unknown>).agent_id).slice(-8) : "",
-          teamId: (initResult.sessionInfo as Record<string, unknown>)?.team_id
-            ? String((initResult.sessionInfo as Record<string, unknown>).team_id).slice(-8) : "",
+          agentIdShort: sessionFields?.agent_id
+            ? String(sessionFields.agent_id).slice(-8)
+            : "",
+          teamId: sessionFields?.team_id
+            ? String(sessionFields.team_id).slice(-8)
+            : "",
           taskName: initResult.taskDetail?.name,
         };
       }
     } catch (err: unknown) {
-      console.error("[session-init] Error in handleSessionInit:", err instanceof Error ? err.message : String(err));
+      console.error(
+        "[session-init] Error in handleSessionInit:",
+        err instanceof Error ? err.message : String(err),
+      );
       sessionInfo = undefined;
       injectedSkipped = true;
     }
@@ -1100,9 +1405,14 @@ export async function handleChatCompletions(
 
   // ── mem:session-reset completion confirmation ────────────────────────────────
   if (_resetFlowResult) {
-    const { agentName, agentIdShort, teamId, taskName, bypassed } = _resetFlowResult;
+    const { agentName, agentIdShort, teamId, taskName, bypassed } =
+      _resetFlowResult;
     const lines = bypassed
-      ? ["✅ Skipped team asset association", "", "Subsequent conversations will not inject team assets (Skill / Memory / Knowledge)."]
+      ? [
+          "✅ Skipped team asset association",
+          "",
+          "Subsequent conversations will not inject team assets (Skill / Memory / Knowledge).",
+        ]
       : [
           "✅ Team assets rebound",
           "",
@@ -1114,8 +1424,12 @@ export async function handleChatCompletions(
         ].filter(Boolean);
     const text = (lines as string[]).join("\n");
 
-    const { buildMemResponse } = await import("./mem-command/response-builder.js");
-    console.log(`[mem-command:session-reset] completed: bypassed=${!!bypassed} agent=${agentName} (${agentIdShort})`);
+    const { buildMemResponse } = await import(
+      "./mem-command/response-builder.js"
+    );
+    console.log(
+      `[mem-command:session-reset] completed: bypassed=${!!bypassed} agent=${agentName} (${agentIdShort})`,
+    );
     return buildMemResponse(text, {
       protocol: "openai",
       stream: isStream,
@@ -1141,7 +1455,14 @@ export async function handleChatCompletions(
   // routing (handler.ts does not hook CC routing); every request is treated as main —
   // matching the codebuddy adapter's classifyRequest.
   if (config.memCommand?.enabled && !isAuxiliary && !_dshHeadless) {
-    const { parseMemCommand, isMemCommandAllowed, executeMemCommand, buildMemResponse, extractSimpleMessages, truncateArgs } = await import("./mem-command/index.js");
+    const {
+      parseMemCommand,
+      isMemCommandAllowed,
+      executeMemCommand,
+      buildMemResponse,
+      extractSimpleMessages,
+      truncateArgs,
+    } = await import("./mem-command/index.js");
     // Regular check: the last user message
     let memCmd = parseMemCommand(body as Record<string, unknown>, agentSource);
     // When the session-init state machine reaches a terminal state (initialized or
@@ -1151,7 +1472,9 @@ export async function handleChatCompletions(
     // branch and returns a message, keeping the first mem: command from being swallowed
     // into history and then leaking into an LLM passthrough.
     if (!memCmd && sessionJustRegistered) {
-      memCmd = parseMemCommand(body as Record<string, unknown>, agentSource, { checkFirst: true });
+      memCmd = parseMemCommand(body as Record<string, unknown>, agentSource, {
+        checkFirst: true,
+      });
     }
     // session-reset is already handled by the pre-hook; skip it here to avoid running
     // it twice — see the same-named section in anthropicHandler
@@ -1166,7 +1489,9 @@ export async function handleChatCompletions(
           stream: isStream,
           requestId: `mem-cmd-${Date.now()}`,
         });
-        console.log(`[mem-command] cmd=${memCmd.command} args="${truncateArgs(memCmd.args)}" session=${sessionKey} blocked: session not initialized`);
+        console.log(
+          `[mem-command] cmd=${memCmd.command} args="${truncateArgs(memCmd.args)}" session=${sessionKey} blocked: session not initialized`,
+        );
         return errResponse;
       }
       const memResult = await executeMemCommand(memCmd, {
@@ -1195,10 +1520,19 @@ export async function handleChatCompletions(
         userId: userId || null,
         sessionKey,
       });
-      if (tdaiClientForMem && tdaiIdentityForMem && isExtractionAllowed(config, "tdai-memory")) {
+      if (
+        tdaiClientForMem &&
+        tdaiIdentityForMem &&
+        isExtractionAllowed(config, "tdai-memory")
+      ) {
         const userMsg = { role: "user" as const, content: memCmd.rawMessage };
         try {
-          await recordTdaiTurn(tdaiClientForMem, tdaiIdentityForMem, userMsg, memResult.messageText);
+          await recordTdaiTurn(
+            tdaiClientForMem,
+            tdaiIdentityForMem,
+            userMsg,
+            memResult.messageText,
+          );
         } catch (err: unknown) {
           console.error("[mem-command] L0 write error:", err);
         }
@@ -1211,7 +1545,10 @@ export async function handleChatCompletions(
           // On the OpenAI protocol assistant content is a string; the
           // normalize-conversation side handles the string form via the
           // convertOpenAIAssistant fallback.
-          const assistantMsg = { role: "assistant", content: memResult.messageText };
+          const assistantMsg = {
+            role: "assistant",
+            content: memResult.messageText,
+          };
           await triggerSkillExtractIfReady({
             config,
             sessionKey,
@@ -1223,11 +1560,16 @@ export async function handleChatCompletions(
             assetCapabilities,
           });
         } catch (err: unknown) {
-          console.warn("[mem-command] skill extract trigger error:", err instanceof Error ? err.message : String(err));
+          console.warn(
+            "[mem-command] skill extract trigger error:",
+            err instanceof Error ? err.message : String(err),
+          );
         }
       }
 
-      console.log(`[mem-command] cmd=${memCmd.command} args="${truncateArgs(memCmd.args)}" session=${sessionKey} success=${memResult.success}`);
+      console.log(
+        `[mem-command] cmd=${memCmd.command} args="${truncateArgs(memCmd.args)}" session=${sessionKey} success=${memResult.success}`,
+      );
 
       // Langfuse: report the mem-command (symmetric with anthropicHandler).
       //   `lf` is only built at L955, so derive turnSeq → traceId inline here.
@@ -1262,7 +1604,10 @@ export async function handleChatCompletions(
 
   // aux requests (compaction/title) and dsh headless (no UI, no preset) do not write
   // L0 — pass them straight through
-  const tdaiClient = isAuxiliary || _dshHeadless || assetCapabilities?.chat_memory === false ? null : createTdaiClient(config, spaceId);
+  const tdaiClient =
+    isAuxiliary || _dshHeadless || assetCapabilities?.chat_memory === false
+      ? null
+      : createTdaiClient(config, spaceId);
   const tdaiIdentity = injectedSkipped
     ? null
     : deriveTdaiIdentity({
@@ -1273,7 +1618,11 @@ export async function handleChatCompletions(
   const tdaiUserMessage = extractLatestUserMessage(messages);
 
   // ── Context injection (before cost guard) ──────────────────────────────
-  if (!injectedSkipped && config.injection?.enabled && config.injection.injectors.length > 0) {
+  if (
+    !injectedSkipped &&
+    config.injection?.enabled &&
+    config.injection.injectors.length > 0
+  ) {
     try {
       const injectionTurnSeq = countHumanTurns(messages, "openai");
       const { getInjectionPipeline } = await import("./injection/index.js");
@@ -1301,8 +1650,10 @@ export async function handleChatCompletions(
           : undefined,
       });
       body = injectedBody;
-      messages = Array.isArray(injectedBody.messages) ? injectedBody.messages : messages;
-    } catch (err: unknown) {
+      messages = Array.isArray(injectedBody.messages)
+        ? injectedBody.messages
+        : messages;
+    } catch {
       // Injection failure is non-fatal — fall back to original body
     }
   }
@@ -1313,7 +1664,9 @@ export async function handleChatCompletions(
   // upstream.agents[agent] is a single map keyed by agent name — same lookup
   // as anthropicHandler. Empty / missing entry → fall back to upstream.url,
   // preserving legacy behavior for configs that don't declare `agents:` at all.
-  const agentUpstreamEntry = agentFromPath ? config.upstream.agents?.[agentFromPath] : undefined;
+  const agentUpstreamEntry = agentFromPath
+    ? config.upstream.agents?.[agentFromPath]
+    : undefined;
   // Per-agent apiKey resolution — three cases:
   //   (a) no entry in agents map           → global upstream.apiKey (fallback)
   //   (b) entry present, apiKey empty      → "" (passthrough, keep client key)
@@ -1325,7 +1678,8 @@ export async function handleChatCompletions(
     : config.upstream.apiKey;
   // Normalize the request path to the canonical upstream endpoint so the
   // extension's URL joining matches the host whitelist behavior.
-  const forwardEndpoint = matchWhitelistEndpoint(c.req.path)?.upstreamEndpoint ?? "/chat/completions";
+  const forwardEndpoint =
+    matchWhitelistEndpoint(c.req.path)?.upstreamEndpoint ?? "/chat/completions";
   // Isolation key is user-namespaced (`${user}:${session}`) so two users that
   // share the same client session id can't contaminate each other's state /
   // turn counting. ClickHouse keeps the raw session_key (it has its own
@@ -1347,7 +1701,9 @@ export async function handleChatCompletions(
     //   regardless of the URL (`/cost-guard` routes are 404 in this mode).
     // markerOptIn=true (test env): only requests with the `/cost-guard`
     //   segment activate the router; bare paths passthrough.
-    useGuard: config.costGuard.markerOptIn ? hasCostGuardMarker(c.req.path) : true,
+    useGuard: config.costGuard.markerOptIn
+      ? hasCostGuardMarker(c.req.path)
+      : true,
     agentName: agentFromPath,
   });
 
@@ -1372,7 +1728,8 @@ export async function handleChatCompletions(
   // Same (sessionKey, turnSeq) across a turn's tool-loop requests → same trace.
   // Prefer the extension's monotonic per-session turnSeq (survives context
   // compaction); fall back to the stateless count when it's not tracked.
-  const turnSeq = target.turnSeq > 0 ? target.turnSeq : countHumanTurns(messages, "openai");
+  const turnSeq =
+    target.turnSeq > 0 ? target.turnSeq : countHumanTurns(messages, "openai");
   const lf: LangfuseTurnContext = {
     traceId: langfuseTurnTraceId(sessionKey, turnSeq),
     turnSeq,
@@ -1381,7 +1738,13 @@ export async function handleChatCompletions(
     sessionId: sessionKey,
     tags: traceTags,
     routeTags: target.tags,
-    userQuery: resolveLatestUserQuery(config, lcHeaders, c.req.path, body, messages),
+    userQuery: resolveLatestUserQuery(
+      config,
+      lcHeaders,
+      c.req.path,
+      body,
+      messages,
+    ),
   };
   if (target.analyzerTrace) {
     reportAnalyzerTrace(config, target.analyzerTrace, {
@@ -1437,7 +1800,13 @@ export async function handleChatCompletions(
   writeRequestLog(config, body);
 
   // ── Build upstream request ───────────────────────────────────────────────
-  const upstreamHeaders = buildUpstreamHeaders(c, config, target, sessionKey, effectiveApiKey);
+  const upstreamHeaders = buildUpstreamHeaders(
+    c,
+    config,
+    target,
+    sessionKey,
+    effectiveApiKey,
+  );
 
   // Optional private preparation stage. It rewrites `body` / `messages` in
   // place, so it has to land after every host-side mutation (injection, agent
@@ -1484,7 +1853,8 @@ export async function handleChatCompletions(
   // Inject stream_options.include_usage for OpenAI compat
   if (isStream) {
     upstreamBody.stream_options = {
-      ...(typeof upstreamBody.stream_options === "object" && upstreamBody.stream_options !== null
+      ...(typeof upstreamBody.stream_options === "object" &&
+      upstreamBody.stream_options !== null
         ? (upstreamBody.stream_options as object)
         : {}),
       include_usage: true,
@@ -1501,9 +1871,13 @@ export async function handleChatCompletions(
 
   try {
     const result = await forwardWithRetry(
-      target, upstreamHeaders, upstreamBody,
-      body, originalHeaders,
-      pipe, forwardTimeoutMs,
+      target,
+      upstreamHeaders,
+      upstreamBody,
+      body,
+      originalHeaders,
+      pipe,
+      forwardTimeoutMs,
       sessionKey,
       { config, instanceId: spaceId || undefined },
     );
@@ -1519,8 +1893,13 @@ export async function handleChatCompletions(
       model: target.model,
       startTime,
       endTime: new Date().toISOString(),
-      input: buildLangfuseInputChat(messages, langfuseDebug, flattenMessagesForOpik),
-      statusMessage: err instanceof Error ? err.message : "Upstream request failed",
+      input: buildLangfuseInputChat(
+        messages,
+        langfuseDebug,
+        flattenMessagesForOpik,
+      ),
+      statusMessage:
+        err instanceof Error ? err.message : "Upstream request failed",
       extraTags: ["error"],
       observationMetadata: { stage: "forward", ...debugMetadata },
     });
@@ -1539,9 +1918,8 @@ export async function handleChatCompletions(
   // gateways set `x-request-id`). Used for cross-system tracing/audit.
   const upstreamRequestId = upstreamResp.headers.get("x-request-id") ?? "";
 
-  const effectiveModel = retried && target.retryTarget
-    ? target.retryTarget.model
-    : target.model;
+  const effectiveModel =
+    retried && target.retryTarget ? target.retryTarget.model : target.model;
 
   // A retry falls back to the model the client asked for, so the request ends
   // up costing what it would have cost unrouted — no saving to attribute.
@@ -1559,14 +1937,20 @@ export async function handleChatCompletions(
   if (isStream) {
     if (!upstreamResp.body) {
       pipe.streamDone(null);
-      return new Response(null, { status: upstreamResp.status, headers: respHeaders });
+      return new Response(null, {
+        status: upstreamResp.status,
+        headers: respHeaders,
+      });
     }
 
     // Log upstream error body for 4xx responses
     if (!retried && upstreamResp.status >= 400 && upstreamResp.status < 500) {
       const [errBodyStream, clientPassStream] = upstreamResp.body.tee();
       const errText = await new Response(errBodyStream).text();
-      pipe.error("UPSTREAM_4xx", `status=${upstreamResp.status} body=${errText.slice(0, 1000)}`);
+      pipe.error(
+        "UPSTREAM_4xx",
+        `status=${upstreamResp.status} body=${errText.slice(0, 1000)}`,
+      );
       writeLog(config, {
         timestamp: new Date().toISOString(),
         event: "usage",
@@ -1575,7 +1959,11 @@ export async function handleChatCompletions(
         sessionKey,
         upstreamUrl: target.url,
         stream: true,
-        usage: { error: true, status: upstreamResp.status, body: errText.slice(0, 500) },
+        usage: {
+          error: true,
+          status: upstreamResp.status,
+          body: errText.slice(0, 500),
+        },
         ...responseLogMeta,
         routedFrom,
         spaceId,
@@ -1586,14 +1974,25 @@ export async function handleChatCompletions(
         model: effectiveModel,
         startTime,
         endTime: new Date().toISOString(),
-        input: buildLangfuseInputChat(messages, langfuseDebug, flattenMessagesForOpik),
+        input: buildLangfuseInputChat(
+          messages,
+          langfuseDebug,
+          flattenMessagesForOpik,
+        ),
         status: upstreamResp.status,
         statusMessage: errText.slice(0, 500),
         extraTags: ["error"],
-        observationMetadata: { stage: "upstream", stream: true, ...debugMetadata },
+        observationMetadata: {
+          stage: "upstream",
+          stream: true,
+          ...debugMetadata,
+        },
       });
       pipe.streamDone(null);
-      return new Response(clientPassStream, { status: upstreamResp.status, headers: respHeaders });
+      return new Response(clientPassStream, {
+        status: upstreamResp.status,
+        headers: respHeaders,
+      });
     }
 
     pipe.streamStart();
@@ -1632,7 +2031,10 @@ export async function handleChatCompletions(
     const passthrough = createUsageTapTransform(tapCtx);
     const tappedStream = upstreamResp.body.pipeThrough(passthrough);
 
-    return new Response(tappedStream, { status: upstreamResp.status, headers: respHeaders });
+    return new Response(tappedStream, {
+      status: upstreamResp.status,
+      headers: respHeaders,
+    });
   }
 
   // ── Non-streaming response ───────────────────────────────────────────────
@@ -1669,8 +2071,14 @@ export async function handleChatCompletions(
       model: effectiveModel,
       stream: false,
       turnSeq: lf.turnSeq,
-      text: typeof assistantMessage?.content === "string" ? assistantMessage.content : "",
-      toolCalls: (Array.isArray(assistantMessage?.tool_calls) ? assistantMessage.tool_calls : [])
+      text:
+        typeof assistantMessage?.content === "string"
+          ? assistantMessage.content
+          : "",
+      toolCalls: (Array.isArray(assistantMessage?.tool_calls)
+        ? assistantMessage.tool_calls
+        : []
+      )
         .map((tc) => {
           const t = tc as Record<string, unknown>;
           const fn = t.function as Record<string, unknown> | undefined;
@@ -1678,7 +2086,10 @@ export async function handleChatCompletions(
           return {
             id: (t.id as string) ?? "",
             name: (fn?.name as string) ?? "",
-            arguments: typeof argsVal === "string" ? argsVal : JSON.stringify(argsVal ?? ""),
+            arguments:
+              typeof argsVal === "string"
+                ? argsVal
+                : JSON.stringify(argsVal ?? ""),
           };
         })
         .filter((tc) => tc.id && tc.arguments),
@@ -1698,7 +2109,10 @@ export async function handleChatCompletions(
           const fn = t.function as Record<string, unknown> | undefined;
           const name = (fn?.name as string) ?? "";
           const argsVal = fn?.arguments;
-          const argsStr = typeof argsVal === "string" ? argsVal : JSON.stringify(argsVal ?? "");
+          const argsStr =
+            typeof argsVal === "string"
+              ? argsVal
+              : JSON.stringify(argsVal ?? "");
           return { name, arguments: argsStr };
         })
         .filter((i) => i.name);
@@ -1763,7 +2177,12 @@ export async function handleChatCompletions(
     }
 
     if (tdaiClient && isExtractionAllowed(config, "tdai-memory")) {
-      await recordTdaiTurn(tdaiClient, tdaiIdentity, tdaiUserMessage, assistantContentForTdai(assistantMessage));
+      await recordTdaiTurn(
+        tdaiClient,
+        tdaiIdentity,
+        tdaiUserMessage,
+        assistantContentForTdai(assistantMessage),
+      );
     } else if (tdaiClient) {
       logExtractionSkipped(config, "tdai-memory", sessionKey);
     }
@@ -1778,10 +2197,7 @@ export async function handleChatCompletions(
       outputMessage: assistantMessage,
       model: effectiveModel,
       usage,
-      tags: [
-        "non-stream",
-        ...(retried ? ["retry"] : []),
-      ],
+      tags: ["non-stream", ...(retried ? ["retry"] : [])],
       forkProjectName: "request_log",
       forkTraceId,
       forkMetadata: {
@@ -1799,7 +2215,11 @@ export async function handleChatCompletions(
       model: effectiveModel,
       startTime,
       endTime,
-      input: buildLangfuseInputChat(messages, langfuseDebug, flattenMessagesForOpik),
+      input: buildLangfuseInputChat(
+        messages,
+        langfuseDebug,
+        flattenMessagesForOpik,
+      ),
       output: assistantMessage,
       usage,
       traceName: lf.traceName,
@@ -1808,21 +2228,38 @@ export async function handleChatCompletions(
       tags: lf.tags,
       traceInput: lf.userQuery || undefined,
       traceOutput: assistantMessage ?? undefined,
-      traceMetadata: { stream: false, retried, upstreamUrl: target.url, ...logMeta, ...debugMetadata },
+      traceMetadata: {
+        stream: false,
+        retried,
+        upstreamUrl: target.url,
+        ...logMeta,
+        ...debugMetadata,
+      },
       observationMetadata: { retried, ...logMeta, ...debugMetadata },
     });
   } else if (upstreamResp.status >= 400) {
-    pipe.error("UPSTREAM_4xx", `status=${upstreamResp.status} body=${respText.slice(0, 1000)}`);
+    pipe.error(
+      "UPSTREAM_4xx",
+      `status=${upstreamResp.status} body=${respText.slice(0, 1000)}`,
+    );
     langfuseReportFailure({
       lf,
       model: effectiveModel,
       startTime,
       endTime,
-      input: buildLangfuseInputChat(messages, langfuseDebug, flattenMessagesForOpik),
+      input: buildLangfuseInputChat(
+        messages,
+        langfuseDebug,
+        flattenMessagesForOpik,
+      ),
       status: upstreamResp.status,
       statusMessage: respText.slice(0, 500),
       extraTags: ["error"],
-      observationMetadata: { stage: "upstream", stream: false, ...debugMetadata },
+      observationMetadata: {
+        stage: "upstream",
+        stream: false,
+        ...debugMetadata,
+      },
     });
   }
 
@@ -1883,26 +2320,37 @@ export async function handleChatCompletions(
     );
   }
 
-  return new Response(respText, { status: upstreamResp.status, headers: respHeaders });
+  return new Response(respText, {
+    status: upstreamResp.status,
+    headers: respHeaders,
+  });
 }
 
-
-function assistantContentForTdai(message: Record<string, unknown> | null): string | null {
+function assistantContentForTdai(
+  message: Record<string, unknown> | null,
+): string | null {
   if (!message) return null;
   const content = message.content;
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
-    return content.map((part) => {
-      const p = part as Record<string, unknown>;
-      if (typeof p.text === "string") return p.text;
-      if (typeof p.content === "string") return p.content;
-      return "";
-    }).filter(Boolean).join("\n") || null;
+    return (
+      content
+        .map((part) => {
+          const p = part as Record<string, unknown>;
+          if (typeof p.text === "string") return p.text;
+          if (typeof p.content === "string") return p.content;
+          return "";
+        })
+        .filter(Boolean)
+        .join("\n") || null
+    );
   }
   return content == null ? null : JSON.stringify(content);
 }
 
-function outputMessageContent(message: Record<string, unknown> | null): string | null {
+function outputMessageContent(
+  message: Record<string, unknown> | null,
+): string | null {
   return assistantContentForTdai(message);
 }
 
@@ -1964,7 +2412,13 @@ interface ToolCallAccumulator {
 /** Result of extracting content + tool_calls from SSE text. */
 interface SseExtractResult {
   content: string;
-  toolCallDeltas: Array<{ index: number; id?: string; type?: string; functionName?: string; functionArguments?: string }>;
+  toolCallDeltas: Array<{
+    index: number;
+    id?: string;
+    type?: string;
+    functionName?: string;
+    functionArguments?: string;
+  }>;
 }
 
 /** Extract assistant content and tool_call deltas from OpenAI SSE text. */
@@ -1981,7 +2435,9 @@ function extractSseContentAndTools(sseText: string): SseExtractResult {
       const evt = JSON.parse(dataStr) as Record<string, unknown>;
       const choices = evt.choices;
       if (Array.isArray(choices) && choices.length > 0) {
-        const delta = (choices[0] as Record<string, unknown>).delta as Record<string, unknown> | undefined;
+        const delta = (choices[0] as Record<string, unknown>).delta as
+          | Record<string, unknown>
+          | undefined;
         if (typeof delta?.content === "string") {
           content += delta.content;
         }
@@ -1996,7 +2452,8 @@ function extractSseContentAndTools(sseText: string): SseExtractResult {
               id: typeof t.id === "string" ? t.id : undefined,
               type: typeof t.type === "string" ? t.type : undefined,
               functionName: typeof fn?.name === "string" ? fn.name : undefined,
-              functionArguments: typeof fn?.arguments === "string" ? fn.arguments : undefined,
+              functionArguments:
+                typeof fn?.arguments === "string" ? fn.arguments : undefined,
             });
           }
         }
@@ -2016,7 +2473,12 @@ function mergeToolCallDeltas(
   for (const d of deltas) {
     let acc = accumulators.get(d.index);
     if (!acc) {
-      acc = { id: "", type: "function", functionName: "", functionArguments: "" };
+      acc = {
+        id: "",
+        type: "function",
+        functionName: "",
+        functionArguments: "",
+      };
       accumulators.set(d.index, acc);
     }
     if (d.id) acc.id = d.id;
@@ -2029,8 +2491,25 @@ function mergeToolCallDeltas(
 /** Create a TransformStream that passes bytes through unchanged,
  *  while extracting usage/content/tool_calls from SSE events in-band.
  */
-function createUsageTapTransform(ctx: TapContext): TransformStream<Uint8Array, Uint8Array> {
-  const { config, modelId, keyId, sessionKey, upstreamUrl, traceId, forkTraceId, startTime, inputMessages, retried, logMeta, pipe, lf, spaceId, upstreamRequestId } = ctx;
+function createUsageTapTransform(
+  ctx: TapContext,
+): TransformStream<Uint8Array, Uint8Array> {
+  const {
+    config,
+    modelId,
+    keyId,
+    sessionKey,
+    upstreamUrl,
+    traceId,
+    startTime,
+    inputMessages,
+    retried,
+    logMeta,
+    pipe,
+    lf,
+    spaceId,
+    upstreamRequestId,
+  } = ctx;
 
   const decoder = new TextDecoder();
   let sseBuf = "";
@@ -2067,7 +2546,17 @@ function createUsageTapTransform(ctx: TapContext): TransformStream<Uint8Array, U
       if (toolCallAccumulators.size > 0) {
         const toolCallEntries = Array.from(toolCallAccumulators.entries())
           .sort(([a], [b]) => a - b)
-          .map(([, acc]) => JSON.stringify({ tool_call_id: acc.id, tool_name: acc.functionName, arguments: acc.functionArguments }, null, 2))
+          .map(([, acc]) =>
+            JSON.stringify(
+              {
+                tool_call_id: acc.id,
+                tool_name: acc.functionName,
+                arguments: acc.functionArguments,
+              },
+              null,
+              2,
+            ),
+          )
           .join("\n\n");
         const parts: string[] = [];
         if (assistantContent) parts.push(assistantContent);
@@ -2106,7 +2595,10 @@ function createUsageTapTransform(ctx: TapContext): TransformStream<Uint8Array, U
     if (toolCallAccumulators.size > 0) {
       const intents = Array.from(toolCallAccumulators.values())
         .filter((acc) => acc.functionName)
-        .map((acc) => ({ name: acc.functionName, arguments: acc.functionArguments }));
+        .map((acc) => ({
+          name: acc.functionName,
+          arguments: acc.functionArguments,
+        }));
       emitModelIntentTelemetry({
         // Match the compositeKey shape used by session_init_logs
         sessionKey: `${ctx.agentSource}:${sessionKey}`,
@@ -2177,10 +2669,7 @@ function createUsageTapTransform(ctx: TapContext): TransformStream<Uint8Array, U
           outputMessage,
           model: modelId,
           usage: lastUsage,
-          tags: [
-            "stream",
-            ...(retried ? ["retry"] : []),
-          ],
+          tags: ["stream", ...(retried ? ["retry"] : [])],
           forkProjectName: "request_log",
           forkTraceId: ctx.forkTraceId,
           forkMetadata: {
@@ -2211,7 +2700,11 @@ function createUsageTapTransform(ctx: TapContext): TransformStream<Uint8Array, U
           model: modelId,
           startTime,
           endTime,
-          input: buildLangfuseInputChat(inputMessages, ctx.langfuseDebug, flattenMessagesForOpik),
+          input: buildLangfuseInputChat(
+            inputMessages,
+            ctx.langfuseDebug,
+            flattenMessagesForOpik,
+          ),
           output: outputMessage,
           usage: lastUsage,
           traceName: lf.traceName,
@@ -2221,12 +2714,18 @@ function createUsageTapTransform(ctx: TapContext): TransformStream<Uint8Array, U
           traceInput: lf.userQuery || undefined,
           traceOutput: outputMessage ?? undefined,
           traceMetadata: {
-            stream: true, retried, upstreamUrl, ...logMeta,
-            ...ctx.debugMetadata, ...streamDebugExtra,
+            stream: true,
+            retried,
+            upstreamUrl,
+            ...logMeta,
+            ...ctx.debugMetadata,
+            ...streamDebugExtra,
           },
           observationMetadata: {
-            retried, ...logMeta,
-            ...ctx.debugMetadata, ...streamDebugExtra,
+            retried,
+            ...logMeta,
+            ...ctx.debugMetadata,
+            ...streamDebugExtra,
           },
         });
       } catch (langfuseErr: unknown) {
@@ -2243,10 +2742,14 @@ function createUsageTapTransform(ctx: TapContext): TransformStream<Uint8Array, U
       //   - withL0Retry handles a transient tdai kernel drop / 5xx (3 backoffs, ~3.5s
       //     total).
       trackWrite(
-        withL0Retry(() => recordTdaiTurn(
-          ctx.tdaiClient!, ctx.tdaiIdentity, ctx.tdaiUserMessage,
-          outputMessageContent(outputMessage),
-        )).catch((err: unknown) => pipe.error("TDAI_L0", err))
+        withL0Retry(() =>
+          recordTdaiTurn(
+            ctx.tdaiClient!,
+            ctx.tdaiIdentity,
+            ctx.tdaiUserMessage,
+            outputMessageContent(outputMessage),
+          ),
+        ).catch((err: unknown) => pipe.error("TDAI_L0", err)),
       );
     } else if (ctx.tdaiClient) {
       logExtractionSkipped(ctx.config, "tdai-memory", ctx.sessionKeyForSkill);
@@ -2258,7 +2761,11 @@ function createUsageTapTransform(ctx: TapContext): TransformStream<Uint8Array, U
     // Synchronous await: do not continue until the store has persisted, so the next
     // turn reads the latest data across nodes. aux requests (compaction/title) and dsh
     // headless skip skill triggering to keep the archived-buffer semantics clean.
-    if (!ctx.isAuxiliary && !ctx.isDshHeadless && isExtractionAllowed(ctx.config, "skill")) {
+    if (
+      !ctx.isAuxiliary &&
+      !ctx.isDshHeadless &&
+      isExtractionAllowed(ctx.config, "skill")
+    ) {
       await triggerSkillExtractIfReady({
         config: ctx.config,
         sessionKey: ctx.sessionKeyForSkill,
@@ -2288,7 +2795,10 @@ function createUsageTapTransform(ctx: TapContext): TransformStream<Uint8Array, U
     )
       .then((outcome) => {
         if (outcome.attempted && !outcome.ok) {
-          pipe.error("CREDIT_REPORT", `[stream] ${outcome.errorMessage ?? "unknown"}`);
+          pipe.error(
+            "CREDIT_REPORT",
+            `[stream] ${outcome.errorMessage ?? "unknown"}`,
+          );
           // Persist failed report as a raw record.
           writeFailedReportRaw(
             {

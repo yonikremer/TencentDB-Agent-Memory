@@ -18,6 +18,20 @@ import type { IngestProgress, ProgressFn } from "./engines/wiki/manager.js";
 const TAG = "[callback]";
 const RETRY_DELAY_MS = 1000;
 
+/** Shared secret authenticating Knowledge→Panel callbacks; empty = legacy open. */
+function callbackSecret(): string {
+  return (process.env.KNOWLEDGE_CALLBACK_SECRET ?? "").trim();
+}
+
+function callbackHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const secret = callbackSecret();
+  if (secret) headers["x-callback-secret"] = secret;
+  return headers;
+}
+
 export interface StatusCallbackPayload {
   knowledge_id: string;
   /** Owning tenant (001 multi-tenancy) = x-tdai-service-id; lets TMC scope the status update. */
@@ -64,7 +78,7 @@ export async function callbackTMC(
     try {
       const resp = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: callbackHeaders(),
         body,
         signal: AbortSignal.timeout(5000),
       });
@@ -72,31 +86,44 @@ export async function callbackTMC(
         return;
       }
       const respText = await resp.text().catch(() => "(unreadable)");
-      console.warn(`${TAG} TMC callback HTTP ${resp.status} for ${payload.knowledge_id} (attempt ${attempt + 1}): ${respText.slice(0, 500)}`);
+      console.warn(
+        `${TAG} TMC callback HTTP ${resp.status} for ${payload.knowledge_id} (attempt ${attempt + 1}): ${respText.slice(0, 500)}`,
+      );
     } catch (err) {
-      console.warn(`${TAG} TMC callback failed for ${payload.knowledge_id} (attempt ${attempt + 1}/${2}):`, err);
+      console.warn(
+        `${TAG} TMC callback failed for ${payload.knowledge_id} (attempt ${attempt + 1}/${2}):`,
+        err,
+      );
     }
     if (attempt === 0) {
       await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
     }
   }
-  console.error(`${TAG} TMC callback gave up after 2 attempts for ${payload.knowledge_id} (type=${payload.type}, status=${payload.status})`);
+  console.error(
+    `${TAG} TMC callback gave up after 2 attempts for ${payload.knowledge_id} (type=${payload.type}, status=${payload.status})`,
+  );
 }
 
 /**
  * Fire-and-forget progress callback during wiki ingest.
  * Failures are logged as warn only — never block the ingest pipeline.
  */
-export function sendProgressCallback(tmcCallbackUrl: string, payload: IngestProgressCallback): void {
+export function sendProgressCallback(
+  tmcCallbackUrl: string,
+  payload: IngestProgressCallback,
+): void {
   if (!tmcCallbackUrl) return;
   const url = `${tmcCallbackUrl.replace(/\/$/, "")}/api/v1/knowledge/status-callback`;
   void fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: callbackHeaders(),
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(5000),
   }).catch((err) => {
-    console.warn(`${TAG} progress callback failed for ${payload.wiki_id}:`, err);
+    console.warn(
+      `${TAG} progress callback failed for ${payload.wiki_id}:`,
+      err,
+    );
   });
 }
 
@@ -144,7 +171,10 @@ export async function generateWikiSummary(
 
   const pageList = pages
     .slice(0, 20) // limit to avoid token overflow
-    .map((p) => `- ${p.title}${p.description ? `: ${p.description.slice(0, 80)}` : ""}`)
+    .map(
+      (p) =>
+        `- ${p.title}${p.description ? `: ${p.description.slice(0, 80)}` : ""}`,
+    )
     .join("\n");
 
   const prompt = `Please generate a no more than100A Chinese summary of the word, describing its main content and purpose. Output only the summary text and nothing else.
@@ -153,18 +183,23 @@ Knowledge base name:${name}
 Pages included:
 ${pageList}`;
 
-  console.info(`${TAG} wiki summary LLM call start for ${wikiId} (model=${llm.model}, protocol=${llm.protocol}, pages=${pages.length})`);
+  console.info(
+    `${TAG} wiki summary LLM call start for ${wikiId} (model=${llm.model}, protocol=${llm.protocol}, pages=${pages.length})`,
+  );
   try {
     const client = createLlmClient(llm);
     const text = await client.chat({
-      system: "You are a knowledge base summary generator. Output only the summary text and nothing else.",
+      system:
+        "You are a knowledge base summary generator. Output only the summary text and nothing else.",
       prompt,
       maxOutputTokens: 1024,
       temperature: 0.3,
       label: `wiki-summary`,
     });
     const result = text.slice(0, 256); // enforce ≤256 char limit
-    console.info(`${TAG} wiki summary LLM call done for ${wikiId} (len=${result.length}, empty=${result.length === 0})`);
+    console.info(
+      `${TAG} wiki summary LLM call done for ${wikiId} (len=${result.length}, empty=${result.length === 0})`,
+    );
     return result;
   } catch (err) {
     console.error(`${TAG} wiki summary generation failed for ${wikiId}:`, err);
@@ -184,5 +219,8 @@ export function generateCodeGraphSummary(
   if (!stats) {
     return `${repoName}（${branch}）`;
   }
-  return `${repoName}(${branch})- ${stats.files} files,${stats.nodes} symbol nodes`.slice(0, 256);
+  return `${repoName}(${branch})- ${stats.files} files,${stats.nodes} symbol nodes`.slice(
+    0,
+    256,
+  );
 }

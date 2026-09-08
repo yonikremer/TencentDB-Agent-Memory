@@ -17,7 +17,10 @@ import {
   errorEnvelope,
   resolveRequestId,
 } from "../../gateway/v3-router.js";
-import { formatZodError, type ApiResponseEnvelope } from "../../gateway/v3-schemas.js";
+import {
+  formatZodError,
+  type ApiResponseEnvelope,
+} from "../../gateway/v3-schemas.js";
 import type { Logger } from "../../core/types.js";
 import { MetadataService, MetadataError } from "../service/metadata-service.js";
 import {
@@ -29,7 +32,11 @@ import {
 import { extractInstanceId } from "./instance.js";
 import { resolvePagination } from "./pagination.js";
 import { resolveUserId } from "../service/resolve-user-id.js";
-import type { AgentFilter, TaskFilter, ParticipationLogFilter } from "../types.js";
+import type {
+  AgentFilter,
+  TaskFilter,
+  ParticipationLogFilter,
+} from "../types.js";
 import * as S from "./v3-meta-schemas.js";
 import {
   createMetaApiTraceContext,
@@ -48,7 +55,9 @@ export const V3_PREFIX = "/v3/meta";
 const TAG = "[META-V3]";
 
 export interface V3MetaRouterDeps {
-  getMetadataService: (instanceId: string) => MetadataService | undefined | Promise<MetadataService | undefined>;
+  getMetadataService: (
+    instanceId: string,
+  ) => MetadataService | undefined | Promise<MetadataService | undefined>;
   logger: Logger;
 }
 
@@ -62,10 +71,14 @@ type Handler = (
 ) => Promise<ApiResponseEnvelope>;
 
 /** Schema validation + business call + success envelope; business exceptions handled centrally by dispatch. */
-function bind<S2 extends ZodType>(schema: S2, fn: BizFn<S2["_output"]>): Handler {
+function bind<S2 extends ZodType>(
+  schema: S2,
+  fn: BizFn<S2["_output"]>,
+): Handler {
   return async (body, ctx, svc, requestId) => {
     const parsed = schema.safeParse(body);
-    if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
+    if (!parsed.success)
+      return errorEnvelope(400, formatZodError(parsed.error), requestId);
     const data = await fn(parsed.data as S2["_output"], ctx, svc);
     return successEnvelope(data, requestId);
   };
@@ -78,22 +91,68 @@ function orNotFound<T>(entity: T | null, code: string, id: string): T {
   return entity;
 }
 
+/**
+ * Read-path guards (identity review): write paths go through *ForCaller, but several
+ * reads historically ignored ctx (`_c`). Denials use 404 (never 403) so callers
+ * cannot probe object existence across teams.
+ */
+/** Caller may only resolve their own id unless system admin (IDOR guard). */
+function assertSelfOrAdmin(targetUserId: string | undefined, ctx: Ctx): void {
+  if (!targetUserId || ctx.isSystemAdmin || targetUserId === ctx.userId) return;
+  throw new MetadataError(
+    "permission_denied",
+    "cannot query another user's data",
+  );
+}
+
+/**
+ * Active membership in team (or system admin). Optional notFound override keeps the
+ * existence oracle closed when the guarded object (not the team) is the secret.
+ */
+async function requireTeamMember(
+  svc: MetadataService,
+  teamId: string,
+  ctx: Ctx,
+  notFound?: { code: string; id: string },
+): Promise<void> {
+  if (ctx.isSystemAdmin) return;
+  const deny = (): never => {
+    if (notFound)
+      throw new MetadataError(notFound.code, `not found: ${notFound.id}`);
+    throw new MetadataError("team_not_found", `not found: ${teamId}`);
+  };
+  if (!ctx.userId)
+    throw new MetadataError("permission_denied", "authentication required");
+  const member = await svc.getTeamMember(teamId, ctx.userId);
+  if (!member || member.status !== "active") deny();
+}
+
 const OK = { ok: true } as const;
 
 /** Groupy control-plane facade; throws groupy_disabled (503) unless wired + enabled. */
-function requireGroupy(svc: MetadataService): import("../groupy/scheduler.js").GroupyScheduler {
+function requireGroupy(
+  svc: MetadataService,
+): import("../groupy/scheduler.js").GroupyScheduler {
   const sched = svc.groupyScheduler;
   if (!sched || !sched.enabled) {
-    throw new MetadataError("groupy_disabled", "groupy sync is not enabled (GROUPY_ENABLED/GROUPY_ROOTS)");
+    throw new MetadataError(
+      "groupy_disabled",
+      "groupy sync is not enabled (GROUPY_ENABLED/GROUPY_ROOTS)",
+    );
   }
   return sched;
 }
 
 /** Scheduler wiring check only (status/tree/summary stay readable when disabled). */
-function requireGroupyWired(svc: MetadataService): import("../groupy/scheduler.js").GroupyScheduler {
+function requireGroupyWired(
+  svc: MetadataService,
+): import("../groupy/scheduler.js").GroupyScheduler {
   const sched = svc.groupyScheduler;
   if (!sched) {
-    throw new MetadataError("groupy_disabled", "groupy sync is not enabled (GROUPY_ENABLED/GROUPY_ROOTS)");
+    throw new MetadataError(
+      "groupy_disabled",
+      "groupy sync is not enabled (GROUPY_ENABLED/GROUPY_ROOTS)",
+    );
   }
   return sched;
 }
@@ -107,195 +166,404 @@ const routeTable: Record<string, Handler> = {
   }),
   // Sister API: allows system_admin to explicitly specify user_key when creating account. Auth is fully symmetric with /user/create.
   // Zod only validates username + user_key are not empty, user_id will be stripped by zod if passed.
-  [`${V3_PREFIX}/user/create-with-key`]: bind(S.userCreateWithKeySchema, async (d, c, s) => {
-    s.assertCanManageUsers(c);
-    return s.createNormalUserWithKey(d);
-  }),
+  [`${V3_PREFIX}/user/create-with-key`]: bind(
+    S.userCreateWithKeySchema,
+    async (d, c, s) => {
+      s.assertCanManageUsers(c);
+      return s.createNormalUserWithKey(d);
+    },
+  ),
   [`${V3_PREFIX}/user/get`]: bind(S.userGetSchema, async (d, c, s) => {
     const userId = await resolveUserId(s, d);
+    assertSelfOrAdmin(userId, c);
     return s.getUserForCaller(userId, c);
   }),
-  [`${V3_PREFIX}/user/delete`]: bind(S.userDeleteSchema, (d, c, s) => s.deleteUsersForCaller(d.user_ids, c)),
+  [`${V3_PREFIX}/user/delete`]: bind(S.userDeleteSchema, (d, c, s) =>
+    s.deleteUsersForCaller(d.user_ids, c),
+  ),
   [`${V3_PREFIX}/user/list`]: bind(S.userListSchema, (d, c, s) =>
     s.listUsersForCaller(d, c, resolvePagination(d)),
   ),
 
-  [`${V3_PREFIX}/user-key/create`]: bind(S.userKeyCreateSchema, async (d, c, s) => {
-    const userId = d.user_id ?? c.userId;
-    if (!userId) throw new MetadataError("permission_denied", "user_id required for admin bootstrap");
-    s.assertUserScope(userId, c.userId, c.isAdmin, c.isSystemAdmin);
-    return s.createUserKey(userId, { name: d.name, expires_at: d.expires_at });
-  }),
+  [`${V3_PREFIX}/user-key/create`]: bind(
+    S.userKeyCreateSchema,
+    async (d, c, s) => {
+      const userId = d.user_id ?? c.userId;
+      if (!userId)
+        throw new MetadataError(
+          "permission_denied",
+          "user_id required for admin bootstrap",
+        );
+      s.assertUserScope(userId, c.userId, c.isAdmin, c.isSystemAdmin);
+      return s.createUserKey(userId, {
+        name: d.name,
+        expires_at: d.expires_at,
+      });
+    },
+  ),
   [`${V3_PREFIX}/user-key/list`]: bind(S.userKeyListSchema, async (d, c, s) => {
     const userId = d.user_id ?? c.userId;
-    if (!userId) throw new MetadataError("permission_denied", "user_id required");
+    if (!userId)
+      throw new MetadataError("permission_denied", "user_id required");
     s.assertUserScope(userId, c.userId, c.isAdmin, c.isSystemAdmin);
     return s.listUserKeys(userId, resolvePagination(d));
   }),
   [`${V3_PREFIX}/user-key/get`]: bind(S.userKeyGetSchema, async (d, c, s) =>
     s.getUserKeyForCaller(d.key_id, c.userId, c.isAdmin, c.isSystemAdmin),
   ),
-  [`${V3_PREFIX}/user-key/revoke`]: bind(S.userKeyRevokeSchema, async (d, c, s) => {
-    const entity = await s.rawStore.getUserKeyById(d.key_id);
-    if (!entity) throw new MetadataError("user_key_not_found", `user key not found: ${d.key_id}`);
-    s.assertUserScope(entity.user_id, c.userId, c.isAdmin, c.isSystemAdmin);
-    await s.revokeUserKey(d.key_id);
-    return OK;
-  }),
-  [`${V3_PREFIX}/user-key/update`]: bind(S.userKeyUpdateSchema, async (d, c, s) => {
-    const entity = await s.rawStore.getUserKeyById(d.key_id);
-    if (!entity) throw new MetadataError("user_key_not_found", `user key not found: ${d.key_id}`);
-    s.assertUserScope(entity.user_id, c.userId, c.isAdmin, c.isSystemAdmin);
-    const { key_id, ...patch } = d;
-    return s.updateUserKey(key_id, patch);
-  }),
+  [`${V3_PREFIX}/user-key/revoke`]: bind(
+    S.userKeyRevokeSchema,
+    async (d, c, s) => {
+      const entity = await s.rawStore.getUserKeyById(d.key_id);
+      if (!entity)
+        throw new MetadataError(
+          "user_key_not_found",
+          `user key not found: ${d.key_id}`,
+        );
+      s.assertUserScope(entity.user_id, c.userId, c.isAdmin, c.isSystemAdmin);
+      await s.revokeUserKey(d.key_id);
+      return OK;
+    },
+  ),
+  [`${V3_PREFIX}/user-key/update`]: bind(
+    S.userKeyUpdateSchema,
+    async (d, c, s) => {
+      const entity = await s.rawStore.getUserKeyById(d.key_id);
+      if (!entity)
+        throw new MetadataError(
+          "user_key_not_found",
+          `user key not found: ${d.key_id}`,
+        );
+      s.assertUserScope(entity.user_id, c.userId, c.isAdmin, c.isSystemAdmin);
+      const { key_id, ...patch } = d;
+      return s.updateUserKey(key_id, patch);
+    },
+  ),
 
   // Team
-  [`${V3_PREFIX}/team/create`]: bind(S.teamCreateSchema, (d, c, s) => s.createTeamForCaller(d, c)),
-  [`${V3_PREFIX}/team/get`]: bind(S.teamGetSchema, async (d, _c, s) => orNotFound(await s.getTeamById(d.team_id), "team_not_found", d.team_id)),
+  [`${V3_PREFIX}/team/create`]: bind(S.teamCreateSchema, (d, c, s) =>
+    s.createTeamForCaller(d, c),
+  ),
+  [`${V3_PREFIX}/team/get`]: bind(S.teamGetSchema, async (d, c, s) => {
+    await requireTeamMember(s, d.team_id, c);
+    return orNotFound(
+      await s.getTeamById(d.team_id),
+      "team_not_found",
+      d.team_id,
+    );
+  }),
   [`${V3_PREFIX}/team/update`]: bind(S.teamUpdateSchema, async (d, c, s) => {
     const { team_id, ...patch } = d;
     return s.updateTeamForCaller(team_id, patch, c);
   }),
-  [`${V3_PREFIX}/team/delete`]: bind(S.teamDeleteSchema, (d, c, s) => s.deleteTeamsForCaller(d.team_ids, c)),
-  [`${V3_PREFIX}/team/list`]: bind(S.teamListSchema, async (d, _c, s) => {
+  [`${V3_PREFIX}/team/delete`]: bind(S.teamDeleteSchema, (d, c, s) =>
+    s.deleteTeamsForCaller(d.team_ids, c),
+  ),
+  [`${V3_PREFIX}/team/list`]: bind(S.teamListSchema, async (d, c, s) => {
     const userId = await resolveUserId(s, d);
+    assertSelfOrAdmin(userId, c);
     const filter = d.name ? { name: d.name } : undefined;
     return s.listTeamsByUser(userId, resolvePagination(d), filter);
   }),
 
   // TeamMember
-  [`${V3_PREFIX}/team-member/add`]: bind(S.teamMemberAddSchema, async (d, c, s) => {
-    await requireEntity(s, EntityType.User, d.user_id);
-    return s.addTeamMemberForCaller(d, c);
-  }),
-  [`${V3_PREFIX}/team-member/remove`]: bind(S.teamMemberRemoveSchema, async (d, c, s) => {
-    await requireEntity(s, EntityType.User, d.user_id);
-    await s.removeTeamMemberForCaller(d.team_id, d.user_id, c);
-    return OK;
-  }),
+  [`${V3_PREFIX}/team-member/add`]: bind(
+    S.teamMemberAddSchema,
+    async (d, c, s) => {
+      await requireEntity(s, EntityType.User, d.user_id);
+      return s.addTeamMemberForCaller(d, c);
+    },
+  ),
+  [`${V3_PREFIX}/team-member/remove`]: bind(
+    S.teamMemberRemoveSchema,
+    async (d, c, s) => {
+      await requireEntity(s, EntityType.User, d.user_id);
+      await s.removeTeamMemberForCaller(d.team_id, d.user_id, c);
+      return OK;
+    },
+  ),
   [`${V3_PREFIX}/team-member/list`]: bind(S.teamMemberListSchema, (d, c, s) =>
     s.listTeamMembersForCaller(d.team_id, c, resolvePagination(d)),
   ),
-  [`${V3_PREFIX}/team-member/get`]: bind(S.teamMemberGetSchema, async (d, c, s) =>
-    s.getTeamMemberForCaller(d.team_id, d.user_id, c)),
+  [`${V3_PREFIX}/team-member/get`]: bind(
+    S.teamMemberGetSchema,
+    async (d, c, s) => s.getTeamMemberForCaller(d.team_id, d.user_id, c),
+  ),
 
   // Agent
-  [`${V3_PREFIX}/agent/create`]: bind(S.agentCreateSchema, (d, c, s) => s.createAgentForCaller(d, c)),
-  [`${V3_PREFIX}/agent/get`]: bind(S.agentGetSchema, async (d, _c, s) => orNotFound(await s.getAgentById(d.agent_id), "agent_not_found", d.agent_id)),
+  [`${V3_PREFIX}/agent/create`]: bind(S.agentCreateSchema, (d, c, s) =>
+    s.createAgentForCaller(d, c),
+  ),
+  [`${V3_PREFIX}/agent/get`]: bind(S.agentGetSchema, async (d, c, s) => {
+    const agent = orNotFound(
+      await s.getAgentById(d.agent_id),
+      "agent_not_found",
+      d.agent_id,
+    );
+    await requireTeamMember(s, agent.team_id, c, {
+      code: "agent_not_found",
+      id: d.agent_id,
+    });
+    return agent;
+  }),
   [`${V3_PREFIX}/agent/update`]: bind(S.agentUpdateSchema, async (d, c, s) => {
     const { agent_id, ...patch } = d;
     return s.updateAgentForCaller(agent_id, patch, c);
   }),
-  [`${V3_PREFIX}/agent/delete`]: bind(S.agentDeleteSchema, (d, c, s) => s.deleteAgentsForCaller(d.agent_ids, c)),
-  [`${V3_PREFIX}/agent/list`]: bind(S.agentListSchema, async (d, _c, s) => {
+  [`${V3_PREFIX}/agent/delete`]: bind(S.agentDeleteSchema, (d, c, s) =>
+    s.deleteAgentsForCaller(d.agent_ids, c),
+  ),
+  [`${V3_PREFIX}/agent/list`]: bind(S.agentListSchema, async (d, c, s) => {
     const pagination = resolvePagination(d);
     if (d.team_id) {
       // team_id branch: if owner_user_id is passed, apply additional filter ("agents owned by me in team"),
       // used for panel "private agent visibility" scenario. If not passed, behavior is unchanged (full team).
+      await requireTeamMember(s, d.team_id, c);
+      if (d.owner_user_id) assertSelfOrAdmin(d.owner_user_id, c);
       const filter: AgentFilter = {};
       if (d.status) filter.status = d.status;
       if (d.owner_user_id) filter.owner_user_id = d.owner_user_id;
       if (d.name) filter.name = d.name;
       return s.listAgentsByTeam(d.team_id, pagination, filter);
     }
-    const ownerId = d.owner_user_id ?? await resolveUserId(s, { user_key: d.owner_user_key });
+    const ownerId =
+      d.owner_user_id ??
+      (await resolveUserId(s, { user_key: d.owner_user_key }));
+    assertSelfOrAdmin(ownerId, c);
     const filter2: AgentFilter = {};
     if (d.status) filter2.status = d.status;
     if (d.name) filter2.name = d.name;
-    return s.listAgentsByOwner(ownerId, pagination, Object.keys(filter2).length ? filter2 : undefined);
+    return s.listAgentsByOwner(
+      ownerId,
+      pagination,
+      Object.keys(filter2).length ? filter2 : undefined,
+    );
   }),
-  [`${V3_PREFIX}/agent/archive`]: bind(S.agentArchiveSchema, (d, c, s) => s.archiveAgentForCaller(d.agent_id, c)),
+  [`${V3_PREFIX}/agent/archive`]: bind(S.agentArchiveSchema, (d, c, s) =>
+    s.archiveAgentForCaller(d.agent_id, c),
+  ),
 
   // Task
-  [`${V3_PREFIX}/task/create`]: bind(S.taskCreateSchema, (d, c, s) => s.createTaskForCaller(d, c)),
-  [`${V3_PREFIX}/task/get`]: bind(S.taskGetSchema, async (d, _c, s) => orNotFound(await s.getTaskById(d.task_id), "task_not_found", d.task_id)),
+  [`${V3_PREFIX}/task/create`]: bind(S.taskCreateSchema, (d, c, s) =>
+    s.createTaskForCaller(d, c),
+  ),
+  [`${V3_PREFIX}/task/get`]: bind(S.taskGetSchema, async (d, c, s) => {
+    const task = orNotFound(
+      await s.getTaskById(d.task_id),
+      "task_not_found",
+      d.task_id,
+    );
+    await requireTeamMember(s, task.team_id, c, {
+      code: "task_not_found",
+      id: d.task_id,
+    });
+    return task;
+  }),
   [`${V3_PREFIX}/task/update`]: bind(S.taskUpdateSchema, (d, c, s) => {
     const { task_id, ...patch } = d;
     return s.updateTaskForCaller(task_id, patch, c);
   }),
-  [`${V3_PREFIX}/task/delete`]: bind(S.taskDeleteSchema, (d, c, s) => s.deleteTasksForCaller(d.task_ids, c)),
-  [`${V3_PREFIX}/task/list`]: bind(S.taskListSchema, async (d, _c, s) => {
+  [`${V3_PREFIX}/task/delete`]: bind(S.taskDeleteSchema, (d, c, s) =>
+    s.deleteTasksForCaller(d.task_ids, c),
+  ),
+  [`${V3_PREFIX}/task/list`]: bind(S.taskListSchema, async (d, c, s) => {
     const filter: TaskFilter = {};
     if (d.status) filter.status = d.status;
     if (d.title) filter.title = d.title;
     if (d.creator_user_id) {
+      assertSelfOrAdmin(d.creator_user_id, c);
       filter.creator_user_id = d.creator_user_id;
     } else if (d.creator_user_key) {
-      filter.creator_user_id = await resolveUserId(s, { user_key: d.creator_user_key });
+      const creatorId = await resolveUserId(s, {
+        user_key: d.creator_user_key,
+      });
+      assertSelfOrAdmin(creatorId, c);
+      filter.creator_user_id = creatorId;
     }
     const pagination = resolvePagination(d);
-    if (d.team_id) return s.listTasksByTeam(d.team_id, pagination, filter);
+    if (d.team_id) {
+      await requireTeamMember(s, d.team_id, c);
+      return s.listTasksByTeam(d.team_id, pagination, filter);
+    }
+    if (!c.isSystemAdmin) {
+      throw new MetadataError(
+        "missing_team_id",
+        "team_id is required for non-system-admin callers",
+      );
+    }
     return s.listTasks(filter, pagination);
   }),
-  [`${V3_PREFIX}/task/archive`]: bind(S.taskArchiveSchema, (d, c, s) => s.archiveTaskForCaller(d.task_id, c)),
+  [`${V3_PREFIX}/task/archive`]: bind(S.taskArchiveSchema, (d, c, s) =>
+    s.archiveTaskForCaller(d.task_id, c),
+  ),
 
   // TaskAgent
   [`${V3_PREFIX}/task-agent/link`]: bind(S.taskAgentLinkSchema, (d, c, s) =>
     s.linkTaskAgentForCaller(d.task_id, d.agent_id, d.role_in_task, c),
   ),
-  [`${V3_PREFIX}/task-agent/unlink`]: bind(S.taskAgentUnlinkSchema, async (d, c, s) => {
-    await requireEntity(s, EntityType.Agent, d.agent_id);
-    await s.unlinkTaskAgentForCaller(d.task_id, d.agent_id, c);
-    return OK;
-  }),
-  [`${V3_PREFIX}/task-agent/list`]: bind(S.taskAgentListSchema, (d, _c, s) =>
-    s.listTaskAgents(d.task_id, resolvePagination(d)),
+  [`${V3_PREFIX}/task-agent/unlink`]: bind(
+    S.taskAgentUnlinkSchema,
+    async (d, c, s) => {
+      await requireEntity(s, EntityType.Agent, d.agent_id);
+      await s.unlinkTaskAgentForCaller(d.task_id, d.agent_id, c);
+      return OK;
+    },
+  ),
+  [`${V3_PREFIX}/task-agent/list`]: bind(
+    S.taskAgentListSchema,
+    async (d, c, s) => {
+      const task = orNotFound(
+        await s.getTaskById(d.task_id),
+        "task_not_found",
+        d.task_id,
+      );
+      await requireTeamMember(s, task.team_id, c, {
+        code: "task_not_found",
+        id: d.task_id,
+      });
+      return s.listTaskAgents(d.task_id, resolvePagination(d));
+    },
   ),
 
   // ParticipationLog
-  [`${V3_PREFIX}/participation-log/append`]: bind(S.participationLogAppendSchema, (d, c, s) =>
-    s.appendParticipationLogForCaller(d, c),
+  [`${V3_PREFIX}/participation-log/append`]: bind(
+    S.participationLogAppendSchema,
+    (d, c, s) => s.appendParticipationLogForCaller(d, c),
   ),
-  [`${V3_PREFIX}/participation-log/list`]: bind(S.participationLogListSchema, (d, c, s) => {
-    const filter: ParticipationLogFilter = { team_id: d.team_id };
-    if (d.task_id) filter.task_id = d.task_id;
-    if (d.agent_id) filter.agent_id = d.agent_id;
-    if (d.user_id) filter.user_id = d.user_id;
-    if (d.created_after) filter.created_after = d.created_after;
-    if (d.created_before) filter.created_before = d.created_before;
-    if (d.dedupe !== undefined) filter.dedupe = d.dedupe;
-    return s.listParticipationLogsForCaller(filter, c, resolvePagination(d));
-  }),
+  [`${V3_PREFIX}/participation-log/list`]: bind(
+    S.participationLogListSchema,
+    (d, c, s) => {
+      const filter: ParticipationLogFilter = { team_id: d.team_id };
+      if (d.task_id) filter.task_id = d.task_id;
+      if (d.agent_id) filter.agent_id = d.agent_id;
+      if (d.user_id) filter.user_id = d.user_id;
+      if (d.created_after) filter.created_after = d.created_after;
+      if (d.created_before) filter.created_before = d.created_before;
+      if (d.dedupe !== undefined) filter.dedupe = d.dedupe;
+      return s.listParticipationLogsForCaller(filter, c, resolvePagination(d));
+    },
+  ),
 
   // Asset
-  [`${V3_PREFIX}/asset/create`]: bind(S.assetCreateSchema, (d, c, s) => s.createAssetForCaller(d, c)),
-  [`${V3_PREFIX}/asset/get`]: bind(S.assetGetSchema, async (d, _c, s) => orNotFound(await s.getAssetById(d.asset_id), "asset_not_found", d.asset_id)),
+  [`${V3_PREFIX}/asset/create`]: bind(S.assetCreateSchema, (d, c, s) =>
+    s.createAssetForCaller(d, c),
+  ),
+  [`${V3_PREFIX}/asset/get`]: bind(S.assetGetSchema, async (d, c, s) => {
+    const asset = orNotFound(
+      await s.getAssetById(d.asset_id),
+      "asset_not_found",
+      d.asset_id,
+    );
+    if (!c.userId)
+      throw new MetadataError("permission_denied", "authentication required");
+    const perm = await s.checkAssetPermission({
+      user_id: c.userId,
+      asset_id: d.asset_id,
+      action: "read",
+    });
+    if (!perm.allowed)
+      throw new MetadataError("asset_not_found", `not found: ${d.asset_id}`);
+    return asset;
+  }),
   [`${V3_PREFIX}/asset/update`]: bind(S.assetUpdateSchema, (d, c, s) => {
     const { asset_id, ...patch } = d;
     return s.updateAssetForCaller(asset_id, patch, c);
   }),
-  [`${V3_PREFIX}/asset/delete`]: bind(S.assetDeleteSchema, (d, c, s) => s.deleteAssetsForCaller(d.asset_ids, c)),
-  [`${V3_PREFIX}/asset/list`]: bind(S.assetListSchema, (d, _c, s) => {
+  [`${V3_PREFIX}/asset/delete`]: bind(S.assetDeleteSchema, (d, c, s) =>
+    s.deleteAssetsForCaller(d.asset_ids, c),
+  ),
+  [`${V3_PREFIX}/asset/list`]: bind(S.assetListSchema, async (d, c, s) => {
     const { team_id, limit, offset, ...filter } = d;
-    return s.listAssetsByTeam(team_id, resolvePagination({ limit, offset }), filter);
+    await requireTeamMember(s, team_id, c);
+    return s.listAssetsByTeam(
+      team_id,
+      resolvePagination({ limit, offset }),
+      filter,
+    );
   }),
-  [`${V3_PREFIX}/asset/list-accessible`]: bind(S.assetListAccessibleSchema, (d, _c, s) =>
-    s.listAccessibleAssets(d)),
+  [`${V3_PREFIX}/asset/list-accessible`]: bind(
+    S.assetListAccessibleSchema,
+    async (d, c, s) => {
+      const target =
+        d.user_id ?? (await resolveUserId(s, { user_key: d.user_key }));
+      assertSelfOrAdmin(target, c);
+      return s.listAccessibleAssets({ ...d, user_id: target });
+    },
+  ),
 
-  [`${V3_PREFIX}/asset/touch-usage`]: bind(S.assetTouchUsageSchema, async (d, c, s) => {
-    await s.touchAssetUsageForCaller(d.asset_id, c);
-    return OK;
-  }),
+  [`${V3_PREFIX}/asset/touch-usage`]: bind(
+    S.assetTouchUsageSchema,
+    async (d, c, s) => {
+      await s.touchAssetUsageForCaller(d.asset_id, c);
+      return OK;
+    },
+  ),
 
   // AgentFixedAsset
-  [`${V3_PREFIX}/agent-fixed-asset/set`]: bind(S.fixedAssetSetSchema, async (d, c, s) => {
-    await s.setAgentFixedAssetsForCaller(d.agent_id, d.bindings, c);
-    return OK;
-  }),
-  [`${V3_PREFIX}/agent-fixed-asset/list`]: bind(S.fixedAssetListSchema, (d, _c, s) =>
-    s.listAgentFixedAssets(d.agent_id, resolvePagination(d)),
+  [`${V3_PREFIX}/agent-fixed-asset/set`]: bind(
+    S.fixedAssetSetSchema,
+    async (d, c, s) => {
+      await s.setAgentFixedAssetsForCaller(d.agent_id, d.bindings, c);
+      return OK;
+    },
   ),
-  [`${V3_PREFIX}/agent-fixed-asset/list-with-detail`]: bind(S.fixedAssetListWithDetailSchema, (d, _c, s) => s.listAgentFixedAssetsWithDetail(d)),
-  [`${V3_PREFIX}/agent-fixed-asset/summary-by-agents`]: bind(S.fixedAssetSummaryByAgentsSchema, (d, _c, s) =>
-    s.summarizeAgentFixedAssetsByAgents({ agent_ids: d.agent_ids, asset_id: d.asset_id }),
+  [`${V3_PREFIX}/agent-fixed-asset/list`]: bind(
+    S.fixedAssetListSchema,
+    async (d, c, s) => {
+      const agent = orNotFound(
+        await s.getAgentById(d.agent_id),
+        "agent_not_found",
+        d.agent_id,
+      );
+      await requireTeamMember(s, agent.team_id, c, {
+        code: "agent_not_found",
+        id: d.agent_id,
+      });
+      return s.listAgentFixedAssets(d.agent_id, resolvePagination(d));
+    },
+  ),
+  [`${V3_PREFIX}/agent-fixed-asset/list-with-detail`]: bind(
+    S.fixedAssetListWithDetailSchema,
+    async (d, c, s) => {
+      const agent = orNotFound(
+        await s.getAgentById(d.agent_id),
+        "agent_not_found",
+        d.agent_id,
+      );
+      await requireTeamMember(s, agent.team_id, c, {
+        code: "agent_not_found",
+        id: d.agent_id,
+      });
+      return s.listAgentFixedAssetsWithDetail(d);
+    },
+  ),
+  [`${V3_PREFIX}/agent-fixed-asset/summary-by-agents`]: bind(
+    S.fixedAssetSummaryByAgentsSchema,
+    async (d, c, s) => {
+      if (!c.userId)
+        throw new MetadataError("permission_denied", "authentication required");
+      const perm = await s.checkAssetPermission({
+        user_id: c.userId,
+        asset_id: d.asset_id,
+        action: "read",
+      });
+      if (!perm.allowed)
+        throw new MetadataError("asset_not_found", `not found: ${d.asset_id}`);
+      return s.summarizeAgentFixedAssetsByAgents({
+        agent_ids: d.agent_ids,
+        asset_id: d.asset_id,
+      });
+    },
   ),
 
   // ACL
   [`${V3_PREFIX}/acl/grant`]: bind(S.aclGrantSchema, async (d, c, s) => {
-    if (d.subject_type === "user") await requireEntity(s, EntityType.User, d.subject_id);
-    else if (d.subject_type === "agent") await requireEntity(s, EntityType.Agent, d.subject_id);
-    const granted_by = d.granted_by ?? await resolveUserId(s, { user_key: d.granted_by_key });
+    if (d.subject_type === "user")
+      await requireEntity(s, EntityType.User, d.subject_id);
+    else if (d.subject_type === "agent")
+      await requireEntity(s, EntityType.Agent, d.subject_id);
+    const granted_by =
+      d.granted_by ?? (await resolveUserId(s, { user_key: d.granted_by_key }));
     const { granted_by_key: _k, ...rest } = d;
     return s.grantAclForCaller({ ...rest, granted_by }, c);
   }),
@@ -306,53 +574,76 @@ const routeTable: Record<string, Handler> = {
   [`${V3_PREFIX}/acl/list`]: bind(S.aclListSchema, (d, c, s) =>
     s.listAclByAssetForCaller(d.asset_id, c, resolvePagination(d)),
   ),
-  [`${V3_PREFIX}/acl/check`]: bind(S.aclCheckSchema, async (d, _c, s) => {
+  [`${V3_PREFIX}/acl/check`]: bind(S.aclCheckSchema, async (d, c, s) => {
     if (d.agent_id) await requireEntity(s, EntityType.Agent, d.agent_id);
-    return s.checkAssetPermission(d);
+    const target =
+      d.user_id ?? (await resolveUserId(s, { user_key: d.user_key }));
+    assertSelfOrAdmin(target, c);
+    return s.checkAssetPermission({ ...d, user_id: target });
   }),
 
   // Auth
-  [`${V3_PREFIX}/auth/verify`]: bind(S.authVerifySchema, async (d, c, s) => s.verifyAuthForCaller(d.user_key, c)),
+  [`${V3_PREFIX}/auth/verify`]: bind(S.authVerifySchema, async (d, c, s) =>
+    s.verifyAuthForCaller(d.user_key, c),
+  ),
 
   // ConfigParam (v3.2)
-  [`${V3_PREFIX}/instance-quota/get`]: bind(S.instanceQuotaGetSchema, async (_d, _c, s) => {
-    return s.configParams.getInstanceQuotaLimits();
-  }),
-  [`${V3_PREFIX}/config/user/get`]: bind(S.configUserGetSchema, async (d, c, s) => {
-    await requireEntity(s, EntityType.User, d.user_id);
-    s.assertCallerIsOwner(d.user_id, c.userId!);
-    return s.configParams.getUserConfigForCaller(d);
-  }),
-  [`${V3_PREFIX}/config/user/set`]: bind(S.configUserSetSchema, async (d, c, s) => {
-    await requireEntity(s, EntityType.User, d.user_id);
-    s.assertCallerIsOwner(d.user_id, c.userId!);
-    return s.configParams.setUserConfigForCaller(d);
-  }),
+  [`${V3_PREFIX}/instance-quota/get`]: bind(
+    S.instanceQuotaGetSchema,
+    async (_d, _c, s) => {
+      return s.configParams.getInstanceQuotaLimits();
+    },
+  ),
+  [`${V3_PREFIX}/config/user/get`]: bind(
+    S.configUserGetSchema,
+    async (d, c, s) => {
+      await requireEntity(s, EntityType.User, d.user_id);
+      s.assertCallerIsOwner(d.user_id, c.userId!);
+      return s.configParams.getUserConfigForCaller(d);
+    },
+  ),
+  [`${V3_PREFIX}/config/user/set`]: bind(
+    S.configUserSetSchema,
+    async (d, c, s) => {
+      await requireEntity(s, EntityType.User, d.user_id);
+      s.assertCallerIsOwner(d.user_id, c.userId!);
+      return s.configParams.setUserConfigForCaller(d);
+    },
+  ),
 
   // Groupy org-sync (admin-only; DESIGN docs/org-hierarchy-sync)
   [`${V3_PREFIX}/groupy/sync`]: bind(S.groupySyncSchema, async (_d, c, s) => {
     s.assertCanManageUsers(c);
     return requireGroupy(s).runNow();
   }),
-  [`${V3_PREFIX}/groupy/status`]: bind(S.groupyStatusSchema, async (_d, c, s) => {
-    s.assertCanManageUsers(c);
-    return requireGroupyWired(s).getStatus();
-  }),
+  [`${V3_PREFIX}/groupy/status`]: bind(
+    S.groupyStatusSchema,
+    async (_d, c, s) => {
+      s.assertCanManageUsers(c);
+      return requireGroupyWired(s).getStatus();
+    },
+  ),
   [`${V3_PREFIX}/groupy/tree`]: bind(S.groupyTreeSchema, async (_d, c, s) => {
     s.assertCanManageUsers(c);
     return requireGroupyWired(s).getTree();
   }),
-  [`${V3_PREFIX}/groupy/summary`]: bind(S.groupySummarySchema, async (_d, c, s) => {
-    s.assertCanManageUsers(c);
-    return requireGroupyWired(s).getSummary();
-  }),
+  [`${V3_PREFIX}/groupy/summary`]: bind(
+    S.groupySummarySchema,
+    async (_d, c, s) => {
+      s.assertCanManageUsers(c);
+      return requireGroupyWired(s).getSummary();
+    },
+  ),
   [`${V3_PREFIX}/groupy/asset-grant`]: bind(S.assetGrantSchema, (d, c, s) =>
     s.applyAssetShareForCaller(d, c),
   ),
-  [`${V3_PREFIX}/groupy/shares`]: bind(S.groupySharesSchema, async (_d, c, s) => {
-    s.assertCanManageUsers(c);
-    return s.rawStore.listGroupyShares();
-  }),
+  [`${V3_PREFIX}/groupy/shares`]: bind(
+    S.groupySharesSchema,
+    async (_d, c, s) => {
+      s.assertCanManageUsers(c);
+      return s.rawStore.listGroupyShares();
+    },
+  ),
 };
 
 /** Registered v3 route paths (for testing / docs). */
@@ -416,7 +707,9 @@ export async function handleV3MetaRoute(
   const handler = routeTable[pathname];
   if (!handler) return false;
 
-  const requestId = resolveRequestId(req.headers as Record<string, string | string[] | undefined>);
+  const requestId = resolveRequestId(
+    req.headers as Record<string, string | string[] | undefined>,
+  );
   const traceCtx = createMetaApiTraceContext({ route: pathname, requestId });
 
   let instanceId: string;
@@ -427,7 +720,11 @@ export async function handleV3MetaRoute(
     if (err instanceof MetadataError) {
       const code = mapErrorCode(err.code);
       const message = `${err.code}: ${err.message}`;
-      logMetaApiRejected(traceCtx, { httpStatus: code, envelopeCode: code, message });
+      logMetaApiRejected(traceCtx, {
+        httpStatus: code,
+        envelopeCode: code,
+        message,
+      });
       sendJson(res, code, errorEnvelope(code, message, requestId));
       return true;
     }
@@ -441,7 +738,11 @@ export async function handleV3MetaRoute(
       envelopeCode: 503,
       message: "MetadataService not available",
     });
-    sendJson(res, 503, errorEnvelope(503, "MetadataService not available", requestId));
+    sendJson(
+      res,
+      503,
+      errorEnvelope(503, "MetadataService not available", requestId),
+    );
     return true;
   }
 
@@ -457,14 +758,22 @@ export async function handleV3MetaRoute(
         envelopeCode: 401,
         message: "unauthorized: missing_user_key",
       });
-      sendJson(res, 401, errorEnvelope(401, "unauthorized: missing_user_key", requestId));
+      sendJson(
+        res,
+        401,
+        errorEnvelope(401, "unauthorized: missing_user_key", requestId),
+      );
       return true;
     }
     const auth = await authenticateV3(headerUserKey, svc);
     if (!auth.ok || !auth.ctx) {
       const status = auth.status ?? 401;
       const message = `unauthorized: ${auth.reason}`;
-      logMetaApiRejected(traceCtx, { httpStatus: status, envelopeCode: status, message });
+      logMetaApiRejected(traceCtx, {
+        httpStatus: status,
+        envelopeCode: status,
+        message,
+      });
       sendJson(res, status, errorEnvelope(status, message, requestId));
       return true;
     }
@@ -485,9 +794,16 @@ export async function handleV3MetaRoute(
       },
       async () => {
         logMetaApiEntry(traceCtx, body);
-        deps.logger.debug?.(`${TAG} ${pathname} instance=${instanceId} user=${ctx.userId ?? "(admin)"}`);
+        deps.logger.debug?.(
+          `${TAG} ${pathname} instance=${instanceId} user=${ctx.userId ?? "(admin)"}`,
+        );
         const envelope = await handler(body, ctx, svc, requestId);
-        const httpStatus = envelope.code === 0 ? 200 : envelope.code >= 400 && envelope.code < 600 ? envelope.code : 200;
+        const httpStatus =
+          envelope.code === 0
+            ? 200
+            : envelope.code >= 400 && envelope.code < 600
+              ? envelope.code
+              : 200;
         logMetaApiResponse(traceCtx, envelope, httpStatus);
         sendJson(res, httpStatus, envelope);
       },

@@ -1499,12 +1499,17 @@ export async function handleExtract(
   // space_id prioritizes body (for backward compatibility with early callers), falling back to auth.serviceId by default ——
   // The two values should be equal by design (both are "the currently logged-in instance"). If they are not equal, record a warning to help detect it early
   // Bug when caller passes wrong instance; isolation/auth/route all rely on auth.serviceId, unrelated to body.
-  const spaceId = input.space_id ?? auth.serviceId;
   if (input.space_id && input.space_id !== auth.serviceId) {
     deps.logger.warn(
-      `${TAG} /v3/skill/extract space_id mismatch: body=${input.space_id} auth=${auth.serviceId}; using body`,
+      `${TAG} /v3/skill/extract space_id mismatch: body=${input.space_id} auth=${auth.serviceId}; rejected`,
+    );
+    return errorEnvelope(
+      40301,
+      `space_id mismatch: body=${input.space_id} != auth=${auth.serviceId}`,
+      requestId,
     );
   }
+  const spaceId = auth.serviceId;
 
   try {
     const t0Archive = Date.now();
@@ -1674,14 +1679,18 @@ export async function handleConversationAdd(
     );
   }
 
-  // space_id prioritizes body, falling back to auth.serviceId (same processing as handleExtract).
-  // The two values should be equal by design; alert if they are not.
-  const spaceId = input.space_id ?? auth.serviceId;
+  // space_id must match auth.serviceId; body value is not trusted for routing.
   if (input.space_id && input.space_id !== auth.serviceId) {
     deps.logger.warn(
-      `${TAG} /v3/skill/conversation/add space_id mismatch: body=${input.space_id} auth=${auth.serviceId}; using body`,
+      `${TAG} /v3/skill/conversation/add space_id mismatch: body=${input.space_id} auth=${auth.serviceId}; rejected`,
+    );
+    return errorEnvelope(
+      40301,
+      `space_id mismatch: body=${input.space_id} != auth=${auth.serviceId}`,
+      requestId,
     );
   }
+  const spaceId = auth.serviceId;
 
   try {
     const t0Handle = Date.now();

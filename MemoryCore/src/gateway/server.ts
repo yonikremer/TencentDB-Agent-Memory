@@ -753,6 +753,12 @@ export class TdaiGateway {
       );
     });
 
+    if (!this.config.server.apiKey) {
+      throw new Error(
+        "server.apiKey is required: set TDAI_GATEWAY_API_KEY (or server.apiKey in tdai-gateway.yaml). " +
+          "The gateway refuses to start without an API key.",
+      );
+    }
     const { port, host } = this.config.server;
 
     await new Promise<void>((resolve, reject) => {

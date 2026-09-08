@@ -92,10 +92,13 @@ export function createApp(config: ProxyConfig): Hono {
     const body = {
       status: degraded ? "degraded" : "ok",
       version: "0.2.0",
-      upstream: config.upstream.url,
-      opik: config.opik.enabled ? config.opik.url : "disabled",
+      upstream: config.upstream.url ? "configured" : "missing",
+      opik: config.opik.enabled ? "enabled" : "disabled",
       costGuard: config.costGuard.enabled ? "enabled" : "disabled",
-      rateLimit: config.rateLimit.tpm > 0 || config.rateLimit.qpm > 0 ? "enabled" : "disabled",
+      rateLimit:
+        config.rateLimit.tpm > 0 || config.rateLimit.qpm > 0
+          ? "enabled"
+          : "disabled",
       storage: {
         enabled: !!config.storage?.enabled,
         requested: eff.requested,
@@ -107,25 +110,27 @@ export function createApp(config: ProxyConfig): Hono {
     return c.json(body, degraded ? 503 : 200);
   });
 
-  // Whoami: resolve API key → key ID (plain text, easy to use with curl)
+  // Whoami: resolve API key → key ID (Bearer only; query-key removed to avoid log leakage)
   app.get("/whoami", (c) => {
-    // Support: Authorization header (Bearer), x-api-key header, or ?key= query param
-    const authHeader = c.req.header("authorization") ?? c.req.header("Authorization") ?? "";
+    const authHeader =
+      c.req.header("authorization") ?? c.req.header("Authorization") ?? "";
     const bearerToken = extractBearerToken(authHeader);
     const xApiKey = c.req.header("x-api-key") ?? "";
-    const queryKey = c.req.query("key") ?? "";
 
-    const apiKey = bearerToken || xApiKey || queryKey;
+    const apiKey = bearerToken || xApiKey;
 
     if (!apiKey) {
-      return c.text("Error: No API key provided. Use ?key=YOUR_KEY\n", 400);
+      return c.text(
+        "Error: No API key provided. Use Authorization: Bearer <key>\n",
+        401,
+      );
     }
 
     const keyId = apiKeyToKeyId(apiKey);
     return c.text(keyId + "\n");
   });
 
-// Skill bridge: LLM curls land here, proxy injects auth + identity, forwards to core.
+  // Skill bridge: LLM curls land here, proxy injects auth + identity, forwards to core.
   // MUST be registered before the agent-prefixed `/:agent/v1/*` routes below.
   const bridgeHandler = createSkillBridgeHandler(config);
   app.post("/skill-bridge/*", (c) => bridgeHandler(c));
@@ -151,13 +156,15 @@ export function createApp(config: ProxyConfig): Hono {
 
   // ── Session management endpoints (underlying interface for the mem: command, reusable by the panel frontend) ──
   app.post("/v3/session/refresh-cache", (c) => {
-    return import("./routes/session-refresh.js").then(({ createSessionRefreshHandler }) =>
-      createSessionRefreshHandler(config)(c),
+    return import("./routes/session-refresh.js").then(
+      ({ createSessionRefreshHandler }) =>
+        createSessionRefreshHandler(config)(c),
     );
   });
   app.post("/v3/session/force-archive-skill", (c) => {
-    return import("./routes/session-force-archive.js").then(({ createSessionForceArchiveHandler }) =>
-      createSessionForceArchiveHandler(config)(c),
+    return import("./routes/session-force-archive.js").then(
+      ({ createSessionForceArchiveHandler }) =>
+        createSessionForceArchiveHandler(config)(c),
     );
   });
 
@@ -169,7 +176,9 @@ export function createApp(config: ProxyConfig): Hono {
   // These endpoints go through a lightweight passthrough handler (they don't enter the
   // route module and don't form a conversation turn).
   // See docs/design/2026-07-02-arbitrary-path-passthrough-design.md
-  app.post("/v1/messages/count_tokens", (c) => handleAuxiliaryEndpoint(c, config));
+  app.post("/v1/messages/count_tokens", (c) =>
+    handleAuxiliaryEndpoint(c, config),
+  );
   app.post("/v1/embeddings", (c) => handleAuxiliaryEndpoint(c, config));
   app.post("/v1/completions", (c) => handleAuxiliaryEndpoint(c, config));
   app.post("/v1/moderations", (c) => handleAuxiliaryEndpoint(c, config));
@@ -196,8 +205,12 @@ export function createApp(config: ProxyConfig): Hono {
   // Hono prefers matching more precise paths, so these must be registered before the
   // generic `/:agent/:spaceId/v1/...` routes.
   if (config.costGuard.markerOptIn) {
-    app.post("/:agent/:spaceId/cost-guard/v1/messages", (c) => handleAnthropicMessages(c, config));
-    app.post("/:agent/:spaceId/cost-guard/v1/chat/completions", (c) => handleChatCompletions(c, config));
+    app.post("/:agent/:spaceId/cost-guard/v1/messages", (c) =>
+      handleAnthropicMessages(c, config),
+    );
+    app.post("/:agent/:spaceId/cost-guard/v1/chat/completions", (c) =>
+      handleChatCompletions(c, config),
+    );
   }
 
   // `/analyse` marker (asset-reflection internal effect evaluation) — fully symmetric
@@ -212,8 +225,12 @@ export function createApp(config: ProxyConfig): Hono {
   // endpoint → upstream 400. So whenever markerOptIn=true these two anthropic/openai
   // 5-segment routes must be explicitly registered.
   if (config.injection?.assetReflection?.markerOptIn) {
-    app.post("/:agent/:spaceId/analyse/v1/messages", (c) => handleAnthropicMessages(c, config));
-    app.post("/:agent/:spaceId/analyse/v1/chat/completions", (c) => handleChatCompletions(c, config));
+    app.post("/:agent/:spaceId/analyse/v1/messages", (c) =>
+      handleAnthropicMessages(c, config),
+    );
+    app.post("/:agent/:spaceId/analyse/v1/chat/completions", (c) =>
+      handleChatCompletions(c, config),
+    );
   }
 
   // ── Codex endpoints (must precede generic /:agent/:spaceId routes) ────────
@@ -231,14 +248,28 @@ export function createApp(config: ProxyConfig): Hono {
   //   /codex/<spaceId>/v1/responses  ← hit when the codex client base includes v1
   //   /codex/<spaceId>/responses     ← hit when the codex client base has no /v1 (aligned with CC/CB usage)
   // Both paths map to handleCodexEndpoint with identical behavior.
-  app.post("/codex/:spaceId/v1/responses/compact", (c) => handleCodexEndpoint(c, config));
-  app.post("/codex/:spaceId/v1/memories/trace_summarize", (c) => handleCodexEndpoint(c, config));
-  app.post("/codex/:spaceId/v1/realtime/calls", (c) => handleCodexEndpoint(c, config));
-  app.post("/codex/:spaceId/v1/responses", (c) => handleCodexEndpoint(c, config));
+  app.post("/codex/:spaceId/v1/responses/compact", (c) =>
+    handleCodexEndpoint(c, config),
+  );
+  app.post("/codex/:spaceId/v1/memories/trace_summarize", (c) =>
+    handleCodexEndpoint(c, config),
+  );
+  app.post("/codex/:spaceId/v1/realtime/calls", (c) =>
+    handleCodexEndpoint(c, config),
+  );
+  app.post("/codex/:spaceId/v1/responses", (c) =>
+    handleCodexEndpoint(c, config),
+  );
   // Compatible with base_url configured without /v1 (aligned with the CC/CB user experience)
-  app.post("/codex/:spaceId/responses/compact", (c) => handleCodexEndpoint(c, config));
-  app.post("/codex/:spaceId/memories/trace_summarize", (c) => handleCodexEndpoint(c, config));
-  app.post("/codex/:spaceId/realtime/calls", (c) => handleCodexEndpoint(c, config));
+  app.post("/codex/:spaceId/responses/compact", (c) =>
+    handleCodexEndpoint(c, config),
+  );
+  app.post("/codex/:spaceId/memories/trace_summarize", (c) =>
+    handleCodexEndpoint(c, config),
+  );
+  app.post("/codex/:spaceId/realtime/calls", (c) =>
+    handleCodexEndpoint(c, config),
+  );
   app.post("/codex/:spaceId/responses", (c) => handleCodexEndpoint(c, config));
 
   // ── Workbuddy endpoints (must precede generic /:agent/:spaceId routes) ────
@@ -247,15 +278,31 @@ export function createApp(config: ProxyConfig): Hono {
   // / realtime / memories belong to aux; the main endpoint is /v1/responses).
   //
   // Like CC/CB/Codex, both base_url forms with/without /v1 are supported.
-  app.post("/workbuddy/:spaceId/v1/responses/compact", (c) => handleWorkbuddyEndpoint(c, config));
-  app.post("/workbuddy/:spaceId/v1/memories/trace_summarize", (c) => handleWorkbuddyEndpoint(c, config));
-  app.post("/workbuddy/:spaceId/v1/realtime/calls", (c) => handleWorkbuddyEndpoint(c, config));
-  app.post("/workbuddy/:spaceId/v1/responses", (c) => handleWorkbuddyEndpoint(c, config));
+  app.post("/workbuddy/:spaceId/v1/responses/compact", (c) =>
+    handleWorkbuddyEndpoint(c, config),
+  );
+  app.post("/workbuddy/:spaceId/v1/memories/trace_summarize", (c) =>
+    handleWorkbuddyEndpoint(c, config),
+  );
+  app.post("/workbuddy/:spaceId/v1/realtime/calls", (c) =>
+    handleWorkbuddyEndpoint(c, config),
+  );
+  app.post("/workbuddy/:spaceId/v1/responses", (c) =>
+    handleWorkbuddyEndpoint(c, config),
+  );
   // Compatible with base_url configured without /v1
-  app.post("/workbuddy/:spaceId/responses/compact", (c) => handleWorkbuddyEndpoint(c, config));
-  app.post("/workbuddy/:spaceId/memories/trace_summarize", (c) => handleWorkbuddyEndpoint(c, config));
-  app.post("/workbuddy/:spaceId/realtime/calls", (c) => handleWorkbuddyEndpoint(c, config));
-  app.post("/workbuddy/:spaceId/responses", (c) => handleWorkbuddyEndpoint(c, config));
+  app.post("/workbuddy/:spaceId/responses/compact", (c) =>
+    handleWorkbuddyEndpoint(c, config),
+  );
+  app.post("/workbuddy/:spaceId/memories/trace_summarize", (c) =>
+    handleWorkbuddyEndpoint(c, config),
+  );
+  app.post("/workbuddy/:spaceId/realtime/calls", (c) =>
+    handleWorkbuddyEndpoint(c, config),
+  );
+  app.post("/workbuddy/:spaceId/responses", (c) =>
+    handleWorkbuddyEndpoint(c, config),
+  );
 
   // Codex-side `/cost-guard` / `/analyse` marker routes — fully aligned with CC/CB:
   // the marker is an independent URL segment (after `/{agent}/{spaceId}`) with the same
@@ -279,12 +326,20 @@ export function createApp(config: ProxyConfig): Hono {
   //   `requestPath: c.req.path` line in the codexHandler.ts injection section), so once
   //   the routes are registered the `/analyse` marker takes effect for codex immediately.
   if (config.costGuard.markerOptIn) {
-    app.post("/codex/:spaceId/cost-guard/v1/responses", (c) => handleCodexEndpoint(c, config));
-    app.post("/codex/:spaceId/cost-guard/responses", (c) => handleCodexEndpoint(c, config));
+    app.post("/codex/:spaceId/cost-guard/v1/responses", (c) =>
+      handleCodexEndpoint(c, config),
+    );
+    app.post("/codex/:spaceId/cost-guard/responses", (c) =>
+      handleCodexEndpoint(c, config),
+    );
   }
   if (config.injection?.assetReflection?.markerOptIn) {
-    app.post("/codex/:spaceId/analyse/v1/responses", (c) => handleCodexEndpoint(c, config));
-    app.post("/codex/:spaceId/analyse/responses", (c) => handleCodexEndpoint(c, config));
+    app.post("/codex/:spaceId/analyse/v1/responses", (c) =>
+      handleCodexEndpoint(c, config),
+    );
+    app.post("/codex/:spaceId/analyse/responses", (c) =>
+      handleCodexEndpoint(c, config),
+    );
   }
 
   // ── deepseek-harness (dsh) endpoints ──────────────────────────────────────
@@ -304,24 +359,42 @@ export function createApp(config: ProxyConfig): Hono {
   // main / title / compaction request classification is not done at the route layer;
   // agent-adapters/dsh.ts's classifyRequest decides based on header + body features
   // (see its doc).
-  app.post("/dsh/:spaceId/v1/chat/completions", (c) => handleChatCompletions(c, config));
-  app.post("/dsh/:spaceId/chat/completions", (c) => handleChatCompletions(c, config));
+  app.post("/dsh/:spaceId/v1/chat/completions", (c) =>
+    handleChatCompletions(c, config),
+  );
+  app.post("/dsh/:spaceId/chat/completions", (c) =>
+    handleChatCompletions(c, config),
+  );
   // dsh captures so far show no embeddings/moderations/completions; reserve aux endpoints (symmetric with CC/CB)
-  app.post("/dsh/:spaceId/v1/embeddings", (c) => handleAuxiliaryEndpoint(c, config));
-  app.post("/dsh/:spaceId/v1/completions", (c) => handleAuxiliaryEndpoint(c, config));
-  app.post("/dsh/:spaceId/v1/moderations", (c) => handleAuxiliaryEndpoint(c, config));
+  app.post("/dsh/:spaceId/v1/embeddings", (c) =>
+    handleAuxiliaryEndpoint(c, config),
+  );
+  app.post("/dsh/:spaceId/v1/completions", (c) =>
+    handleAuxiliaryEndpoint(c, config),
+  );
+  app.post("/dsh/:spaceId/v1/moderations", (c) =>
+    handleAuxiliaryEndpoint(c, config),
+  );
 
   // dsh cost-guard / analyse marker routes — fully symmetric with CC/CB/Codex.
   // Per the codex comments: these four 5-segment paths must be explicitly registered,
   // otherwise they fall through to the catch-all POST /* (default path) and the marker
   // silently stops working.
   if (config.costGuard.markerOptIn) {
-    app.post("/dsh/:spaceId/cost-guard/v1/chat/completions", (c) => handleChatCompletions(c, config));
-    app.post("/dsh/:spaceId/cost-guard/chat/completions", (c) => handleChatCompletions(c, config));
+    app.post("/dsh/:spaceId/cost-guard/v1/chat/completions", (c) =>
+      handleChatCompletions(c, config),
+    );
+    app.post("/dsh/:spaceId/cost-guard/chat/completions", (c) =>
+      handleChatCompletions(c, config),
+    );
   }
   if (config.injection?.assetReflection?.markerOptIn) {
-    app.post("/dsh/:spaceId/analyse/v1/chat/completions", (c) => handleChatCompletions(c, config));
-    app.post("/dsh/:spaceId/analyse/chat/completions", (c) => handleChatCompletions(c, config));
+    app.post("/dsh/:spaceId/analyse/v1/chat/completions", (c) =>
+      handleChatCompletions(c, config),
+    );
+    app.post("/dsh/:spaceId/analyse/chat/completions", (c) =>
+      handleChatCompletions(c, config),
+    );
   }
 
   // opencode cost-guard / analyse marker routes — fully symmetric with CC/CB/Codex/dsh.
@@ -334,32 +407,64 @@ export function createApp(config: ProxyConfig): Hono {
   // passed to resolveForwardTarget in handler.ts via agentName=agentFromPath("opencode");
   // as long as a route matches, the Router can branch its decision on agentSource=opencode.
   if (config.costGuard.markerOptIn) {
-    app.post("/opencode/:spaceId/cost-guard/v1/chat/completions", (c) => handleChatCompletions(c, config));
-    app.post("/opencode/:spaceId/cost-guard/chat/completions", (c) => handleChatCompletions(c, config));
+    app.post("/opencode/:spaceId/cost-guard/v1/chat/completions", (c) =>
+      handleChatCompletions(c, config),
+    );
+    app.post("/opencode/:spaceId/cost-guard/chat/completions", (c) =>
+      handleChatCompletions(c, config),
+    );
   }
   if (config.injection?.assetReflection?.markerOptIn) {
-    app.post("/opencode/:spaceId/analyse/v1/chat/completions", (c) => handleChatCompletions(c, config));
-    app.post("/opencode/:spaceId/analyse/chat/completions", (c) => handleChatCompletions(c, config));
+    app.post("/opencode/:spaceId/analyse/v1/chat/completions", (c) =>
+      handleChatCompletions(c, config),
+    );
+    app.post("/opencode/:spaceId/analyse/chat/completions", (c) =>
+      handleChatCompletions(c, config),
+    );
   }
 
-  app.post("/:agent/:spaceId/v1/messages", (c) => handleAnthropicMessages(c, config));
-  app.post("/:agent/:spaceId/v1/messages/count_tokens", (c) => handleAuxiliaryEndpoint(c, config));
-  app.post("/:agent/:spaceId/v1/embeddings", (c) => handleAuxiliaryEndpoint(c, config));
-  app.post("/:agent/:spaceId/v1/completions", (c) => handleAuxiliaryEndpoint(c, config));
-  app.post("/:agent/:spaceId/v1/moderations", (c) => handleAuxiliaryEndpoint(c, config));
-  app.post("/:agent/:spaceId/v1/chat/completions", (c) => handleChatCompletions(c, config));
+  app.post("/:agent/:spaceId/v1/messages", (c) =>
+    handleAnthropicMessages(c, config),
+  );
+  app.post("/:agent/:spaceId/v1/messages/count_tokens", (c) =>
+    handleAuxiliaryEndpoint(c, config),
+  );
+  app.post("/:agent/:spaceId/v1/embeddings", (c) =>
+    handleAuxiliaryEndpoint(c, config),
+  );
+  app.post("/:agent/:spaceId/v1/completions", (c) =>
+    handleAuxiliaryEndpoint(c, config),
+  );
+  app.post("/:agent/:spaceId/v1/moderations", (c) =>
+    handleAuxiliaryEndpoint(c, config),
+  );
+  app.post("/:agent/:spaceId/v1/chat/completions", (c) =>
+    handleChatCompletions(c, config),
+  );
 
   // Agent-prefixed routes without spaceId (deprecated: no credit reporting)
   app.post("/:agent/v1/messages", (c) => handleAnthropicMessages(c, config));
-  app.post("/:agent/v1/chat/completions", (c) => handleChatCompletions(c, config));
+  app.post("/:agent/v1/chat/completions", (c) =>
+    handleChatCompletions(c, config),
+  );
 
   // Legacy /proxy/<spaceId>/ prefix — no agent info, defaults to codebuddy.
   // Kept for compatibility with clients that don't include an agent prefix.
-  app.post("/proxy/:spaceId/v1/messages", (c) => handleAnthropicMessages(c, config));
-  app.post("/proxy/:spaceId/v1/messages/count_tokens", (c) => handleAuxiliaryEndpoint(c, config));
-  app.post("/proxy/:spaceId/v1/embeddings", (c) => handleAuxiliaryEndpoint(c, config));
-  app.post("/proxy/:spaceId/v1/completions", (c) => handleAuxiliaryEndpoint(c, config));
-  app.post("/proxy/:spaceId/v1/moderations", (c) => handleAuxiliaryEndpoint(c, config));
+  app.post("/proxy/:spaceId/v1/messages", (c) =>
+    handleAnthropicMessages(c, config),
+  );
+  app.post("/proxy/:spaceId/v1/messages/count_tokens", (c) =>
+    handleAuxiliaryEndpoint(c, config),
+  );
+  app.post("/proxy/:spaceId/v1/embeddings", (c) =>
+    handleAuxiliaryEndpoint(c, config),
+  );
+  app.post("/proxy/:spaceId/v1/completions", (c) =>
+    handleAuxiliaryEndpoint(c, config),
+  );
+  app.post("/proxy/:spaceId/v1/moderations", (c) =>
+    handleAuxiliaryEndpoint(c, config),
+  );
   app.post("/proxy/:spaceId/*", (c) => handleChatCompletions(c, config));
 
   // OpenAI-compatible chat completions (catch-all for any remaining POST paths)

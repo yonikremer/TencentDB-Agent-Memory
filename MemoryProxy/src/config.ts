@@ -17,7 +17,16 @@ export const DEFAULT_CONFIG: ProxyConfig = {
     rotate: { maxSizeBytes: 100 * 1024 * 1024, backupLimit: 10 },
   },
   opik: { enabled: false, url: "", apiKey: "", stripRequestLogContent: false },
-  langfuse: { enabled: false, host: "", publicKey: "", secretKey: "", debug: false, maxQueueSize: 8192, flushAt: 256, flushInterval: 2 },
+  langfuse: {
+    enabled: false,
+    host: "",
+    publicKey: "",
+    secretKey: "",
+    debug: false,
+    maxQueueSize: 8192,
+    flushAt: 256,
+    flushInterval: 2,
+  },
   clickhouse: {
     enabled: false,
     url: "",
@@ -60,7 +69,7 @@ export const DEFAULT_CONFIG: ProxyConfig = {
       },
     },
     sqlite: { dbPath: "" },
-    fs: { fsRoot: "" },  // empty string → ensureBindingRepoPersistent uses ~/.memory-tencentdb/proxy-state/
+    fs: { fsRoot: "" }, // empty string → ensureBindingRepoPersistent uses ~/.memory-tencentdb/proxy-state/
   },
   costGuard: {
     enabled: false,
@@ -221,9 +230,16 @@ function parseCostGuard(yaml: RawYamlConfig): CostGuardConfig {
   }
 
   const result: CostGuardConfig = {
-    enabled: typeof enabled === "boolean" ? enabled : DEFAULT_CONFIG.costGuard.enabled,
-    markerOptIn: typeof markerOptIn === "boolean" ? markerOptIn : DEFAULT_CONFIG.costGuard.markerOptIn,
-    agentProfile: typeof agentProfile === "string" ? agentProfile : DEFAULT_CONFIG.costGuard.agentProfile,
+    enabled:
+      typeof enabled === "boolean" ? enabled : DEFAULT_CONFIG.costGuard.enabled,
+    markerOptIn:
+      typeof markerOptIn === "boolean"
+        ? markerOptIn
+        : DEFAULT_CONFIG.costGuard.markerOptIn,
+    agentProfile:
+      typeof agentProfile === "string"
+        ? agentProfile
+        : DEFAULT_CONFIG.costGuard.agentProfile,
     options,
   };
   if (
@@ -231,7 +247,9 @@ function parseCostGuard(yaml: RawYamlConfig): CostGuardConfig {
     typeof anthropicUpstream === "object" &&
     typeof (anthropicUpstream as { url?: unknown }).url === "string"
   ) {
-    result.anthropicUpstream = { url: (anthropicUpstream as { url: string }).url };
+    result.anthropicUpstream = {
+      url: (anthropicUpstream as { url: string }).url,
+    };
   }
   return result;
 }
@@ -244,7 +262,9 @@ function parseCostGuard(yaml: RawYamlConfig): CostGuardConfig {
  * a glance).
  */
 function parseUpstreamAgents(
-  raw: Record<string, { url?: string; apiKey?: string } | null | undefined> | undefined,
+  raw:
+    | Record<string, { url?: string; apiKey?: string } | null | undefined>
+    | undefined,
 ): Record<string, { url: string; apiKey?: string }> {
   if (!raw || typeof raw !== "object") return {};
   const out: Record<string, { url: string; apiKey?: string }> = {};
@@ -253,9 +273,10 @@ function parseUpstreamAgents(
     const url = (entry as { url?: unknown }).url;
     if (typeof url !== "string" || url.length === 0) continue;
     const apiKey = (entry as { apiKey?: unknown }).apiKey;
-    out[name] = typeof apiKey === "string" && apiKey.length > 0
-      ? { url, apiKey }
-      : { url };
+    out[name] =
+      typeof apiKey === "string" && apiKey.length > 0
+        ? { url, apiKey }
+        : { url };
   }
   return out;
 }
@@ -273,8 +294,7 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
       host: overrides.host ?? yaml.server?.host ?? DEFAULT_CONFIG.server.host,
       port: overrides.port ?? yaml.server?.port ?? DEFAULT_CONFIG.server.port,
       forwardTimeoutMs:
-        yaml.server?.forwardTimeoutMs ??
-        DEFAULT_CONFIG.server.forwardTimeoutMs,
+        yaml.server?.forwardTimeoutMs ?? DEFAULT_CONFIG.server.forwardTimeoutMs,
     },
     upstream: {
       url:
@@ -292,9 +312,11 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
       backend: yaml.log?.backend ?? DEFAULT_CONFIG.log.backend,
       rotate: {
         maxSizeBytes:
-          yaml.log?.rotate?.maxSizeBytes ?? DEFAULT_CONFIG.log.rotate.maxSizeBytes,
+          yaml.log?.rotate?.maxSizeBytes ??
+          DEFAULT_CONFIG.log.rotate.maxSizeBytes,
         backupLimit:
-          yaml.log?.rotate?.backupLimit ?? DEFAULT_CONFIG.log.rotate.backupLimit,
+          yaml.log?.rotate?.backupLimit ??
+          DEFAULT_CONFIG.log.rotate.backupLimit,
       },
     },
     opik: {
@@ -306,7 +328,8 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
       apiKey:
         overrides.opikApiKey ?? yaml.opik?.apiKey ?? DEFAULT_CONFIG.opik.apiKey,
       stripRequestLogContent:
-        yaml.opik?.stripRequestLogContent ?? DEFAULT_CONFIG.opik.stripRequestLogContent,
+        yaml.opik?.stripRequestLogContent ??
+        DEFAULT_CONFIG.opik.stripRequestLogContent,
     },
     langfuse: {
       enabled: yaml.langfuse?.enabled ?? DEFAULT_CONFIG.langfuse.enabled,
@@ -314,9 +337,11 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
       publicKey: yaml.langfuse?.publicKey ?? DEFAULT_CONFIG.langfuse.publicKey,
       secretKey: yaml.langfuse?.secretKey ?? DEFAULT_CONFIG.langfuse.secretKey,
       debug: yaml.langfuse?.debug ?? DEFAULT_CONFIG.langfuse.debug,
-      maxQueueSize: yaml.langfuse?.maxQueueSize ?? DEFAULT_CONFIG.langfuse.maxQueueSize,
+      maxQueueSize:
+        yaml.langfuse?.maxQueueSize ?? DEFAULT_CONFIG.langfuse.maxQueueSize,
       flushAt: yaml.langfuse?.flushAt ?? DEFAULT_CONFIG.langfuse.flushAt,
-      flushInterval: yaml.langfuse?.flushInterval ?? DEFAULT_CONFIG.langfuse.flushInterval,
+      flushInterval:
+        yaml.langfuse?.flushInterval ?? DEFAULT_CONFIG.langfuse.flushInterval,
     },
     clickhouse: {
       enabled: yaml.clickhouse?.enabled ?? DEFAULT_CONFIG.clickhouse.enabled,
@@ -326,8 +351,12 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
       rawTable: yaml.clickhouse?.rawTable ?? DEFAULT_CONFIG.clickhouse.rawTable,
       user: yaml.clickhouse?.user ?? DEFAULT_CONFIG.clickhouse.user,
       password: yaml.clickhouse?.password ?? DEFAULT_CONFIG.clickhouse.password,
-      flushIntervalMs: yaml.clickhouse?.flushIntervalMs ?? DEFAULT_CONFIG.clickhouse.flushIntervalMs,
-      flushThreshold: yaml.clickhouse?.flushThreshold ?? DEFAULT_CONFIG.clickhouse.flushThreshold,
+      flushIntervalMs:
+        yaml.clickhouse?.flushIntervalMs ??
+        DEFAULT_CONFIG.clickhouse.flushIntervalMs,
+      flushThreshold:
+        yaml.clickhouse?.flushThreshold ??
+        DEFAULT_CONFIG.clickhouse.flushThreshold,
       ttlDays: yaml.clickhouse?.ttlDays ?? DEFAULT_CONFIG.clickhouse.ttlDays,
     },
     redis: {
@@ -339,7 +368,9 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
       db: yaml.redis?.db ?? DEFAULT_CONFIG.redis.db,
       keyPrefix: yaml.redis?.keyPrefix ?? DEFAULT_CONFIG.redis.keyPrefix,
       ttlSeconds: yaml.redis?.ttlSeconds ?? DEFAULT_CONFIG.redis.ttlSeconds,
-      injectionTtlSeconds: yaml.redis?.injectionTtlSeconds ?? DEFAULT_CONFIG.redis.injectionTtlSeconds,
+      injectionTtlSeconds:
+        yaml.redis?.injectionTtlSeconds ??
+        DEFAULT_CONFIG.redis.injectionTtlSeconds,
     },
     rateLimit: {
       tpm: Math.max(0, yaml.rateLimit?.tpm ?? DEFAULT_CONFIG.rateLimit.tpm),
@@ -350,123 +381,213 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
       backend: yaml.storage?.backend ?? DEFAULT_CONFIG.storage.backend,
       ttlDays: yaml.storage?.ttlDays ?? DEFAULT_CONFIG.storage.ttlDays,
       cos: {
-        rootPrefix: yaml.storage?.cos?.rootPrefix ?? DEFAULT_CONFIG.storage.cos.rootPrefix,
+        rootPrefix:
+          yaml.storage?.cos?.rootPrefix ??
+          DEFAULT_CONFIG.storage.cos.rootPrefix,
         endpointDomain: yaml.storage?.cos?.endpointDomain ?? undefined,
         shark: {
-          baseUrl: yaml.storage?.cos?.shark?.baseUrl ?? DEFAULT_CONFIG.storage.cos.shark.baseUrl,
-          timeoutMs: yaml.storage?.cos?.shark?.timeoutMs ?? DEFAULT_CONFIG.storage.cos.shark.timeoutMs,
-          retryCount: yaml.storage?.cos?.shark?.retryCount ?? DEFAULT_CONFIG.storage.cos.shark.retryCount,
-          refreshBufferMs: yaml.storage?.cos?.shark?.refreshBufferMs ?? DEFAULT_CONFIG.storage.cos.shark.refreshBufferMs,
-          maxSpaces: yaml.storage?.cos?.shark?.maxSpaces ?? DEFAULT_CONFIG.storage.cos.shark.maxSpaces,
-          graceCloseDelayMs: yaml.storage?.cos?.shark?.graceCloseDelayMs ?? DEFAULT_CONFIG.storage.cos.shark.graceCloseDelayMs,
+          baseUrl:
+            yaml.storage?.cos?.shark?.baseUrl ??
+            DEFAULT_CONFIG.storage.cos.shark.baseUrl,
+          timeoutMs:
+            yaml.storage?.cos?.shark?.timeoutMs ??
+            DEFAULT_CONFIG.storage.cos.shark.timeoutMs,
+          retryCount:
+            yaml.storage?.cos?.shark?.retryCount ??
+            DEFAULT_CONFIG.storage.cos.shark.retryCount,
+          refreshBufferMs:
+            yaml.storage?.cos?.shark?.refreshBufferMs ??
+            DEFAULT_CONFIG.storage.cos.shark.refreshBufferMs,
+          maxSpaces:
+            yaml.storage?.cos?.shark?.maxSpaces ??
+            DEFAULT_CONFIG.storage.cos.shark.maxSpaces,
+          graceCloseDelayMs:
+            yaml.storage?.cos?.shark?.graceCloseDelayMs ??
+            DEFAULT_CONFIG.storage.cos.shark.graceCloseDelayMs,
         },
       },
-      sqlite: { dbPath: yaml.storage?.sqlite?.dbPath ?? DEFAULT_CONFIG.storage.sqlite.dbPath },
-      fs: { fsRoot: yaml.storage?.fs?.fsRoot ?? DEFAULT_CONFIG.storage.fs.fsRoot },
+      sqlite: {
+        dbPath:
+          yaml.storage?.sqlite?.dbPath ?? DEFAULT_CONFIG.storage.sqlite.dbPath,
+      },
+      fs: {
+        fsRoot: yaml.storage?.fs?.fsRoot ?? DEFAULT_CONFIG.storage.fs.fsRoot,
+      },
     },
     costGuard: parseCostGuard(yaml),
     creditReport: {
       url: yaml.creditReport?.url ?? DEFAULT_CONFIG.creditReport.url,
-      timeoutMs: yaml.creditReport?.timeoutMs ?? DEFAULT_CONFIG.creditReport.timeoutMs,
+      timeoutMs:
+        yaml.creditReport?.timeoutMs ?? DEFAULT_CONFIG.creditReport.timeoutMs,
     },
     creditPricing: {
-      models: (yaml.creditPricing?.models ?? []).map((m) => ({
-        name: m.name ?? "",
-        // Display name / alias — loaded explicitly. When missing, `resolveModelName`
-        // falls back to `name`, but `resolveModelId` needs this field for the
-        // client-facing alias → real model_id reverse lookup (§13.15); without it the
-        // alias is never found and a client sending the alias gets a 400 directly.
-        modelName: m.modelName,
-        input: m.input ?? 0,
-        output: m.output ?? 0,
-        cacheRead: m.cacheRead ?? 0,
-        cacheWrite5m: m.cacheWrite5m ?? 0,
-        cacheWrite1h: m.cacheWrite1h ?? 0,
-      })).filter((m) => m.name !== ""),
+      models: (yaml.creditPricing?.models ?? [])
+        .map((m) => ({
+          name: m.name ?? "",
+          // Display name / alias — loaded explicitly. When missing, `resolveModelName`
+          // falls back to `name`, but `resolveModelId` needs this field for the
+          // client-facing alias → real model_id reverse lookup (§13.15); without it the
+          // alias is never found and a client sending the alias gets a 400 directly.
+          modelName: m.modelName,
+          input: m.input ?? 0,
+          output: m.output ?? 0,
+          cacheRead: m.cacheRead ?? 0,
+          cacheWrite5m: m.cacheWrite5m ?? 0,
+          cacheWrite1h: m.cacheWrite1h ?? 0,
+        }))
+        .filter((m) => m.name !== ""),
     },
     injection: {
       enabled: yaml.injection?.enabled ?? DEFAULT_CONFIG.injection.enabled,
-      injectors: yaml.injection?.injectors ?? DEFAULT_CONFIG.injection.injectors,
-      externalGatewayUrl: typeof yaml.injection?.externalGatewayUrl === "string" && yaml.injection.externalGatewayUrl.trim() !== ""
-        ? yaml.injection.externalGatewayUrl.trim().replace(/\/$/, "")
-        : undefined,
+      injectors:
+        yaml.injection?.injectors ?? DEFAULT_CONFIG.injection.injectors,
+      externalGatewayUrl:
+        typeof yaml.injection?.externalGatewayUrl === "string" &&
+        yaml.injection.externalGatewayUrl.trim() !== ""
+          ? yaml.injection.externalGatewayUrl.trim().replace(/\/$/, "")
+          : undefined,
       // Only a boolean is accepted; a missing or mistyped yaml falls back to the
       // default (off). Same approach as costGuard.markerOptIn, so a deployed yaml
       // without an assetReflection: section is entirely unaffected.
       assetReflection: {
-        markerOptIn: typeof yaml.injection?.assetReflection?.markerOptIn === "boolean"
-          ? yaml.injection.assetReflection.markerOptIn
-          : DEFAULT_CONFIG.injection.assetReflection!.markerOptIn,
+        markerOptIn:
+          typeof yaml.injection?.assetReflection?.markerOptIn === "boolean"
+            ? yaml.injection.assetReflection.markerOptIn
+            : DEFAULT_CONFIG.injection.assetReflection!.markerOptIn,
       },
     },
     extraction: {
       enabled: yaml.extraction?.enabled ?? DEFAULT_CONFIG.extraction.enabled,
-      extractors: yaml.extraction?.extractors ?? DEFAULT_CONFIG.extraction.extractors,
+      extractors:
+        yaml.extraction?.extractors ?? DEFAULT_CONFIG.extraction.extractors,
     },
-  sessionInit: {
-    enabled: yaml.sessionInit?.enabled ?? DEFAULT_CONFIG.sessionInit.enabled,
-    maxRetries: yaml.sessionInit?.maxRetries ?? DEFAULT_CONFIG.sessionInit.maxRetries,
-    injectAgentContext: yaml.sessionInit?.injectAgentContext ?? DEFAULT_CONFIG.sessionInit.injectAgentContext,
-    injectTaskContext: yaml.sessionInit?.injectTaskContext ?? DEFAULT_CONFIG.sessionInit.injectTaskContext,
-    defaultTaskId: typeof yaml.sessionInit?.defaultTaskId === "string"
-      ? (yaml.sessionInit.defaultTaskId.trim() || undefined)   // empty string → disabled
-      : DEFAULT_CONFIG.sessionInit.defaultTaskId,
-    headerAutoSelect: {
-      enabled: yaml.sessionInit?.headerAutoSelect?.enabled ?? DEFAULT_CONFIG.sessionInit.headerAutoSelect!.enabled,
-      teamHeader: (yaml.sessionInit?.headerAutoSelect?.teamHeader ?? DEFAULT_CONFIG.sessionInit.headerAutoSelect!.teamHeader).toLowerCase(),
-      agentHeader: (yaml.sessionInit?.headerAutoSelect?.agentHeader ?? DEFAULT_CONFIG.sessionInit.headerAutoSelect!.agentHeader).toLowerCase(),
-      taskHeader: (yaml.sessionInit?.headerAutoSelect?.taskHeader ?? DEFAULT_CONFIG.sessionInit.headerAutoSelect!.taskHeader).toLowerCase(),
-      onMismatch: yaml.sessionInit?.headerAutoSelect?.onMismatch ?? DEFAULT_CONFIG.sessionInit.headerAutoSelect!.onMismatch,
+    sessionInit: {
+      enabled: yaml.sessionInit?.enabled ?? DEFAULT_CONFIG.sessionInit.enabled,
+      maxRetries:
+        yaml.sessionInit?.maxRetries ?? DEFAULT_CONFIG.sessionInit.maxRetries,
+      injectAgentContext:
+        yaml.sessionInit?.injectAgentContext ??
+        DEFAULT_CONFIG.sessionInit.injectAgentContext,
+      injectTaskContext:
+        yaml.sessionInit?.injectTaskContext ??
+        DEFAULT_CONFIG.sessionInit.injectTaskContext,
+      defaultTaskId:
+        typeof yaml.sessionInit?.defaultTaskId === "string"
+          ? yaml.sessionInit.defaultTaskId.trim() || undefined // empty string → disabled
+          : DEFAULT_CONFIG.sessionInit.defaultTaskId,
+      headerAutoSelect: {
+        enabled:
+          yaml.sessionInit?.headerAutoSelect?.enabled ??
+          DEFAULT_CONFIG.sessionInit.headerAutoSelect!.enabled,
+        teamHeader: (
+          yaml.sessionInit?.headerAutoSelect?.teamHeader ??
+          DEFAULT_CONFIG.sessionInit.headerAutoSelect!.teamHeader
+        ).toLowerCase(),
+        agentHeader: (
+          yaml.sessionInit?.headerAutoSelect?.agentHeader ??
+          DEFAULT_CONFIG.sessionInit.headerAutoSelect!.agentHeader
+        ).toLowerCase(),
+        taskHeader: (
+          yaml.sessionInit?.headerAutoSelect?.taskHeader ??
+          DEFAULT_CONFIG.sessionInit.headerAutoSelect!.taskHeader
+        ).toLowerCase(),
+        onMismatch:
+          yaml.sessionInit?.headerAutoSelect?.onMismatch ??
+          DEFAULT_CONFIG.sessionInit.headerAutoSelect!.onMismatch,
+      },
+      // Identity overrides only activate with explicit TDAI_ALLOW_DEBUG_IDENTITY=1 opt-in.
+      // Without it, yaml debugForceIdentity/debugForceUserId are ignored (fail closed) so a
+      // stray debug stanza in production config can never spoof user/team/agent identity.
+      debugForceIdentity:
+        process.env.TDAI_ALLOW_DEBUG_IDENTITY === "1" &&
+        yaml.sessionInit?.debugForceIdentity &&
+        typeof yaml.sessionInit.debugForceIdentity === "object" &&
+        typeof (yaml.sessionInit.debugForceIdentity as Record<string, unknown>)
+          .team_id === "string" &&
+        typeof (yaml.sessionInit.debugForceIdentity as Record<string, unknown>)
+          .agent_id === "string"
+          ? {
+              team_id: (
+                yaml.sessionInit.debugForceIdentity as Record<string, string>
+              ).team_id,
+              agent_id: (
+                yaml.sessionInit.debugForceIdentity as Record<string, string>
+              ).agent_id,
+              task_id:
+                typeof (
+                  yaml.sessionInit.debugForceIdentity as Record<string, unknown>
+                ).task_id === "string"
+                  ? (
+                      yaml.sessionInit.debugForceIdentity as Record<
+                        string,
+                        string
+                      >
+                    ).task_id
+                  : undefined,
+            }
+          : undefined,
+      debugForceUserId:
+        process.env.TDAI_ALLOW_DEBUG_IDENTITY === "1" &&
+        typeof yaml.sessionInit?.debugForceUserId === "string" &&
+        yaml.sessionInit.debugForceUserId.trim()
+          ? yaml.sessionInit.debugForceUserId.trim()
+          : undefined,
+      debugVerboseLogging: yaml.sessionInit?.debugVerboseLogging ?? false,
     },
-    debugForceIdentity: yaml.sessionInit?.debugForceIdentity
-      && typeof yaml.sessionInit.debugForceIdentity === "object"
-      && typeof (yaml.sessionInit.debugForceIdentity as Record<string, unknown>).team_id === "string"
-      && typeof (yaml.sessionInit.debugForceIdentity as Record<string, unknown>).agent_id === "string"
-      ? {
-          team_id: (yaml.sessionInit.debugForceIdentity as Record<string, string>).team_id,
-          agent_id: (yaml.sessionInit.debugForceIdentity as Record<string, string>).agent_id,
-          task_id: typeof (yaml.sessionInit.debugForceIdentity as Record<string, unknown>).task_id === "string"
-            ? (yaml.sessionInit.debugForceIdentity as Record<string, string>).task_id
-            : undefined,
-        }
-      : undefined,
-    debugForceUserId: typeof yaml.sessionInit?.debugForceUserId === "string"
-      && yaml.sessionInit.debugForceUserId.trim()
-      ? yaml.sessionInit.debugForceUserId.trim()
-      : undefined,
-    debugVerboseLogging: yaml.sessionInit?.debugVerboseLogging ?? false,
-  },
     tdai: {
       enabled: yaml.tdai?.enabled ?? DEFAULT_CONFIG.tdai.enabled,
       endpoint: yaml.tdai?.endpoint ?? DEFAULT_CONFIG.tdai.endpoint,
       apiKey: yaml.tdai?.apiKey ?? DEFAULT_CONFIG.tdai.apiKey,
       serviceId: yaml.tdai?.serviceId ?? DEFAULT_CONFIG.tdai.serviceId,
       memory: {
-        enabled: yaml.tdai?.memory?.enabled ?? DEFAULT_CONFIG.tdai.memory.enabled,
+        enabled:
+          yaml.tdai?.memory?.enabled ?? DEFAULT_CONFIG.tdai.memory.enabled,
         inject: yaml.tdai?.memory?.inject ?? DEFAULT_CONFIG.tdai.memory.inject,
-        writeL0: yaml.tdai?.memory?.writeL0 ?? DEFAULT_CONFIG.tdai.memory.writeL0,
-        recallL1: yaml.tdai?.memory?.recallL1 ?? DEFAULT_CONFIG.tdai.memory.recallL1,
-        injectL2L3: yaml.tdai?.memory?.injectL2L3 ?? DEFAULT_CONFIG.tdai.memory.injectL2L3,
-        l1Limit: yaml.tdai?.memory?.l1Limit ?? DEFAULT_CONFIG.tdai.memory.l1Limit,
-        l2Limit: yaml.tdai?.memory?.l2Limit ?? DEFAULT_CONFIG.tdai.memory.l2Limit,
-        timeoutMs: yaml.tdai?.memory?.timeoutMs ?? DEFAULT_CONFIG.tdai.memory.timeoutMs,
+        writeL0:
+          yaml.tdai?.memory?.writeL0 ?? DEFAULT_CONFIG.tdai.memory.writeL0,
+        recallL1:
+          yaml.tdai?.memory?.recallL1 ?? DEFAULT_CONFIG.tdai.memory.recallL1,
+        injectL2L3:
+          yaml.tdai?.memory?.injectL2L3 ??
+          DEFAULT_CONFIG.tdai.memory.injectL2L3,
+        l1Limit:
+          yaml.tdai?.memory?.l1Limit ?? DEFAULT_CONFIG.tdai.memory.l1Limit,
+        l2Limit:
+          yaml.tdai?.memory?.l2Limit ?? DEFAULT_CONFIG.tdai.memory.l2Limit,
+        timeoutMs:
+          yaml.tdai?.memory?.timeoutMs ?? DEFAULT_CONFIG.tdai.memory.timeoutMs,
       },
     },
     // `skill:` is the canonical YAML section name; `coreSkill:` is kept as a
     // backward-compat alias so existing deployments don't break. Prefer the
     // new name in config.example.yaml. When both are present, `skill:` wins.
     coreSkill: {
-      endpoint: yaml.skill?.endpoint ?? yaml.coreSkill?.endpoint ?? DEFAULT_CONFIG.coreSkill.endpoint,
-      serviceToken: yaml.skill?.serviceToken ?? yaml.coreSkill?.serviceToken ?? DEFAULT_CONFIG.coreSkill.serviceToken,
-      serviceId: yaml.skill?.serviceId ?? yaml.coreSkill?.serviceId ?? DEFAULT_CONFIG.coreSkill.serviceId,
-      timeoutMs: yaml.skill?.timeoutMs ?? yaml.coreSkill?.timeoutMs ?? DEFAULT_CONFIG.coreSkill.timeoutMs,
+      endpoint:
+        yaml.skill?.endpoint ??
+        yaml.coreSkill?.endpoint ??
+        DEFAULT_CONFIG.coreSkill.endpoint,
+      serviceToken:
+        yaml.skill?.serviceToken ??
+        yaml.coreSkill?.serviceToken ??
+        DEFAULT_CONFIG.coreSkill.serviceToken,
+      serviceId:
+        yaml.skill?.serviceId ??
+        yaml.coreSkill?.serviceId ??
+        DEFAULT_CONFIG.coreSkill.serviceId,
+      timeoutMs:
+        yaml.skill?.timeoutMs ??
+        yaml.coreSkill?.timeoutMs ??
+        DEFAULT_CONFIG.coreSkill.timeoutMs,
     },
     knowledge: {
       enabled: yaml.knowledge?.enabled ?? DEFAULT_CONFIG.knowledge.enabled,
       endpoint: yaml.knowledge?.endpoint ?? DEFAULT_CONFIG.knowledge.endpoint,
-      serviceToken: yaml.knowledge?.serviceToken ?? DEFAULT_CONFIG.knowledge.serviceToken,
-      serviceId: yaml.knowledge?.serviceId ?? DEFAULT_CONFIG.knowledge.serviceId,
-      timeoutMs: yaml.knowledge?.timeoutMs ?? DEFAULT_CONFIG.knowledge.timeoutMs,
+      serviceToken:
+        yaml.knowledge?.serviceToken ?? DEFAULT_CONFIG.knowledge.serviceToken,
+      serviceId:
+        yaml.knowledge?.serviceId ?? DEFAULT_CONFIG.knowledge.serviceId,
+      timeoutMs:
+        yaml.knowledge?.timeoutMs ?? DEFAULT_CONFIG.knowledge.timeoutMs,
     },
     skillRuntime: {
       allowLlmWrite:
@@ -506,7 +627,9 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
     memCommand: {
       enabled: yaml.memCommand?.enabled ?? DEFAULT_CONFIG.memCommand.enabled,
       allowedCommands: Array.isArray(yaml.memCommand?.allowedCommands)
-        ? yaml.memCommand.allowedCommands.filter((c: unknown) => typeof c === "string")
+        ? yaml.memCommand.allowedCommands.filter(
+            (c: unknown) => typeof c === "string",
+          )
         : DEFAULT_CONFIG.memCommand.allowedCommands,
       // taskDraft is an optional section, injected only when explicitly present in the
       // yaml —— when unconfigured the field is absent and the task command family returns
@@ -533,13 +656,14 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
     },
     ccRequestRouting: {
       enabled:
-        (yaml as { ccRequestRouting?: { enabled?: boolean } }).ccRequestRouting?.enabled
-        ?? DEFAULT_CONFIG.ccRequestRouting.enabled,
+        (yaml as { ccRequestRouting?: { enabled?: boolean } }).ccRequestRouting
+          ?.enabled ?? DEFAULT_CONFIG.ccRequestRouting.enabled,
     },
     workbuddyRequestRouting: {
       enabled:
-        (yaml as { workbuddyRequestRouting?: { enabled?: boolean } }).workbuddyRequestRouting?.enabled
-        ?? DEFAULT_CONFIG.workbuddyRequestRouting.enabled,
+        (yaml as { workbuddyRequestRouting?: { enabled?: boolean } })
+          .workbuddyRequestRouting?.enabled ??
+        DEFAULT_CONFIG.workbuddyRequestRouting.enabled,
     },
   };
 }
@@ -553,11 +677,14 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
  * might already be in use (regex-adjacent config, prompts, etc).
  */
 function expandEnv(input: string): string {
-  return input.replace(/\$\{([A-Z_][A-Z0-9_]*)(?::-([^}]*))?\}/gi, (_m, name: string, def?: string) => {
-    const val = process.env[name];
-    if (val !== undefined && val !== "") return val;
-    return def ?? "";
-  });
+  return input.replace(
+    /\$\{([A-Z_][A-Z0-9_]*)(?::-([^}]*))?\}/gi,
+    (_m, name: string, def?: string) => {
+      const val = process.env[name];
+      if (val !== undefined && val !== "") return val;
+      return def ?? "";
+    },
+  );
 }
 
 /** Parse process.argv into CliOverrides (minimal arg parser, no extra deps). */
@@ -605,7 +732,6 @@ export function parseArgv(argv: string[]): CliOverrides {
       case "-v":
         overrides.verbose = true;
         break;
-
     }
   }
   return overrides;
