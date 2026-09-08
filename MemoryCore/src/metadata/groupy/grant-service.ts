@@ -241,6 +241,12 @@ export async function applyAssetShare(
   if (!asset) throw new MetadataError("asset_not_found", `asset not found: ${req.asset_id}`);
   const caller = await assertCanShare(service, asset, req.ctx);
   const grantType = resolveGrantType(req.grant_type);
+  // Privilege rule: home-team admins may share as viewer; editor/owner
+  // (KS ingest/delete caps) require the asset owner or system admin.
+  const canEscalate = req.ctx.isSystemAdmin || asset.owner_user_id === caller;
+  if (grantType !== "viewer" && !canEscalate) {
+    throw new MetadataError("permission_denied", `grant_type ${grantType} requires asset owner or system admin`);
+  }
   const store = service.rawStore;
   const archived = new Set(
     (await store.listGroupyNodes(true)).filter((n) => n.archived).map((n) => n.node_id),
@@ -249,7 +255,9 @@ export async function applyAssetShare(
     throw new MetadataError("groupy_node_archived", `groupy node archived: ${req.node_id}`);
   }
   const graph = await buildGraphFromStore(service);
-  if (!graph.has(req.node_id)) {
+  // Revoke is cleanup: an archived node is absent from the live graph but
+  // still a known share target.
+  if (!graph.has(req.node_id) && !(req.action === "revoke" && archived.has(req.node_id))) {
     throw new MetadataError("groupy_node_not_found", `groupy node not found: ${req.node_id}`);
   }
   const share = await store.getGroupyShare(req.asset_id);
@@ -299,7 +307,11 @@ export async function applyAssetShare(
     });
   } else {
     await store.deleteGroupyShare(asset.asset_id);
-    visibility = (share?.prev_visibility ?? "team") as AssetEntity["visibility"];
+    // Restore pre-share visibility only when the share still owns it: an
+    // admin change mid-share must not be clobbered by the revoke.
+    visibility = asset.visibility === "restricted"
+      ? ((share?.prev_visibility ?? "team") as AssetEntity["visibility"])
+      : asset.visibility;
   }
   if (visibility !== asset.visibility) {
     await service.updateAsset(asset.asset_id, { visibility });
@@ -353,7 +365,7 @@ export async function recomputeGroupyShares(input: RecomputeInput): Promise<{ re
     await rewriteAcl(service, asset.asset_id, targets, grantedBy);
     if (live.length === 0) {
       await store.deleteGroupyShare(share.asset_id);
-      if (asset.visibility !== share.prev_visibility) {
+      if (asset.visibility === "restricted" && asset.visibility !== share.prev_visibility) {
         await service.updateAsset(share.asset_id, { visibility: share.prev_visibility as AssetEntity["visibility"] });
       }
     } else if (live.length !== share.node_ids.length) {
