@@ -370,6 +370,13 @@ export function errorEnvelope(
 // Auth middleware
 // ============================
 
+/**
+ * Routing check (not identity): requires `x-tdai-service-id` for tenant routing.
+ *
+ * Single identity plane — a Bearer token is accepted when present but carries no
+ * authority and is never read downstream. Identity comes exclusively from
+ * `x-tdai-user-key`, verified against the user table by verifyDataPlaneUser.
+ */
 export function parseV3Auth(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -379,18 +386,6 @@ export function parseV3Auth(
   const authHeader = req.headers["authorization"] ?? "";
   const serviceId = (req.headers["x-tdai-service-id"] as string) ?? "";
 
-  if (!authHeader.startsWith("Bearer ") || !authHeader.slice(7).trim()) {
-    sendJsonFn(
-      res,
-      401,
-      errorEnvelope(
-        401,
-        "Missing or invalid Authorization header. Expected: Bearer {api_key}",
-        requestId,
-      ),
-    );
-    return null;
-  }
   if (!serviceId.trim()) {
     sendJsonFn(
       res,
@@ -399,11 +394,58 @@ export function parseV3Auth(
     );
     return null;
   }
+  const apiKey = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
 
-  return Object.fromEntries([
-    ["apiKey", authHeader.slice(7).trim()],
-    ["serviceId", serviceId.trim()],
-  ]) as V3AuthContext;
+  return { apiKey, serviceId: serviceId.trim() };
+}
+
+export interface VerifiedDataPlaneUser {
+  userId: string;
+  isSystemAdmin: boolean;
+}
+
+/**
+ * Single identity plane: verify `x-tdai-user-key` in-process against the
+ * metadata user table. Every data-plane caller — end users, Proxy bridges
+ * (which forward the end-user key), Panel (which forwards the browser key) —
+ * authenticates the same way. No service-level shared secret is accepted.
+ *
+ * Returns null after sending the 401/503 envelope (caller must stop dispatch).
+ */
+export async function verifyDataPlaneUser(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  serviceId: string,
+  deps: Pick<V3RouterDeps, "getMetadataService">,
+  requestId: string,
+  sendJsonFn: (res: http.ServerResponse, status: number, body: unknown) => void,
+): Promise<VerifiedDataPlaneUser | null> {
+  const raw = req.headers["x-tdai-user-key"];
+  const userKey = (Array.isArray(raw) ? raw[0] : (raw ?? "")).trim();
+  if (!userKey) {
+    sendJsonFn(res, 401, errorEnvelope(401, "Missing x-tdai-user-key header: authenticate with a per-user key", requestId));
+    return null;
+  }
+  if (!deps.getMetadataService) {
+    sendJsonFn(res, 503, errorEnvelope(503, "User store unavailable", requestId));
+    return null;
+  }
+  const svc = await deps.getMetadataService(serviceId);
+  if (!svc) {
+    sendJsonFn(res, 503, errorEnvelope(503, "User store unavailable", requestId));
+    return null;
+  }
+  // Memory-system keys (sk-mem-*) are machine credentials, never user identity.
+  if (svc.isConfiguredMemorySystemUserKey(userKey)) {
+    sendJsonFn(res, 401, errorEnvelope(401, "Invalid x-tdai-user-key", requestId));
+    return null;
+  }
+  const user = await svc.verifyAuth(userKey);
+  if (!user) {
+    sendJsonFn(res, 401, errorEnvelope(401, "Invalid x-tdai-user-key", requestId));
+    return null;
+  }
+  return { userId: user.user_id, isSystemAdmin: user.user_type === "system_admin" };
 }
 
 // ============================
@@ -583,6 +625,11 @@ export async function handleV3Route(
   }
   if (!auth) return true;
 
+  // Single identity plane: the verified user_id below overrides any body/header
+  // claim for the rest of this request (bound into requestIsolation).
+  const verifiedUser = await verifyDataPlaneUser(req, res, auth.serviceId, deps, requestId, sendJson);
+  if (!verifiedUser) return true;
+
   try {
     // Pre-resolve per-request store/storage (service mode → per-instance, standalone → core singleton)
     const resolveStart = Date.now();
@@ -627,19 +674,15 @@ export async function handleV3Route(
     //
     // /v3 strictly validates: must simultaneously provide team_id + agent_id + user_id + session_id,
     // Missing any directly returns 422, and no fallback to legacyCompatMode.
-    const headers = (req.headers ?? {}) as Record<
-      string,
-      string | string[] | undefined
-    >;
-    const isoLegacyCompat = false;
-    const isoResolved = resolveIsolation(
-      body as Record<string, unknown> | undefined,
-      headers,
-      {
-        legacyCompatMode: isoLegacyCompat,
-        legacyPlaceholder: deps.isolationConfig?.legacyPlaceholder,
-      },
-    );
+    const headers = (req.headers ?? {}) as Record<string, string | string[] | undefined>;
+    const isoLegacyCompat = isV3 ? false : (deps.isolationConfig?.legacyCompatMode ?? false);
+    const isoResolved = resolveIsolation(body as Record<string, unknown> | undefined, headers, {
+      legacyCompatMode: isoLegacyCompat,
+      legacyPlaceholder: deps.isolationConfig?.legacyPlaceholder,
+    });
+    // Verified identity wins: a caller cannot act as another user by putting a
+    // different user_id in the body or x-tdai-user-id header.
+    isoResolved.ctx.userId = verifiedUser.userId;
 
     // /v3 strict isolation is for L0–L3 memory data-plane only.
     // Skill and knowledge endpoints are team-scoped management-plane
@@ -652,11 +695,9 @@ export async function handleV3Route(
       pathname.slice(V3_PREFIX.length) === "/pipeline/status";
     if (isV3 && !isV3Extra && v3StrictEnabled && !v3IsolationExempt) {
       const v3Subpath = pathname.slice(V3_PREFIX.length);
-      const v3Missing = collectV3Missing(
-        v3Subpath,
-        body as Record<string, unknown> | undefined,
-        headers,
-      );
+      // user_id comes from the verified key, not the body — team/agent stay required.
+      const v3Missing = collectV3Missing(v3Subpath, body as Record<string, unknown> | undefined, headers)
+        .filter((m) => m !== "user_id");
       if (v3Missing.length > 0) {
         sendJson(
           res,
@@ -2043,6 +2084,8 @@ async function handleScenarioRead(
   const content = await storage.readFile(key);
 
   // File not found → return 200 with null content (not 404)
+  // SAFETY: the ScenarioFile wire contract uses null to signal absence while the
+  // static type predates that convention; clients already null-check these fields.
   if (content === null) {
     return successEnvelope<ScenarioFile>(
       {
@@ -2285,6 +2328,8 @@ async function handleCoreRead(
   );
 
   // File not found → return 200 with null content (not 404)
+  // SAFETY: the CoreFile wire contract uses null to signal absence while the
+  // static type predates that convention; clients already null-check these fields.
   if (content === null) {
     return successEnvelope<CoreFile>(
       {

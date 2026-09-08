@@ -30,12 +30,16 @@ import type {
   CodeGraphListResult,
   CodeGraphSyncResult,
   CodeGraphToolResult,
+  GrantMirrorResult,
+  GrantClearResult,
 } from '../ports/knowledge-client-port.js';
 
 export interface KnowledgeClientConfig {
   baseUrl: string;
   authToken: string;
   serviceId?: string;
+  /** End-user key (single identity plane): forwarded as x-tdai-user-key, the actual KS credential. */
+  userKey?: string;
   timeoutMs?: number;
 }
 
@@ -56,6 +60,8 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (this.cfg.authToken) headers.Authorization = `Bearer ${this.cfg.authToken}`;
       if (this.cfg.serviceId) headers['x-tdai-service-id'] = this.cfg.serviceId;
+      // Single identity plane: the end-user key is the KS credential.
+      if (this.cfg.userKey) headers['x-tdai-user-key'] = this.cfg.userKey;
       const resp = await fetch(`${this.cfg.baseUrl}${path}`, {
         method: 'POST',
         headers,

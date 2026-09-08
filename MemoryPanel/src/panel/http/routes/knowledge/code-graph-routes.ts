@@ -35,7 +35,7 @@ export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): vo
     if (!teamId) return respondControlError(c, 400, 'MISSING_TEAM_ID');
     const gate = await requireTeamMember(deps, c, ctx, teamId);
     if ('error' in gate) return gate.error;
-    const kc = deps.knowledgeClientFactory(ctx.instanceId);
+    const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     const opts = {
       status: str(body, 'status') ?? undefined,
       limit: typeof body.limit === 'number' ? body.limit : undefined,
@@ -56,7 +56,7 @@ export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): vo
     if ('error' in gate) return gate.error;
     const branch = str(body, 'branch') ?? undefined;
     const repoName = str(body, 'repo_name') ?? undefined;
-    const kc = deps.knowledgeClientFactory(ctx.instanceId);
+    const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     try {
       const detail = await kc.codeGraphCreate(teamId, repoUrl, branch, gate.userId, repoName);
       // stash owner key for status-callback ready to register meta asset as owner
@@ -99,7 +99,7 @@ export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): vo
     if ('error' in gate) return gate.error;
     const readGate = await requireKnowledgeRead(deps, c, ctx, cgId, { allowInFlightCodeOwner: true });
     if ('error' in readGate) return readGate.error;
-    const kc = deps.knowledgeClientFactory(ctx.instanceId);
+    const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     let detail;
     try {
       detail = await kc.codeGraphGet(cgId);
@@ -139,7 +139,7 @@ export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): vo
     if (!cgId) return respondControlError(c, 400, 'MISSING_CODE_GRAPH_ID');
     const gate = await requireKnowledgeRead(deps, c, ctx, cgId, { allowInFlightCodeOwner: true });
     if ('error' in gate) return gate.error;
-    const kc = deps.knowledgeClientFactory(ctx.instanceId);
+    const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     return runKs(c, () => kc.codeGraphGet(cgId));
   });
 
@@ -151,7 +151,7 @@ export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): vo
     if (!cgId) return respondControlError(c, 400, 'MISSING_CODE_GRAPH_ID');
     const gate = await requireKnowledgeRead(deps, c, ctx, cgId, { action: 'write', allowInFlightCodeOwner: true });
     if ('error' in gate) return gate.error;
-    const kc = deps.knowledgeClientFactory(ctx.instanceId);
+    const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     return runKs(c, () => kc.codeGraphSync(cgId));
   });
 
@@ -168,7 +168,7 @@ export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): vo
       });
       if ('error' in gate) return gate.error;
     }
-    const kc = deps.knowledgeClientFactory(ctx.instanceId);
+    const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     return runKs(c, async () => {
       const result = await kc.codeGraphDelete(cgIds);
       await deleteKnowledgeCascade(deps, ctx, cgIds);
@@ -189,7 +189,7 @@ export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): vo
     const params: Record<string, unknown> = { query };
     if (str(body, 'kind')) params.kind = str(body, 'kind');
     if (typeof body.limit === 'number') params.limit = body.limit;
-    const kc = deps.knowledgeClientFactory(ctx.instanceId);
+    const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     return runKs(c, () => kc.codeGraphQuery(cgId, 'search', params));
   });
 
@@ -205,7 +205,7 @@ export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): vo
     if ('error' in gate) return gate.error;
     const params: Record<string, unknown> = { query };
     if (typeof body.maxFiles === 'number') params.maxFiles = body.maxFiles;
-    const kc = deps.knowledgeClientFactory(ctx.instanceId);
+    const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     return runKs(c, () => kc.codeGraphQuery(cgId, 'explore', params));
   });
 }

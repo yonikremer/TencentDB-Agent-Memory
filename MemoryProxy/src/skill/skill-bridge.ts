@@ -462,7 +462,12 @@ export function createSkillBridgeHandler(
   return async (c: Context): Promise<Response> => {
     const t0 = (deps.now ?? Date.now)();
 
-    const path = new URL(c.req.url).pathname;
+    let path: string;
+    try {
+      path = new URL(c.req.url).pathname;
+    } catch {
+      return envelope(40001, `${TAG} malformed request URL`, 400);
+    }
     const sub = extractSubpath(path);
     // Early-exit telemetry for pre-checks: emit a bridge_call with non-empty reject_reason
     // before each return. sessionKey may not be derived yet here, so "" is allowed
@@ -597,6 +602,8 @@ export function createSkillBridgeHandler(
       const upstreamUrl = `${config.coreSkill.endpoint.replace(/\/$/, "")}/v3/skill/files/read`;
       const headers: Record<string, string> = {
         "Authorization": `Bearer ${config.coreSkill.serviceToken}`,
+        // Single identity plane: the session user_key is the credential; Bearer is legacy transport only.
+        "x-tdai-user-key": ids.user_key ?? "",
         // Prefer session-derived tenant; fall back to config for legacy sessions.
         "x-tdai-service-id": ids.space_id || config.coreSkill.serviceId,
         "Content-Type": "application/json",
@@ -880,6 +887,8 @@ export function createSkillBridgeHandler(
     const upstreamUrl = `${config.coreSkill.endpoint.replace(/\/$/, "")}/v3/skill/${upstreamSub}`;
     const headers: Record<string, string> = {
       "Authorization": `Bearer ${config.coreSkill.serviceToken}`,
+      // Single identity plane: the session user_key is the credential; Bearer is legacy transport only.
+      "x-tdai-user-key": ids.user_key ?? "",
       // Prefer session-derived tenant; fall back to config for legacy sessions.
       "x-tdai-service-id": ids.space_id || config.coreSkill.serviceId,
       "Content-Type": "application/json",

@@ -81,8 +81,10 @@ export interface ServiceConfig {
  tmcCallbackUrl: string;
  /** Shared secret for Knowledge→Panel status callbacks (empty = legacy open, warns). */
  callbackSecret: string;
- /** Bearer token gating all /v3/* routes (empty = legacy open, warns). */
- apiKey: string;
+ /** Core verify endpoint for the single identity plane, e.g. http://core:8080 (empty = fail closed, warns). */
+ coreVerifyUrl: string;
+ /** Timeout for Core auth/verify calls in ms. */
+ coreVerifyTimeoutMs: number;
  /** Optional ClickHouse request telemetry. Disabled by default. */
  clickhouse: ClickHouseTelemetryConfig;
 }
@@ -182,7 +184,12 @@ function validateClickHouseConfig(config: ClickHouseTelemetryConfig): void {
   throw new Error(
    "KNOWLEDGE_CLICKHOUSE_URL is required when telemetry is enabled",
   );
- const url = new URL(config.url);
+ let url: URL;
+ try {
+  url = new URL(config.url);
+ } catch {
+  throw new Error("KNOWLEDGE_CLICKHOUSE_URL is not a valid URL");
+ }
  if (url.protocol !== "http:" && url.protocol !== "https:") {
   throw new Error("KNOWLEDGE_CLICKHOUSE_URL must use http or https");
  }
@@ -228,7 +235,8 @@ export function loadConfig(): ServiceConfig {
   publicBaseUrl: env("KNOWLEDGE_PUBLIC_BASE_URL", ""),
   tmcCallbackUrl: env("TMC_CALLBACK_URL", ""),
   callbackSecret: env("KNOWLEDGE_CALLBACK_SECRET", ""),
-  apiKey: env("KNOWLEDGE_API_KEY", ""),
+  coreVerifyUrl: env("CORE_VERIFY_URL", "").replace(/\/+$/, ""),
+  coreVerifyTimeoutMs: envInt("CORE_VERIFY_TIMEOUT_MS", 3000),
   clickhouse,
   llm: {
    mode: env("LLM_MODE", "proxy") === "custom" ? "custom" : "proxy",
@@ -242,5 +250,5 @@ export function loadConfig(): ServiceConfig {
    timeoutMs: envInt("LLM_TIMEOUT_MS", 1200000),
    stream: process.env.LLM_STREAM === "true",
   },
- };
+};
 }

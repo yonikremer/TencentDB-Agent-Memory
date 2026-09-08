@@ -257,7 +257,12 @@ export function createMemoryBridgeHandler(
   return async (c: Context): Promise<Response> => {
     const t0 = (deps.now ?? Date.now)();
 
-    const path = new URL(c.req.url).pathname;
+    let path: string;
+    try {
+      path = new URL(c.req.url).pathname;
+    } catch {
+      return envelope(40001, `${TAG} malformed request URL`, 400);
+    }
     const sub = extractSubpath(path);
     // Early-exit telemetry for pre-checks: log a bridge_call with a non-empty reject_reason before every return, symmetric with skill-bridge.
     if (!sub) {
@@ -336,7 +341,7 @@ export function createMemoryBridgeHandler(
             rejectReason: "body_not_object", httpStatus: 400,
             executedEndpoint: sub, requestBody: raw.slice(0, 512),
             spaceId: ids.space_id, userId: ids.user_id, teamId: ids.team_id,
-            agentId: ids.agent_id, agentSource: ids.agent_source,
+            agentId: ids.agent_id, agentSource: agentSourceFromSessionKey(sessionKey),
           });
           return envelope(40001, `${TAG} body must be a JSON object`, 400);
         }
@@ -347,7 +352,7 @@ export function createMemoryBridgeHandler(
         rejectReason: "invalid_json_body", httpStatus: 400,
         executedEndpoint: sub,
         spaceId: ids.space_id, userId: ids.user_id, teamId: ids.team_id,
-        agentId: ids.agent_id, agentSource: ids.agent_source,
+        agentId: ids.agent_id, agentSource: agentSourceFromSessionKey(sessionKey),
       });
       return envelope(40001, `${TAG} invalid JSON body: ${(err as Error).message}`, 400);
     }
@@ -371,6 +376,8 @@ export function createMemoryBridgeHandler(
       ids.space_id || config.tdai?.serviceId || config.coreSkill.serviceId;
     const headers: Record<string, string> = {
       "Authorization": `Bearer ${upstreamToken}`,
+      // Single identity plane: the session user_key is the credential; Bearer is legacy transport only.
+      "x-tdai-user-key": ids.user_key ?? "",
       "x-tdai-service-id": upstreamServiceId,
       "Content-Type": "application/json",
     };

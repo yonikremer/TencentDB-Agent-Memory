@@ -9,7 +9,7 @@
  * POST-only by Panel convention (DESIGN §7 lists GETs for status/tree/orphans).
  * Thin forwards over metaKernel.invoke; kernel owns authz + state.
  */
-import type { Hono } from 'hono';
+import type { Hono, Context } from 'hono';
 import type { PanelDeps } from '../../panel-deps.js';
 import { validatePanelMetaHeaders } from '../middleware/validate-panel-headers.js';
 import { respondControlError, respondEnvelope } from '../envelope.js';
@@ -19,7 +19,7 @@ import { knowledgeKindForAssetType } from '../../domain/asset-id.js';
 export function registerGroupyRoutes(api: Hono, deps: PanelDeps): void {
   const mw = validatePanelMetaHeaders(deps);
 
-  async function forward(c: Parameters<Parameters<typeof api.post>[1]>[0], action: string) {
+  async function forward(c: Context, action: string) {
     const ctx = buildCtx(c);
     if (!(await isCallerSystemAdmin(deps, ctx))) return respondControlError(c, 403, 'FORBIDDEN');
     let env;
@@ -110,7 +110,7 @@ export function registerGroupyRoutes(api: Hono, deps: PanelDeps): void {
       }
       return out;
     };
-    const kc = deps.knowledgeClientFactory(ctx.instanceId);
+    const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     const report: Array<{ asset_id: string; set: number; cleared: number; skipped?: string }> = [];
     for (const share of shares) {
       const live = (share.node_ids ?? []).filter((n) => {

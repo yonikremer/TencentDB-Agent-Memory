@@ -341,13 +341,13 @@ export class KnowledgeToolsInjector implements InjectionHook {
       if (agentId && userKey) {
         const ids = await client.listAgentKnowledgeIds(agentId, userKey, { serviceId: spaceId ?? undefined });
         console.log(`${TAG} ${phase} per-agent path: listAgentKnowledgeIds → ${ids.length} ids [${ids.join(",")}]`);
-        resources = ids.length > 0 ? await client.listKnowledgeByIds(teamId, ids, { serviceId: spaceId ?? undefined }) : [];
+        resources = ids.length > 0 ? await client.listKnowledgeByIds(teamId, ids, { serviceId: spaceId ?? undefined, userKey: userKey ?? undefined }) : [];
         console.log(`${TAG} ${phase} per-agent path: listKnowledgeByIds → ${resources.length} resources`);
         scope = `agent:${agentId}`;
       } else {
         // Fallback: no caller identity -> team full list.
         // Pass space_id as kernel tenant routing header (same as SkillInjector).
-        resources = await client.listKnowledge(teamId, { serviceId: spaceId ?? undefined });
+        resources = await client.listKnowledge(teamId, { serviceId: spaceId ?? undefined, userKey: userKey ?? undefined });
         console.log(`${TAG} ${phase} fallback path: listKnowledge → ${resources.length} resources`);
         scope = `team:${teamId}`;
       }

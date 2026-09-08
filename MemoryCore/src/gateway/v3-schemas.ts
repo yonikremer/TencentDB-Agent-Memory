@@ -420,7 +420,9 @@ export function formatZodError(error: z.ZodError): string {
 // ============================
 
 export const v2AuthContextSchema = z.object({
-  apiKey: z.string().min(1),
+  // apiKey is legacy transport only (accepted when present, never authoritative).
+  // Identity always comes from x-tdai-user-key, verified against the user table.
+  apiKey: z.string(),
   serviceId: z.string().min(1),
 });
 export type V3AuthContext = z.infer<typeof v2AuthContextSchema>;

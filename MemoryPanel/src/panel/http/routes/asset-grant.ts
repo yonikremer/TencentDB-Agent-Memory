@@ -66,7 +66,7 @@ export function registerAssetGrantRoutes(api: Hono, deps: PanelDeps): void {
     const kind = knowledgeKindForAssetType(asset.asset_type);
     let mirror: unknown = null;
     if (kind) {
-      const kc = deps.knowledgeClientFactory(ctx.instanceId);
+      const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
       try {
         mirror =
           action === 'grant'

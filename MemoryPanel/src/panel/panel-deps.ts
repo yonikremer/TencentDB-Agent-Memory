@@ -21,7 +21,7 @@ export interface PanelDeps {
   kernelHttp: KernelHttpPort;
   metaKernel: MetaKernelPort;
   /** Construct KS client by request instanceId (x-tdai-service-id = instanceId). */
-  knowledgeClientFactory: (instanceId: string) => KnowledgeClientPort;
+  knowledgeClientFactory: (instanceId: string, userKey?: string) => KnowledgeClientPort;
   skillKernel: SkillKernelPort;
   /** Knowledge extraction task memory state: stash owner key on create, retrieve registered meta asset on callback ready. */
   knowledgeTaskRegistry: KnowledgeTaskRegistry;
@@ -37,11 +37,12 @@ export function buildPanelDeps(config: PanelConfig): PanelDeps {
   const instanceRegistry = InstanceRegistry.load(config.metadataInstancesConfig);
   const kernelHttp = new FetchKernelHttpAdapter(logger);
   const metaKernel = new FetchMetaKernelAdapter(kernelHttp, config.metadataRemoteTimeoutMs);
-  const knowledgeClientFactory = (instanceId: string): KnowledgeClientPort =>
+  const knowledgeClientFactory = (instanceId: string, userKey?: string): KnowledgeClientPort =>
     new HttpKnowledgeClient({
       baseUrl: config.knowledge.baseUrl,
       authToken: config.knowledge.authToken,
       serviceId: instanceId,
+      userKey,
       timeoutMs: config.knowledge.timeoutMs,
     });
   const skillKernel = new FetchSkillKernelAdapter(kernelHttp, config.metadataRemoteTimeoutMs);

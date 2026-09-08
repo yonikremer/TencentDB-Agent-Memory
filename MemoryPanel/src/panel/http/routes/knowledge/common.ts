@@ -358,7 +358,7 @@ export async function requireKnowledgeRead(
 
   if (opts?.allowInFlightCodeOwner && (action === 'read' || action === 'write')) {
     try {
-      const kc = deps.knowledgeClientFactory(ctx.instanceId);
+      const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
       const detail = await kc.codeGraphGet(knowledgeId);
       if (detail.owner_user_id === userId) {
         const member = await isTeamMember(deps, ctx, detail.team_id, userId);
@@ -482,7 +482,7 @@ export async function joinKnowledgeAssetsWithKs(
   assets: KnowledgeAssetMetaRaw[],
   assetType: typeof ASSET_TYPE_WIKI | typeof ASSET_TYPE_CODE_GRAPH,
 ): Promise<KnowledgeAssetListItem[]> {
-  const kc = deps.knowledgeClientFactory(ctx.instanceId);
+  const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
   const joiner = assetType === ASSET_TYPE_WIKI ? joinWikiKs : joinCodeKs;
   const settled = await Promise.allSettled(assets.map((a) => joiner(kc, a)));
   return settled.map((r, i) => {
@@ -586,7 +586,7 @@ export async function mergeWithKsOnlyItems(
   joined: KnowledgeAssetListItem[],
   assetType: typeof ASSET_TYPE_WIKI | typeof ASSET_TYPE_CODE_GRAPH,
 ): Promise<KnowledgeAssetListItem[]> {
-  const kc = deps.knowledgeClientFactory(ctx.instanceId);
+  const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
   const ksItems = await fetchKsOnlyItems(kc, teamId, assetType);
   if (ksItems.length === 0) return joined;
 

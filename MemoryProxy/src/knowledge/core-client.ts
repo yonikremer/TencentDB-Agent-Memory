@@ -144,20 +144,20 @@ export class CoreKnowledgeClient {
    *   reading `sessionInfo.space_id`) MUST pass it — kernel routes tenants by
    *   this header, and the config value is only correct for standalone mode.
    */
-  async listKnowledge(teamId: string, opts: { serviceId?: string } = {}): Promise<KnowledgeItem[]> {
+  async listKnowledge(teamId: string, opts: { serviceId?: string; userKey?: string } = {}): Promise<KnowledgeItem[]> {
     if (!teamId) return [];
 
     const effectiveServiceId = opts.serviceId || this.serviceId;
     const cacheKey = `list:${teamId}:${effectiveServiceId}`;
 
     const result = await this._cachedFetch<KnowledgeItem[]>(cacheKey, () =>
-      this._doListKnowledge(teamId, effectiveServiceId),
+      this._doListKnowledge(teamId, effectiveServiceId, opts.userKey),
     );
     return result ?? [];
   }
 
   /** actual HTTP call, no caching. Returns null on any failure (feeds _cachedFetch stale logic). */
-  private async _doListKnowledge(teamId: string, serviceId: string): Promise<KnowledgeItem[] | null> {
+  private async _doListKnowledge(teamId: string, serviceId: string, userKey?: string): Promise<KnowledgeItem[] | null> {
     const url = `${this.endpoint}/v3/knowledge/list`;
     const timeout = this.defaultTimeoutMs;
 
@@ -166,6 +166,8 @@ export class CoreKnowledgeClient {
       "x-tdai-service-id": serviceId,
       "Content-Type": "application/json",
     };
+    // Single identity plane: the end-user key is the credential.
+    if (userKey) headers["x-tdai-user-key"] = userKey;
 
     let resp: Response;
     try {
@@ -211,7 +213,7 @@ export class CoreKnowledgeClient {
   async listKnowledgeByIds(
     teamId: string,
     ids: string[],
-    opts: { serviceId?: string } = {},
+    opts: { serviceId?: string; userKey?: string } = {},
   ): Promise<KnowledgeItem[]> {
     if (!teamId || ids.length === 0) return [];
 
@@ -220,10 +222,13 @@ export class CoreKnowledgeClient {
     const cacheKey = `listByIds:${teamId}:${sortedIds}:${effectiveServiceId}`;
 
     const result = await this._cachedFetch<KnowledgeItem[]>(cacheKey, async () => {
+      const extraHeaders: Record<string, string> = {};
+      // Single identity plane: the end-user key is the credential.
+      if (opts.userKey) extraHeaders["x-tdai-user-key"] = opts.userKey;
       const env = await this._post<CoreKnowledgeListResult>(
         `${this.endpoint}/v3/knowledge/list`,
         { team_id: teamId, knowledge_ids: ids },
-        {},
+        extraHeaders,
         opts.serviceId,
       );
       // env=null means HTTP/decode failure → propagate null so _cachedFetch falls back to stale logic;

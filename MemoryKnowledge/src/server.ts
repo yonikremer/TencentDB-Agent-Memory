@@ -13,8 +13,8 @@ initTelemetry();
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { swaggerUI } from "@hono/swagger-ui";
-import { timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { wrapError } from "./api-helpers.js";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 
@@ -63,32 +63,66 @@ export function createApp() {
 
   // /v3 prefix applied once here — routes define paths without prefix
   const api = new Hono();
-  // Bearer gate for all /v3/* routes. Opt-in via KNOWLEDGE_API_KEY; unset = legacy
-  // open (internal-network assumption) with a loud startup warning. Health (/health)
-  // and docs (/docs, /openapi.json) stay public by design.
-  if (config.apiKey) {
-    const expected = config.apiKey;
-    api.use("*", async (c, next) => {
-      const header = c.req.header("authorization") ?? "";
-      const provided = header.startsWith("Bearer ")
-        ? header.slice(7).trim()
-        : "";
-      const a = Buffer.from(provided);
-      const b = Buffer.from(expected);
-      if (!provided || a.length !== b.length || !timingSafeEqual(a, b)) {
-        return c.json(
-          { code: 401, message: "Unauthorized: invalid Bearer token" },
-          401,
-        );
-      }
-      await next();
-    });
-    log.info("Knowledge /v3/* Bearer auth ENABLED");
+  // Single identity plane: every /v3/* caller authenticates with x-tdai-user-key,
+  // verified against Core's user table via {CORE_VERIFY_URL}/v3/meta/auth/verify.
+  // No service-level shared secret is accepted here. Health (/health) and docs
+  // (/docs, /openapi.json) stay public by design.
+  const verifyCache = new Map<string, { userId: string; exp: number }>();
+  const VERIFY_TTL_MS = 60_000;
+  if (process.env.KNOWLEDGE_AUTH_DISABLED === "1") {
+    log.warn("KNOWLEDGE_AUTH_DISABLED=1 — all /v3/* routes are open (isolated-dev only).");
+  } else if (config.coreVerifyUrl) {
+    log.info(`Knowledge /v3/* user-key auth ENABLED (verifier=${config.coreVerifyUrl})`);
   } else {
-    log.warn(
-      "KNOWLEDGE_API_KEY is NOT set — all /v3/* routes are open to anyone who can reach this port. Set KNOWLEDGE_API_KEY before exposing beyond loopback.",
-    );
+    log.error("CORE_VERIFY_URL is NOT set — /v3/* will refuse all callers until a user verifier is configured.");
   }
+  api.use("*", async (c, next) => {
+    const userKey = c.req.header("x-tdai-user-key")?.trim() ?? "";
+    if (!userKey) {
+      return c.json(wrapError(401, "x-tdai-user-key header is required"), 401);
+    }
+    if (process.env.KNOWLEDGE_AUTH_DISABLED === "1") {
+      await next();
+      return;
+    }
+    if (!config.coreVerifyUrl) {
+      return c.json(wrapError(503, "user verifier unconfigured (CORE_VERIFY_URL)"), 503);
+    }
+    // Positive-only cache: revocations take effect on expiry at the latest.
+    const hit = verifyCache.get(userKey);
+    if (!hit || hit.exp < Date.now()) {
+      if (verifyCache.size > 10000) verifyCache.clear();
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), config.coreVerifyTimeoutMs);
+      try {
+        const resp = await fetch(`${config.coreVerifyUrl}/v3/meta/auth/verify`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-tdai-service-id": c.req.header("x-tdai-service-id") ?? "",
+          },
+          body: JSON.stringify({ user_key: userKey }),
+          signal: ctrl.signal,
+        });
+        clearTimeout(timer);
+        if (!resp.ok) {
+          return c.json(wrapError(503, "user verifier unreachable"), 503);
+        }
+        const body = (await resp.json()) as {
+          code?: number;
+          data?: { valid?: boolean; user?: { user_id?: string } };
+        };
+        if (body.code !== 0 || body.data?.valid !== true || !body.data.user?.user_id) {
+          return c.json(wrapError(401, "invalid x-tdai-user-key"), 401);
+        }
+        verifyCache.set(userKey, { userId: body.data.user.user_id, exp: Date.now() + VERIFY_TTL_MS });
+      } catch {
+        clearTimeout(timer);
+        return c.json(wrapError(503, "user verifier unreachable"), 503);
+      }
+    }
+    await next();
+  });
   // Only Agent tool executions are usage telemetry; health/admin/ingest remain excluded.
   api.use(
     "/tools/call",
