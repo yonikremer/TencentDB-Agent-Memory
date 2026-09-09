@@ -56,9 +56,17 @@ afterAll(() => {
 });
 
 describe("isSpaShellPath", () => {
-  it.each(["/", "/wiki", "/wiki/abc/overview", "/code/c1", "/skills/s9", "/memory/b1/L2", "/team/agents", "/guide"])(
-    "treats %s as a client route",
-    (p) => expect(isSpaShellPath(p)).toBe(true),
+  it.each([
+    "/",
+    "/wiki",
+    "/wiki/abc/overview",
+    "/code/c1",
+    "/skills/s9",
+    "/memory/b1/L2",
+    "/team/agents",
+    "/guide",
+  ])("treats %s as a client route", (p) =>
+    expect(isSpaShellPath(p)).toBe(true),
   );
   it.each(["/totally-bogus", "/wiki2", "/codes", "/api/v1/meta/instances"])(
     "rejects %s",

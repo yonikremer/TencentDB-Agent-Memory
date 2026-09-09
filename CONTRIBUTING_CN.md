@@ -59,14 +59,18 @@ cp .env.example .env && $EDITOR .env
 
 1. Fork 仓库
 2. 从 `master` 或最新的 `develop_*` 分支切出 feature 分支
+
    ```bash
    git checkout -b fix/xxx-issue
    ```
+
 3. 修改代码，跑相关测试
+
    ```bash
    cd <module>
    npm test          # 或 pnpm test
    ```
+
 4. 提交（Conventional Commits）
 5. 推到 fork，发起 PR 到 `develop_server_team` 或 `master`（按维护者最新
    指示）
@@ -85,7 +89,7 @@ cp .env.example .env && $EDITOR .env
 ### type
 
 | type | 说明 |
-|---|---|
+| --- | --- |
 | `feat` | 新功能 |
 | `fix` | Bug 修复 |
 | `perf` | 性能优化 |

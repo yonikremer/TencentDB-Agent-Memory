@@ -60,14 +60,18 @@ it standalone (usually `cd <module> && npm install && npm run dev`).
 
 1. Fork the repo
 2. Cut a feature branch off `master` or the latest `develop_*` branch
+
    ```bash
    git checkout -b fix/xxx-issue
    ```
+
 3. Make your changes, run the relevant tests
+
    ```bash
    cd <module>
    npm test          # or pnpm test
    ```
+
 4. Commit using Conventional Commits
 5. Push and open a PR against `develop_server_team` or `master` (follow the
    maintainer's latest guidance)
@@ -86,7 +90,7 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 ### type
 
 | type | meaning |
-|---|---|
+| --- | --- |
 | `feat` | New feature |
 | `fix` | Bug fix |
 | `perf` | Performance optimization |
