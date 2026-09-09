@@ -41,6 +41,7 @@ import {
 } from '@/components/asset/AssetListPanel';
 import { UserBadge } from '@/components/asset/UserBadge';
 import SkillDetailPane from './SkillDetailPane';
+import { NotFoundPage } from '@/pages/NotFoundPage';
 import ImportSkillDialog from './ImportSkillDialog';
 import ForkSkillDialog from './ForkSkillDialog';
 import { TAB_I18N_KEY, useSkillsPanel, type Tab } from '../hooks/useSkillsPanel';
@@ -70,7 +71,8 @@ export default function SkillsPanel({
     setSelectedAgent,
     loading,
     selectedSkillId,
-    setSelectedSkillId,
+    selectSkill,
+    routeSkillId,
     showImport,
     setShowImport,
     showFork,
@@ -88,6 +90,11 @@ export default function SkillsPanel({
     handleToggleVisibility,
     selectedSkill,
   } = store;
+
+  // Unknown skill_id on a deep link → 404 (only after the team-tab union finished loading).
+  if (routeSkillId && tab === 'team' && !loading && !selectedSkill) {
+    return <NotFoundPage />;
+  }
 
   return (
     <div className="_memory-skills-body">
@@ -117,7 +124,7 @@ export default function SkillsPanel({
               value={selectedAgent}
               onChange={(value) => {
                 setSelectedAgent(value);
-                setSelectedSkillId(null);
+                selectSkill(null);
               }}
               disabled={teamAgents.length === 0}
               placeholder={t('skills.noAgent')}
@@ -192,7 +199,7 @@ export default function SkillsPanel({
             items={skillsWithCache}
             selectedId={selectedSkillId}
             getItemId={(s) => s.skill_id}
-            onSelect={(s) => setSelectedSkillId(s.skill_id)}
+            onSelect={(s) => selectSkill(s.skill_id)}
             emptyText={
               tab === 'fixed' && !selectedAgent
                 ? t('skills.empty.fixed.noAgent')

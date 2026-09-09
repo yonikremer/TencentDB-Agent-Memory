@@ -21,6 +21,7 @@ import {
 } from '@/components/asset/AssetListPanel';
 import { UserBadge } from '@/components/asset/UserBadge';
 import { useChatMemory } from '../hooks/useChatMemory';
+import { NotFoundPage } from '@/pages/NotFoundPage';
 import '../styles/chat-memory-panel.css';
 
 export default function ChatMemoryPanel(
@@ -43,9 +44,10 @@ export default function ChatMemoryPanel(
     blocks,
     blocksLoading,
     selectedId,
-    setSelectedId,
+    selectBlock,
+    routeBlockId,
     layer,
-    setLayer,
+    selectLayer,
     layerLoading,
     layerItemLoadingId,
     l0MoreLoading,
@@ -81,6 +83,11 @@ export default function ChatMemoryPanel(
     allocatableAgents,
     isSelfChatMemory,
   } = store;
+
+  // Unknown block id on a deep link → 404 (only after the team-tab union finished loading).
+  if (routeBlockId && scopeTab === 'team' && !blocksLoading && !selected) {
+    return <NotFoundPage />;
+  }
 
   return (
     <div className="_asset-memory-page">
@@ -161,7 +168,7 @@ export default function ChatMemoryPanel(
               items={filtered}
               selectedId={selectedId}
               getItemId={(b) => b.id}
-              onSelect={(b) => setSelectedId(b.id)}
+              onSelect={(b) => selectBlock(b.id)}
               isItemDisabled={(b) =>
                 scopeTab === 'fixed' &&
                 b.scope === 'private' &&
@@ -252,7 +259,7 @@ export default function ChatMemoryPanel(
               <BlockDetail
                 block={selected}
                 layer={layer}
-                onLayerChange={setLayer}
+                onLayerChange={selectLayer}
                 agentLabel={agentLabel}
                 layerPage={layerPage}
                 layerPageSize={pageSize}

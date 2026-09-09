@@ -4,6 +4,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate, useParams } from 'react-router-dom';
+import { navigateIfDiff, skillPath } from '@/lib/asset-routes';
 import { assetsApi, agentsApi, type Asset } from '@/lib/teamApi';
 import {
   listSkills,
@@ -26,6 +28,9 @@ export const TAB_I18N_KEY: Record<Tab, string> = {
 
 export function useSkillsPanel() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const params = useParams<{ skillId?: string }>();
+  const routeSkillId = params.skillId ? decodeURIComponent(params.skillId) : '';
   // Default display Agent assets (fixed) to prevent users from mistakenly thinking their assets are in "Team Assets"
   const [tab, setTab] = useState<Tab>('fixed');
   const { activeTeamId, activeTeam } = useTeams();
@@ -260,12 +265,37 @@ export function useSkillsPanel() {
   // Skip the loading intermediate state: refresh first setsSkills([]) and then refetches,
   // If we judge at the moment of clearing, it will mistakenly clear the selection (refreshing after editing and saving will lose the current selection).
   // Wait until refresh is complete (loading=false) and the list is filled, then judge, and keep the selection if the selected item is still there.
+  // URL → state: direct load, refresh, or browser back/forward.
+  useEffect(() => {
+    if (routeSkillId && routeSkillId !== selectedSkillId) {
+      setSelectedSkillId(routeSkillId);
+    } else if (!routeSkillId && selectedSkillId) {
+      setSelectedSkillId(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeSkillId]);
+
+  const selectSkill = (id: string | null) => {
+    navigateIfDiff(navigate, skillPath(id ?? undefined));
+    setSelectedSkillId(id);
+  };
+
+  // Deep link may land on the wrong scope tab (fixed lists one agent only).
+  // Fall back to the team tab — the union of all agents — before calling it missing.
+  useEffect(() => {
+    if (routeSkillId && !loading && tab !== 'team' && !skillsWithCache.find((s) => s.skill_id === routeSkillId)) {
+      setTab('team');
+    }
+  }, [routeSkillId, loading, tab, skillsWithCache]);
+
   useEffect(() => {
     if (loading) return;
+    // Deep link: keep the id so the panel renders a 404 instead of silently clearing.
+    if (routeSkillId) return;
     if (selectedSkillId && !skillsWithCache.find((s) => s.skill_id === selectedSkillId)) {
       setSelectedSkillId(null);
     }
-  }, [skillsWithCache, selectedSkillId, loading]);
+  }, [skillsWithCache, selectedSkillId, loading, routeSkillId]);
 
   const selectedSkill = useMemo(
     () =>
@@ -308,6 +338,7 @@ export function useSkillsPanel() {
           expected_version: version,
         });
         if (selectedSkillId === skill.skill_id) {
+          navigate('/skills');
           setSelectedSkillId(null);
         }
         tea.notify.success(t('skills.notify.deleted', { name: skill.name }));
@@ -415,6 +446,8 @@ export function useSkillsPanel() {
     loading: listLoading,
     selectedSkillId,
     setSelectedSkillId,
+    selectSkill,
+    routeSkillId,
     showImport,
     setShowImport,
     showFork,

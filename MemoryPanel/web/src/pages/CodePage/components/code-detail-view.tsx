@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { Alert, Button, Card, MetricsBoard, SearchBox, StatusTip, Text } from 'tea-component';
 import { ArrowLeftIcon, CodeIcon, RefreshIcon } from 'tea-icons-react';
 import { AssetMarkdown } from '@/components/asset/AssetMarkdown';
+import { NotFoundPage } from '@/pages/NotFoundPage';
 import { formatRepoName } from '../constants/code-constants';
 import { statusLabel } from './code-ui';
 import type { CodeSourcesStore } from '../hooks/useCodeSources';
@@ -13,7 +14,8 @@ import type { CodeSourcesStore } from '../hooks/useCodeSources';
 export function CodeDetailView({ store }: { store: CodeSourcesStore }) {
   const { t } = useTranslation();
   const {
-    setSubView,
+    closeDetail,
+    loading,
     selected,
     handleSync,
     searchQuery,
@@ -28,7 +30,11 @@ export function CodeDetailView({ store }: { store: CodeSourcesStore }) {
     handleExplore,
   } = store;
 
-  if (!selected) return null;
+  // Unknown code_graph_id → 404. While the list is still loading, avoid a false 404.
+  if (!selected) {
+    if (loading) return <StatusTip status="loading" />;
+    return <NotFoundPage />;
+  }
 
   const selRepo = selected ? formatRepoName(selected.repo_name, selected.repo_url) : '';
   const selBranch = selected?.branch ?? '';
@@ -37,7 +43,7 @@ export function CodeDetailView({ store }: { store: CodeSourcesStore }) {
     <div className="_codedetail-root">
       {/* 返回面包屑 */}
       <div className="_codedetail-breadcrumb">
-        <Button type="link" onClick={() => setSubView('list')}>
+        <Button type="link" onClick={() => closeDetail()}>
           <span className="_codedetail-inline-icon">
             <ArrowLeftIcon size={12} /> {t('code.detail.breadcrumb')}
           </span>

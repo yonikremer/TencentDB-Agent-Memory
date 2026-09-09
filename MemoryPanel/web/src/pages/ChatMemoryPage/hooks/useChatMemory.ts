@@ -4,6 +4,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate, useParams } from 'react-router-dom';
+import { isMemoryLayer, memoryPath, navigateIfDiff } from '@/lib/asset-routes';
 import { useAgents, useTeams } from '@/services';
 import { readAuth } from '@/components/LoginGate';
 import { tea, confirmThenRun } from '@/lib/tea-bridge';
@@ -22,6 +24,10 @@ import { getLayerCount } from '../utils/utils';
 
 export function useChatMemory(props: { activeTeamId?: string | null } = {}) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const params = useParams<{ blockId?: string; layer?: string }>();
+  const routeBlockId = params.blockId ? decodeURIComponent(params.blockId) : '';
+  const routeLayer = isMemoryLayer(params.layer) ? params.layer : null;
   const scopeTabLabels = useScopeTabLabels();
   const auth = readAuth();
   const { activeTeamId: storeActiveTeamId, activeTeam } = useTeams();
@@ -161,13 +167,50 @@ export function useChatMemory(props: { activeTeamId?: string | null } = {}) {
     void fetchBlocks();
   }, [activeTeamId, scopeTab, agentFilter, fetchBlocks]);
 
+  // URL → state: direct load, refresh, or browser back/forward.
+  useEffect(() => {
+    if (routeBlockId && routeBlockId !== selectedId) {
+      setSelectedId(routeBlockId);
+    } else if (!routeBlockId && selectedId) {
+      setSelectedId(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeBlockId]);
+
+  useEffect(() => {
+    if (routeBlockId && routeLayer && routeLayer !== layer) {
+      setLayer(routeLayer);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeLayer, routeBlockId]);
+
+  const selectBlock = (id: string | null) => {
+    navigateIfDiff(navigate, memoryPath(id ?? undefined, layer));
+    setSelectedId(id);
+  };
+
+  const selectLayer = (l: MemoryLayer) => {
+    if (selectedId) navigateIfDiff(navigate, memoryPath(selectedId, l));
+    setLayer(l);
+  };
+
+  // Deep link may land on the wrong scope tab (fixed lists one agent only).
+  // Fall back to the team tab — all team blocks — before calling it missing.
+  useEffect(() => {
+    if (routeBlockId && !blocksLoading && scopeTab !== 'team' && !blocks.some((b) => b.id === routeBlockId)) {
+      setScopeTab('team');
+    }
+  }, [routeBlockId, blocksLoading, scopeTab, blocks]);
+
   // After the list changes, clear the selection only when the currently selected memory block is no longer in the list.
   // Do not automatically select the first one when entering the page (to keep consistent with skill behavior); load the details after the user clicks.
   useEffect(() => {
+    // Deep link: keep the id so the panel renders a 404 instead of silently clearing.
+    if (routeBlockId) return;
     if (selectedId && !blocks.some((b) => b.id === selectedId)) {
       setSelectedId(null);
     }
-  }, [blocks, selectedId]);
+  }, [blocks, selectedId, routeBlockId]);
 
   // ── Layered Pagination Loading ──
   const selected = useMemo(
@@ -524,7 +567,10 @@ export function useChatMemory(props: { activeTeamId?: string | null } = {}) {
       async () => {
         await chatMemoryApi.unbind(teamId, id, agentId);
         setBlocks((prev) => prev.filter((b) => b.id !== id));
-        if (selectedId === id) setSelectedId(null);
+        if (selectedId === id) {
+          navigate('/memory');
+          setSelectedId(null);
+        }
         tea.notify.success(t('memory.notify.unbound'));
       },
       (e) => tea.notify.error((e as Error)?.message || t('memory.notify.unbindFailed')),
@@ -590,8 +636,11 @@ export function useChatMemory(props: { activeTeamId?: string | null } = {}) {
     blocksLoading,
     selectedId,
     setSelectedId,
+    selectBlock,
+    routeBlockId,
     layer,
     setLayer,
+    selectLayer,
     layerPages,
     layerLoading,
     layerItemLoadingId,

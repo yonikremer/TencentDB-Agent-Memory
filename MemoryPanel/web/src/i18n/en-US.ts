@@ -3,6 +3,9 @@
 export const enUS = {
   // ===== App =====
   'app.checkingSession': 'Checking session…',
+  'notFound.title': 'Page not found',
+  'notFound.desc': 'The page or asset ID doesn\u2019t exist. Check the URL or go back.',
+  'notFound.back': 'Back to home',
 
   // ===== Menu / Navigation =====
   'menu.workbench_board': 'Task Board',

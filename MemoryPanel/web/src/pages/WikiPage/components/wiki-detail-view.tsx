@@ -21,6 +21,7 @@ import {
 } from 'tea-icons-react';
 import { knowledgeApi } from '@/lib/api/knowledge-api';
 import { tea } from '@/lib/tea-bridge';
+import { NotFoundPage } from '@/pages/NotFoundPage';
 import { WIKI_ALLOWED_FILE_RE, TYPE_COLORS, TYPE_COLOR_FALLBACK, type DetailTab } from '../constants/wiki-constants';
 import { WikiStatusBadge } from './wiki-ui';
 import { GraphTabContent, PagesTabContent } from './wiki-detail-components';
@@ -31,7 +32,9 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
   const {
     sources,
     selectedWikiId,
-    setSubView,
+    loading,
+    closeDetail,
+    selectTab,
     fetchSources,
     setShowAddDoc,
     setAddDocTab,
@@ -40,7 +43,6 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
     displayIngestState,
     setIngestState,
     activeTab,
-    setActiveTab,
     pages,
     types,
     typeCounts,
@@ -78,18 +80,18 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
   const source = sources.find((s) => s.wiki_id === selectedWikiId);
   const wikiName = source?.name ?? '';
 
-  // Show an empty state when Wiki is selected but does not exist (deleted or refresh failed), to avoid dead ends
+  // Unknown wiki_id → 404. While the list is still loading, show loading instead of a false 404.
   if (!source) {
-    return (
-      <Card>
-        <Card.Body>
-          <Button type="text" onClick={() => { fetchSources(); setSubView('list'); }}>
-            <ArrowLeftIcon size={12} /> {t('wiki.breadcrumb')}
-          </Button>
-          <StatusTip status="empty" emptyText={t('wiki.detail.notFound')} />
-        </Card.Body>
-      </Card>
-    );
+    if (loading) {
+      return (
+        <Card>
+          <Card.Body>
+            <StatusTip status="loading" />
+          </Card.Body>
+        </Card>
+      );
+    }
+    return <NotFoundPage message={t('wiki.detail.notFound')} />;
   }
 
   return (
@@ -97,7 +99,7 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
       <Card>
         <Card.Body className="_wiki-detail-header-body">
           <div className="_wiki-detail-breadcrumb">
-            <Button type="link" onClick={() => { fetchSources(); setSubView('list'); }}>
+            <Button type="link" onClick={() => { fetchSources(); closeDetail(); }}>
               <ArrowLeftIcon size={12} /> {t('wiki.breadcrumb')}
             </Button>
             <span className="_wiki-detail-breadcrumb-sep">/</span>
@@ -216,7 +218,7 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
 
       <Tabs
         activeId={activeTab}
-        onActive={(tab) => setActiveTab(tab.id as DetailTab)}
+        onActive={(tab) => selectTab(tab.id as DetailTab)}
         disableTabScrolling
         className="_wiki-detail-tabs"
         tabs={[
@@ -313,7 +315,7 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
                         key={(page as any).id || page.path}
                         onClick={() => {
                           handleReadPage(page);
-                          setActiveTab('pages');
+                          selectTab('pages');
                         }}
                         className="_wiki-detail-overview-item"
                       >
@@ -412,7 +414,7 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
                             type: result.type,
                           } as any);
                         handleReadPage(page);
-                        setActiveTab('pages');
+                        selectTab('pages');
                       }}
                     >
                       <span className="_wiki-detail-search-item-head">

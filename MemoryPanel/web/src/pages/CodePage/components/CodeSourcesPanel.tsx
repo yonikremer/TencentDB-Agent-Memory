@@ -41,6 +41,7 @@ export default function CodeSourcesPanel() {
     viewMode,
     setViewMode,
     subView,
+    routeCodeId,
     // register
     showRegister,
     setShowRegister,
@@ -68,7 +69,8 @@ export default function CodeSourcesPanel() {
     filteredSources,
   } = code;
 
-  if (subView === 'detail') {
+  // routeCodeId covers direct load / refresh on a deep link before URL→state sync runs.
+  if (subView === 'detail' || routeCodeId) {
     return <CodeDetailView store={code} />;
   }
 

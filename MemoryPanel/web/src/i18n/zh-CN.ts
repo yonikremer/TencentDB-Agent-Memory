@@ -3,6 +3,9 @@
 export const zhCN = {
   // ===== App =====
   'app.checkingSession': '正在检测登录态…',
+  'notFound.title': '页面不存在',
+  'notFound.desc': '页面或资产 ID 不存在，请检查 URL 或返回。',
+  'notFound.back': '回到首页',
 
   // ===== Menu / Navigation =====
   'menu.workbench_board': '任务看板',

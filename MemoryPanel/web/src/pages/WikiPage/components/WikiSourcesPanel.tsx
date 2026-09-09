@@ -42,6 +42,7 @@ export default function WikiSourcesPanel() {
     viewMode,
     setViewMode,
     subView,
+    routeWikiId,
     // create
     showCreate,
     setShowCreate,
@@ -68,7 +69,8 @@ export default function WikiSourcesPanel() {
     ingestBusy,
   } = wiki;
 
-  if (subView === 'detail') {
+  // routeWikiId covers direct load / refresh on a deep link before URL→state sync runs.
+  if (subView === 'detail' || routeWikiId) {
     return <WikiDetailView store={wiki} />;
   }
 

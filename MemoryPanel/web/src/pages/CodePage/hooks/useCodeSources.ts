@@ -4,6 +4,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate, useParams } from 'react-router-dom';
+import { codePath, navigateIfDiff } from '@/lib/asset-routes';
 import { knowledgeApi, type CodeGraphDetail } from '@/lib/api/knowledge-api';
 import { useTeams, useAgents } from '@/services';
 import { readAuth } from '@/components/LoginGate';
@@ -12,6 +14,9 @@ import { isValidGitHttpUrl, formatRepoName, type ScopeTab, type StatusFilter, ty
 
 export function useCodeSources() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const params = useParams<{ codeId?: string }>();
+  const routeCodeId = params.codeId ? decodeURIComponent(params.codeId) : '';
   const [sources, setSources] = useState<CodeGraphDetail[]>([]);
   const [loading, setLoading] = useState(false);
   // Default display Agent assets (fixed) to prevent users from mistakenly thinking their assets are in "Team Assets"
@@ -325,7 +330,7 @@ export function useCodeSources() {
       setSources((prev) => prev.filter((x) => x.code_graph_id !== cgId));
       setInFlight((prev) => prev.filter((x) => x.code_graph_id !== cgId));
       if (selectedCodeAsset?.cgId === cgId) setSelectedCodeAsset(null);
-      if (selectedCgId === cgId) setSubView('list');
+      if (selectedCgId === cgId) navigate('/code');
       tea.notify.success(t('code.notify.deleted'));
       fetchSources();
     } catch (e: unknown) {
@@ -333,13 +338,33 @@ export function useCodeSources() {
     }
   };
 
-  const openDetail = (cgId: string) => {
+  const enterDetailState = (cgId: string) => {
     setSelectedCgId(cgId);
     setSearchQuery('');
     setSearchResult('');
     setExploreQuery('');
     setExploreResult('');
     setSubView('detail');
+  };
+
+  // URL → state: direct load, refresh, or browser back/forward.
+  useEffect(() => {
+    if (routeCodeId && routeCodeId !== selectedCgId) {
+      enterDetailState(routeCodeId);
+    } else if (!routeCodeId && subView === 'detail') {
+      setSubView('list');
+      setSelectedCgId('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeCodeId]);
+
+  const openDetail = (cgId: string) => {
+    navigateIfDiff(navigate, codePath(cgId));
+    if (cgId !== selectedCgId) enterDetailState(cgId);
+  };
+
+  const closeDetail = () => {
+    navigateIfDiff(navigate, '/code');
   };
 
   const handleSearch = async () => {
@@ -372,7 +397,8 @@ export function useCodeSources() {
     }
   };
 
-  const selected = displaySources.find((source) => source.code_graph_id === selectedCgId);
+  // Detail lookup spans scopes (fixed tab filters the list) so deep links never false-404.
+  const selected = [...inFlight, ...sources].find((source) => source.code_graph_id === selectedCgId) ?? displaySources.find((source) => source.code_graph_id === selectedCgId) ?? null;
 
   return {
     // context
@@ -398,6 +424,7 @@ export function useCodeSources() {
     setSubView,
     selectedCgId,
     setSelectedCgId,
+    routeCodeId,
     // register
     showRegister,
     setShowRegister,
@@ -434,6 +461,7 @@ export function useCodeSources() {
     handleSync,
     handleDelete,
     openDetail,
+    closeDetail,
     handleSearch,
     handleExplore,
     // computed
