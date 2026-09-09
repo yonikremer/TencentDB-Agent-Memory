@@ -8,10 +8,22 @@
  * ingestSource() remains as a thin wrapper (= extract + commit serially), leaving existing unit tests/external calls unchanged.
  */
 
-import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
+import {
+  readFileSync,
+  readdirSync,
+  statSync,
+  existsSync,
+  writeFileSync,
+  mkdirSync,
+} from "node:fs";
 import { join, dirname, basename } from "node:path";
 import type { LimitFunction } from "p-limit";
-import { createLlmClient, normalizeLlmConfig, type LlmClient, type RawLlmConfig } from "./llm.js";
+import {
+  createLlmClient,
+  normalizeLlmConfig,
+  type LlmClient,
+  type RawLlmConfig,
+} from "./llm.js";
 import { loadTemplate } from "./template.js";
 import {
   buildSystemPrompt,
@@ -47,7 +59,10 @@ export function dumpGenerateFailure(args: {
     const safeSource = sourceName.replace(/[^\w.-]+/g, "_");
     const safeChunk = chunkTag.replace(/[^\w.\-#]+/g, "_");
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
-    const file = join(debugDir, `generate-fail-${safeSource}-${safeChunk}-${ts}.txt`);
+    const file = join(
+      debugDir,
+      `generate-fail-${safeSource}-${safeChunk}-${ts}.txt`,
+    );
     const header = [
       `# generate failure dump`,
       `# source=${sourceName}`,
@@ -61,7 +76,10 @@ export function dumpGenerateFailure(args: {
     writeFileSync(file, header + output, "utf-8");
     return file;
   } catch (err) {
-    log.warn("Failed to dump generate failure raw text to disk", { source: sourceName, error: String(err) });
+    log.warn("Failed to dump generate failure raw text to disk", {
+      source: sourceName,
+      error: String(err),
+    });
     return null;
   }
 }
@@ -124,10 +142,12 @@ export async function extractSource(
   existingPages: ExistingPageInfo[],
   options: IngestOptions = {},
 ): Promise<Map<string, string>> {
-  if (!existsSync(sourcePath)) throw new Error(`Source file does not exist: ${sourcePath}`);
+  if (!existsSync(sourcePath))
+    throw new Error(`Source file does not exist: ${sourcePath}`);
   const sourceText = readFileSync(sourcePath, "utf-8");
   const sourceName = basename(sourcePath);
-  if (!sourceText.trim()) throw new Error(`Source file is empty: ${sourceName}`);
+  if (!sourceText.trim())
+    throw new Error(`Source file is empty: ${sourceName}`);
 
   const llm = options.llm ?? createLlmClient(normalizeLlmConfig(llmConfig));
   const template = loadTemplate(projectPath);
@@ -152,7 +172,10 @@ export async function extractSource(
   const warnings: string[] = [];
 
   for (let i = 0; i < chunks.length; i++) {
-    const chunkLabel = chunks.length > 1 ? `${sourceName} (chunk ${i + 1}/${chunks.length})` : sourceName;
+    const chunkLabel =
+      chunks.length > 1
+        ? `${sourceName} (chunk ${i + 1}/${chunks.length})`
+        : sourceName;
     const tag = chunks.length > 1 ? `${sourceName}#${i + 1}` : sourceName;
 
     // Retrieval-augmented ingestion: per-chunk retrieval—each chunk searches relevant existing pages with its own text (rather than once per whole file).
@@ -162,7 +185,13 @@ export async function extractSource(
       try {
         retrievalContext = options.retrieveContext(chunks[i]);
       } catch (err) {
-        log.warn("Per-chunk retrieval augmentation failed, chunk degraded to no augmentation", { chunk: tag, error: err instanceof Error ? err.message : String(err) });
+        log.warn(
+          "Per-chunk retrieval augmentation failed, chunk degraded to no augmentation",
+          {
+            chunk: tag,
+            error: err instanceof Error ? err.message : String(err),
+          },
+        );
       }
     }
 
@@ -171,33 +200,83 @@ export async function extractSource(
       log.debug("Stage A analysis start", { chunk: tag });
       const analysis = await llm.chat({
         system: buildAnalysisSystemPrompt(template),
-        prompt: buildAnalysisPrompt({ sourceName: chunkLabel, sourceText: chunks[i], existingPages, retrievalContext }),
+        prompt: buildAnalysisPrompt({
+          sourceName: chunkLabel,
+          sourceText: chunks[i],
+          existingPages,
+          retrievalContext,
+        }),
         label: `analysis:${tag}`,
       });
-      log.debug("Stage A analysis complete", { chunk: tag, analysisChars: analysis.length, empty: !analysis.trim() });
-      log.debug("Stage A analysis preview", { chunk: tag, preview: analysis.slice(0, 200) });
+      log.debug("Stage A analysis complete", {
+        chunk: tag,
+        analysisChars: analysis.length,
+        empty: !analysis.trim(),
+      });
+      log.debug("Stage A analysis preview", {
+        chunk: tag,
+        preview: analysis.slice(0, 200),
+      });
       const genPrompt = analysis.trim()
-        ? buildGenerateFromAnalysisPrompt({ sourceName: chunkLabel, sourceText: chunks[i], analysis, existingPages, retrievalContext })
-        : buildGeneratePrompt({ sourceName: chunkLabel, sourceText: chunks[i], existingPages, retrievalContext });
-      if (!analysis.trim()) log.warn("Analysis empty, fallback to single-stage generation", { chunk: tag });
-      out = await llm.chat({ system: systemPrompt, prompt: genPrompt, label: `generate:${tag}` });
+        ? buildGenerateFromAnalysisPrompt({
+            sourceName: chunkLabel,
+            sourceText: chunks[i],
+            analysis,
+            existingPages,
+            retrievalContext,
+          })
+        : buildGeneratePrompt({
+            sourceName: chunkLabel,
+            sourceText: chunks[i],
+            existingPages,
+            retrievalContext,
+          });
+      if (!analysis.trim())
+        log.warn("Analysis empty, fallback to single-stage generation", {
+          chunk: tag,
+        });
+      out = await llm.chat({
+        system: systemPrompt,
+        prompt: genPrompt,
+        label: `generate:${tag}`,
+      });
     } else {
-      const prompt = buildGeneratePrompt({ sourceName: chunkLabel, sourceText: chunks[i], existingPages, retrievalContext });
-      out = await llm.chat({ system: systemPrompt, prompt, label: `generate:${tag}` });
+      const prompt = buildGeneratePrompt({
+        sourceName: chunkLabel,
+        sourceText: chunks[i],
+        existingPages,
+        retrievalContext,
+      });
+      out = await llm.chat({
+        system: systemPrompt,
+        prompt,
+        label: `generate:${tag}`,
+      });
     }
 
     const { files, warnings: w } = parseFileBlocks(out);
     warnings.push(...w);
-    log.debug("FILE block parsing", { chunk: tag, outChars: out.length, files: files.length, warnings: w.length });
+    log.debug("FILE block parsing", {
+      chunk: tag,
+      outChars: out.length,
+      files: files.length,
+      warnings: w.length,
+    });
     if (files.length === 0 && out.trim()) {
       const dumpPath = dumpGenerateFailure({
         projectPath,
         sourceName,
         chunkTag: tag,
         output: out,
-        reason: w.length ? `parse_empty warnings=${w.length}` : "parse_empty files=0",
+        reason: w.length
+          ? `parse_empty warnings=${w.length}`
+          : "parse_empty files=0",
       });
-      if (dumpPath) log.warn("generate has no valid FILE, dumped to disk", { source: sourceName, dumpPath });
+      if (dumpPath)
+        log.warn("generate has no valid FILE, dumped to disk", {
+          source: sourceName,
+          dumpPath,
+        });
     }
     for (const f of files) {
       const canonicalPath = canonicalizePagePath(f.path, f.content);
@@ -210,13 +289,20 @@ export async function extractSource(
   }
 
   if (candidates.size === 0) {
-    log.error("No valid wiki pages generated", { source: sourceName, warnings });
+    log.error("No valid wiki pages generated", {
+      source: sourceName,
+      warnings,
+    });
     throw new Error(
       `Failed to generate any valid wiki pages (no files generated): ${sourceName}${warnings.length ? ` [${warnings.join("; ")}]` : ""}`,
     );
   }
 
-  log.info("extractSource complete", { source: sourceName, candidates: candidates.size, warnings: warnings.length });
+  log.info("extractSource complete", {
+    source: sourceName,
+    candidates: candidates.size,
+    warnings: warnings.length,
+  });
   return candidates;
 }
 
@@ -229,7 +315,10 @@ export async function extractSource(
  */
 export async function commitCandidates(
   projectPath: string,
-  allCandidates: Array<{ sourceFilename: string; candidates: Map<string, string> }>,
+  allCandidates: Array<{
+    sourceFilename: string;
+    candidates: Map<string, string>;
+  }>,
   /** Omit when no candidates exist (only rebuild index); when candidates exist but LLM missing, record corresponding page into mergeErrors. */
   llm: LlmClient | undefined,
   options?: CommitOptions,
@@ -249,7 +338,9 @@ export async function commitCandidates(
 
   for (const [relPath, entries] of byPage) {
     const fullPath = join(projectPath, relPath);
-    let existing = existsSync(fullPath) ? readFileSync(fullPath, "utf-8") : null;
+    let existing = existsSync(fullPath)
+      ? readFileSync(fullPath, "utf-8")
+      : null;
 
     for (const entry of entries) {
       if (!llm) {
@@ -262,7 +353,9 @@ export async function commitCandidates(
       }
       try {
         const decision = globalLlmLimit
-          ? await globalLlmLimit(() => mergePage(existing, entry.content, llm, mergeOpts))
+          ? await globalLlmLimit(() =>
+              mergePage(existing, entry.content, llm, mergeOpts),
+            )
           : await mergePage(existing, entry.content, llm, mergeOpts);
         if (decision.action === "skip") {
           log.debug("Skip page (locked)", { relPath, source: entry.source });
@@ -272,10 +365,18 @@ export async function commitCandidates(
         writeFileSync(fullPath, decision.content, "utf-8");
         existing = decision.content;
         if (!written.includes(relPath)) written.push(relPath);
-        log.debug("Disk write", { relPath, source: entry.source, bytes: decision.content.length });
+        log.debug("Disk write", {
+          relPath,
+          source: entry.source,
+          bytes: decision.content.length,
+        });
       } catch (err) {
         mergeErrors.push({ relPath, source: entry.source, error: String(err) });
-        log.error("Page merge failed", { relPath, source: entry.source, error: String(err) });
+        log.error("Page merge failed", {
+          relPath,
+          source: entry.source,
+          error: String(err),
+        });
       }
     }
   }
@@ -283,7 +384,9 @@ export async function commitCandidates(
   try {
     rebuildIndexFile(projectPath);
   } catch (err) {
-    log.warn("index.md rebuild failed (does not affect main workflow)", { error: String(err) });
+    log.warn("index.md rebuild failed (does not affect main workflow)", {
+      error: String(err),
+    });
   }
 
   try {
@@ -291,11 +394,15 @@ export async function commitCandidates(
       appendIngestLogBatch(projectPath, {
         sourcesProcessed: allCandidates.map((c) => c.sourceFilename),
         pagesWritten: written,
-        mergeErrors: mergeErrors.map((e) => `${e.relPath} (from ${e.source}): ${e.error}`),
+        mergeErrors: mergeErrors.map(
+          (e) => `${e.relPath} (from ${e.source}): ${e.error}`,
+        ),
       });
     }
   } catch (err) {
-    log.warn("log.md write failed (does not affect main workflow)", { error: String(err) });
+    log.warn("log.md write failed (does not affect main workflow)", {
+      error: String(err),
+    });
   }
 
   return { written, mergeErrors };
@@ -313,7 +420,13 @@ export async function ingestSource(
   options: IngestOptions = {},
 ): Promise<string[]> {
   const existingPages = scanExistingPages(projectPath);
-  const candidates = await extractSource(projectPath, sourcePath, llmConfig, existingPages, options);
+  const candidates = await extractSource(
+    projectPath,
+    sourcePath,
+    llmConfig,
+    existingPages,
+    options,
+  );
   const llm = options.llm ?? createLlmClient(normalizeLlmConfig(llmConfig));
   const sourceName = basename(sourcePath);
   const { written } = await commitCandidates(
@@ -329,9 +442,14 @@ export async function ingestSource(
   try {
     appendIngestLog(projectPath, sourceName, written.length);
   } catch (err) {
-    log.warn("log.md append failed", { error: err instanceof Error ? err.message : String(err) });
+    log.warn("log.md append failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
-  log.info("ingestSource complete", { source: sourceName, written: written.length });
+  log.info("ingestSource complete", {
+    source: sourceName,
+    written: written.length,
+  });
   return written;
 }
 
@@ -369,9 +487,15 @@ function walk(baseDir: string, dir: string, out: ExistingPageInfo[]): void {
         const { frontmatter } = parseFrontmatter(content);
         out.push({
           relPath: rel,
-          title: typeof frontmatter.title === "string" ? frontmatter.title : basename(entry, ".md"),
+          title:
+            typeof frontmatter.title === "string"
+              ? frontmatter.title
+              : basename(entry, ".md"),
           type: frontmatter.type,
-          description: typeof frontmatter.description === "string" ? frontmatter.description : undefined,
+          description:
+            typeof frontmatter.description === "string"
+              ? frontmatter.description
+              : undefined,
         });
       } catch {
         /* Skip malformed page */
@@ -387,10 +511,15 @@ function walk(baseDir: string, dir: string, out: ExistingPageInfo[]): void {
 export function ensureSources(content: string, sourceName: string): string {
   const parsed = parseFrontmatter(content);
   const cur = Array.isArray(parsed.frontmatter.sources)
-    ? parsed.frontmatter.sources.filter((x): x is string => typeof x === "string")
+    ? parsed.frontmatter.sources.filter(
+        (x): x is string => typeof x === "string",
+      )
     : [];
   if (cur.includes(sourceName)) return content;
-  return buildPage({ ...parsed.frontmatter, sources: [...cur, sourceName] }, parsed.body);
+  return buildPage(
+    { ...parsed.frontmatter, sources: [...cur, sourceName] },
+    parsed.body,
+  );
 }
 
 /**
@@ -410,8 +539,10 @@ export function ensureSources(content: string, sourceName: string): string {
  */
 export function canonicalizePagePath(llmPath: string, content: string): string {
   const { frontmatter } = parseFrontmatter(content);
-  const type = typeof frontmatter.type === "string" ? frontmatter.type.trim() : "";
-  const title = typeof frontmatter.title === "string" ? frontmatter.title.trim() : "";
+  const type =
+    typeof frontmatter.type === "string" ? frontmatter.type.trim() : "";
+  const title =
+    typeof frontmatter.title === "string" ? frontmatter.title.trim() : "";
 
   if (type && title) {
     const slug = slugify(title);

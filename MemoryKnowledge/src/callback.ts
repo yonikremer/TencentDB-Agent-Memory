@@ -156,7 +156,10 @@ export function buildProgressFn(
  * Reads page titles + descriptions, asks LLM for a ≤100 char Chinese summary.
  * Reuse createLlmClient(Automatically follow the correct protocol openai/anthropic + Langfuse track + timeout processing).
  */
-import { createLlmClient, normalizeLlmConfig } from "./engines/wiki/ingest-v2/llm.js";
+import {
+  createLlmClient,
+  normalizeLlmConfig,
+} from "./engines/wiki/ingest-v2/llm.js";
 
 export async function generateWikiSummary(
   wikiId: string,

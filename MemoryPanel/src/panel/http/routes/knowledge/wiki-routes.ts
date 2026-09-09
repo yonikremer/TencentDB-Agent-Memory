@@ -10,12 +10,12 @@
  *   - id-only endpoints (get/ingest/delete/graph/page/search/raw/ls) → require valid caller,
  *     KS isolated by x-tdai-service-id + team logic.
  */
-import type { Hono } from 'hono';
-import { validatePanelMetaHeaders } from '../../middleware/validate-panel-headers.js';
-import { respondControlError } from '../../envelope.js';
-import type { PanelDeps } from '../../../panel-deps.js';
-import type { WikiRawWriteFile } from '../../../kernel/ports/knowledge-client-port.js';
-import { respondEnvelope } from '../../envelope.js';
+import type { Hono } from "hono";
+import { validatePanelMetaHeaders } from "../../middleware/validate-panel-headers.js";
+import { respondControlError } from "../../envelope.js";
+import type { PanelDeps } from "../../../panel-deps.js";
+import type { WikiRawWriteFile } from "../../../kernel/ports/knowledge-client-port.js";
+import { respondEnvelope } from "../../envelope.js";
 import {
   buildCtx,
   readJson,
@@ -28,38 +28,38 @@ import {
   ensureKnowledgeAsset,
   deleteKnowledgeCascade,
   ASSET_TYPE_WIKI,
-} from './common.js';
+} from "./common.js";
 
 export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
   const mw = validatePanelMetaHeaders(deps);
 
   // W2 list — @deprecated Panel UI has been replaced with team-assets / my-assets
-  api.post('/knowledge/wiki/list', mw, async (c) => {
+  api.post("/knowledge/wiki/list", mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
-    const teamId = str(body, 'team_id');
-    if (!teamId) return respondControlError(c, 400, 'MISSING_TEAM_ID');
+    const teamId = str(body, "team_id");
+    if (!teamId) return respondControlError(c, 400, "MISSING_TEAM_ID");
     const gate = await requireTeamMember(deps, c, ctx, teamId);
-    if ('error' in gate) return gate.error;
+    if ("error" in gate) return gate.error;
     const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     const opts = {
-      status: str(body, 'status') ?? undefined,
-      limit: typeof body.limit === 'number' ? body.limit : undefined,
-      offset: typeof body.offset === 'number' ? body.offset : undefined,
+      status: str(body, "status") ?? undefined,
+      limit: typeof body.limit === "number" ? body.limit : undefined,
+      offset: typeof body.offset === "number" ? body.offset : undefined,
     };
     return runKs(c, () => kc.wikiList(teamId, opts));
   });
 
   // W1 create — team gate; KS create → get wiki_id → idempotent register meta_asset (asset_id=wiki_id)
-  api.post('/knowledge/wiki/create', mw, async (c) => {
+  api.post("/knowledge/wiki/create", mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
-    const teamId = str(body, 'team_id');
-    const name = str(body, 'name');
-    if (!teamId) return respondControlError(c, 400, 'MISSING_TEAM_ID');
-    if (!name) return respondControlError(c, 400, 'MISSING_NAME');
+    const teamId = str(body, "team_id");
+    const name = str(body, "name");
+    if (!teamId) return respondControlError(c, 400, "MISSING_TEAM_ID");
+    if (!name) return respondControlError(c, 400, "MISSING_NAME");
     const gate = await requireTeamMember(deps, c, ctx, teamId);
-    if ('error' in gate) return gate.error;
+    if ("error" in gate) return gate.error;
     const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     let detail;
     try {
@@ -82,19 +82,21 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
   });
 
   // W4 ingest — id-only (requires read permission) + empty wiki validation
-  api.post('/knowledge/wiki/ingest', mw, async (c) => {
+  api.post("/knowledge/wiki/ingest", mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
-    const wikiId = str(body, 'wiki_id');
-    if (!wikiId) return respondControlError(c, 400, 'MISSING_WIKI_ID');
-    const gate = await requireKnowledgeRead(deps, c, ctx, wikiId, { action: 'write' });
-    if ('error' in gate) return gate.error;
+    const wikiId = str(body, "wiki_id");
+    if (!wikiId) return respondControlError(c, 400, "MISSING_WIKI_ID");
+    const gate = await requireKnowledgeRead(deps, c, ctx, wikiId, {
+      action: "write",
+    });
+    if ("error" in gate) return gate.error;
     const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     // Empty wiki ingest prohibited: first check raw/ls, reject if no source files
     try {
       const listing = await kc.wikiRawLs(wikiId);
       if (!listing.items || listing.items.length === 0) {
-        return respondControlError(c, 400, 'WIKI_EMPTY_NO_SOURCES');
+        return respondControlError(c, 400, "WIKI_EMPTY_NO_SOURCES");
       }
     } catch {
       // raw/ls query failure does not block ingest (KS side also has defense)
@@ -103,19 +105,19 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
   });
 
   // W3 get — id-only (requires read permission); aggregate Panel memory ingest progress (no new interface)
-  api.post('/knowledge/wiki/get', mw, async (c) => {
+  api.post("/knowledge/wiki/get", mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
-    const wikiId = str(body, 'wiki_id');
-    if (!wikiId) return respondControlError(c, 400, 'MISSING_WIKI_ID');
+    const wikiId = str(body, "wiki_id");
+    if (!wikiId) return respondControlError(c, 400, "MISSING_WIKI_ID");
     const gate = await requireKnowledgeRead(deps, c, ctx, wikiId);
-    if ('error' in gate) return gate.error;
+    if ("error" in gate) return gate.error;
     const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     return runKs(c, async () => {
       const detail = await kc.wikiGet(wikiId);
       const status = (detail as { status?: string } | null)?.status;
       const stored =
-        status === 'processing' ? deps.ingestProgressStore.get(wikiId) : null;
+        status === "processing" ? deps.ingestProgressStore.get(wikiId) : null;
       return {
         ...detail,
         progress: stored,
@@ -124,14 +126,17 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
   });
 
   // W5 delete — delete three places: KS + entity_knowledge details + meta_asset (see §0.6)
-  api.post('/knowledge/wiki/delete', mw, async (c) => {
+  api.post("/knowledge/wiki/delete", mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
-    const wikiIds = strArray(body, 'wiki_ids');
-    if (wikiIds.length === 0) return respondControlError(c, 400, 'MISSING_WIKI_ID');
+    const wikiIds = strArray(body, "wiki_ids");
+    if (wikiIds.length === 0)
+      return respondControlError(c, 400, "MISSING_WIKI_ID");
     for (const wikiId of wikiIds) {
-      const gate = await requireKnowledgeRead(deps, c, ctx, wikiId, { action: 'write' });
-      if ('error' in gate) return gate.error;
+      const gate = await requireKnowledgeRead(deps, c, ctx, wikiId, {
+        action: "write",
+      });
+      if ("error" in gate) return gate.error;
     }
     const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     return runKs(c, async () => {
@@ -142,146 +147,170 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
   });
 
   // W15 graph — id-only
-  api.post('/knowledge/wiki/graph', mw, async (c) => {
+  api.post("/knowledge/wiki/graph", mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
-    const wikiId = str(body, 'wiki_id');
-    if (!wikiId) return respondControlError(c, 400, 'MISSING_WIKI_ID');
+    const wikiId = str(body, "wiki_id");
+    if (!wikiId) return respondControlError(c, 400, "MISSING_WIKI_ID");
     const gate = await requireKnowledgeRead(deps, c, ctx, wikiId);
-    if ('error' in gate) return gate.error;
+    if ("error" in gate) return gate.error;
     const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     return runKs(c, () => kc.wikiGraph(wikiId));
   });
 
   // W11 page/ls — id-only
-  api.post('/knowledge/wiki/page/ls', mw, async (c) => {
+  api.post("/knowledge/wiki/page/ls", mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
-    const wikiId = str(body, 'wiki_id');
-    if (!wikiId) return respondControlError(c, 400, 'MISSING_WIKI_ID');
+    const wikiId = str(body, "wiki_id");
+    if (!wikiId) return respondControlError(c, 400, "MISSING_WIKI_ID");
     const gate = await requireKnowledgeRead(deps, c, ctx, wikiId);
-    if ('error' in gate) return gate.error;
+    if ("error" in gate) return gate.error;
     const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     return runKs(c, () => kc.wikiPageLs(wikiId));
   });
 
   // W12 page/read — id-only
-  api.post('/knowledge/wiki/page/read', mw, async (c) => {
+  api.post("/knowledge/wiki/page/read", mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
-    const wikiId = str(body, 'wiki_id');
-    const refs = strArray(body, 'refs');
-    if (!wikiId) return respondControlError(c, 400, 'MISSING_WIKI_ID');
-    if (refs.length === 0) return respondControlError(c, 400, 'MISSING_REFS');
+    const wikiId = str(body, "wiki_id");
+    const refs = strArray(body, "refs");
+    if (!wikiId) return respondControlError(c, 400, "MISSING_WIKI_ID");
+    if (refs.length === 0) return respondControlError(c, 400, "MISSING_REFS");
     const gate = await requireKnowledgeRead(deps, c, ctx, wikiId);
-    if ('error' in gate) return gate.error;
+    if ("error" in gate) return gate.error;
     const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     return runKs(c, () => kc.wikiPageRead(wikiId, refs));
   });
 
   // W14 page/rm — id-only + write permissions; KS needs team_id, from meta_asset.team_id
-  api.post('/knowledge/wiki/page/rm', mw, async (c) => {
+  api.post("/knowledge/wiki/page/rm", mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
-    const wikiId = str(body, 'wiki_id');
-    const refs = strArray(body, 'refs');
-    if (!wikiId) return respondControlError(c, 400, 'MISSING_WIKI_ID');
-    if (refs.length === 0) return respondControlError(c, 400, 'MISSING_REFS');
-    const gate = await requireKnowledgeRead(deps, c, ctx, wikiId, { action: 'write' });
-    if ('error' in gate) return gate.error;
+    const wikiId = str(body, "wiki_id");
+    const refs = strArray(body, "refs");
+    if (!wikiId) return respondControlError(c, 400, "MISSING_WIKI_ID");
+    if (refs.length === 0) return respondControlError(c, 400, "MISSING_REFS");
+    const gate = await requireKnowledgeRead(deps, c, ctx, wikiId, {
+      action: "write",
+    });
+    if ("error" in gate) return gate.error;
     const teamId = gate.asset?.team_id;
-    if (!teamId) return respondControlError(c, 400, 'MISSING_TEAM_ID');
+    if (!teamId) return respondControlError(c, 400, "MISSING_TEAM_ID");
     const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     return runKs(c, () => kc.wikiPageRm(teamId, wikiId, refs, gate.userId));
   });
 
   // W16 search — id-only
-  api.post('/knowledge/wiki/search', mw, async (c) => {
+  api.post("/knowledge/wiki/search", mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
-    const wikiId = str(body, 'wiki_id');
-    const query = str(body, 'query');
-    if (!wikiId) return respondControlError(c, 400, 'MISSING_WIKI_ID');
-    if (!query) return respondControlError(c, 400, 'MISSING_QUERY');
+    const wikiId = str(body, "wiki_id");
+    const query = str(body, "query");
+    if (!wikiId) return respondControlError(c, 400, "MISSING_WIKI_ID");
+    if (!query) return respondControlError(c, 400, "MISSING_QUERY");
     const gate = await requireKnowledgeRead(deps, c, ctx, wikiId);
-    if ('error' in gate) return gate.error;
-    const limit = typeof body.limit === 'number' ? body.limit : undefined;
+    if ("error" in gate) return gate.error;
+    const limit = typeof body.limit === "number" ? body.limit : undefined;
     const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     return runKs(c, () => kc.wikiSearch(wikiId, query, limit));
   });
 
   // W7 raw/ls — id-only
-  api.post('/knowledge/wiki/raw/ls', mw, async (c) => {
+  api.post("/knowledge/wiki/raw/ls", mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
-    const wikiId = str(body, 'wiki_id');
-    if (!wikiId) return respondControlError(c, 400, 'MISSING_WIKI_ID');
+    const wikiId = str(body, "wiki_id");
+    if (!wikiId) return respondControlError(c, 400, "MISSING_WIKI_ID");
     const gate = await requireKnowledgeRead(deps, c, ctx, wikiId);
-    if ('error' in gate) return gate.error;
+    if ("error" in gate) return gate.error;
     const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     return runKs(c, () => kc.wikiRawLs(wikiId));
   });
 
   // W8 raw/read — id-only
-  api.post('/knowledge/wiki/raw/read', mw, async (c) => {
+  api.post("/knowledge/wiki/raw/read", mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
-    const wikiId = str(body, 'wiki_id');
-    if (!wikiId) return respondControlError(c, 400, 'MISSING_WIKI_ID');
-    const filenames = Array.isArray(body.filenames) ? (body.filenames as string[]) : [];
-    if (filenames.length === 0) return respondControlError(c, 400, 'MISSING_FILENAMES');
+    const wikiId = str(body, "wiki_id");
+    if (!wikiId) return respondControlError(c, 400, "MISSING_WIKI_ID");
+    const filenames = Array.isArray(body.filenames)
+      ? (body.filenames as string[])
+      : [];
+    if (filenames.length === 0)
+      return respondControlError(c, 400, "MISSING_FILENAMES");
     const gate = await requireKnowledgeRead(deps, c, ctx, wikiId);
-    if ('error' in gate) return gate.error;
+    if ("error" in gate) return gate.error;
     const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     return runKs(c, () => kc.wikiRawRead(wikiId, filenames));
   });
 
   // W10 raw/rm — id-only + write permissions; KS needs team_id, from meta_asset.team_id
-  api.post('/knowledge/wiki/raw/rm', mw, async (c) => {
+  api.post("/knowledge/wiki/raw/rm", mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
-    const wikiId = str(body, 'wiki_id');
-    if (!wikiId) return respondControlError(c, 400, 'MISSING_WIKI_ID');
-    const filenames = Array.isArray(body.filenames) ? (body.filenames as string[]) : [];
-    if (filenames.length === 0) return respondControlError(c, 400, 'MISSING_FILENAMES');
-    const gate = await requireKnowledgeRead(deps, c, ctx, wikiId, { action: 'write' });
-    if ('error' in gate) return gate.error;
+    const wikiId = str(body, "wiki_id");
+    if (!wikiId) return respondControlError(c, 400, "MISSING_WIKI_ID");
+    const filenames = Array.isArray(body.filenames)
+      ? (body.filenames as string[])
+      : [];
+    if (filenames.length === 0)
+      return respondControlError(c, 400, "MISSING_FILENAMES");
+    const gate = await requireKnowledgeRead(deps, c, ctx, wikiId, {
+      action: "write",
+    });
+    if ("error" in gate) return gate.error;
     const teamId = gate.asset?.team_id;
-    if (!teamId) return respondControlError(c, 400, 'MISSING_TEAM_ID');
+    if (!teamId) return respondControlError(c, 400, "MISSING_TEAM_ID");
     const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     return runKs(c, () => kc.wikiRawRm(teamId, wikiId, filenames, gate.userId));
   });
 
   // W9 raw/write — team gate + upload size limit
-  const MAX_FILE_SIZE = 512 * 1024;        // single file 512KB
-  const MAX_FILES_PER_REQUEST = 10;        // max 10 files per request
-  const MAX_TOTAL_SIZE = 5 * 1024 * 1024;  // total size per request 5MB
+  const MAX_FILE_SIZE = 512 * 1024; // single file 512KB
+  const MAX_FILES_PER_REQUEST = 10; // max 10 files per request
+  const MAX_TOTAL_SIZE = 5 * 1024 * 1024; // total size per request 5MB
 
-  api.post('/knowledge/wiki/raw/write', mw, async (c) => {
+  api.post("/knowledge/wiki/raw/write", mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
-    const teamId = str(body, 'team_id');
-    const wikiId = str(body, 'wiki_id');
-    if (!teamId) return respondControlError(c, 400, 'MISSING_TEAM_ID');
-    if (!wikiId) return respondControlError(c, 400, 'MISSING_WIKI_ID');
-    const files = Array.isArray(body.files) ? (body.files as WikiRawWriteFile[]) : [];
-    if (files.length === 0) return respondControlError(c, 400, 'MISSING_FILES');
+    const teamId = str(body, "team_id");
+    const wikiId = str(body, "wiki_id");
+    if (!teamId) return respondControlError(c, 400, "MISSING_TEAM_ID");
+    if (!wikiId) return respondControlError(c, 400, "MISSING_WIKI_ID");
+    const files = Array.isArray(body.files)
+      ? (body.files as WikiRawWriteFile[])
+      : [];
+    if (files.length === 0) return respondControlError(c, 400, "MISSING_FILES");
     if (files.length > MAX_FILES_PER_REQUEST) {
-      return respondControlError(c, 413, `TOO_MANY_FILES (max ${MAX_FILES_PER_REQUEST})`);
+      return respondControlError(
+        c,
+        413,
+        `TOO_MANY_FILES (max ${MAX_FILES_PER_REQUEST})`,
+      );
     }
     let totalSize = 0;
     for (const f of files) {
-      const size = Buffer.byteLength(f.content ?? '', 'utf-8');
+      const size = Buffer.byteLength(f.content ?? "", "utf-8");
       if (size > MAX_FILE_SIZE) {
-        return respondControlError(c, 413, `FILE_TOO_LARGE (max ${MAX_FILE_SIZE} bytes, got ${size})`);
+        return respondControlError(
+          c,
+          413,
+          `FILE_TOO_LARGE (max ${MAX_FILE_SIZE} bytes, got ${size})`,
+        );
       }
       totalSize += size;
     }
     if (totalSize > MAX_TOTAL_SIZE) {
-      return respondControlError(c, 413, `TOTAL_TOO_LARGE (max ${MAX_TOTAL_SIZE} bytes, got ${totalSize})`);
+      return respondControlError(
+        c,
+        413,
+        `TOTAL_TOO_LARGE (max ${MAX_TOTAL_SIZE} bytes, got ${totalSize})`,
+      );
     }
     const gate = await requireTeamMember(deps, c, ctx, teamId);
-    if ('error' in gate) return gate.error;
+    if ("error" in gate) return gate.error;
     const kc = deps.knowledgeClientFactory(ctx.instanceId, ctx.userKey);
     return runKs(c, () => kc.wikiRawWrite(teamId, wikiId, files, gate.userId));
   });

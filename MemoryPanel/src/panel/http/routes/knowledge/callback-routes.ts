@@ -269,13 +269,21 @@ export function registerKnowledgeCallbackRoutes(
           return c.json({ code: 0, message: "ok", request_id: "", data: null });
         }
         const entry = deps.instanceRegistry.resolve(serviceId); // throw → below catch
+        // S2S callback carries no browser user key; use the owner key stashed at
+        // create (knowledge-task-registry) for the KS detail fetch AND the kernel
+        // entity write. Missing (restart / non-panel creation) → undefined → both
+        // calls stay unauthenticated and fail closed, frontend register-meta
+        // rebuild covers that path (idempotent).
+        const task = deps.knowledgeTaskRegistry.peek(body.knowledge_id);
+        const s2sUserKey = task?.owner_user_key;
         const cred: KernelCredentials = {
           endpoint: entry.gateway_endpoint,
           apiKey: entry.api_key,
           instanceId: entry.instance_id,
+          userKey: s2sUserKey,
           timeoutMs: deps.config.metadataRemoteTimeoutMs,
         };
-        const kc = deps.knowledgeClientFactory(serviceId);
+        const kc = deps.knowledgeClientFactory(serviceId, s2sUserKey);
 
         if (body.type === "wiki") {
           const detail = await kc.wikiGet(body.knowledge_id);

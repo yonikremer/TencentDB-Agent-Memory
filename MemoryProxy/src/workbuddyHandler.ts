@@ -54,7 +54,10 @@ import { recordTdaiTurn } from "./tdai/recorder.js";
 import { trackWrite, withL0Retry } from "./tdai/pending-writes.js";
 import type { TdaiIdentity, TdaiMessage } from "./tdai/types.js";
 import { triggerSkillExtractIfReady } from "./skill/handler-glue.js";
-import { isExtractionAllowed, logExtractionSkipped } from "./extraction-gate.js";
+import {
+  isExtractionAllowed,
+  logExtractionSkipped,
+} from "./extraction-gate.js";
 
 // ── Handler-level constants ──────────────────────────────────────────────────
 
@@ -131,7 +134,12 @@ export function classifyWorkbuddyRequest(
   headers: Record<string, string>,
 ): "main" | "auxiliary" {
   // ① path-based aux detection
-  const AUX_PATH_HINTS = ["/compact", "/trace_summarize", "/realtime", "/memories"];
+  const AUX_PATH_HINTS = [
+    "/compact",
+    "/trace_summarize",
+    "/realtime",
+    "/memories",
+  ];
   for (const hint of AUX_PATH_HINTS) {
     if (path.includes(hint)) return "auxiliary";
   }
@@ -169,7 +177,8 @@ export function extractWorkbuddySessionId(
   body: Record<string, unknown>,
 ): string | null {
   const fromHeader = headers["session-id"] ?? headers["Session-Id"];
-  if (typeof fromHeader === "string" && fromHeader.length > 0) return fromHeader;
+  if (typeof fromHeader === "string" && fromHeader.length > 0)
+    return fromHeader;
 
   const meta = body.client_metadata as Record<string, unknown> | undefined;
   if (meta && typeof meta === "object") {
@@ -310,7 +319,12 @@ function extractLatestWorkbuddyUserMessage(input: unknown): TdaiMessage | null {
 }
 
 function createWorkbuddyTdaiClient(config: ProxyConfig): TdaiClient | null {
-  if (!config.tdai?.enabled || !config.tdai?.memory?.enabled || !config.tdai?.endpoint) return null;
+  if (
+    !config.tdai?.enabled ||
+    !config.tdai?.memory?.enabled ||
+    !config.tdai?.endpoint
+  )
+    return null;
   return new TdaiClient({
     enabled: config.tdai.enabled,
     endpoint: config.tdai.endpoint,
@@ -341,9 +355,10 @@ function buildWorkbuddyArchiveCtx(args: {
   // When chat_memory=false the user explicitly disabled memory → don't create the tdaiClient;
   // skill archiving still runs.
   // Aligned with codexHandler.buildArchiveCtx (lines 855-857).
-  const tdaiClient = args.assetCapabilities?.chat_memory === false
-    ? null
-    : createWorkbuddyTdaiClient(args.config);
+  const tdaiClient =
+    args.assetCapabilities?.chat_memory === false
+      ? null
+      : createWorkbuddyTdaiClient(args.config);
   const tdaiIdentity = deriveTdaiIdentity({
     sessionInfo,
     userId: args.userId || null,
@@ -387,12 +402,24 @@ async function triggerWorkbuddyArchiveHooks(
   //
   // Note: buildWorkbuddyArchiveCtx already nulled tdaiClient when chat_memory=false, so there is
   // no need to re-check assetCapabilities.chat_memory here; a null tdaiClient is skipped naturally.
-  if (ctx.tdaiClient && ctx.tdaiIdentity && isExtractionAllowed(ctx.config, "tdai-memory")) {
+  if (
+    ctx.tdaiClient &&
+    ctx.tdaiIdentity &&
+    isExtractionAllowed(ctx.config, "tdai-memory")
+  ) {
     trackWrite(
       withL0Retry(() =>
-        recordTdaiTurn(ctx.tdaiClient!, ctx.tdaiIdentity, ctx.tdaiUserMessage, assistantText || null),
+        recordTdaiTurn(
+          ctx.tdaiClient!,
+          ctx.tdaiIdentity,
+          ctx.tdaiUserMessage,
+          assistantText || null,
+        ),
       ).catch((err: unknown) => {
-        console.warn("[workbuddy-tdai-l0] failed:", err instanceof Error ? err.message : String(err));
+        console.warn(
+          "[workbuddy-tdai-l0] failed:",
+          err instanceof Error ? err.message : String(err),
+        );
       }),
     );
   } else if (ctx.tdaiClient) {
@@ -454,17 +481,25 @@ export type WorkbuddyLangfuseInput =
   | unknown[]
   | undefined;
 
-function buildWorkbuddyLangfuseInput(body: Record<string, unknown>): WorkbuddyLangfuseInput {
+function buildWorkbuddyLangfuseInput(
+  body: Record<string, unknown>,
+): WorkbuddyLangfuseInput {
   const hasInstructions =
-    typeof body.instructions === "string" && (body.instructions as string).length > 0;
+    typeof body.instructions === "string" &&
+    (body.instructions as string).length > 0;
   if (!Array.isArray(body.input) && !hasInstructions) return undefined;
   if (Array.isArray(body.input) && hasInstructions) {
     return { input: body.input, instructions: body.instructions };
   }
-  return Array.isArray(body.input) ? body.input : { instructions: body.instructions };
+  return Array.isArray(body.input)
+    ? body.input
+    : { instructions: body.instructions };
 }
 
-function buildUpstreamHeaders(c: Context, config: ProxyConfig): Record<string, string> {
+function buildUpstreamHeaders(
+  c: Context,
+  config: ProxyConfig,
+): Record<string, string> {
   const h: Record<string, string> = {};
   for (const [k, v] of c.req.raw.headers.entries()) {
     if (!SKIP_REQUEST_HEADERS.has(k.toLowerCase())) h[k] = v;
@@ -504,10 +539,14 @@ async function forwardToUpstream(
   // Aligned with codexHandler: supports config.upstream.agents?.workbuddy to point at its own
   // URL/apiKey; falls back to the global config.upstream.{url,apiKey} when unset.
   // SAFETY: validated JSON config; structural read of the optional per-agent override map.
-  const perAgent = (config.upstream as unknown as {
-    agents?: { workbuddy?: { url?: string; apiKey?: string } };
-  }).agents?.workbuddy;
-  const upstreamBase = ((perAgent?.url ?? config.upstream.url ?? "") as string).replace(/\/$/, "");
+  const perAgent = (
+    config.upstream as unknown as {
+      agents?: { workbuddy?: { url?: string; apiKey?: string } };
+    }
+  ).agents?.workbuddy;
+  const upstreamBase = (
+    (perAgent?.url ?? config.upstream.url ?? "") as string
+  ).replace(/\/$/, "");
   const upstreamPath = c.req.path.replace(/^\/workbuddy\/[^/]+/, "");
   const upstreamUrl = joinUrl(upstreamBase, upstreamPath);
 
@@ -689,18 +728,21 @@ async function consumeWorkbuddyStream(
   // flag instead of throwing directly, because cancelling fetch's ReadableStream lets the main
   // loop exit naturally.
   let streamCompleted = false;
-  const timeoutHandle = setTimeout(() => {
-    if (!streamCompleted) {
-      ctx.pipe.error(
-        "STREAM_TIMEOUT",
-        new Error("Workbuddy stream reading exceeded 5 minutes"),
-      );
-      // Actively cancel the reader; the read loop then exits on done=true or an error
-      void reader.cancel().catch(() => {
-        /* best-effort */
-      });
-    }
-  }, 5 * 60 * 1000);
+  const timeoutHandle = setTimeout(
+    () => {
+      if (!streamCompleted) {
+        ctx.pipe.error(
+          "STREAM_TIMEOUT",
+          new Error("Workbuddy stream reading exceeded 5 minutes"),
+        );
+        // Actively cancel the reader; the read loop then exits on done=true or an error
+        void reader.cancel().catch(() => {
+          /* best-effort */
+        });
+      }
+    },
+    5 * 60 * 1000,
+  );
 
   try {
     for (;;) {
@@ -752,7 +794,10 @@ async function consumeWorkbuddyStream(
       }
     }
   } catch (err) {
-    ctx.pipe.info("WORKBUDDY_STREAM_ERR", err instanceof Error ? err.message : String(err));
+    ctx.pipe.info(
+      "WORKBUDDY_STREAM_ERR",
+      err instanceof Error ? err.message : String(err),
+    );
   } finally {
     streamCompleted = true;
     clearTimeout(timeoutHandle);
@@ -801,14 +846,16 @@ async function consumeWorkbuddyStream(
   // report. archiveCtx=null (aux / uninitialized session / bypass) is skipped entirely.
   // Q: toolUseCount is passed to skill archiving as the round-boundary criterion.
   if (ctx.archiveCtx && assistantText) {
-    await triggerWorkbuddyArchiveHooks(ctx.archiveCtx, assistantText, toolUseCount).catch(
-      (err: unknown) => {
-        ctx.pipe.info(
-          "WORKBUDDY_ARCHIVE_ERR",
-          err instanceof Error ? err.message : String(err),
-        );
-      },
-    );
+    await triggerWorkbuddyArchiveHooks(
+      ctx.archiveCtx,
+      assistantText,
+      toolUseCount,
+    ).catch((err: unknown) => {
+      ctx.pipe.info(
+        "WORKBUDDY_ARCHIVE_ERR",
+        err instanceof Error ? err.message : String(err),
+      );
+    });
   }
 }
 
@@ -839,19 +886,21 @@ export async function handleWorkbuddyEndpoint(
   const path = c.req.path;
 
   // ── 1. Auth ──────────────────────────────────────────────────────────────
-  const rawAuth = c.req.header("authorization") ?? c.req.header("Authorization") ?? "";
+  const rawAuth =
+    c.req.header("authorization") ?? c.req.header("Authorization") ?? "";
   const rawXApiKey = c.req.header("x-api-key") ?? "";
-  const apiKey =
-    extractBearerToken(rawAuth) ??
-    rawXApiKey ??
-    "";
+  const apiKey = extractBearerToken(rawAuth) ?? rawXApiKey ?? "";
   const spaceId = extractSpaceIdFromPath(path) ?? "";
-  const { userId, rejected: userKeyRejected, rejectReason } = await verifyUserKey(
-    apiKey,
-    spaceId,
-  );
+  const {
+    userId,
+    rejected: userKeyRejected,
+    rejectReason,
+  } = await verifyUserKey(apiKey, spaceId);
   if (userKeyRejected) {
-    return c.json({ error: `Authentication failed: ${rejectReason ?? "unknown"}` }, 401);
+    return c.json(
+      { error: `Authentication failed: ${rejectReason ?? "unknown"}` },
+      401,
+    );
   }
   const keyId = userId || (apiKey ? apiKeyToKeyId(apiKey) : "unknown");
 
@@ -886,8 +935,22 @@ export async function handleWorkbuddyEndpoint(
 
   // ── 5. Aux passthrough ───────────────────────────────────────────────────
   if (isAuxiliary) {
-    pipe.info("WORKBUDDY_AUX", `auxiliary request → passthrough (path=${path})`);
-    return forwardToUpstream(c, config, body, traceId, startTime, keyId, modelId, pipe, null, null);
+    pipe.info(
+      "WORKBUDDY_AUX",
+      `auxiliary request → passthrough (path=${path})`,
+    );
+    return forwardToUpstream(
+      c,
+      config,
+      body,
+      traceId,
+      startTime,
+      keyId,
+      modelId,
+      pipe,
+      null,
+      null,
+    );
   }
 
   // ── 6. Session ID + langfuse turn ctx ────────────────────────────────────
@@ -927,71 +990,113 @@ export async function handleWorkbuddyEndpoint(
   // All three are codex-client-specific behaviors, and WorkBuddy behaves the same. The
   // agent_source in langfuse tags / logs stays "workbuddy", unaffected.
   let sessionInfo: Record<string, unknown> | null | undefined;
-  let assetCapabilities: import("./injection/types.js").AssetCapabilityFlags | undefined;
+  let assetCapabilities:
+    | import("./injection/types.js").AssetCapabilityFlags
+    | undefined;
   let injectionSkipped = false;
   let cachedAgentDetail: unknown = null;
   let cachedTaskDetail: unknown = null;
-  let _resetFlowResult: { agentName: string; agentIdShort: string; teamId: string; taskName?: string | null; bypassed?: boolean } | null = null;
+  let _resetFlowResult: {
+    agentName: string;
+    agentIdShort: string;
+    teamId: string;
+    taskName?: string | null;
+    bypassed?: boolean;
+  } | null = null;
 
   const input = Array.isArray(body.input) ? body.input : [];
 
   // ── mem:session-reset pre-hook ──
   if (config.memCommand?.enabled) {
-    const { isSessionResetCommand } = await import("./mem-command/pre-intercept.js");
+    const { isSessionResetCommand } = await import(
+      "./mem-command/pre-intercept.js"
+    );
     if (isSessionResetCommand(body as Record<string, unknown>, agentSource)) {
-      const { parseCommandFromText, isMemCommandAllowed } = await import("./mem-command/index.js");
-      const { workbuddyAdapter } = await import("./agent-adapters/workbuddy.js");
+      const { parseCommandFromText, isMemCommandAllowed } = await import(
+        "./mem-command/index.js"
+      );
+      const { workbuddyAdapter } = await import(
+        "./agent-adapters/workbuddy.js"
+      );
       const userText = workbuddyAdapter.extractUserText(input) ?? "";
       const memCmd = parseCommandFromText(userText);
       if (memCmd && isMemCommandAllowed(config.memCommand, memCmd.command)) {
         const { getSessionStore } = await import("./session/store.js");
         const store = getSessionStore();
         const compositeKey = `codex:${sessionKey}`;
-        store.bind(compositeKey, { userId: userId || "anonymous", agentSource, sessionId: sessionKey, spaceId });
+        store.bind(compositeKey, {
+          userId: userId || "anonymous",
+          agentSource,
+          sessionId: sessionKey,
+          spaceId,
+        });
 
         // ── Force-archive the old agent's skill buffer (best-effort) ──
         const oldState = store.get(compositeKey);
-        if (oldState?.status === "initialized" && oldState.sessionInfo && config.coreSkill?.endpoint) {
+        if (
+          oldState?.status === "initialized" &&
+          oldState.sessionInfo &&
+          config.coreSkill?.endpoint
+        ) {
           // SAFETY: sessionInfo is a JSON-decoded plain object at runtime; treating it as a
           // string record for field extraction is sound (all reads are guarded by truthiness).
           const si = oldState.sessionInfo as unknown as Record<string, string>;
           if (si.space_id && si.user_id && si.team_id && si.agent_id) {
-            import("./skill/core-client.js").then(({ getCoreSkillClient }) => {
-              const client = getCoreSkillClient(config.coreSkill!);
-              client.forceArchive(
-                {
-                  space_id: si.space_id,
-                  user_id: si.user_id,
-                  team_id: si.team_id,
-                  agent_id: si.agent_id,
-                  session_id: sessionKey,
-                  task_id: si.task_id || undefined,
-                  reason: "session-reset",
-                },
-                { serviceId: si.space_id },
-              ).then((res) => {
-                console.log(`[session-reset] force-archive old buffer: status=${res.status} session=${sessionKey} agent=${si.agent_id}`);
-              }).catch((err) => {
-                console.warn(`[session-reset] force-archive failed (best-effort): ${err instanceof Error ? err.message : String(err)}`);
-              });
-            }).catch(() => {});
+            import("./skill/core-client.js")
+              .then(({ getCoreSkillClient }) => {
+                const client = getCoreSkillClient(config.coreSkill!);
+                client
+                  .forceArchive(
+                    {
+                      space_id: si.space_id,
+                      user_id: si.user_id,
+                      team_id: si.team_id,
+                      agent_id: si.agent_id,
+                      session_id: sessionKey,
+                      task_id: si.task_id || undefined,
+                      reason: "session-reset",
+                    },
+                    { serviceId: si.space_id },
+                  )
+                  .then((res) => {
+                    console.log(
+                      `[session-reset] force-archive old buffer: status=${res.status} session=${sessionKey} agent=${si.agent_id}`,
+                    );
+                  })
+                  .catch((err) => {
+                    console.warn(
+                      `[session-reset] force-archive failed (best-effort): ${err instanceof Error ? err.message : String(err)}`,
+                    );
+                  });
+              })
+              .catch(() => {});
           }
         }
 
         const resetEpoch = Date.now();
-        await store.set(compositeKey, { status: "uninitialized", keyId: sessionKey, startedAt: resetEpoch, attemptCount: 0, userId: userId || "anonymous", resetEpoch, resetFlow: true });
+        await store.set(compositeKey, {
+          status: "uninitialized",
+          keyId: sessionKey,
+          startedAt: resetEpoch,
+          attemptCount: 0,
+          userId: userId || "anonymous",
+          resetEpoch,
+          resetFlow: true,
+        });
         const bindingRepo = store.getBindingRepo();
-        if (bindingRepo) await bindingRepo.deleteBinding(spaceId, sessionKey).catch(() => {});
-        console.log(`[mem-command:pre] session-reset session=${sessionKey} → falling through to pop form`);
+        if (bindingRepo)
+          await bindingRepo.deleteBinding(spaceId, sessionKey).catch(() => {});
+        console.log(
+          `[mem-command:pre] session-reset session=${sessionKey} → falling through to pop form`,
+        );
       }
     }
   }
 
   if (config.sessionInit?.enabled && sessionId) {
     try {
-      const { getSessionStore, handleSessionInit, parsePresetIdentity } = await import(
-        "./session/index.js"
-      );
+      const { getSessionStore, handleSessionInit, parsePresetIdentity } =
+        await import("./session/index.js");
       const { getMetadataClient } = await import("./meta/client.js");
       const store = getSessionStore();
       // The kernel-side auth x-tdai-user-key is taken directly from the client request bearer
@@ -999,7 +1104,11 @@ export async function handleWorkbuddyEndpoint(
       // Codex / Claude Code desktop clients is the user key itself, which the kernel recognizes;
       // no config.tdai.apiKey fallback is needed (otherwise "local" from the config would override
       // the real user key and cause a 401).
-      const metadataClient = getMetadataClient(config.coreSkill, spaceId, apiKey);
+      const metadataClient = getMetadataClient(
+        config.coreSkill,
+        spaceId,
+        apiKey,
+      );
       const presetIdentity = parsePresetIdentity(config.sessionInit, headers);
 
       const compositeKey = `codex:${sessionKey}`;
@@ -1109,16 +1218,21 @@ export async function handleWorkbuddyEndpoint(
       // Default gate first hit → return a Plan-mode notice once; later turns of the same session
       // recover with bypassed=true
       if ((initResult as any).bypassReason === "default-gate") {
-        pipe.info("WORKBUDDY_GATE", "Default mode gate detected → notify user (first hit)");
-        const { buildMemResponse } = await import("./mem-command/response-builder.js");
+        pipe.info(
+          "WORKBUDDY_GATE",
+          "Default mode gate detected → notify user (first hit)",
+        );
+        const { buildMemResponse } = await import(
+          "./mem-command/response-builder.js"
+        );
         // reset-scenario gate: use tailored copy; see the same-named section in codexHandler
         const gateText = (initResult as any).resetFlow
-          ? "⚠️ mem:session-reset requires Plan mode support.\n\n"
-            + "The workbuddy client is not currently in Plan mode, so the asset selection form "
-            + "cannot be shown. Switch to Plan mode and run mem:session-reset again."
-          : "Plan mode was not enabled; asset injection is skipped for this session. "
-            + "To manage Skill / Task / Agent, switch to Plan mode and start a new session."
-            + "This message will be answered directly by the LLM.";
+          ? "⚠️ mem:session-reset requires Plan mode support.\n\n" +
+            "The workbuddy client is not currently in Plan mode, so the asset selection form " +
+            "cannot be shown. Switch to Plan mode and run mem:session-reset again."
+          : "Plan mode was not enabled; asset injection is skipped for this session. " +
+            "To manage Skill / Task / Agent, switch to Plan mode and start a new session." +
+            "This message will be answered directly by the LLM.";
         return buildMemResponse(gateText, {
           protocol: "responses",
           stream: isStream,
@@ -1132,13 +1246,20 @@ export async function handleWorkbuddyEndpoint(
           `[workbuddy] session=${sessionKey} bypassed (reason=${(initResult as any).bypassReason ?? "unknown"}) → skipping injection`,
         );
         if (initResult.resetFlow) {
-          _resetFlowResult = { agentName: "", agentIdShort: "", teamId: "", bypassed: true };
+          _resetFlowResult = {
+            agentName: "",
+            agentIdShort: "",
+            teamId: "",
+            bypassed: true,
+          };
         }
       }
 
       if (!initResult.bypassed && initResult.sessionInfo) {
         try {
-          const { fetchAssetCapabilities } = await import("./tdai/capabilities.js");
+          const { fetchAssetCapabilities } = await import(
+            "./tdai/capabilities.js"
+          );
           assetCapabilities = await fetchAssetCapabilities({
             endpoint: config.tdai.endpoint,
             apiKey: config.tdai.apiKey,
@@ -1162,11 +1283,15 @@ export async function handleWorkbuddyEndpoint(
         try {
           const userTextPeek = workbuddyAdapter.extractUserText(input);
           if (userTextPeek) {
-            const { parseCommandFromText, isMemCommandAllowed } = await import("./mem-command/index.js");
+            const { parseCommandFromText, isMemCommandAllowed } = await import(
+              "./mem-command/index.js"
+            );
             const peek = parseCommandFromText(userTextPeek);
             if (peek && isMemCommandAllowed(config.memCommand, peek.command)) {
               memCommandPending = true;
-              console.log(`[workbuddy] prewarm skipped: mem-command pending (cmd=${peek.command}) session=${sessionKey}`);
+              console.log(
+                `[workbuddy] prewarm skipped: mem-command pending (cmd=${peek.command}) session=${sessionKey}`,
+              );
             }
           }
         } catch (err) {
@@ -1187,17 +1312,22 @@ export async function handleWorkbuddyEndpoint(
       ) {
         try {
           const mod = await import("./injection/index.js");
-          await mod.prewarmFromConfig(config, {
-            keyId: sessionKey,
-            userId: userId || "anonymous",
-            agentSource,
-            spaceId,
-            sessionInfo: initResult.sessionInfo as import("./session/types.js").SessionInfo,
-            agentDetail: initResult.agentDetail ?? null,
-            taskDetail: initResult.taskDetail ?? null,
-            assetCapabilities,
-            callerUserKey: callerUserKey ?? undefined,
-          }, { clearBefore: true });
+          await mod.prewarmFromConfig(
+            config,
+            {
+              keyId: sessionKey,
+              userId: userId || "anonymous",
+              agentSource,
+              spaceId,
+              sessionInfo:
+                initResult.sessionInfo as import("./session/types.js").SessionInfo,
+              agentDetail: initResult.agentDetail ?? null,
+              taskDetail: initResult.taskDetail ?? null,
+              assetCapabilities,
+              callerUserKey: callerUserKey ?? undefined,
+            },
+            { clearBefore: true },
+          );
         } catch (err) {
           console.warn(
             "[workbuddy] prewarm error:",
@@ -1206,7 +1336,10 @@ export async function handleWorkbuddyEndpoint(
         }
       }
 
-      sessionInfo = initResult.sessionInfo as Record<string, unknown> | null | undefined;
+      sessionInfo = initResult.sessionInfo as
+        | Record<string, unknown>
+        | null
+        | undefined;
       if (sessionInfo && !sessionInfo.space_id && spaceId) {
         sessionInfo.space_id = spaceId;
       }
@@ -1215,14 +1348,23 @@ export async function handleWorkbuddyEndpoint(
 
       // SAFETY: sessionInfo is a JSON-decoded plain object at runtime; string-keyed reads
       // with optional chaining are sound (missing keys yield undefined, handled by ?:).
-      const sessionFields = initResult.sessionInfo as unknown as Record<string, unknown> | null | undefined;
-      if (initResult.resetFlow && initResult.justRegistered && !initResult.bypassed) {
+      const sessionFields = initResult.sessionInfo as unknown as
+        | Record<string, unknown>
+        | null
+        | undefined;
+      if (
+        initResult.resetFlow &&
+        initResult.justRegistered &&
+        !initResult.bypassed
+      ) {
         _resetFlowResult = {
           agentName: initResult.agentDetail?.name ?? "Unknown",
           agentIdShort: sessionFields?.agent_id
-            ? String(sessionFields.agent_id).slice(-8) : "",
+            ? String(sessionFields.agent_id).slice(-8)
+            : "",
           teamId: sessionFields?.team_id
-            ? String(sessionFields.team_id).slice(-8) : "",
+            ? String(sessionFields.team_id).slice(-8)
+            : "",
           taskName: initResult.taskDetail?.name,
         };
       }
@@ -1238,9 +1380,14 @@ export async function handleWorkbuddyEndpoint(
 
   // ── mem:session-reset completion confirmation ─────────────────────────────
   if (_resetFlowResult) {
-    const { agentName, agentIdShort, teamId, taskName, bypassed } = _resetFlowResult;
+    const { agentName, agentIdShort, teamId, taskName, bypassed } =
+      _resetFlowResult;
     const lines = bypassed
-      ? ["✅ Skipped team asset association", "", "Subsequent conversations will not inject team assets (Skill / Memory / Knowledge)."]
+      ? [
+          "✅ Skipped team asset association",
+          "",
+          "Subsequent conversations will not inject team assets (Skill / Memory / Knowledge).",
+        ]
       : [
           "✅ Team assets rebound",
           "",
@@ -1252,8 +1399,12 @@ export async function handleWorkbuddyEndpoint(
         ].filter(Boolean);
     const text = (lines as string[]).join("\n");
 
-    const { buildMemResponse } = await import("./mem-command/response-builder.js");
-    console.log(`[mem-command:session-reset] completed: bypassed=${!!bypassed} agent=${agentName} (${agentIdShort})`);
+    const { buildMemResponse } = await import(
+      "./mem-command/response-builder.js"
+    );
+    console.log(
+      `[mem-command:session-reset] completed: bypassed=${!!bypassed} agent=${agentName} (${agentIdShort})`,
+    );
     return buildMemResponse(text, {
       protocol: "responses",
       stream: isStream,
@@ -1265,8 +1416,14 @@ export async function handleWorkbuddyEndpoint(
   if (config.memCommand?.enabled) {
     const userText = workbuddyAdapter.extractUserText(input);
     if (userText) {
-      const { parseCommandFromText, isMemCommandAllowed, executeMemCommand, buildMemResponse, extractSimpleMessages, truncateArgs } =
-        await import("./mem-command/index.js");
+      const {
+        parseCommandFromText,
+        isMemCommandAllowed,
+        executeMemCommand,
+        buildMemResponse,
+        extractSimpleMessages,
+        truncateArgs,
+      } = await import("./mem-command/index.js");
       // ⚠️ Don't use parseMemCommand(body, "workbuddy") — it only parses body.messages[]
       // (the CC/CB shape). WorkBuddy uses the Responses API (body.input[]), so it always returns
       // null → the command silently passes through to the LLM. Instead, parse userText directly
@@ -1287,7 +1444,10 @@ export async function handleWorkbuddyEndpoint(
           );
           return errResponse;
         }
-        pipe.info("WORKBUDDY_MEM_CMD", `mem command intercepted: ${memCmd.command}`);
+        pipe.info(
+          "WORKBUDDY_MEM_CMD",
+          `mem command intercepted: ${memCmd.command}`,
+        );
         const memResult = await executeMemCommand(memCmd, {
           sessionKey,
           agentSource: "workbuddy",
@@ -1325,7 +1485,10 @@ export async function handleWorkbuddyEndpoint(
           assetCapabilities,
         });
         if (memArchiveCtx) {
-          void triggerWorkbuddyArchiveHooks(memArchiveCtx, memResult.messageText ?? "").catch((err: unknown) => {
+          void triggerWorkbuddyArchiveHooks(
+            memArchiveCtx,
+            memResult.messageText ?? "",
+          ).catch((err: unknown) => {
             pipe.info(
               "WORKBUDDY_MEM_ARCHIVE_ERR",
               err instanceof Error ? err.message : String(err),
@@ -1422,7 +1585,8 @@ export async function handleWorkbuddyEndpoint(
         | Array<Record<string, unknown>>
         | undefined;
       const sysMsg = injectedMessages?.[0];
-      const injectedText = typeof sysMsg?.content === "string" ? sysMsg.content : "";
+      const injectedText =
+        typeof sysMsg?.content === "string" ? sysMsg.content : "";
 
       if (injectedText.length > 0) {
         body = injectWorkbuddyAssets(body, { raw: injectedText });
@@ -1447,5 +1611,16 @@ export async function handleWorkbuddyEndpoint(
     callerUserKey,
     assetCapabilities,
   });
-  return forwardToUpstream(c, config, body, traceId, startTime, keyId, modelId, pipe, lf, archiveCtx);
+  return forwardToUpstream(
+    c,
+    config,
+    body,
+    traceId,
+    startTime,
+    keyId,
+    modelId,
+    pipe,
+    lf,
+    archiveCtx,
+  );
 }

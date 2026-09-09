@@ -7,7 +7,7 @@
  *
  * Same mode as HttpSkillClient: Bearer + service-id + envelope resolution.
  */
-import { CoreUpstreamError } from '../../domain/errors.js';
+import { CoreUpstreamError } from "../../domain/errors.js";
 import type {
   KnowledgeClientPort,
   WikiDetail,
@@ -32,7 +32,7 @@ import type {
   CodeGraphToolResult,
   GrantMirrorResult,
   GrantClearResult,
-} from '../ports/knowledge-client-port.js';
+} from "../ports/knowledge-client-port.js";
 
 export interface KnowledgeClientConfig {
   baseUrl: string;
@@ -57,13 +57,16 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), this.cfg.timeoutMs ?? 15_000);
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (this.cfg.authToken) headers.Authorization = `Bearer ${this.cfg.authToken}`;
-      if (this.cfg.serviceId) headers['x-tdai-service-id'] = this.cfg.serviceId;
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (this.cfg.authToken)
+        headers.Authorization = `Bearer ${this.cfg.authToken}`;
+      if (this.cfg.serviceId) headers["x-tdai-service-id"] = this.cfg.serviceId;
       // Single identity plane: the end-user key is the KS credential.
-      if (this.cfg.userKey) headers['x-tdai-user-key'] = this.cfg.userKey;
+      if (this.cfg.userKey) headers["x-tdai-user-key"] = this.cfg.userKey;
       const resp = await fetch(`${this.cfg.baseUrl}${path}`, {
-        method: 'POST',
+        method: "POST",
         headers,
         body: JSON.stringify(body),
         signal: ctrl.signal,
@@ -71,14 +74,19 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
       const json = (await resp.json()) as CoreEnvelope<T>;
       if (json.code !== undefined && json.code !== 0) {
         throw new CoreUpstreamError(
-          'CORE_UPSTREAM_ERROR',
+          "CORE_UPSTREAM_ERROR",
           resp.status >= 400 ? resp.status : 502,
           json.message || `core error code ${json.code}`,
           json.code,
         );
       }
       if (!resp.ok) {
-        throw new CoreUpstreamError('CORE_UPSTREAM_ERROR', resp.status, json.message || `HTTP ${resp.status}`, 0);
+        throw new CoreUpstreamError(
+          "CORE_UPSTREAM_ERROR",
+          resp.status,
+          json.message || `HTTP ${resp.status}`,
+          0,
+        );
       }
       return json.data as T;
     } finally {
@@ -88,131 +96,235 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
 
   //═══════════════ Wiki · Asset Layer ═══════════════
 
-  async wikiCreate(teamId: string, name: string, userId?: string): Promise<WikiDetail> {
-    return this.post('/v3/wiki/create', { team_id: teamId, name, user_id: userId });
+  async wikiCreate(
+    teamId: string,
+    name: string,
+    userId?: string,
+  ): Promise<WikiDetail> {
+    return this.post("/v3/wiki/create", {
+      team_id: teamId,
+      name,
+      user_id: userId,
+    });
   }
 
   async wikiGet(wikiId: string): Promise<WikiDetail> {
-    return this.post('/v3/wiki/get', { wiki_id: wikiId });
+    return this.post("/v3/wiki/get", { wiki_id: wikiId });
   }
 
   async wikiIngest(wikiId: string): Promise<WikiIngestResult> {
-    return this.post('/v3/wiki/ingest', { wiki_id: wikiId });
+    return this.post("/v3/wiki/ingest", { wiki_id: wikiId });
   }
 
   async wikiDelete(wikiIds: string[]): Promise<BatchDeleteResult> {
-    return this.post('/v3/wiki/delete', { wiki_ids: wikiIds });
+    return this.post("/v3/wiki/delete", { wiki_ids: wikiIds });
   }
 
-  async wikiList(teamId: string, opts?: { status?: string; limit?: number; offset?: number }): Promise<WikiListResult> {
-    return this.post('/v3/wiki/list', { team_id: teamId, ...opts });
+  async wikiList(
+    teamId: string,
+    opts?: { status?: string; limit?: number; offset?: number },
+  ): Promise<WikiListResult> {
+    return this.post("/v3/wiki/list", { team_id: teamId, ...opts });
   }
 
   //═══════════════ Grants mirror (org-hierarchy sync) ═══════════════
 
   async grantsSet(
-    kind: 'wiki' | 'code-graph',
+    kind: "wiki" | "code-graph",
     knowledgeId: string,
     grants: Array<{ team_id: string; grant_type?: string }>,
   ): Promise<GrantMirrorResult> {
-    return this.post('/v3/grants/set', { kind, knowledge_id: knowledgeId, grants });
+    return this.post("/v3/grants/set", {
+      kind,
+      knowledge_id: knowledgeId,
+      grants,
+    });
   }
 
   async grantsClear(
-    kind: 'wiki' | 'code-graph',
+    kind: "wiki" | "code-graph",
     knowledgeId: string,
     teamIds?: string[],
   ): Promise<GrantClearResult> {
-    return this.post('/v3/grants/clear', teamIds ? { kind, knowledge_id: knowledgeId, team_ids: teamIds } : { kind, knowledge_id: knowledgeId });
+    return this.post(
+      "/v3/grants/clear",
+      teamIds
+        ? { kind, knowledge_id: knowledgeId, team_ids: teamIds }
+        : { kind, knowledge_id: knowledgeId },
+    );
   }
 
-  async grantsList(kind: 'wiki' | 'code-graph', knowledgeId: string): Promise<GrantMirrorResult> {
-    return this.post('/v3/grants/list', { kind, knowledge_id: knowledgeId });
+  async grantsList(
+    kind: "wiki" | "code-graph",
+    knowledgeId: string,
+  ): Promise<GrantMirrorResult> {
+    return this.post("/v3/grants/list", { kind, knowledge_id: knowledgeId });
   }
 
   //═══════════════ Wiki · raw file layer ═══════════════
 
   async wikiRawLs(wikiId: string): Promise<{ items: RawFileEntry[] }> {
-    return this.post('/v3/wiki/raw/ls', { wiki_id: wikiId });
+    return this.post("/v3/wiki/raw/ls", { wiki_id: wikiId });
   }
 
-  async wikiRawRead(wikiId: string, filenames: string[]): Promise<{ items: WikiRawReadItem[] }> {
-    return this.post('/v3/wiki/raw/read', { wiki_id: wikiId, filenames });
+  async wikiRawRead(
+    wikiId: string,
+    filenames: string[],
+  ): Promise<{ items: WikiRawReadItem[] }> {
+    return this.post("/v3/wiki/raw/read", { wiki_id: wikiId, filenames });
   }
 
-  async wikiRawWrite(teamId: string, wikiId: string, files: WikiRawWriteFile[], userId?: string): Promise<{ items: WikiRawWriteItem[] }> {
-    return this.post('/v3/wiki/raw/write', { team_id: teamId, user_id: userId, wiki_id: wikiId, files });
+  async wikiRawWrite(
+    teamId: string,
+    wikiId: string,
+    files: WikiRawWriteFile[],
+    userId?: string,
+  ): Promise<{ items: WikiRawWriteItem[] }> {
+    return this.post("/v3/wiki/raw/write", {
+      team_id: teamId,
+      user_id: userId,
+      wiki_id: wikiId,
+      files,
+    });
   }
 
-  async wikiRawRm(teamId: string, wikiId: string, filenames: string[], userId?: string): Promise<WikiRawRmResult> {
-    return this.post('/v3/wiki/raw/rm', { team_id: teamId, user_id: userId, wiki_id: wikiId, filenames });
+  async wikiRawRm(
+    teamId: string,
+    wikiId: string,
+    filenames: string[],
+    userId?: string,
+  ): Promise<WikiRawRmResult> {
+    return this.post("/v3/wiki/raw/rm", {
+      team_id: teamId,
+      user_id: userId,
+      wiki_id: wikiId,
+      filenames,
+    });
   }
 
   //═══════════════ Wiki · page file layer ═══════════════
 
   async wikiPageLs(wikiId: string): Promise<{ items: PageEntry[] }> {
-    return this.post('/v3/wiki/page/ls', { wiki_id: wikiId });
+    return this.post("/v3/wiki/page/ls", { wiki_id: wikiId });
   }
 
-  async wikiPageRead(wikiId: string, refs: string[]): Promise<{ items: WikiPageReadItem[] }> {
-    return this.post('/v3/wiki/page/read', { wiki_id: wikiId, refs });
+  async wikiPageRead(
+    wikiId: string,
+    refs: string[],
+  ): Promise<{ items: WikiPageReadItem[] }> {
+    return this.post("/v3/wiki/page/read", { wiki_id: wikiId, refs });
   }
 
-  async wikiPageWrite(teamId: string, wikiId: string, pages: WikiPageWriteItem[], userId?: string): Promise<{ items: WikiPageWriteResultItem[] }> {
-    return this.post('/v3/wiki/page/write', { team_id: teamId, user_id: userId, wiki_id: wikiId, pages });
+  async wikiPageWrite(
+    teamId: string,
+    wikiId: string,
+    pages: WikiPageWriteItem[],
+    userId?: string,
+  ): Promise<{ items: WikiPageWriteResultItem[] }> {
+    return this.post("/v3/wiki/page/write", {
+      team_id: teamId,
+      user_id: userId,
+      wiki_id: wikiId,
+      pages,
+    });
   }
 
-  async wikiPageRm(teamId: string, wikiId: string, refs: string[], userId?: string): Promise<WikiPageRmResult> {
-    return this.post('/v3/wiki/page/rm', { team_id: teamId, user_id: userId, wiki_id: wikiId, refs });
+  async wikiPageRm(
+    teamId: string,
+    wikiId: string,
+    refs: string[],
+    userId?: string,
+  ): Promise<WikiPageRmResult> {
+    return this.post("/v3/wiki/page/rm", {
+      team_id: teamId,
+      user_id: userId,
+      wiki_id: wikiId,
+      refs,
+    });
   }
 
   //═══════════════ Wiki · Derived view ═══════════════
 
   async wikiGraph(wikiId: string): Promise<WikiGraphData> {
-    return this.post('/v3/wiki/graph', { wiki_id: wikiId });
+    return this.post("/v3/wiki/graph", { wiki_id: wikiId });
   }
 
-  async wikiSearch(wikiId: string, query: string, limit?: number, graph?: { hop?: number; decay?: number; minScore?: number }): Promise<WikiSearchResult> {
-    return this.post('/v3/wiki/search', { wiki_id: wikiId, query, limit: limit ?? 20, ...(graph && Object.keys(graph).length > 0 ? { graph } : {}) });
+  async wikiSearch(
+    wikiId: string,
+    query: string,
+    limit?: number,
+    graph?: { hop?: number; decay?: number; minScore?: number },
+  ): Promise<WikiSearchResult> {
+    return this.post("/v3/wiki/search", {
+      wiki_id: wikiId,
+      query,
+      limit: limit ?? 20,
+      ...(graph && Object.keys(graph).length > 0 ? { graph } : {}),
+    });
   }
 
-  async wikiUpdateMeta(wikiId: string, patch: { name?: string; summary?: string | null }): Promise<WikiDetail> {
-    return this.post('/v3/wiki/update-meta', { wiki_id: wikiId, ...patch });
+  async wikiUpdateMeta(
+    wikiId: string,
+    patch: { name?: string; summary?: string | null },
+  ): Promise<WikiDetail> {
+    return this.post("/v3/wiki/update-meta", { wiki_id: wikiId, ...patch });
   }
 
   // ═══════════════ Code-Graph ═══════════════
 
-  async codeGraphCreate(teamId: string, repoUrl: string, branch?: string, userId?: string, repoName?: string): Promise<CodeGraphDetail> {
-    return this.post('/v3/code-graph/create', {
+  async codeGraphCreate(
+    teamId: string,
+    repoUrl: string,
+    branch?: string,
+    userId?: string,
+    repoName?: string,
+  ): Promise<CodeGraphDetail> {
+    return this.post("/v3/code-graph/create", {
       team_id: teamId,
       user_id: userId,
       repo_url: repoUrl,
-      branch: branch ?? 'main',
+      branch: branch ?? "main",
       repo_name: repoName,
     });
   }
 
-  async codeGraphList(teamId: string, opts?: { status?: string; limit?: number; offset?: number }): Promise<CodeGraphListResult> {
-    return this.post('/v3/code-graph/list', { team_id: teamId, ...opts });
+  async codeGraphList(
+    teamId: string,
+    opts?: { status?: string; limit?: number; offset?: number },
+  ): Promise<CodeGraphListResult> {
+    return this.post("/v3/code-graph/list", { team_id: teamId, ...opts });
   }
 
   async codeGraphGet(codeGraphId: string): Promise<CodeGraphDetail> {
-    return this.post('/v3/code-graph/get', { code_graph_id: codeGraphId });
+    return this.post("/v3/code-graph/get", { code_graph_id: codeGraphId });
   }
 
   async codeGraphSync(codeGraphId: string): Promise<CodeGraphSyncResult> {
-    return this.post('/v3/code-graph/sync', { code_graph_id: codeGraphId });
+    return this.post("/v3/code-graph/sync", { code_graph_id: codeGraphId });
   }
 
   async codeGraphDelete(codeGraphIds: string[]): Promise<BatchDeleteResult> {
-    return this.post('/v3/code-graph/delete', { code_graph_ids: codeGraphIds });
+    return this.post("/v3/code-graph/delete", { code_graph_ids: codeGraphIds });
   }
 
-  async codeGraphUpdateMeta(codeGraphId: string, patch: { repo_name?: string; summary?: string | null }): Promise<CodeGraphDetail> {
-    return this.post('/v3/code-graph/update-meta', { code_graph_id: codeGraphId, ...patch });
+  async codeGraphUpdateMeta(
+    codeGraphId: string,
+    patch: { repo_name?: string; summary?: string | null },
+  ): Promise<CodeGraphDetail> {
+    return this.post("/v3/code-graph/update-meta", {
+      code_graph_id: codeGraphId,
+      ...patch,
+    });
   }
 
-  async codeGraphQuery(codeGraphId: string, tool: string, params: Record<string, unknown>): Promise<CodeGraphToolResult> {
-    return this.post(`/v3/code-graph/${tool}`, { code_graph_id: codeGraphId, ...params });
+  async codeGraphQuery(
+    codeGraphId: string,
+    tool: string,
+    params: Record<string, unknown>,
+  ): Promise<CodeGraphToolResult> {
+    return this.post(`/v3/code-graph/${tool}`, {
+      code_graph_id: codeGraphId,
+      ...params,
+    });
   }
 }

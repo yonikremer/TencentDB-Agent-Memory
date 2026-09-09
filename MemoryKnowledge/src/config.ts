@@ -85,6 +85,8 @@ export interface ServiceConfig {
  coreVerifyUrl: string;
  /** Timeout for Core auth/verify calls in ms. */
  coreVerifyTimeoutMs: number;
+ /** Bearer token sent on the Core verify call (Core server.apiKey; empty = legacy no-token). */
+ coreVerifyBearer: string;
  /** Optional ClickHouse request telemetry. Disabled by default. */
  clickhouse: ClickHouseTelemetryConfig;
 }
@@ -236,6 +238,7 @@ export function loadConfig(): ServiceConfig {
   tmcCallbackUrl: env("TMC_CALLBACK_URL", ""),
   callbackSecret: env("KNOWLEDGE_CALLBACK_SECRET", ""),
   coreVerifyUrl: env("CORE_VERIFY_URL", "").replace(/\/+$/, ""),
+  coreVerifyBearer: env("CORE_VERIFY_BEARER", ""),
   coreVerifyTimeoutMs: envInt("CORE_VERIFY_TIMEOUT_MS", 3000),
   clickhouse,
   llm: {
@@ -250,5 +253,5 @@ export function loadConfig(): ServiceConfig {
    timeoutMs: envInt("LLM_TIMEOUT_MS", 1200000),
    stream: process.env.LLM_STREAM === "true",
   },
-};
+ };
 }

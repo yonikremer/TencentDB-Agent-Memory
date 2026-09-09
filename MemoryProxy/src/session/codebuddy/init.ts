@@ -150,7 +150,10 @@ function detectCodexDefaultGate(input: unknown): boolean {
   // Only when the tail is function_call_output (meaning the client just replayed the gate and hasn't let the user input yet)
   // do we judge it as Default; if the tail is a user message / tool_use / etc. → it means the current turn is a new turn,
   // ignoring historical residual gates.
-  const last = input[input.length - 1] as Record<string, unknown> | null | undefined;
+  const last = input[input.length - 1] as
+    | Record<string, unknown>
+    | null
+    | undefined;
   if (!last || typeof last !== "object") return false;
   if (last.type !== "function_call_output") return false;
   const output = last.output;
@@ -168,9 +171,16 @@ function detectCodexDefaultGate(input: unknown): boolean {
  */
 function computeCodexPageBumps(
   cur: { teamPage?: number; agentPage?: number; taskPage?: number } | undefined,
-  perQuestion: { team_select: boolean; agent_select: boolean; task_select: boolean },
+  perQuestion: {
+    team_select: boolean;
+    agent_select: boolean;
+    task_select: boolean;
+  },
   fallbackStage: "team" | "agent" | "task" | null,
-): { next: { teamPage: number; agentPage: number; taskPage: number }; bumped: Array<"team" | "agent" | "task"> } {
+): {
+  next: { teamPage: number; agentPage: number; taskPage: number };
+  bumped: Array<"team" | "agent" | "task">;
+} {
   const teamPage = cur?.teamPage ?? 0;
   const agentPage = cur?.agentPage ?? 0;
   const taskPage = cur?.taskPage ?? 0;
@@ -178,15 +188,34 @@ function computeCodexPageBumps(
   let nextTeam = teamPage;
   let nextAgent = agentPage;
   let nextTask = taskPage;
-  if (perQuestion.team_select) { nextTeam++; bumped.push("team"); }
-  if (perQuestion.agent_select) { nextAgent++; bumped.push("agent"); }
-  if (perQuestion.task_select) { nextTask++; bumped.push("task"); }
-  if (bumped.length === 0 && fallbackStage) {
-    if (fallbackStage === "team") { nextTeam++; bumped.push("team"); }
-    else if (fallbackStage === "agent") { nextAgent++; bumped.push("agent"); }
-    else if (fallbackStage === "task") { nextTask++; bumped.push("task"); }
+  if (perQuestion.team_select) {
+    nextTeam++;
+    bumped.push("team");
   }
-  return { next: { teamPage: nextTeam, agentPage: nextAgent, taskPage: nextTask }, bumped };
+  if (perQuestion.agent_select) {
+    nextAgent++;
+    bumped.push("agent");
+  }
+  if (perQuestion.task_select) {
+    nextTask++;
+    bumped.push("task");
+  }
+  if (bumped.length === 0 && fallbackStage) {
+    if (fallbackStage === "team") {
+      nextTeam++;
+      bumped.push("team");
+    } else if (fallbackStage === "agent") {
+      nextAgent++;
+      bumped.push("agent");
+    } else if (fallbackStage === "task") {
+      nextTask++;
+      bumped.push("task");
+    }
+  }
+  return {
+    next: { teamPage: nextTeam, agentPage: nextAgent, taskPage: nextTask },
+    bumped,
+  };
 }
 
 /**
@@ -240,7 +269,6 @@ function detectWorkbuddyMorePage(
   const totalPages = computeCCPagination(Math.max(0, total), 0).totalPages;
   return nextPage > totalPages - 1 ? 0 : nextPage;
 }
-
 async function fetchTeamsAndAgents(
   userId: string,
   config: SessionInitConfig,
@@ -287,7 +315,10 @@ async function fetchTeamsAndAgents(
   return { teams };
 }
 
-function findTeamIdForAgent(teams: TeamOption[], agentId: string): string | undefined {
+function findTeamIdForAgent(
+  teams: TeamOption[],
+  agentId: string,
+): string | undefined {
   for (const team of teams) {
     if (team.agents.some((a) => a.agent_id === agentId)) return team.team_id;
   }
@@ -326,7 +357,13 @@ function applyArtifactsAndContext(
 ): MessageArr {
   // This used to decide whether to stripInitArtifacts based on config.keepInitArtifacts;
   // now the session_init form interaction is **always retained**, never removed.
-  const injected = injectSessionContextWithToggles(messages, agentDetail, taskDetail, config, sessionKey);
+  const injected = injectSessionContextWithToggles(
+    messages,
+    agentDetail,
+    taskDetail,
+    config,
+    sessionKey,
+  );
   if (injected !== messages) {
     const finalRoles = (injected as unknown[]).map((m: any) => m.role);
     console.log(
@@ -360,8 +397,16 @@ export async function completeRegistration(
     console.warn(
       `[session-init:cb] session=${compositeKey} no user_id available → bypass`,
     );
-    await store.set(compositeKey, { status: "initialized", bypassed: true } as SessionInitState);
-    return { intercepted: false, bypassed: true, justRegistered: true, resetFlow: state?.resetFlow ?? false };
+    await store.set(compositeKey, {
+      status: "initialized",
+      bypassed: true,
+    } as SessionInitState);
+    return {
+      intercepted: false,
+      bypassed: true,
+      justRegistered: true,
+      resetFlow: state?.resetFlow ?? false,
+    };
   }
   // task_id is OPTIONAL for registration: the kernel treats task as an
   // optional business dimension (isolation.ts), so a header-identity agent
@@ -370,13 +415,26 @@ export async function completeRegistration(
   // narrowing to a task. The interactive "Don't bind a task this time" / defaultTaskId path
   // also lands here with task_id = defaultTaskId (a virtual value). Do NOT
   // bypass when task_id is missing/undefined.
-  const regData = buildRegistrationData(resolved, cachedTeams, sessionKey, regUserId);
+  const regData = buildRegistrationData(
+    resolved,
+    cachedTeams,
+    sessionKey,
+    regUserId,
+  );
   if (!regData) {
     console.warn(
       `[session-init:cb] session=${compositeKey} agent=${resolved.agent_id} not bound to any team → bypass`,
     );
-    await store.set(compositeKey, { status: "initialized", bypassed: true } as SessionInitState);
-    return { intercepted: false, bypassed: true, justRegistered: true, resetFlow: state?.resetFlow ?? false };
+    await store.set(compositeKey, {
+      status: "initialized",
+      bypassed: true,
+    } as SessionInitState);
+    return {
+      intercepted: false,
+      bypassed: true,
+      justRegistered: true,
+      resetFlow: state?.resetFlow ?? false,
+    };
   }
 
   let agentDetail: AgentDetail | null = null;
@@ -384,7 +442,8 @@ export async function completeRegistration(
 
   if (metadataClient) {
     // When task_id is defaultTaskId (virtual value), skip getTask — the kernel does not have this task.
-    const shouldFetchTask = regData.task_id && regData.task_id !== config.defaultTaskId;
+    const shouldFetchTask =
+      regData.task_id && regData.task_id !== config.defaultTaskId;
     const [agentRes, taskRes] = await Promise.allSettled([
       metadataClient.getAgent(resolved.agent_id).then((a) => ({
         id: a.agent_id,
@@ -401,9 +460,15 @@ export async function completeRegistration(
         : Promise.resolve(null),
     ]);
     if (agentRes.status === "fulfilled") agentDetail = agentRes.value;
-    else console.warn(`[session-init:cb] getAgent failed: ${String(agentRes.reason)}`);
+    else
+      console.warn(
+        `[session-init:cb] getAgent failed: ${String(agentRes.reason)}`,
+      );
     if (taskRes.status === "fulfilled") taskDetail = taskRes.value;
-    else console.warn(`[session-init:cb] getTask failed: ${String(taskRes.reason)}`);
+    else
+      console.warn(
+        `[session-init:cb] getTask failed: ${String(taskRes.reason)}`,
+      );
   }
 
   const sessionInfo = buildSessionInfo(regData, userKey, spaceId);
@@ -450,7 +515,13 @@ export async function completeRegistration(
   };
   await store.set(compositeKey, nextState);
 
-  const out = applyArtifactsAndContext(messages, agentDetail, taskDetail, compositeKey, config);
+  const out = applyArtifactsAndContext(
+    messages,
+    agentDetail,
+    taskDetail,
+    compositeKey,
+    config,
+  );
   return {
     intercepted: false,
     messages: out,
@@ -489,8 +560,17 @@ export async function handleSessionInit(
   const prevStatus = store.get(compositeKey)?.status ?? "uninitialized";
   try {
     const result = await handleSessionInitInner(
-      sessionKey, userId, messages, config, store, reqCtx,
-      metadataClient, userKey, spaceId, presetIdentity, agentSource,
+      sessionKey,
+      userId,
+      messages,
+      config,
+      store,
+      reqCtx,
+      metadataClient,
+      userKey,
+      spaceId,
+      presetIdentity,
+      agentSource,
     );
     // codex-only post-pass enhancement: stuff the latest state's codexPageIndex into formData
     // so that codexHandler's buildCodexFormResponse gets the correct pagination page numbers. Thus
@@ -499,7 +579,10 @@ export async function handleSessionInit(
     if (agentSource === "codex" && result.intercepted && result.formData) {
       const latest = store.get(compositeKey);
       if (latest?.codexPageIndex) {
-        result.formData = withCodexPageIndex(result.formData, latest.codexPageIndex);
+        result.formData = withCodexPageIndex(
+          result.formData,
+          latest.codexPageIndex,
+        );
       }
     }
     return result;
@@ -561,7 +644,7 @@ async function handleSessionInitInner(
         keyId: sessionKey,
         startedAt: state?.startedAt ?? Date.now(),
         attemptCount: state?.attemptCount ?? 0,
-        userId: state?.userId ?? (userId ?? undefined),
+        userId: state?.userId ?? userId ?? undefined,
         cachedTeams: state?.cachedTeams,
         sessionInfo: null,
         agentDetail: null,
@@ -601,24 +684,31 @@ async function handleSessionInitInner(
       const answerText = getLastUserMessageText(messages);
       const stripped = answerText.split(CODEX_MORE_LABEL).join("").trim();
       const hasRealAnswer = stripped.length > 0;
-      const partialMore = hasRealAnswer && (
-        !detection.perQuestion.team_select ||
-        !detection.perQuestion.agent_select ||
-        !detection.perQuestion.task_select
-      );
+      const partialMore =
+        hasRealAnswer &&
+        (!detection.perQuestion.team_select ||
+          !detection.perQuestion.agent_select ||
+          !detection.perQuestion.task_select);
       // fallbackStage: with a pure-string MORE, infer the stage back from state.status
       const fallbackStage: "team" | "agent" | "task" | null =
-        detection.perQuestion.team_select || detection.perQuestion.agent_select || detection.perQuestion.task_select
+        detection.perQuestion.team_select ||
+        detection.perQuestion.agent_select ||
+        detection.perQuestion.task_select
           ? null
           : state.status === "pending_team_select"
             ? "team"
-            : state.status === "pending_agent_task" || state.status === "pending_agent_select"
+            : state.status === "pending_agent_task" ||
+                state.status === "pending_agent_select"
               ? "agent"
               : state.status === "pending_task_select"
                 ? "task"
                 : null;
 
-      const { next, bumped } = computeCodexPageBumps(state.codexPageIndex, detection.perQuestion, fallbackStage);
+      const { next, bumped } = computeCodexPageBumps(
+        state.codexPageIndex,
+        detection.perQuestion,
+        fallbackStage,
+      );
 
       if (bumped.length > 0) {
         await store.set(compositeKey, { ...state, codexPageIndex: next });
@@ -636,20 +726,29 @@ async function handleSessionInitInner(
           // own independent stage, and the form returned to codex only asks that stage's question.
           let stage: FormData["stage"];
           if (state.status === "pending_team_select") stage = "team";
-          else if (state.status === "pending_agent_select") stage = "agent_select";
-          else if (state.status === "pending_task_select") stage = "task_select";
+          else if (state.status === "pending_agent_select")
+            stage = "agent_select";
+          else if (state.status === "pending_task_select")
+            stage = "task_select";
           else stage = "agent_task"; // legacy pending_agent_task (CB one-shot)
-          const fd: FormData = withCodexPageIndex({
-            teams: cachedTeams,
-            stage,
-            selectedTeamId: state.selectedTeamId,
-            selectedAgentId: state.selectedAgentId,
-            stream: reqCtx.stream,
-            questionsAsArray: reqCtx.questionsAsArray,
-            modelId: reqCtx.modelId,
-            protocol: reqCtx.protocol,
-          }, next);
-          return { intercepted: true, response: buildFormResponse(fd), formData: fd };
+          const fd: FormData = withCodexPageIndex(
+            {
+              teams: cachedTeams,
+              stage,
+              selectedTeamId: state.selectedTeamId,
+              selectedAgentId: state.selectedAgentId,
+              stream: reqCtx.stream,
+              questionsAsArray: reqCtx.questionsAsArray,
+              modelId: reqCtx.modelId,
+              protocol: reqCtx.protocol,
+            },
+            next,
+          );
+          return {
+            intercepted: true,
+            response: buildFormResponse(fd),
+            formData: fd,
+          };
         }
         // partial fall through to state-machine dispatch
       }
@@ -743,7 +842,12 @@ async function handleSessionInitInner(
         taskDetail: null,
         bypassed: true,
       } as SessionInitState);
-      return { intercepted: false, bypassed: true, justRegistered: true, resetFlow: state?.resetFlow ?? false };
+      return {
+        intercepted: false,
+        bypassed: true,
+        justRegistered: true,
+        resetFlow: state?.resetFlow ?? false,
+      };
     }
 
     const totalAgents = teams.reduce((acc, t) => acc + t.agents.length, 0);
@@ -763,7 +867,12 @@ async function handleSessionInitInner(
         taskDetail: null,
         bypassed: true,
       } as SessionInitState);
-      return { intercepted: false, bypassed: true, justRegistered: true, resetFlow: state?.resetFlow ?? false };
+      return {
+        intercepted: false,
+        bypassed: true,
+        justRegistered: true,
+        resetFlow: state?.resetFlow ?? false,
+      };
     }
 
     // ── Header-driven pre-selection: skip forms when identity is provided ──
@@ -772,7 +881,9 @@ async function handleSessionInitInner(
 
       if (pr.hadMismatch) {
         if (config.headerAutoSelect.onMismatch === "bypass") {
-          console.warn(`[session-init:cb] session=${compositeKey} preset mismatch → bypass`);
+          console.warn(
+            `[session-init:cb] session=${compositeKey} preset mismatch → bypass`,
+          );
           await store.set(compositeKey, {
             status: "initialized",
             keyId: sessionKey,
@@ -785,9 +896,16 @@ async function handleSessionInitInner(
             taskDetail: null,
             bypassed: true,
           } as SessionInitState);
-          return { intercepted: false, bypassed: true, justRegistered: true, resetFlow: state?.resetFlow ?? false };
+          return {
+            intercepted: false,
+            bypassed: true,
+            justRegistered: true,
+            resetFlow: state?.resetFlow ?? false,
+          };
         }
-        console.warn(`[session-init:cb] session=${compositeKey} preset mismatch → fallback to form`);
+        console.warn(
+          `[session-init:cb] session=${compositeKey} preset mismatch → fallback to form`,
+        );
         // fall through to the normal asset_confirm flow below
       } else if (pr.canRegister) {
         // team + agent resolved → register directly (task optional). A missing
@@ -813,8 +931,17 @@ async function handleSessionInitInner(
         };
         return completeRegistration(
           { agent_id: pr.agentId!, task_id: pr.taskId },
-          seedState, teams, compositeKey, sessionKey, userId,
-          config, store, messages, metadataClient, userKey, spaceId,
+          seedState,
+          teams,
+          compositeKey,
+          sessionKey,
+          userId,
+          config,
+          store,
+          messages,
+          metadataClient,
+          userKey,
+          spaceId,
         );
       } else if (pr.teamId) {
         // only team resolved → jump straight to agent+task selection (skip
@@ -823,8 +950,20 @@ async function handleSessionInitInner(
         //
         // opencode note: opencode's native `question` tool can only pop one question at a time,
         // so it cannot carry the "ask agent+task together" semantics and must split stages (same as codex/wb/dsh).
-        const nextStatus = (isCodexClient || agentSource === "workbuddy" || agentSource === "dsh" || agentSource === "opencode") ? "pending_agent_select" : "pending_agent_task";
-        const nextStage: FormData["stage"] = (isCodexClient || agentSource === "workbuddy" || agentSource === "dsh" || agentSource === "opencode") ? "agent_select" : "agent_task";
+        const nextStatus =
+          isCodexClient ||
+          agentSource === "workbuddy" ||
+          agentSource === "dsh" ||
+          agentSource === "opencode"
+            ? "pending_agent_select"
+            : "pending_agent_task";
+        const nextStage: FormData["stage"] =
+          isCodexClient ||
+          agentSource === "workbuddy" ||
+          agentSource === "dsh" ||
+          agentSource === "opencode"
+            ? "agent_select"
+            : "agent_task";
         await store.set(compositeKey, {
           status: nextStatus,
           keyId: sessionKey,
@@ -846,7 +985,11 @@ async function handleSessionInitInner(
           modelId: reqCtx.modelId,
           protocol: reqCtx.protocol,
         };
-        return { intercepted: true, response: buildFormResponse(fd), formData: fd };
+        return {
+          intercepted: true,
+          response: buildFormResponse(fd),
+          formData: fd,
+        };
       }
     }
 
@@ -898,8 +1041,16 @@ async function handleSessionInitInner(
         sessionInfo: null,
         bypassed: true,
       } as SessionInitState);
-      console.log(`[session-init:cb] session=${compositeKey} user chose no-asset → bypass`);
-      return { intercepted: false, messages: messages as Record<string, unknown>[], bypassed: true, justRegistered: true, resetFlow: state?.resetFlow ?? false };
+      console.log(
+        `[session-init:cb] session=${compositeKey} user chose no-asset → bypass`,
+      );
+      return {
+        intercepted: false,
+        messages: messages as Record<string, unknown>[],
+        bypassed: true,
+        justRegistered: true,
+        resetFlow: state?.resetFlow ?? false,
+      };
     }
 
     if (choice === true) {
@@ -937,7 +1088,12 @@ async function handleSessionInitInner(
             console.log(
               `[session-init:cb] session=${compositeKey} team has 0 tasks → bypass`,
             );
-            return { intercepted: false, bypassed: true, justRegistered: true, resetFlow: state?.resetFlow ?? false };
+            return {
+              intercepted: false,
+              bypassed: true,
+              justRegistered: true,
+              resetFlow: state?.resetFlow ?? false,
+            };
           }
           if (onlyTeam.tasks.length === 1) {
             const soleTaskId = onlyTeam.tasks[0].task_id;
@@ -946,8 +1102,17 @@ async function handleSessionInitInner(
             );
             return await completeRegistration(
               { agent_id: soloAgent.agent_id, task_id: soleTaskId },
-              nextState, teams, compositeKey, sessionKey, userId,
-              config, store, messages, metadataClient, userKey, spaceId,
+              nextState,
+              teams,
+              compositeKey,
+              sessionKey,
+              userId,
+              config,
+              store,
+              messages,
+              metadataClient,
+              userKey,
+              spaceId,
             );
           }
           // ≥2 tasks: switch to the task_select stage and emit the task form.
@@ -968,7 +1133,11 @@ async function handleSessionInitInner(
             modelId: reqCtx.modelId,
             protocol: reqCtx.protocol,
           };
-          return { intercepted: true, response: buildFormResponse(fd), formData: fd };
+          return {
+            intercepted: true,
+            response: buildFormResponse(fd),
+            formData: fd,
+          };
         }
 
         // ≥2 agents: the legacy CB path asks both at once via pending_agent_task; codex/WB/dsh/opencode
@@ -976,9 +1145,17 @@ async function handleSessionInitInner(
         // so route it through the codex branch to avoid the semantic ambiguity of landing in the legacy
         // agent_task stage where the form only asks the agent yet is processed with legacy semantics. opencode's
         // native `question` tool can only pop one question at a time, so it must also use the split stage.
-        const useSplitStage = isCodexClient || agentSource === "workbuddy" || agentSource === "dsh" || agentSource === "opencode";
-        const nextStatus = useSplitStage ? "pending_agent_select" : "pending_agent_task";
-        const nextStage: FormData["stage"] = useSplitStage ? "agent_select" : "agent_task";
+        const useSplitStage =
+          isCodexClient ||
+          agentSource === "workbuddy" ||
+          agentSource === "dsh" ||
+          agentSource === "opencode";
+        const nextStatus = useSplitStage
+          ? "pending_agent_select"
+          : "pending_agent_task";
+        const nextStage: FormData["stage"] = useSplitStage
+          ? "agent_select"
+          : "agent_task";
         await store.set(compositeKey, {
           status: nextStatus,
           keyId: sessionKey,
@@ -1000,7 +1177,11 @@ async function handleSessionInitInner(
           modelId: reqCtx.modelId,
           protocol: reqCtx.protocol,
         };
-        return { intercepted: true, response: buildFormResponse(fd), formData: fd };
+        return {
+          intercepted: true,
+          response: buildFormResponse(fd),
+          formData: fd,
+        };
       }
 
       await store.set(compositeKey, {
@@ -1022,14 +1203,28 @@ async function handleSessionInitInner(
         modelId: reqCtx.modelId,
         protocol: reqCtx.protocol,
       };
-      return { intercepted: true, response: buildFormResponse(fd), formData: fd };
+      return {
+        intercepted: true,
+        response: buildFormResponse(fd),
+        formData: fd,
+      };
     }
 
     state.attemptCount++;
     if (state.attemptCount >= config.maxRetries) {
-      console.warn(`[session-init:cb] session=${compositeKey} asset-confirm max retries, abandoning`);
-      await store.set(compositeKey, { status: "initialized", bypassed: true } as SessionInitState);
-      return { intercepted: false, bypassed: true, justRegistered: true, resetFlow: state?.resetFlow ?? false };
+      console.warn(
+        `[session-init:cb] session=${compositeKey} asset-confirm max retries, abandoning`,
+      );
+      await store.set(compositeKey, {
+        status: "initialized",
+        bypassed: true,
+      } as SessionInitState);
+      return {
+        intercepted: false,
+        bypassed: true,
+        justRegistered: true,
+        resetFlow: state?.resetFlow ?? false,
+      };
     }
     await store.set(compositeKey, state);
     const fd: FormData = {
@@ -1047,7 +1242,10 @@ async function handleSessionInitInner(
   // ── Case 1.5: Awaiting team selection ─────────────────────────────────────
   if (state.status === "pending_team_select") {
     const lastUserText = getLastUserMessageText(messages);
-    const teamId = extractTeamFromOptionText(lastUserText, state.cachedTeams ?? []);
+    const teamId = extractTeamFromOptionText(
+      lastUserText,
+      state.cachedTeams ?? [],
+    );
 
     // The user actively bypasses in the team_select stage via SKIP_RE (skip / no association / skip)
     // (P1-4 fix). Mirrors the BYPASS_MARKER branch posture in pending_agent_select (init.ts:922) /
@@ -1066,14 +1264,34 @@ async function handleSessionInitInner(
         taskDetail: null,
         bypassed: true,
       } as SessionInitState);
-      console.log(`[session-init:cb] session=${compositeKey} team_select bypass`);
-      return { intercepted: false, messages: messages as Record<string, unknown>[], bypassed: true, justRegistered: true, resetFlow: state?.resetFlow ?? false };
+      console.log(
+        `[session-init:cb] session=${compositeKey} team_select bypass`,
+      );
+      return {
+        intercepted: false,
+        messages: messages as Record<string, unknown>[],
+        bypassed: true,
+        justRegistered: true,
+        resetFlow: state?.resetFlow ?? false,
+      };
     }
 
     if (teamId && teamId !== BYPASS_MARKER) {
       // codex/WB/dsh/opencode split stages: agent_select first → task_select; the CB legacy path keeps asking both at once in agent_task.
-      const nextStatus = (isCodexClient || agentSource === "workbuddy" || agentSource === "dsh" || agentSource === "opencode") ? "pending_agent_select" : "pending_agent_task";
-      const nextStage: FormData["stage"] = (isCodexClient || agentSource === "workbuddy" || agentSource === "dsh" || agentSource === "opencode") ? "agent_select" : "agent_task";
+      const nextStatus =
+        isCodexClient ||
+        agentSource === "workbuddy" ||
+        agentSource === "dsh" ||
+        agentSource === "opencode"
+          ? "pending_agent_select"
+          : "pending_agent_task";
+      const nextStage: FormData["stage"] =
+        isCodexClient ||
+        agentSource === "workbuddy" ||
+        agentSource === "dsh" ||
+        agentSource === "opencode"
+          ? "agent_select"
+          : "agent_task";
       const next: SessionInitState = {
         ...state,
         status: nextStatus,
@@ -1081,7 +1299,9 @@ async function handleSessionInitInner(
         attemptCount: 0,
       };
       await store.set(compositeKey, next);
-      console.log(`[session-init:cb] session=${compositeKey} team=${teamId} → ${nextStatus}`);
+      console.log(
+        `[session-init:cb] session=${compositeKey} team=${teamId} → ${nextStatus}`,
+      );
       const fd: FormData = {
         teams: state.cachedTeams ?? [],
         stage: nextStage,
@@ -1091,14 +1311,28 @@ async function handleSessionInitInner(
         modelId: reqCtx.modelId,
         protocol: reqCtx.protocol,
       };
-      return { intercepted: true, response: buildFormResponse(fd), formData: fd };
+      return {
+        intercepted: true,
+        response: buildFormResponse(fd),
+        formData: fd,
+      };
     }
 
     state.attemptCount++;
     if (state.attemptCount >= config.maxRetries) {
-      console.warn(`[session-init:cb] session=${compositeKey} team-select max retries, abandoning`);
-      await store.set(compositeKey, { status: "initialized", bypassed: true } as SessionInitState);
-      return { intercepted: false, bypassed: true, justRegistered: true, resetFlow: state?.resetFlow ?? false };
+      console.warn(
+        `[session-init:cb] session=${compositeKey} team-select max retries, abandoning`,
+      );
+      await store.set(compositeKey, {
+        status: "initialized",
+        bypassed: true,
+      } as SessionInitState);
+      return {
+        intercepted: false,
+        bypassed: true,
+        justRegistered: true,
+        resetFlow: state?.resetFlow ?? false,
+      };
     }
     await store.set(compositeKey, state);
     const fd: FormData = {
@@ -1126,8 +1360,16 @@ async function handleSessionInitInner(
       console.warn(
         `[session-init:cb] session=${compositeKey} pending_agent_select but team=${selectedTeamId} not in cache → bypass`,
       );
-      await store.set(compositeKey, { status: "initialized", bypassed: true } as SessionInitState);
-      return { intercepted: false, bypassed: true, justRegistered: true, resetFlow: state?.resetFlow ?? false };
+      await store.set(compositeKey, {
+        status: "initialized",
+        bypassed: true,
+      } as SessionInitState);
+      return {
+        intercepted: false,
+        bypassed: true,
+        justRegistered: true,
+        resetFlow: state?.resetFlow ?? false,
+      };
     }
 
     const lastUserText = getLastUserMessageText(messages);
@@ -1141,7 +1383,11 @@ async function handleSessionInitInner(
     // MORE_LABEL and pagination semantics with workbuddy, so it is intercepted here too.
     if (agentSource === "workbuddy" || agentSource === "opencode") {
       const curAgentPage = state.codexPageIndex?.agentPage ?? 0;
-      const nextAgentPage = detectWorkbuddyMorePage(lastUserText, curAgentPage, team.agents.length);
+      const nextAgentPage = detectWorkbuddyMorePage(
+        lastUserText,
+        curAgentPage,
+        team.agents.length,
+      );
       if (nextAgentPage !== null) {
         const nextPx = {
           teamPage: state.codexPageIndex?.teamPage ?? 0,
@@ -1152,16 +1398,23 @@ async function handleSessionInitInner(
         console.log(
           `[session-init:cb] session=${compositeKey} WB agent MORE page ${curAgentPage} → ${nextAgentPage}`,
         );
-        const fd: FormData = withCodexPageIndex({
-          teams: cachedTeams,
-          stage: "agent_select",
-          selectedTeamId,
-          stream: reqCtx.stream,
-          questionsAsArray: reqCtx.questionsAsArray,
-          modelId: reqCtx.modelId,
-          protocol: reqCtx.protocol,
-        }, nextPx);
-        return { intercepted: true, response: buildFormResponse(fd), formData: fd };
+        const fd: FormData = withCodexPageIndex(
+          {
+            teams: cachedTeams,
+            stage: "agent_select",
+            selectedTeamId,
+            stream: reqCtx.stream,
+            questionsAsArray: reqCtx.questionsAsArray,
+            modelId: reqCtx.modelId,
+            protocol: reqCtx.protocol,
+          },
+          nextPx,
+        );
+        return {
+          intercepted: true,
+          response: buildFormResponse(fd),
+          formData: fd,
+        };
       }
     }
 
@@ -1181,8 +1434,16 @@ async function handleSessionInitInner(
         taskDetail: null,
         bypassed: true,
       } as SessionInitState);
-      console.log(`[session-init:cb] session=${compositeKey} agent_select bypass`);
-      return { intercepted: false, messages: messages as Record<string, unknown>[], bypassed: true, justRegistered: true, resetFlow: state?.resetFlow ?? false };
+      console.log(
+        `[session-init:cb] session=${compositeKey} agent_select bypass`,
+      );
+      return {
+        intercepted: false,
+        messages: messages as Record<string, unknown>[],
+        bypassed: true,
+        justRegistered: true,
+        resetFlow: state?.resetFlow ?? false,
+      };
     }
 
     if (picked) {
@@ -1206,7 +1467,12 @@ async function handleSessionInitInner(
           taskDetail: null,
           bypassed: true,
         } as SessionInitState);
-        return { intercepted: false, bypassed: true, justRegistered: true, resetFlow: state?.resetFlow ?? false };
+        return {
+          intercepted: false,
+          bypassed: true,
+          justRegistered: true,
+          resetFlow: state?.resetFlow ?? false,
+        };
       }
       if (team.tasks.length === 1) {
         const soleTaskId = team.tasks[0].task_id;
@@ -1215,8 +1481,17 @@ async function handleSessionInitInner(
         );
         return await completeRegistration(
           { agent_id: resolvedAgentId, task_id: soleTaskId },
-          state, cachedTeams, compositeKey, sessionKey, userId,
-          config, store, messages, metadataClient, userKey, spaceId,
+          state,
+          cachedTeams,
+          compositeKey,
+          sessionKey,
+          userId,
+          config,
+          store,
+          messages,
+          metadataClient,
+          userKey,
+          spaceId,
         );
       }
       // ≥2 tasks → enter the task_select stage and emit the next form.
@@ -1227,7 +1502,11 @@ async function handleSessionInitInner(
         attemptCount: 0,
         // Clear the task page number when entering a new stage, so flipping restarts from page 1. agentPage is
         // spent; keeping or clearing it both work — clearing is cleaner, so reset everything to 0.
-        codexPageIndex: { teamPage: state.codexPageIndex?.teamPage ?? 0, agentPage: 0, taskPage: 0 },
+        codexPageIndex: {
+          teamPage: state.codexPageIndex?.teamPage ?? 0,
+          agentPage: 0,
+          taskPage: 0,
+        },
       };
       await store.set(compositeKey, nextState);
       console.log(
@@ -1243,15 +1522,29 @@ async function handleSessionInitInner(
         modelId: reqCtx.modelId,
         protocol: reqCtx.protocol,
       };
-      return { intercepted: true, response: buildFormResponse(fd), formData: fd };
+      return {
+        intercepted: true,
+        response: buildFormResponse(fd),
+        formData: fd,
+      };
     }
 
     // Extraction failed → retry / bypass.
     state.attemptCount++;
     if (state.attemptCount >= config.maxRetries) {
-      console.warn(`[session-init:cb] session=${compositeKey} agent_select max retries, abandoning`);
-      await store.set(compositeKey, { status: "initialized", bypassed: true } as SessionInitState);
-      return { intercepted: false, bypassed: true, justRegistered: true, resetFlow: state?.resetFlow ?? false };
+      console.warn(
+        `[session-init:cb] session=${compositeKey} agent_select max retries, abandoning`,
+      );
+      await store.set(compositeKey, {
+        status: "initialized",
+        bypassed: true,
+      } as SessionInitState);
+      return {
+        intercepted: false,
+        bypassed: true,
+        justRegistered: true,
+        resetFlow: state?.resetFlow ?? false,
+      };
     }
     await store.set(compositeKey, state);
     const fd: FormData = {
@@ -1277,8 +1570,16 @@ async function handleSessionInitInner(
       console.warn(
         `[session-init:cb] session=${compositeKey} pending_task_select missing team/agent (team=${selectedTeamId} agent=${selectedAgentId}) → bypass`,
       );
-      await store.set(compositeKey, { status: "initialized", bypassed: true } as SessionInitState);
-      return { intercepted: false, bypassed: true, justRegistered: true, resetFlow: state?.resetFlow ?? false };
+      await store.set(compositeKey, {
+        status: "initialized",
+        bypassed: true,
+      } as SessionInitState);
+      return {
+        intercepted: false,
+        bypassed: true,
+        justRegistered: true,
+        resetFlow: state?.resetFlow ?? false,
+      };
     }
 
     const lastUserText = getLastUserMessageText(messages);
@@ -1289,7 +1590,11 @@ async function handleSessionInitInner(
     // codexPageIndex.taskPage by session/index.ts's workbuddy/opencode re-render branch according to stage).
     if (agentSource === "workbuddy" || agentSource === "opencode") {
       const curTaskPage = state.codexPageIndex?.taskPage ?? 0;
-      const nextTaskPage = detectWorkbuddyMorePage(lastUserText, curTaskPage, team.tasks.length);
+      const nextTaskPage = detectWorkbuddyMorePage(
+        lastUserText,
+        curTaskPage,
+        team.tasks.length,
+      );
       if (nextTaskPage !== null) {
         const nextPx = {
           teamPage: state.codexPageIndex?.teamPage ?? 0,
@@ -1300,17 +1605,24 @@ async function handleSessionInitInner(
         console.log(
           `[session-init:cb] session=${compositeKey} WB task MORE page ${curTaskPage} → ${nextTaskPage}`,
         );
-        const fd: FormData = withCodexPageIndex({
-          teams: cachedTeams,
-          stage: "task_select",
-          selectedTeamId,
-          selectedAgentId,
-          stream: reqCtx.stream,
-          questionsAsArray: reqCtx.questionsAsArray,
-          modelId: reqCtx.modelId,
-          protocol: reqCtx.protocol,
-        }, nextPx);
-        return { intercepted: true, response: buildFormResponse(fd), formData: fd };
+        const fd: FormData = withCodexPageIndex(
+          {
+            teams: cachedTeams,
+            stage: "task_select",
+            selectedTeamId,
+            selectedAgentId,
+            stream: reqCtx.stream,
+            questionsAsArray: reqCtx.questionsAsArray,
+            modelId: reqCtx.modelId,
+            protocol: reqCtx.protocol,
+          },
+          nextPx,
+        );
+        return {
+          intercepted: true,
+          response: buildFormResponse(fd),
+          formData: fd,
+        };
       }
     }
 
@@ -1331,25 +1643,52 @@ async function handleSessionInitInner(
         taskDetail: null,
         bypassed: true,
       } as SessionInitState);
-      console.log(`[session-init:cb] session=${compositeKey} task_select bypass`);
-      return { intercepted: false, messages: messages as Record<string, unknown>[], bypassed: true, justRegistered: true, resetFlow: state?.resetFlow ?? false };
+      console.log(
+        `[session-init:cb] session=${compositeKey} task_select bypass`,
+      );
+      return {
+        intercepted: false,
+        messages: messages as Record<string, unknown>[],
+        bypassed: true,
+        justRegistered: true,
+        resetFlow: state?.resetFlow ?? false,
+      };
     }
 
     if (typeof picked === "string") {
       // Matched a task_id (including the defaultTaskId virtual entry) → complete.
       return await completeRegistration(
         { agent_id: selectedAgentId, task_id: picked },
-        state, cachedTeams, compositeKey, sessionKey, userId,
-        config, store, messages, metadataClient, userKey, spaceId,
+        state,
+        cachedTeams,
+        compositeKey,
+        sessionKey,
+        userId,
+        config,
+        store,
+        messages,
+        metadataClient,
+        userKey,
+        spaceId,
       );
     }
 
     // Unrecognized → retry / bypass.
     state.attemptCount++;
     if (state.attemptCount >= config.maxRetries) {
-      console.warn(`[session-init:cb] session=${compositeKey} task_select max retries, abandoning`);
-      await store.set(compositeKey, { status: "initialized", bypassed: true } as SessionInitState);
-      return { intercepted: false, bypassed: true, justRegistered: true, resetFlow: state?.resetFlow ?? false };
+      console.warn(
+        `[session-init:cb] session=${compositeKey} task_select max retries, abandoning`,
+      );
+      await store.set(compositeKey, {
+        status: "initialized",
+        bypassed: true,
+      } as SessionInitState);
+      return {
+        intercepted: false,
+        bypassed: true,
+        justRegistered: true,
+        resetFlow: state?.resetFlow ?? false,
+      };
     }
     await store.set(compositeKey, state);
     const fd: FormData = {
@@ -1367,7 +1706,10 @@ async function handleSessionInitInner(
   }
 
   // ── Case 2: Awaiting agent + task selection ───────────────────────────────
-  if (state.status === "pending_agent_task" || state.status === "pending_form") {
+  if (
+    state.status === "pending_agent_task" ||
+    state.status === "pending_form"
+  ) {
     const lastUserText = getLastUserMessageText(messages);
     const cachedTeams = state.cachedTeams ?? [];
     const selectedTeamId = state.selectedTeamId;
@@ -1375,16 +1717,23 @@ async function handleSessionInitInner(
     // LLM-based extraction fallback was removed — engineered paths only.
     // If neither the option-text match nor the structured parser recognises
     // the reply, the caller falls through to the retry / bypass branch.
-    let extracted = extractFromOptionText(lastUserText, cachedTeams, selectedTeamId)
-      ?? extractStructured(lastUserText);
+    let extracted =
+      extractFromOptionText(lastUserText, cachedTeams, selectedTeamId) ??
+      extractStructured(lastUserText);
 
     if (extracted && extracted.agent_id === BYPASS_MARKER) {
-      console.warn(`[session-init:cb] session=${compositeKey} unexpected bypass in agent_task, treating as extraction failure`);
+      console.warn(
+        `[session-init:cb] session=${compositeKey} unexpected bypass in agent_task, treating as extraction failure`,
+      );
       extracted = null;
     }
 
     if (extracted) {
-      const resolvedAgentId = resolveAgent(extracted.agent_id, cachedTeams, selectedTeamId);
+      const resolvedAgentId = resolveAgent(
+        extracted.agent_id,
+        cachedTeams,
+        selectedTeamId,
+      );
       const resolvedTaskId = resolveTask(
         extracted.task_id,
         cachedTeams,
@@ -1397,17 +1746,37 @@ async function handleSessionInitInner(
       };
 
       return await completeRegistration(
-        resolved, state, cachedTeams, compositeKey, sessionKey, userId,
-        config, store, messages, metadataClient, userKey, spaceId,
+        resolved,
+        state,
+        cachedTeams,
+        compositeKey,
+        sessionKey,
+        userId,
+        config,
+        store,
+        messages,
+        metadataClient,
+        userKey,
+        spaceId,
       );
     }
 
     // Extraction failed → retry / reset
     state.attemptCount++;
     if (state.attemptCount >= config.maxRetries) {
-      console.warn(`[session-init:cb] session=${compositeKey} max retries, abandoning`);
-      await store.set(compositeKey, { status: "initialized", bypassed: true } as SessionInitState);
-      return { intercepted: false, bypassed: true, justRegistered: true, resetFlow: state?.resetFlow ?? false };
+      console.warn(
+        `[session-init:cb] session=${compositeKey} max retries, abandoning`,
+      );
+      await store.set(compositeKey, {
+        status: "initialized",
+        bypassed: true,
+      } as SessionInitState);
+      return {
+        intercepted: false,
+        bypassed: true,
+        justRegistered: true,
+        resetFlow: state?.resetFlow ?? false,
+      };
     }
     await store.set(compositeKey, state);
     const fd: FormData = {
@@ -1427,6 +1796,17 @@ async function handleSessionInitInner(
   const bypassed = (state as any).bypassed === true;
   const agent = bypassed ? null : (state.agentDetail ?? null);
   const task = bypassed ? null : (state.taskDetail ?? null);
-  const out = applyArtifactsAndContext(messages, agent, task, sessionKey, config);
-  return { intercepted: false, messages: out, sessionInfo: state.sessionInfo, bypassed };
+  const out = applyArtifactsAndContext(
+    messages,
+    agent,
+    task,
+    sessionKey,
+    config,
+  );
+  return {
+    intercepted: false,
+    messages: out,
+    sessionInfo: state.sessionInfo,
+    bypassed,
+  };
 }

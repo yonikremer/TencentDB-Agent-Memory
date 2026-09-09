@@ -10,7 +10,9 @@ from tencentdb_agent_memory.v3.memory_prompt import (
 
 def _sync(**kw):
     stub = FakeStub()
-    return MemoryPromptClient(endpoint="http://e", api_key="k", service_id="s", stub=stub, **kw), stub
+    return MemoryPromptClient(
+        endpoint="http://e", api_key="k", service_id="s", stub=stub, **kw
+    ), stub
 
 
 def test_init_and_get_fallback():
@@ -21,7 +23,9 @@ def test_init_and_get_fallback():
     c, stub = _sync(team_id="t", agent_id="a")
     c.get("mp-1")
     assert stub.calls[-1][0] == "GET"
-    cp = MemoryPromptClient(endpoint="http://e", api_key="k", service_id="s", stub=PostOnlyStub())
+    cp = MemoryPromptClient(
+        endpoint="http://e", api_key="k", service_id="s", stub=PostOnlyStub()
+    )
     cp.get("mp-1")
     assert cp._stub.calls[-1][0] == "POST"
     cp.close()
@@ -93,17 +97,35 @@ def test_settings_and_logs():
     with pytest.raises(ParamError):
         c.list_settings(target_type="team", team_id="t", agent_id="a")
     with pytest.raises(ParamError):
-        MemoryPromptClient(endpoint="http://e", api_key="k", service_id="s",
-                           stub=FakeStub(), agent_id="a").list_settings()
+        MemoryPromptClient(
+            endpoint="http://e",
+            api_key="k",
+            service_id="s",
+            stub=FakeStub(),
+            agent_id="a",
+        ).list_settings()
     c.list_setting_logs(memory_prompt_id="mp")
-    c.list_setting_logs(team_id="t", action="apply", limit=5, offset=1, time_order="asc",
-                        start_time="2026-01-01T00:00:00Z", end_time="2026-01-02T00:00:00Z")
+    c.list_setting_logs(
+        team_id="t",
+        action="apply",
+        limit=5,
+        offset=1,
+        time_order="asc",
+        start_time="2026-01-01T00:00:00Z",
+        end_time="2026-01-02T00:00:00Z",
+    )
     with pytest.raises(ParamError):
-        MemoryPromptClient(endpoint="http://e", api_key="k", service_id="s",
-                           stub=FakeStub()).list_setting_logs()
+        MemoryPromptClient(
+            endpoint="http://e", api_key="k", service_id="s", stub=FakeStub()
+        ).list_setting_logs()
     with pytest.raises(ParamError):
-        MemoryPromptClient(endpoint="http://e", api_key="k", service_id="s",
-                           stub=FakeStub(), agent_id="a").list_setting_logs(memory_prompt_id="m")
+        MemoryPromptClient(
+            endpoint="http://e",
+            api_key="k",
+            service_id="s",
+            stub=FakeStub(),
+            agent_id="a",
+        ).list_setting_logs(memory_prompt_id="m")
     c.close()
 
 
@@ -111,8 +133,14 @@ def test_settings_and_logs():
 async def test_async_mirror():
     with pytest.raises(ParamError):
         AsyncMemoryPromptClient(endpoint="http://e", api_key="k")
-    c = AsyncMemoryPromptClient(endpoint="http://e", api_key="k", service_id="s",
-                                stub=FakeAsyncStub(), team_id="t", agent_id="a")
+    c = AsyncMemoryPromptClient(
+        endpoint="http://e",
+        api_key="k",
+        service_id="s",
+        stub=FakeAsyncStub(),
+        team_id="t",
+        agent_id="a",
+    )
     await c.create(name="n", layer="l1", prompt="p")
     with pytest.raises(ParamError):
         await c.create(name="", layer="l1", prompt="p")
@@ -120,14 +148,17 @@ async def test_async_mirror():
     await c.list(layer="l1")
     await c.get_effective(layer="l1")
     with pytest.raises(ParamError):
-        await AsyncMemoryPromptClient(endpoint="http://e", api_key="k", service_id="s",
-                                      stub=FakeAsyncStub()).get_effective(layer="l1")
+        await AsyncMemoryPromptClient(
+            endpoint="http://e", api_key="k", service_id="s", stub=FakeAsyncStub()
+        ).get_effective(layer="l1")
     await c.update("mp", name="n")
     with pytest.raises(ParamError):
         await c.update("mp")
     await c.delete(["a"])
     await c.apply("mp", layer="l1")
-    bare = AsyncMemoryPromptClient(endpoint="http://e", api_key="k", service_id="s", stub=FakeAsyncStub())
+    bare = AsyncMemoryPromptClient(
+        endpoint="http://e", api_key="k", service_id="s", stub=FakeAsyncStub()
+    )
     with pytest.raises(ParamError):
         await bare.apply("mp", layer="l1", agent_ids=["a"])
     await bare.close()
@@ -140,7 +171,9 @@ async def test_async_mirror():
     await c.list_setting_logs(memory_prompt_id="m")
     with pytest.raises(ParamError):
         await bare.list_setting_logs()
-    cp = AsyncMemoryPromptClient(endpoint="http://e", api_key="k", service_id="s", stub=FakeAsyncPostOnly())
+    cp = AsyncMemoryPromptClient(
+        endpoint="http://e", api_key="k", service_id="s", stub=FakeAsyncPostOnly()
+    )
     await cp.get("mp-1")
     assert cp._stub.calls[-1][0] == "POST"
     await cp.close()

@@ -52,7 +52,10 @@ import { recordTdaiTurn } from "./tdai/recorder.js";
 import { trackWrite, withL0Retry } from "./tdai/pending-writes.js";
 import type { TdaiIdentity, TdaiMessage } from "./tdai/types.js";
 import { triggerSkillExtractIfReady } from "./skill/handler-glue.js";
-import { isExtractionAllowed, logExtractionSkipped } from "./extraction-gate.js";
+import {
+  isExtractionAllowed,
+  logExtractionSkipped,
+} from "./extraction-gate.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -78,8 +81,16 @@ const SKIP_RESPONSE_HEADERS = new Set([
  * spaceId takes precedence over config default serviceId to report multi-tenant codex
  * requests to the correct kernel instance. Returns null when config.tdai.memory.enabled=false.
  */
-function createCodexTdaiClient(config: ProxyConfig, spaceId?: string): TdaiClient | null {
-  if (!config.tdai.enabled || !config.tdai.memory.enabled || !config.tdai.endpoint) return null;
+function createCodexTdaiClient(
+  config: ProxyConfig,
+  spaceId?: string,
+): TdaiClient | null {
+  if (
+    !config.tdai.enabled ||
+    !config.tdai.memory.enabled ||
+    !config.tdai.endpoint
+  )
+    return null;
   return new TdaiClient({
     enabled: config.tdai.enabled && config.tdai.memory.enabled,
     endpoint: config.tdai.endpoint,
@@ -127,10 +138,7 @@ const CODEX_AUX_PATH_SUFFIXES = new Set([
 ]);
 
 /** Known aux thread_source values. */
-const CODEX_AUX_THREAD_SOURCES = new Set([
-  "memory_consolidation",
-  "system",
-]);
+const CODEX_AUX_THREAD_SOURCES = new Set(["memory_consolidation", "system"]);
 
 /**
  * Classify a codex request as main or auxiliary.
@@ -152,7 +160,8 @@ export function classifyCodexRequest(
   // Signal 3: body.client_metadata.thread_source whitelist
   const meta = body.client_metadata as { thread_source?: string } | undefined;
   const ts = meta?.thread_source;
-  if (typeof ts === "string" && CODEX_AUX_THREAD_SOURCES.has(ts)) return "auxiliary";
+  if (typeof ts === "string" && CODEX_AUX_THREAD_SOURCES.has(ts))
+    return "auxiliary";
 
   return "main";
 }
@@ -189,7 +198,10 @@ export function extractCodexSessionId(
 export function detectDefaultModeGate(input: unknown): boolean {
   if (!Array.isArray(input)) return false;
   // Only match when "last item of input is gate output": see comment with same name in codebuddy/init.ts.
-  const last = input[input.length - 1] as Record<string, unknown> | null | undefined;
+  const last = input[input.length - 1] as
+    | Record<string, unknown>
+    | null
+    | undefined;
   if (!last || typeof last !== "object") return false;
   if (last.type !== "function_call_output") return false;
   const output = last.output;
@@ -279,13 +291,18 @@ export async function handleCodexEndpoint(
 
   // ── 1. Auth ────────────────────────────────────────────────────────────────
   const apiKey =
-    extractBearerToken(c.req.header("authorization") ?? c.req.header("Authorization") ?? "") ??
+    extractBearerToken(
+      c.req.header("authorization") ?? c.req.header("Authorization") ?? "",
+    ) ??
     c.req.header("x-api-key") ??
     "";
 
   const spaceId = extractSpaceIdFromPath(path) ?? "";
-  const { userId, rejected: userKeyRejected, rejectReason } =
-    await verifyUserKey(apiKey, spaceId);
+  const {
+    userId,
+    rejected: userKeyRejected,
+    rejectReason,
+  } = await verifyUserKey(apiKey, spaceId);
   if (userKeyRejected) {
     return c.json(
       { error: `Authentication failed: ${rejectReason ?? "unknown"}` },
@@ -314,14 +331,20 @@ export async function handleCodexEndpoint(
   try {
     const tools = Array.isArray(body.tools) ? body.tools : [];
     const rui = tools.find(
-      (t: any) => t?.type === "function" && t?.name === "request_user_input" ||
-                  t?.function?.name === "request_user_input" ||
-                  t?.name === "request_user_input",
+      (t: any) =>
+        (t?.type === "function" && t?.name === "request_user_input") ||
+        t?.function?.name === "request_user_input" ||
+        t?.name === "request_user_input",
     );
     if (rui) {
-      console.log("[codex-debug] request_user_input tool schema:", JSON.stringify(rui));
+      console.log(
+        "[codex-debug] request_user_input tool schema:",
+        JSON.stringify(rui),
+      );
     }
-  } catch {}
+  } catch (err: unknown) {
+    console.log(`[codex-debug] tool schema inspection failed: ${(err as Error).message}`);
+  }
 
   // ── 4. Classify request ────────────────────────────────────────────────────
   const requestKind = classifyCodexRequest(body, path, headers);
@@ -339,7 +362,17 @@ export async function handleCodexEndpoint(
   if (isAuxiliary) {
     pipe.info("CODEX_AUX", `auxiliary request → passthrough (path=${path})`);
     // aux does not report to langfuse (aligned with CC/CB — sidequery/fork aux are not main dialog turns)
-    return forwardToUpstream(c, config, body, traceId, startTime, keyId, modelId, pipe, null);
+    return forwardToUpstream(
+      c,
+      config,
+      body,
+      traceId,
+      startTime,
+      keyId,
+      modelId,
+      pipe,
+      null,
+    );
   }
 
   // ── 6. Session ID extraction ───────────────────────────────────────────────
@@ -376,9 +409,17 @@ export async function handleCodexEndpoint(
 
   // ── 7. Session-init state machine ──────────────────────────────────────────
   let sessionInfo: Record<string, unknown> | null | undefined;
-  let assetCapabilities: import("./injection/types.js").AssetCapabilityFlags | undefined;
+  let assetCapabilities:
+    | import("./injection/types.js").AssetCapabilityFlags
+    | undefined;
   let injectionSkipped = false;
-  let _resetFlowResult: { agentName: string; agentIdShort: string; teamId: string; taskName?: string | null; bypassed?: boolean } | null = null;
+  let _resetFlowResult: {
+    agentName: string;
+    agentIdShort: string;
+    teamId: string;
+    taskName?: string | null;
+    bypassed?: boolean;
+  } | null = null;
   // Store initResult agent/task detail for § 9 injection phase to construct <session_context>.
   // handleSessionInit originally inserts session_context via messages[0], but that messages
   // array was a temporary synthesizedMessages array passed in, which doesn't return to codex body.
@@ -391,9 +432,13 @@ export async function handleCodexEndpoint(
 
   // ── mem:session-reset pre-hook ──
   if (config.memCommand?.enabled) {
-    const { isSessionResetCommand } = await import("./mem-command/pre-intercept.js");
+    const { isSessionResetCommand } = await import(
+      "./mem-command/pre-intercept.js"
+    );
     if (isSessionResetCommand(body as Record<string, unknown>, agentSource)) {
-      const { parseCommandFromText, isMemCommandAllowed } = await import("./mem-command/index.js");
+      const { parseCommandFromText, isMemCommandAllowed } = await import(
+        "./mem-command/index.js"
+      );
       const { codexAdapter } = await import("./agent-adapters/codex.js");
       const userText = codexAdapter.extractUserText(input) ?? "";
       const memCmd = parseCommandFromText(userText);
@@ -401,42 +446,71 @@ export async function handleCodexEndpoint(
         const { getSessionStore } = await import("./session/store.js");
         const store = getSessionStore();
         const compositeKey = `${agentSource}:${sessionKey}`;
-        store.bind(compositeKey, { userId: userId || "anonymous", agentSource, sessionId: sessionKey, spaceId });
+        store.bind(compositeKey, {
+          userId: userId || "anonymous",
+          agentSource,
+          sessionId: sessionKey,
+          spaceId,
+        });
 
         // ── Force archive old agent skill buffer (best-effort) ──
         const oldState = store.get(compositeKey);
-        if (oldState?.status === "initialized" && oldState.sessionInfo && config.coreSkill?.endpoint) {
+        if (
+          oldState?.status === "initialized" &&
+          oldState.sessionInfo &&
+          config.coreSkill?.endpoint
+        ) {
           // SAFETY: sessionInfo is a JSON-decoded plain object at runtime; treating it as a
           // string record for field extraction is sound (all reads are guarded by truthiness).
           const si = oldState.sessionInfo as unknown as Record<string, string>;
           if (si.space_id && si.user_id && si.team_id && si.agent_id) {
-            import("./skill/core-client.js").then(({ getCoreSkillClient }) => {
-              const client = getCoreSkillClient(config.coreSkill!);
-              client.forceArchive(
-                {
-                  space_id: si.space_id,
-                  user_id: si.user_id,
-                  team_id: si.team_id,
-                  agent_id: si.agent_id,
-                  session_id: sessionKey,
-                  task_id: si.task_id || undefined,
-                  reason: "session-reset",
-                },
-                { serviceId: si.space_id },
-              ).then((res) => {
-                console.log(`[session-reset] force-archive old buffer: status=${res.status} session=${sessionKey} agent=${si.agent_id}`);
-              }).catch((err) => {
-                console.warn(`[session-reset] force-archive failed (best-effort): ${err instanceof Error ? err.message : String(err)}`);
-              });
-            }).catch(() => {});
+            import("./skill/core-client.js")
+              .then(({ getCoreSkillClient }) => {
+                const client = getCoreSkillClient(config.coreSkill!);
+                client
+                  .forceArchive(
+                    {
+                      space_id: si.space_id,
+                      user_id: si.user_id,
+                      team_id: si.team_id,
+                      agent_id: si.agent_id,
+                      session_id: sessionKey,
+                      task_id: si.task_id || undefined,
+                      reason: "session-reset",
+                    },
+                    { serviceId: si.space_id },
+                  )
+                  .then((res) => {
+                    console.log(
+                      `[session-reset] force-archive old buffer: status=${res.status} session=${sessionKey} agent=${si.agent_id}`,
+                    );
+                  })
+                  .catch((err) => {
+                    console.warn(
+                      `[session-reset] force-archive failed (best-effort): ${err instanceof Error ? err.message : String(err)}`,
+                    );
+                  });
+              })
+              .catch(() => {});
           }
         }
 
         const resetEpoch = Date.now();
-        await store.set(compositeKey, { status: "uninitialized", keyId: sessionKey, startedAt: resetEpoch, attemptCount: 0, userId: userId || "anonymous", resetEpoch, resetFlow: true });
+        await store.set(compositeKey, {
+          status: "uninitialized",
+          keyId: sessionKey,
+          startedAt: resetEpoch,
+          attemptCount: 0,
+          userId: userId || "anonymous",
+          resetEpoch,
+          resetFlow: true,
+        });
         const bindingRepo = store.getBindingRepo();
-        if (bindingRepo) await bindingRepo.deleteBinding(spaceId, sessionKey).catch(() => {});
-        console.log(`[mem-command:pre] session-reset session=${sessionKey} → falling through to pop form`);
+        if (bindingRepo)
+          await bindingRepo.deleteBinding(spaceId, sessionKey).catch(() => {});
+        console.log(
+          `[mem-command:pre] session-reset session=${sessionKey} → falling through to pop form`,
+        );
       }
     }
   }
@@ -450,10 +524,15 @@ export async function handleCodexEndpoint(
   // by this handler; subsequent requests for same session passthrough under bypass steady state.
   if (config.sessionInit?.enabled && sessionId) {
     try {
-      const { getSessionStore, handleSessionInit, parsePresetIdentity } = await import("./session/index.js");
+      const { getSessionStore, handleSessionInit, parsePresetIdentity } =
+        await import("./session/index.js");
       const { getMetadataClient } = await import("./meta/client.js");
       const store = getSessionStore();
-      const metadataClient = getMetadataClient(config.coreSkill, spaceId, apiKey);
+      const metadataClient = getMetadataClient(
+        config.coreSkill,
+        spaceId,
+        apiKey,
+      );
       const presetIdentity = parsePresetIdentity(config.sessionInit, headers);
 
       const compositeKey = `${agentSource}:${sessionKey}`;
@@ -480,7 +559,9 @@ export async function handleCodexEndpoint(
 
       if (recovered && isTerminalState) {
         // Recovered from L2b/L2a — skip form, apply context
-        const { buildSessionContextBlockWithToggles } = await import("./session/context-injector.js");
+        const { buildSessionContextBlockWithToggles } = await import(
+          "./session/context-injector.js"
+        );
         const systemAppend = recovered.bypassed
           ? null
           : buildSessionContextBlockWithToggles(
@@ -512,9 +593,14 @@ export async function handleCodexEndpoint(
         // generated answer). Also dump the extracted answers.
         const rawOutputs = input
           .filter((it: any) => it?.type === "function_call_output")
-          .map((it: any) => ({ call_id: it.call_id, output_preview: String(it.output ?? "").slice(0, 200) }));
+          .map((it: any) => ({
+            call_id: it.call_id,
+            output_preview: String(it.output ?? "").slice(0, 200),
+          }));
         if (rawOutputs.length > 0) {
-          console.log(`[codex-debug] session=${sessionKey} function_call_outputs=${JSON.stringify(rawOutputs)} synth_msgs=${JSON.stringify(synthesizedMessages).slice(0, 500)}`);
+          console.log(
+            `[codex-debug] session=${sessionKey} function_call_outputs=${JSON.stringify(rawOutputs)} synth_msgs=${JSON.stringify(synthesizedMessages).slice(0, 500)}`,
+          );
         }
         initResult = await handleSessionInit(
           sessionKey,
@@ -568,17 +654,22 @@ export async function handleCodexEndpoint(
       //    handler returns one Plan-mode prompt; on the next request recovered.bypassed=true
       //    routes through the initialized branch and passes through directly — no repeat prompt.
       if ((initResult as any).bypassReason === "default-gate") {
-        pipe.info("CODEX_GATE", "Default mode gate detected → notify user (first hit)");
-        const { buildMemResponse } = await import("./mem-command/response-builder.js");
+        pipe.info(
+          "CODEX_GATE",
+          "Default mode gate detected → notify user (first hit)",
+        );
+        const { buildMemResponse } = await import(
+          "./mem-command/response-builder.js"
+        );
         // Reset-scenario gate: user explicitly sent mem:session-reset command, but the codex
         // client is not in Plan mode so no form can be shown → wording must clearly state
         // "reset command requires Plan mode" rather than a generic "assets feature disabled".
         const gateText = (initResult as any).resetFlow
-          ? "⚠️ mem:session-reset requires Plan mode support.\n\n"
-            + "The codex client is not currently in Plan mode, so the asset selection form cannot be shown.\n"
-            + "Switch to Plan mode and run mem:session-reset again."
-          : "Plan mode is not enabled, so team asset features will not be activated for this conversation (Skill / Task / Agent are not involved)."
-            + "To use them, switch to Plan mode and start a new conversation.";
+          ? "⚠️ mem:session-reset requires Plan mode support.\n\n" +
+            "The codex client is not currently in Plan mode, so the asset selection form cannot be shown.\n" +
+            "Switch to Plan mode and run mem:session-reset again."
+          : "Plan mode is not enabled, so team asset features will not be activated for this conversation (Skill / Task / Agent are not involved)." +
+            "To use them, switch to Plan mode and start a new conversation.";
         return buildMemResponse(gateText, {
           protocol: "responses",
           stream: isStream,
@@ -588,16 +679,25 @@ export async function handleCodexEndpoint(
 
       if (initResult.bypassed) {
         injectionSkipped = true;
-        console.log(`[codex] session=${sessionKey} bypassed → skipping all injection`);
+        console.log(
+          `[codex] session=${sessionKey} bypassed → skipping all injection`,
+        );
         if (initResult.resetFlow) {
-          _resetFlowResult = { agentName: "", agentIdShort: "", teamId: "", bypassed: true };
+          _resetFlowResult = {
+            agentName: "",
+            agentIdShort: "",
+            teamId: "",
+            bypassed: true,
+          };
         }
       }
 
       if (!initResult.bypassed && initResult.sessionInfo) {
         // Fetch asset capabilities for this session
         try {
-          const { fetchAssetCapabilities } = await import("./tdai/capabilities.js");
+          const { fetchAssetCapabilities } = await import(
+            "./tdai/capabilities.js"
+          );
           assetCapabilities = await fetchAssetCapabilities({
             endpoint: config.tdai.endpoint,
             apiKey: config.tdai.apiKey,
@@ -608,7 +708,9 @@ export async function handleCodexEndpoint(
             timeoutMs: config.tdai.memory.timeoutMs,
           });
         } catch (err) {
-          console.warn(`[codex] asset-capability resolve failed: ${err instanceof Error ? err.message : String(err)}`);
+          console.warn(
+            `[codex] asset-capability resolve failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
 
@@ -619,11 +721,15 @@ export async function handleCodexEndpoint(
         try {
           const userTextPeek = codexAdapter.extractUserText(input);
           if (userTextPeek) {
-            const { parseCommandFromText, isMemCommandAllowed } = await import("./mem-command/index.js");
+            const { parseCommandFromText, isMemCommandAllowed } = await import(
+              "./mem-command/index.js"
+            );
             const peek = parseCommandFromText(userTextPeek);
             if (peek && isMemCommandAllowed(config.memCommand, peek.command)) {
               memCommandPending = true;
-              console.log(`[codex] prewarm skipped: mem-command pending (cmd=${peek.command}) session=${sessionKey}`);
+              console.log(
+                `[codex] prewarm skipped: mem-command pending (cmd=${peek.command}) session=${sessionKey}`,
+              );
             }
           }
         } catch (err) {
@@ -645,23 +751,34 @@ export async function handleCodexEndpoint(
       ) {
         try {
           const mod = await import("./injection/index.js");
-          await mod.prewarmFromConfig(config, {
-            keyId: sessionKey,
-            userId: userId || "anonymous",
-            agentSource,
-            spaceId,
-            sessionInfo: initResult.sessionInfo as import("./session/types.js").SessionInfo,
-            agentDetail: initResult.agentDetail ?? null,
-            taskDetail: initResult.taskDetail ?? null,
-            assetCapabilities,
-            callerUserKey: callerUserKey ?? undefined,
-          }, { clearBefore: true });
+          await mod.prewarmFromConfig(
+            config,
+            {
+              keyId: sessionKey,
+              userId: userId || "anonymous",
+              agentSource,
+              spaceId,
+              sessionInfo:
+                initResult.sessionInfo as import("./session/types.js").SessionInfo,
+              agentDetail: initResult.agentDetail ?? null,
+              taskDetail: initResult.taskDetail ?? null,
+              assetCapabilities,
+              callerUserKey: callerUserKey ?? undefined,
+            },
+            { clearBefore: true },
+          );
         } catch (err) {
-          console.warn("[codex] prewarm error:", err instanceof Error ? err.message : String(err));
+          console.warn(
+            "[codex] prewarm error:",
+            err instanceof Error ? err.message : String(err),
+          );
         }
       }
 
-      sessionInfo = initResult.sessionInfo as Record<string, unknown> | null | undefined;
+      sessionInfo = initResult.sessionInfo as
+        | Record<string, unknown>
+        | null
+        | undefined;
       if (sessionInfo && !sessionInfo.space_id && spaceId) {
         sessionInfo.space_id = spaceId;
       }
@@ -674,19 +791,31 @@ export async function handleCodexEndpoint(
       // Record resetFlow to outer scope for confirmation response return
       // SAFETY: sessionInfo is a JSON-decoded plain object at runtime; string-keyed reads
       // with optional chaining are sound (missing keys yield undefined, handled by ?:).
-      const sessionFields = initResult.sessionInfo as unknown as Record<string, unknown> | null | undefined;
-      if (initResult.resetFlow && initResult.justRegistered && !initResult.bypassed) {
+      const sessionFields = initResult.sessionInfo as unknown as
+        | Record<string, unknown>
+        | null
+        | undefined;
+      if (
+        initResult.resetFlow &&
+        initResult.justRegistered &&
+        !initResult.bypassed
+      ) {
         _resetFlowResult = {
           agentName: initResult.agentDetail?.name ?? "Unknown",
           agentIdShort: sessionFields?.agent_id
-            ? String(sessionFields.agent_id).slice(-8) : "",
+            ? String(sessionFields.agent_id).slice(-8)
+            : "",
           teamId: sessionFields?.team_id
-            ? String(sessionFields.team_id).slice(-8) : "",
+            ? String(sessionFields.team_id).slice(-8)
+            : "",
           taskName: initResult.taskDetail?.name,
         };
       }
     } catch (err: unknown) {
-      console.error("[codex] session-init error:", err instanceof Error ? err.message : String(err));
+      console.error(
+        "[codex] session-init error:",
+        err instanceof Error ? err.message : String(err),
+      );
       sessionInfo = undefined;
       injectionSkipped = true;
     }
@@ -694,9 +823,14 @@ export async function handleCodexEndpoint(
 
   // ── mem:session-reset completion confirmation ─────────────────────────────
   if (_resetFlowResult) {
-    const { agentName, agentIdShort, teamId, taskName, bypassed } = _resetFlowResult;
+    const { agentName, agentIdShort, teamId, taskName, bypassed } =
+      _resetFlowResult;
     const lines = bypassed
-      ? ["✅ Skipped team asset association", "", "Subsequent conversations will not inject team assets (Skill / Memory / Knowledge)."]
+      ? [
+          "✅ Skipped team asset association",
+          "",
+          "Subsequent conversations will not inject team assets (Skill / Memory / Knowledge).",
+        ]
       : [
           "✅ Team assets rebound",
           "",
@@ -708,8 +842,12 @@ export async function handleCodexEndpoint(
         ].filter(Boolean);
     const text = (lines as string[]).join("\n");
 
-    const { buildMemResponse } = await import("./mem-command/response-builder.js");
-    console.log(`[mem-command:session-reset] completed: bypassed=${!!bypassed} agent=${agentName} (${agentIdShort})`);
+    const { buildMemResponse } = await import(
+      "./mem-command/response-builder.js"
+    );
+    console.log(
+      `[mem-command:session-reset] completed: bypassed=${!!bypassed} agent=${agentName} (${agentIdShort})`,
+    );
     return buildMemResponse(text, {
       protocol: "responses",
       stream: isStream,
@@ -727,8 +865,14 @@ export async function handleCodexEndpoint(
   if (config.memCommand?.enabled) {
     const userText = codexAdapter.extractUserText(input);
     if (userText) {
-      const { parseCommandFromText, isMemCommandAllowed, executeMemCommand, buildMemResponse, extractSimpleMessages, truncateArgs } =
-        await import("./mem-command/index.js");
+      const {
+        parseCommandFromText,
+        isMemCommandAllowed,
+        executeMemCommand,
+        buildMemResponse,
+        extractSimpleMessages,
+        truncateArgs,
+      } = await import("./mem-command/index.js");
       let memCmd = parseCommandFromText(userText);
       // session-reset already handled by pre-hook, skip to prevent double execution
       if (memCmd?.command === "session-reset") memCmd = null;
@@ -741,10 +885,15 @@ export async function handleCodexEndpoint(
             stream: isStream,
             requestId: `mem-cmd-${Date.now()}`,
           });
-          console.log(`[codex] mem-command cmd=${memCmd.command} args="${truncateArgs(memCmd.args)}" session=${sessionKey} blocked: session not initialized`);
+          console.log(
+            `[codex] mem-command cmd=${memCmd.command} args="${truncateArgs(memCmd.args)}" session=${sessionKey} blocked: session not initialized`,
+          );
           return errResponse;
         }
-        pipe.info("CODEX_MEM_CMD", `mem command intercepted: ${memCmd.command}`);
+        pipe.info(
+          "CODEX_MEM_CMD",
+          `mem command intercepted: ${memCmd.command}`,
+        );
         const memResult = await executeMemCommand(memCmd, {
           sessionKey,
           agentSource: "codex",
@@ -767,15 +916,27 @@ export async function handleCodexEndpoint(
         //   Must explicitly await persistence before returning to avoid loss if process exits before flush.
         const tdaiClientForMem = createCodexTdaiClient(config, spaceId);
         const tdaiIdentityForMem = deriveTdaiIdentity({
-          sessionInfo: sessionInfo as Record<string, unknown> | null | undefined,
+          sessionInfo: sessionInfo as
+            | Record<string, unknown>
+            | null
+            | undefined,
           userId: userId || null,
           sessionKey,
           userKey: callerUserKey,
         });
-        if (tdaiClientForMem && tdaiIdentityForMem && isExtractionAllowed(config, "tdai-memory")) {
+        if (
+          tdaiClientForMem &&
+          tdaiIdentityForMem &&
+          isExtractionAllowed(config, "tdai-memory")
+        ) {
           const userMsg = { role: "user" as const, content: memCmd.rawMessage };
           try {
-            await recordTdaiTurn(tdaiClientForMem, tdaiIdentityForMem, userMsg, memResult.messageText);
+            await recordTdaiTurn(
+              tdaiClientForMem,
+              tdaiIdentityForMem,
+              userMsg,
+              memResult.messageText,
+            );
           } catch (err: unknown) {
             console.error("[codex] mem-command L0 write error:", err);
           }
@@ -787,7 +948,9 @@ export async function handleCodexEndpoint(
             const assistantMessage = {
               type: "message" as const,
               role: "assistant" as const,
-              content: [{ type: "output_text" as const, text: memResult.messageText }],
+              content: [
+                { type: "output_text" as const, text: memResult.messageText },
+              ],
             };
             await triggerSkillExtractIfReady({
               config,
@@ -800,7 +963,10 @@ export async function handleCodexEndpoint(
               assetCapabilities,
             });
           } catch (err: unknown) {
-            console.warn("[codex] mem-command skill extract trigger error:", err instanceof Error ? err.message : String(err));
+            console.warn(
+              "[codex] mem-command skill extract trigger error:",
+              err instanceof Error ? err.message : String(err),
+            );
           }
         }
 
@@ -823,7 +989,9 @@ export async function handleCodexEndpoint(
           traceOutput: memResult.messageText,
         });
 
-        console.log(`[codex] mem-command cmd=${memCmd.command} args="${truncateArgs(memCmd.args)}" session=${sessionKey} success=${memResult.success}`);
+        console.log(
+          `[codex] mem-command cmd=${memCmd.command} args="${truncateArgs(memCmd.args)}" session=${sessionKey} success=${memResult.success}`,
+        );
         return memResult.response;
       }
     }
@@ -839,7 +1007,12 @@ export async function handleCodexEndpoint(
   //
   // This reuses 100% of the existing pipeline infrastructure (hook cache,
   // prewarm, all injectors) without writing a third protocol adapter.
-  if (!injectionSkipped && sessionInfo && config.injection?.enabled && (config.injection.injectors?.length ?? 0) > 0) {
+  if (
+    !injectionSkipped &&
+    sessionInfo &&
+    config.injection?.enabled &&
+    (config.injection.injectors?.length ?? 0) > 0
+  ) {
     try {
       const { getInjectionPipeline } = await import("./injection/index.js");
       const pipeline = getInjectionPipeline(config);
@@ -855,7 +1028,9 @@ export async function handleCodexEndpoint(
       // to construct the same block and prefill into the synthetic body system message.
       // Below pipeline.process will continue to append more injection content after the same system message,
       // and raw mode will extract them all together → developer block includes session_context.
-      const { buildSessionContextBlockWithToggles } = await import("./session/context-injector.js");
+      const { buildSessionContextBlockWithToggles } = await import(
+        "./session/context-injector.js"
+      );
       const sessionContextBlock = buildSessionContextBlockWithToggles(
         cachedAgentDetail as any,
         cachedTaskDetail as any,
@@ -887,14 +1062,21 @@ export async function handleCodexEndpoint(
         sessionKey,
         turnSeq: 0,
         requestPath: c.req.path,
-        custom: { session: sessionInfo, userKey: callerUserKey ?? undefined, assetCapabilities },
+        custom: {
+          session: sessionInfo,
+          userKey: callerUserKey ?? undefined,
+          assetCapabilities,
+        },
       });
 
       // Extract injected content from the synthetic body's system message.
       // The pipeline appends to `messages[0].content` (system message).
-      const injectedMessages = injectedBody.messages as Array<Record<string, unknown>> | undefined;
+      const injectedMessages = injectedBody.messages as
+        | Array<Record<string, unknown>>
+        | undefined;
       const sysMsg = injectedMessages?.[0];
-      const injectedText = typeof sysMsg?.content === "string" ? sysMsg.content : "";
+      const injectedText =
+        typeof sysMsg?.content === "string" ? sysMsg.content : "";
 
       if (injectedText.length > 0) {
         // The injectedText produced by Pipeline is already the **final XML text** (containing
@@ -906,7 +1088,10 @@ export async function handleCodexEndpoint(
         body = injectCodexAssets(body, { raw: injectedText });
       }
     } catch (err: unknown) {
-      console.error("[codex] injection pipeline error:", err instanceof Error ? err.message : String(err));
+      console.error(
+        "[codex] injection pipeline error:",
+        err instanceof Error ? err.message : String(err),
+      );
       // Degrade gracefully: forward without injection
     }
   }
@@ -930,7 +1115,18 @@ export async function handleCodexEndpoint(
   });
 
   // ── 11. Forward to upstream ────────────────────────────────────────────────
-  return forwardToUpstream(c, config, body, traceId, startTime, keyId, modelId, pipe, lf, archiveCtx);
+  return forwardToUpstream(
+    c,
+    config,
+    body,
+    traceId,
+    startTime,
+    keyId,
+    modelId,
+    pipe,
+    lf,
+    archiveCtx,
+  );
 }
 
 // ── Archive context (skill/conversation/add + TDAI L0 write) ─────────────────
@@ -975,9 +1171,10 @@ function buildArchiveCtx(args: {
   const { sessionInfo, injectionSkipped } = args;
   if (injectionSkipped || !sessionInfo) return null;
 
-  const tdaiClient = args.assetCapabilities?.chat_memory === false
-    ? null
-    : createCodexTdaiClient(args.config, args.spaceId);
+  const tdaiClient =
+    args.assetCapabilities?.chat_memory === false
+      ? null
+      : createCodexTdaiClient(args.config, args.spaceId);
   const tdaiIdentity = deriveTdaiIdentity({
     sessionInfo,
     userId: args.userId || null,
@@ -1020,12 +1217,24 @@ async function triggerCodexArchiveHooks(
   //   - trackWrite attached to global in-flight set (index.ts flushPendingWrites handles SIGTERM packet loss fallback)
   //   - withL0Retry 3-time backoff guards against tdai kernel transient disconnects
   //   - non-await in stream scenario allows archiving hook to return early
-  if (ctx.tdaiClient && ctx.tdaiIdentity && isExtractionAllowed(ctx.config, "tdai-memory")) {
+  if (
+    ctx.tdaiClient &&
+    ctx.tdaiIdentity &&
+    isExtractionAllowed(ctx.config, "tdai-memory")
+  ) {
     trackWrite(
       withL0Retry(() =>
-        recordTdaiTurn(ctx.tdaiClient!, ctx.tdaiIdentity, ctx.tdaiUserMessage, assistantText || null),
+        recordTdaiTurn(
+          ctx.tdaiClient!,
+          ctx.tdaiIdentity,
+          ctx.tdaiUserMessage,
+          assistantText || null,
+        ),
       ).catch((err: unknown) => {
-        console.warn("[codex-tdai-l0] failed:", err instanceof Error ? err.message : String(err));
+        console.warn(
+          "[codex-tdai-l0] failed:",
+          err instanceof Error ? err.message : String(err),
+        );
       }),
     );
   } else if (ctx.tdaiClient) {
@@ -1102,7 +1311,10 @@ async function forwardToUpstream(
       body: JSON.stringify(body),
     });
   } catch (err: unknown) {
-    pipe.error("CODEX_FORWARD", err instanceof Error ? err : new Error(String(err)));
+    pipe.error(
+      "CODEX_FORWARD",
+      err instanceof Error ? err : new Error(String(err)),
+    );
     // Report langfuse failure (forward error — upstream did not return response body, fetch threw locally)
     if (lf) {
       try {
@@ -1112,7 +1324,11 @@ async function forwardToUpstream(
           startTime,
           endTime: new Date().toISOString(),
           input: buildCodexLangfuseInput(body),
-          statusMessage: `forward error: ${err instanceof Error ? err.message : String(err)}`.slice(0, 500),
+          statusMessage:
+            `forward error: ${err instanceof Error ? err.message : String(err)}`.slice(
+              0,
+              500,
+            ),
           extraTags: ["error"],
           observationMetadata: { stage: "forward", stream: true, upstreamUrl },
         });
@@ -1121,7 +1337,10 @@ async function forwardToUpstream(
       }
     }
     return c.json(
-      { error: "Upstream request failed", detail: err instanceof Error ? err.message : String(err) },
+      {
+        error: "Upstream request failed",
+        detail: err instanceof Error ? err.message : String(err),
+      },
       502,
     );
   }
@@ -1222,7 +1441,9 @@ export function countHumanTurnsCodex(input: unknown): number {
  * to clearly display input for this invocation). instructions block attached separately to complete context
  * (codex system prompt is in body.instructions rather than input).
  */
-function buildCodexLangfuseInput(body: Record<string, unknown>): Record<string, unknown> {
+function buildCodexLangfuseInput(
+  body: Record<string, unknown>,
+): Record<string, unknown> {
   const out: Record<string, unknown> = { input: body.input };
   if (typeof body.instructions === "string" && body.instructions.length > 0) {
     out.instructions = body.instructions;
@@ -1258,8 +1479,12 @@ export interface CodexTapContext {
  *
  * Silent failure — telemetry never impacts business logic chain.
  */
-export function consumeCodexStream(stream: ReadableStream<Uint8Array>, ctx: CodexTapContext): void {
-  const { lf, modelId, startTime, upstreamUrl, inputBody, pipe, archiveCtx } = ctx;
+export function consumeCodexStream(
+  stream: ReadableStream<Uint8Array>,
+  ctx: CodexTapContext,
+): void {
+  const { lf, modelId, startTime, upstreamUrl, inputBody, pipe, archiveCtx } =
+    ctx;
 
   (async () => {
     const decoder = new TextDecoder();
@@ -1270,12 +1495,20 @@ export function consumeCodexStream(stream: ReadableStream<Uint8Array>, ctx: Code
     let stopReason: string | undefined;
     let streamCompleted = false;
     // 5-minute timeout fallback: client disconnect may hang upstream stream, force completion upon timeout here.
-    const timeoutHandle = setTimeout(() => {
-      if (!streamCompleted) {
-        pipe.error("STREAM_TIMEOUT", "Codex stream reading exceeded 5 minutes");
-        void completeStream().catch((err) => pipe.error("STREAM_TIMEOUT_COMPLETE", err));
-      }
-    }, 5 * 60 * 1000);
+    const timeoutHandle = setTimeout(
+      () => {
+        if (!streamCompleted) {
+          pipe.error(
+            "STREAM_TIMEOUT",
+            "Codex stream reading exceeded 5 minutes",
+          );
+          void completeStream().catch((err) =>
+            pipe.error("STREAM_TIMEOUT_COMPLETE", err),
+          );
+        }
+      },
+      5 * 60 * 1000,
+    );
 
     async function completeStream(): Promise<void> {
       if (streamCompleted) return;
@@ -1330,7 +1563,12 @@ export function consumeCodexStream(stream: ReadableStream<Uint8Array>, ctx: Code
         try {
           await triggerCodexArchiveHooks(archiveCtx, outputText, toolUseCount);
         } catch (archiveErr: unknown) {
-          pipe.error("CODEX_ARCHIVE", archiveErr instanceof Error ? archiveErr : new Error(String(archiveErr)));
+          pipe.error(
+            "CODEX_ARCHIVE",
+            archiveErr instanceof Error
+              ? archiveErr
+              : new Error(String(archiveErr)),
+          );
         }
       }
     }
@@ -1373,9 +1611,12 @@ export function consumeCodexStream(stream: ReadableStream<Uint8Array>, ctx: Code
             } else if (evtType === "response.incomplete") {
               // max_output_tokens / other interruptions (Responses API standard)
               const resp = evt.response as Record<string, unknown> | undefined;
-              const details = resp?.incomplete_details as Record<string, unknown> | undefined;
+              const details = resp?.incomplete_details as
+                | Record<string, unknown>
+                | undefined;
               stopReason = `incomplete:${details?.reason ?? "unknown"}`;
-              if (resp?.usage) Object.assign(usage, resp.usage as Record<string, unknown>);
+              if (resp?.usage)
+                Object.assign(usage, resp.usage as Record<string, unknown>);
             }
           } catch {
             // ignore malformed frames — telemetry-level issues do not block
@@ -1383,7 +1624,10 @@ export function consumeCodexStream(stream: ReadableStream<Uint8Array>, ctx: Code
         }
       }
     } catch (err: unknown) {
-      pipe.error("CODEX_TAP", err instanceof Error ? err : new Error(String(err)));
+      pipe.error(
+        "CODEX_TAP",
+        err instanceof Error ? err : new Error(String(err)),
+      );
     } finally {
       await completeStream();
     }

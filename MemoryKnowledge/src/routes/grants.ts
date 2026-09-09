@@ -30,7 +30,11 @@ export function createGrantsRoutes(deps: GrantsRouteDeps): Hono {
   const app = new Hono();
   const { wikiService, cgService } = deps;
 
-  function resourceExists(kind: GrantKind, serviceId: string, knowledgeId: string): boolean {
+  function resourceExists(
+    kind: GrantKind,
+    serviceId: string,
+    knowledgeId: string,
+  ): boolean {
     return kind === "wiki"
       ? wikiService.getById(serviceId, knowledgeId) !== null
       : cgService.getById(serviceId, knowledgeId) !== null;
@@ -44,16 +48,24 @@ export function createGrantsRoutes(deps: GrantsRouteDeps): Hono {
   app.post("/set", async (c) => {
     const body = await c.req.json<Record<string, unknown>>();
     const serviceId = c.req.header("x-tdai-service-id");
-    if (!isValidIdSegment(serviceId)) return c.json(wrapError(400, "x-tdai-service-id header is required"), 400);
+    if (!isValidIdSegment(serviceId))
+      return c.json(
+        wrapError(400, "x-tdai-service-id header is required"),
+        400,
+      );
     const kind = body.kind;
     if (kind !== "wiki" && kind !== "code-graph") {
       return c.json(wrapError(400, "kind must be 'wiki' or 'code-graph'"), 400);
     }
     const knowledgeId = body.knowledge_id;
-    if (!isValidIdSegment(knowledgeId)) return c.json(wrapError(400, "knowledge_id is required"), 400);
+    if (!isValidIdSegment(knowledgeId))
+      return c.json(wrapError(400, "knowledge_id is required"), 400);
     const rawGrants = body.grants;
     if (!Array.isArray(rawGrants) || rawGrants.length === 0) {
-      return c.json(wrapError(400, "grants is required (non-empty array)"), 400);
+      return c.json(
+        wrapError(400, "grants is required (non-empty array)"),
+        400,
+      );
     }
     if (rawGrants.length > MAX_GRANTS) {
       return c.json(wrapError(400, `grants exceeds max ${MAX_GRANTS}`), 400);
@@ -61,19 +73,35 @@ export function createGrantsRoutes(deps: GrantsRouteDeps): Hono {
     const grants: SetGrantInput[] = [];
     for (const g of rawGrants) {
       const r = g as Record<string, unknown>;
-      if (!isValidIdSegment(r.team_id)) return c.json(wrapError(400, "grants[].team_id is required"), 400);
+      if (!isValidIdSegment(r.team_id))
+        return c.json(wrapError(400, "grants[].team_id is required"), 400);
       const grantType = r.grant_type ?? "viewer";
       if (!GRANT_TYPES.includes(grantType as GrantType)) {
-        return c.json(wrapError(400, "grant_type must be viewer|editor|owner"), 400);
+        return c.json(
+          wrapError(400, "grant_type must be viewer|editor|owner"),
+          400,
+        );
       }
-      grants.push({ team_id: r.team_id as string, grant_type: grantType as GrantType });
+      grants.push({
+        team_id: r.team_id as string,
+        grant_type: grantType as GrantType,
+      });
     }
     if (!resourceExists(kind, serviceId as string, knowledgeId as string)) {
       return c.json(wrapError(404, notFound(kind)), 404);
     }
-    const rows = kind === "wiki"
-      ? wikiService.setGrants(serviceId as string, knowledgeId as string, grants)
-      : cgService.setGrants(serviceId as string, knowledgeId as string, grants);
+    const rows =
+      kind === "wiki"
+        ? wikiService.setGrants(
+            serviceId as string,
+            knowledgeId as string,
+            grants,
+          )
+        : cgService.setGrants(
+            serviceId as string,
+            knowledgeId as string,
+            grants,
+          );
     return c.json(wrapOk({ kind, knowledge_id: knowledgeId, grants: rows }));
   });
 
@@ -81,16 +109,24 @@ export function createGrantsRoutes(deps: GrantsRouteDeps): Hono {
   app.post("/clear", async (c) => {
     const body = await c.req.json<Record<string, unknown>>();
     const serviceId = c.req.header("x-tdai-service-id");
-    if (!isValidIdSegment(serviceId)) return c.json(wrapError(400, "x-tdai-service-id header is required"), 400);
+    if (!isValidIdSegment(serviceId))
+      return c.json(
+        wrapError(400, "x-tdai-service-id header is required"),
+        400,
+      );
     const kind = body.kind;
     if (kind !== "wiki" && kind !== "code-graph") {
       return c.json(wrapError(400, "kind must be 'wiki' or 'code-graph'"), 400);
     }
     const knowledgeId = body.knowledge_id;
-    if (!isValidIdSegment(knowledgeId)) return c.json(wrapError(400, "knowledge_id is required"), 400);
+    if (!isValidIdSegment(knowledgeId))
+      return c.json(wrapError(400, "knowledge_id is required"), 400);
     let teamIds: string[] | undefined;
     if (body.team_ids !== undefined) {
-      if (!Array.isArray(body.team_ids) || !body.team_ids.every(isValidIdSegment)) {
+      if (
+        !Array.isArray(body.team_ids) ||
+        !body.team_ids.every(isValidIdSegment)
+      ) {
         return c.json(wrapError(400, "team_ids must be string[]"), 400);
       }
       teamIds = body.team_ids as string[];
@@ -98,9 +134,18 @@ export function createGrantsRoutes(deps: GrantsRouteDeps): Hono {
     if (!resourceExists(kind, serviceId as string, knowledgeId as string)) {
       return c.json(wrapError(404, notFound(kind)), 404);
     }
-    const cleared = kind === "wiki"
-      ? wikiService.clearGrants(serviceId as string, knowledgeId as string, teamIds)
-      : cgService.clearGrants(serviceId as string, knowledgeId as string, teamIds);
+    const cleared =
+      kind === "wiki"
+        ? wikiService.clearGrants(
+            serviceId as string,
+            knowledgeId as string,
+            teamIds,
+          )
+        : cgService.clearGrants(
+            serviceId as string,
+            knowledgeId as string,
+            teamIds,
+          );
     return c.json(wrapOk({ kind, knowledge_id: knowledgeId, cleared }));
   });
 
@@ -108,19 +153,25 @@ export function createGrantsRoutes(deps: GrantsRouteDeps): Hono {
   app.post("/list", async (c) => {
     const body = await c.req.json<Record<string, unknown>>();
     const serviceId = c.req.header("x-tdai-service-id");
-    if (!isValidIdSegment(serviceId)) return c.json(wrapError(400, "x-tdai-service-id header is required"), 400);
+    if (!isValidIdSegment(serviceId))
+      return c.json(
+        wrapError(400, "x-tdai-service-id header is required"),
+        400,
+      );
     const kind = body.kind;
     if (kind !== "wiki" && kind !== "code-graph") {
       return c.json(wrapError(400, "kind must be 'wiki' or 'code-graph'"), 400);
     }
     const knowledgeId = body.knowledge_id;
-    if (!isValidIdSegment(knowledgeId)) return c.json(wrapError(400, "knowledge_id is required"), 400);
+    if (!isValidIdSegment(knowledgeId))
+      return c.json(wrapError(400, "knowledge_id is required"), 400);
     if (!resourceExists(kind, serviceId as string, knowledgeId as string)) {
       return c.json(wrapError(404, notFound(kind)), 404);
     }
-    const grants = kind === "wiki"
-      ? wikiService.listGrants(serviceId as string, knowledgeId as string)
-      : cgService.listGrants(serviceId as string, knowledgeId as string);
+    const grants =
+      kind === "wiki"
+        ? wikiService.listGrants(serviceId as string, knowledgeId as string)
+        : cgService.listGrants(serviceId as string, knowledgeId as string);
     return c.json(wrapOk({ kind, knowledge_id: knowledgeId, grants }));
   });
 

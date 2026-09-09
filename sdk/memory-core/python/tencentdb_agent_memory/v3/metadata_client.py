@@ -58,14 +58,14 @@ class _MetadataMethodsMixin:
 
     # ── User ──
 
-    def _create_user(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _create_user(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/user/create", _body(p))
 
-    def _get_user(self, query: str | dict[str, Any]) -> dict[str, Any]:
+    def _get_user(self, query: str | dict[str, Any]) -> Any:
         payload = {"user_id": query} if isinstance(query, str) else query
         return self._stub.post(f"{_V3}/user/get", _body(payload))
 
-    def _delete_users(self, user_ids: list[str]) -> dict[str, Any]:
+    def _delete_users(self, user_ids: list[str]) -> Any:
         return self._stub.post(f"{_V3}/user/delete", {"user_ids": user_ids})
 
     def _list_users(
@@ -73,14 +73,17 @@ class _MetadataMethodsMixin:
         team_id_or_request: str | dict[str, Any] | None = None,
         *,
         pagination: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    ) -> Any:
         if isinstance(team_id_or_request, str):
-            return self._stub.post(f"{_V3}/user/list", _body({"team_id": team_id_or_request, **(pagination or {})}))
+            return self._stub.post(
+                f"{_V3}/user/list",
+                _body({"team_id": team_id_or_request, **(pagination or {})}),
+            )
         return self._stub.post(f"{_V3}/user/list", _body(team_id_or_request or {}))
 
     # ── UserKey ──
 
-    def _create_user_key(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _create_user_key(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/user-key/create", _body(p))
 
     def _list_user_keys(
@@ -88,32 +91,35 @@ class _MetadataMethodsMixin:
         user_id_or_request: str | dict[str, Any] | None = None,
         *,
         pagination: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    ) -> Any:
         if isinstance(user_id_or_request, str):
-            return self._stub.post(f"{_V3}/user-key/list", _body({"user_id": user_id_or_request, **(pagination or {})}))
+            return self._stub.post(
+                f"{_V3}/user-key/list",
+                _body({"user_id": user_id_or_request, **(pagination or {})}),
+            )
         return self._stub.post(f"{_V3}/user-key/list", _body(user_id_or_request or {}))
 
-    def _get_user_key(self, key_id: str) -> dict[str, Any]:
+    def _get_user_key(self, key_id: str) -> Any:
         return self._stub.post(f"{_V3}/user-key/get", {"key_id": key_id})
 
-    def _revoke_user_key(self, key_id: str) -> dict[str, Any]:
+    def _revoke_user_key(self, key_id: str) -> Any:
         return self._stub.post(f"{_V3}/user-key/revoke", {"key_id": key_id})
 
-    def _update_user_key(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _update_user_key(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/user-key/update", _body(p))
 
     # ── Team ──
 
-    def _create_team(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _create_team(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/team/create", _body(p))
 
-    def _get_team(self, team_id: str) -> dict[str, Any]:
+    def _get_team(self, team_id: str) -> Any:
         return self._stub.post(f"{_V3}/team/get", {"team_id": team_id})
 
-    def _update_team(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _update_team(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/team/update", _body(p))
 
-    def _delete_teams(self, team_ids: list[str]) -> dict[str, Any]:
+    def _delete_teams(self, team_ids: list[str]) -> Any:
         return self._stub.post(f"{_V3}/team/delete", {"team_ids": team_ids})
 
     def _list_teams(
@@ -121,7 +127,7 @@ class _MetadataMethodsMixin:
         user_id_or_request: str | dict[str, Any] | None = None,
         *,
         pagination: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    ) -> Any:
         payload = (
             {"user_id": user_id_or_request, **(pagination or {})}
             if isinstance(user_id_or_request, str)
@@ -133,10 +139,10 @@ class _MetadataMethodsMixin:
 
     # ── TeamMember ──
 
-    def _add_team_member(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _add_team_member(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/team-member/add", _body(p))
 
-    def _remove_team_member(self, team_id: str, user_id: str) -> dict[str, Any]:
+    def _remove_team_member(self, team_id: str, user_id: str) -> Any:
         return self._stub.post(f"{_V3}/team-member/remove", {"team_id": team_id, "user_id": user_id})
 
     def _list_team_members(
@@ -144,44 +150,44 @@ class _MetadataMethodsMixin:
         team_id: str,
         *,
         pagination: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    ) -> Any:
         return self._stub.post(f"{_V3}/team-member/list", _body({"team_id": team_id, **(pagination or {})}))
 
-    def _get_team_member(self, team_id: str, user_id: str) -> dict[str, Any]:
+    def _get_team_member(self, team_id: str, user_id: str) -> Any:
         return self._stub.post(f"{_V3}/team-member/get", {"team_id": team_id, "user_id": user_id})
 
     # ── Agent ──
 
-    def _create_agent(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _create_agent(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/agent/create", _body(p))
 
-    def _get_agent(self, agent_id: str) -> dict[str, Any]:
+    def _get_agent(self, agent_id: str) -> Any:
         return self._stub.post(f"{_V3}/agent/get", {"agent_id": agent_id})
 
-    def _update_agent(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _update_agent(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/agent/update", _body(p))
 
-    def _delete_agents(self, agent_ids: list[str]) -> dict[str, Any]:
+    def _delete_agents(self, agent_ids: list[str]) -> Any:
         return self._stub.post(f"{_V3}/agent/delete", {"agent_ids": agent_ids})
 
-    def _list_agents(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _list_agents(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/agent/list", _body(p))
 
-    def _archive_agent(self, agent_id: str) -> dict[str, Any]:
+    def _archive_agent(self, agent_id: str) -> Any:
         return self._stub.post(f"{_V3}/agent/archive", {"agent_id": agent_id})
 
     # ── Task ──
 
-    def _create_task(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _create_task(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/task/create", _body(p))
 
-    def _get_task(self, task_id: str) -> dict[str, Any]:
+    def _get_task(self, task_id: str) -> Any:
         return self._stub.post(f"{_V3}/task/get", {"task_id": task_id})
 
-    def _update_task(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _update_task(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/task/update", _body(p))
 
-    def _delete_tasks(self, task_ids: list[str]) -> dict[str, Any]:
+    def _delete_tasks(self, task_ids: list[str]) -> Any:
         return self._stub.post(f"{_V3}/task/delete", {"task_ids": task_ids})
 
     def _list_tasks(
@@ -190,17 +196,19 @@ class _MetadataMethodsMixin:
         *,
         status: str | None = None,
         pagination: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    ) -> Any:
         payload = (
             {"team_id": team_id_or_request, "status": status, **(pagination or {})}
             if isinstance(team_id_or_request, str)
             else (team_id_or_request or {})
         )
         payload = _body(payload)
-        _require_any(payload, ("team_id", "creator_user_id", "creator_user_key"), "list_tasks")
+        _require_any(
+            payload, ("team_id", "creator_user_id", "creator_user_key"), "list_tasks"
+        )
         return self._stub.post(f"{_V3}/task/list", payload)
 
-    def _archive_task(self, task_id: str) -> dict[str, Any]:
+    def _archive_task(self, task_id: str) -> Any:
         return self._stub.post(f"{_V3}/task/archive", {"task_id": task_id})
 
     # ── TaskAgent ──
@@ -210,13 +218,15 @@ class _MetadataMethodsMixin:
         task_id: str,
         agent_id: str,
         role_in_task: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> Any:
         return self._stub.post(
             f"{_V3}/task-agent/link",
-            _body({"task_id": task_id, "agent_id": agent_id, "role_in_task": role_in_task}),
+            _body(
+                {"task_id": task_id, "agent_id": agent_id, "role_in_task": role_in_task}
+            ),
         )
 
-    def _unlink_task_agent(self, task_id: str, agent_id: str) -> dict[str, Any]:
+    def _unlink_task_agent(self, task_id: str, agent_id: str) -> Any:
         return self._stub.post(f"{_V3}/task-agent/unlink", {"task_id": task_id, "agent_id": agent_id})
 
     def _list_task_agents(
@@ -224,43 +234,43 @@ class _MetadataMethodsMixin:
         task_id: str,
         *,
         pagination: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    ) -> Any:
         return self._stub.post(f"{_V3}/task-agent/list", _body({"task_id": task_id, **(pagination or {})}))
 
     # ── ParticipationLog ──
 
-    def _append_participation_log(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _append_participation_log(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/participation-log/append", _body(p))
 
-    def _list_participation_logs(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _list_participation_logs(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/participation-log/list", _body(p))
 
     # ── Asset ──
 
-    def _create_asset(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _create_asset(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/asset/create", _body(p))
 
-    def _get_asset(self, asset_id: str) -> dict[str, Any]:
+    def _get_asset(self, asset_id: str) -> Any:
         return self._stub.post(f"{_V3}/asset/get", {"asset_id": asset_id})
 
-    def _update_asset(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _update_asset(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/asset/update", _body(p))
 
-    def _delete_assets(self, asset_ids: list[str]) -> dict[str, Any]:
+    def _delete_assets(self, asset_ids: list[str]) -> Any:
         return self._stub.post(f"{_V3}/asset/delete", {"asset_ids": asset_ids})
 
-    def _list_assets(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _list_assets(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/asset/list", _body(p))
 
-    def _list_accessible_assets(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _list_accessible_assets(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/asset/list-accessible", _body(p))
 
-    def _touch_asset_usage(self, asset_id: str) -> dict[str, Any]:
+    def _touch_asset_usage(self, asset_id: str) -> Any:
         return self._stub.post(f"{_V3}/asset/touch-usage", {"asset_id": asset_id})
 
     # ── AgentFixedAsset ──
 
-    def _set_agent_fixed_assets(self, agent_id: str, bindings: list[dict[str, Any]]) -> dict[str, Any]:
+    def _set_agent_fixed_assets(self, agent_id: str, bindings: list[dict[str, Any]]) -> Any:
         return self._stub.post(f"{_V3}/agent-fixed-asset/set", {"agent_id": agent_id, "bindings": bindings})
 
     def _list_agent_fixed_assets(
@@ -268,21 +278,21 @@ class _MetadataMethodsMixin:
         agent_id: str,
         *,
         pagination: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    ) -> Any:
         return self._stub.post(f"{_V3}/agent-fixed-asset/list", _body({"agent_id": agent_id, **(pagination or {})}))
 
-    def _list_agent_fixed_assets_with_detail(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _list_agent_fixed_assets_with_detail(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/agent-fixed-asset/list-with-detail", _body(p))
 
-    def _summarize_agent_fixed_assets_by_agents(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _summarize_agent_fixed_assets_by_agents(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/agent-fixed-asset/summary-by-agents", _body(p))
 
     # ── ACL ──
 
-    def _grant_acl(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _grant_acl(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/acl/grant", _body(p))
 
-    def _revoke_acl(self, acl_id: str) -> dict[str, Any]:
+    def _revoke_acl(self, acl_id: str) -> Any:
         return self._stub.post(f"{_V3}/acl/revoke", {"id": acl_id})
 
     def _list_acl(
@@ -290,49 +300,49 @@ class _MetadataMethodsMixin:
         asset_id: str,
         *,
         pagination: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    ) -> Any:
         return self._stub.post(f"{_V3}/acl/list", _body({"asset_id": asset_id, **(pagination or {})}))
 
-    def _check_acl(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _check_acl(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/acl/check", _body(p))
 
     # ── Auth ──
 
-    def _verify_auth(self, user_key: str) -> dict[str, Any]:
+    def _verify_auth(self, user_key: str) -> Any:
         return self._stub.post(f"{_V3}/auth/verify", {"user_key": user_key})
 
     # ── ConfigParam ──
 
-    def _get_instance_quota(self) -> dict[str, Any]:
+    def _get_instance_quota(self) -> Any:
         return self._stub.post(f"{_V3}/instance-quota/get", {})
 
-    def _get_user_config(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _get_user_config(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/config/user/get", _body(p))
 
-    def _set_user_config(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _set_user_config(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/config/user/set", _body(p))
 
     # ── Knowledge ──
 
-    def _create_knowledge(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _create_knowledge(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3_KNOWLEDGE}/create", _body(p))
 
-    def _get_knowledge(self, knowledge_id: str, team_id: str | None = None) -> dict[str, Any]:
+    def _get_knowledge(self, knowledge_id: str, team_id: str | None = None) -> Any:
         return self._stub.post(
             f"{_V3_KNOWLEDGE}/get",
             _body({"knowledge_id": knowledge_id, "team_id": team_id}),
         )
 
-    def _update_knowledge(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _update_knowledge(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3_KNOWLEDGE}/update", _body(p))
 
-    def _delete_knowledge(self, knowledge_ids: list[str], team_id: str | None = None) -> dict[str, Any]:
+    def _delete_knowledge(self, knowledge_ids: list[str], team_id: str | None = None) -> Any:
         return self._stub.post(
             f"{_V3_KNOWLEDGE}/delete",
             _body({"knowledge_ids": knowledge_ids, "team_id": team_id}),
         )
 
-    def _list_knowledge(self, p: dict[str, Any]) -> dict[str, Any]:
+    def _list_knowledge(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3_KNOWLEDGE}/list", _body(p))
 
 
@@ -358,8 +368,12 @@ class MetadataClient(_MetadataMethodsMixin):
             if not api_key:
                 raise ParamError("api_key must be provided")
             self._stub = HttpStub(
-                endpoint, api_key, service_id,
-                timeout=timeout, verify=verify, user_key=user_key,
+                endpoint,
+                api_key,
+                service_id,
+                timeout=timeout,
+                verify=verify,
+                user_key=user_key,
             )
 
     # ── User ──
@@ -645,8 +659,12 @@ class AsyncMetadataClient(_MetadataMethodsMixin):
             if not api_key:
                 raise ParamError("api_key must be provided")
             self._stub = AsyncHttpStub(
-                endpoint, api_key, service_id,
-                timeout=timeout, verify=verify, user_key=user_key,
+                endpoint,
+                api_key,
+                service_id,
+                timeout=timeout,
+                verify=verify,
+                user_key=user_key,
             )
 
     async def create_user(self, p: dict[str, Any]) -> dict[str, Any]:

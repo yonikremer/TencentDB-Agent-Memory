@@ -62,7 +62,9 @@ const DEFAULT_TIMEOUT_MS = 1_200_000; // 20min — reasoning models require long
  * binding/mode logic and caused silent fallback to direct connection). baseUrl/apiKey must be provided by upper layer
  * (module.ts -> resolveLlmConfig); missing values cause createLlmClient to throw directly.
  */
-export function normalizeLlmConfig(raw: RawLlmConfig | undefined): NormalizedLlmConfig {
+export function normalizeLlmConfig(
+  raw: RawLlmConfig | undefined,
+): NormalizedLlmConfig {
   const cfg = raw ?? {};
   const protocol = cfg.protocol ?? "openai";
   const baseUrl = cfg.baseUrl || cfg.customEndpoint || "";
@@ -120,8 +122,12 @@ export function createLlmClient(config: NormalizedLlmConfig): LlmClient {
         maxOutputTokens: params.maxOutputTokens ?? config.maxTokens,
         timeoutMs: config.timeoutMs,
       });
-      log.debug(`LLM system prompt [${label}] (model=${config.model})`, { text: params.system.slice(0, 200) });
-      log.debug(`LLM user prompt [${label}] (model=${config.model})`, { text: params.prompt.slice(0, 500) });
+      log.debug(`LLM system prompt [${label}] (model=${config.model})`, {
+        text: params.system.slice(0, 200),
+      });
+      log.debug(`LLM user prompt [${label}] (model=${config.model})`, {
+        text: params.prompt.slice(0, 500),
+      });
 
       try {
         const callParams = {
@@ -129,7 +135,9 @@ export function createLlmClient(config: NormalizedLlmConfig): LlmClient {
           system: params.system,
           prompt: params.prompt,
           maxOutputTokens: params.maxOutputTokens ?? config.maxTokens,
-          ...(params.temperature === undefined ? {} : { temperature: params.temperature }),
+          ...(params.temperature === undefined
+            ? {}
+            : { temperature: params.temperature }),
           abortSignal: signal,
           experimental_telemetry: {
             isEnabled: true,
@@ -167,7 +175,9 @@ export function createLlmClient(config: NormalizedLlmConfig): LlmClient {
           outputChars: text.length,
         });
         if (!text) {
-          log.warn(`LLM returned empty text [${label}]`, { finishReason: finishReason ?? null });
+          log.warn(`LLM returned empty text [${label}]`, {
+            finishReason: finishReason ?? null,
+          });
         }
         return text;
       } catch (err) {

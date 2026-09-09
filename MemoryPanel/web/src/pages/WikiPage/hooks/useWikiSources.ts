@@ -751,6 +751,7 @@ export function useWikiSources() {
           content,
         });
         setUploadProgress((prev) => ({ ...prev, [f.name]: 'done' }));
+        return f.name;
       }),
     );
     uploadInFlightRef.current = false;

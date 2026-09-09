@@ -7,7 +7,7 @@ import math
 
 import httpx
 
-from ._http import Stub
+from ._http import AsyncStub, Stub
 from .errors import ParamError, TDAMError
 
 logger = logging.getLogger(__name__)
@@ -133,7 +133,7 @@ class HttpStub(Stub):
             self.client.close()
 
 
-class AsyncHttpStub:
+class AsyncHttpStub(AsyncStub):
     """Asynchronous v3 transport with strict validation and TLS verification."""
 
     def __init__(

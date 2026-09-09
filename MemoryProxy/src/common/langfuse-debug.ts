@@ -106,7 +106,11 @@ export function buildRequestDebugMetadata(
 
     // Anthropic thinking block
     const thinking = b.thinking as { type?: unknown } | undefined;
-    if (thinking && typeof thinking === "object" && typeof thinking.type === "string") {
+    if (
+      thinking &&
+      typeof thinking === "object" &&
+      typeof thinking.type === "string"
+    ) {
       out.thinking_type = thinking.type;
     }
 
@@ -114,8 +118,8 @@ export function buildRequestDebugMetadata(
     const stopSeq = Array.isArray(b.stop_sequences)
       ? (b.stop_sequences as unknown[])
       : Array.isArray(b.stop)
-      ? (b.stop as unknown[])
-      : null;
+        ? (b.stop as unknown[])
+        : null;
     if (stopSeq) out.stop_sequences_len = stopSeq.length;
 
     // system prompt length (Anthropic has body.system; OpenAI stuffed in messages[0].role='system')
@@ -144,7 +148,8 @@ export function buildRequestDebugMetadata(
         // Anthropic: {name, description}；OpenAI: {function: {name, description}}
         const fn = (t.function as Record<string, unknown> | undefined) ?? t;
         const name = typeof fn.name === "string" ? fn.name : undefined;
-        const descRaw = typeof fn.description === "string" ? fn.description : undefined;
+        const descRaw =
+          typeof fn.description === "string" ? fn.description : undefined;
         const entry: { name?: string; desc?: string } = {};
         if (name) entry.name = truncate(name, STRING_TRUNC);
         if (descRaw) entry.desc = truncate(descRaw, STRING_TRUNC);
@@ -160,17 +165,37 @@ export function buildRequestDebugMetadata(
     }
 
     // Anthropic body.metadata (might contain client context like user_id / session_id)
-    if (b.metadata && typeof b.metadata === "object" && !Array.isArray(b.metadata)) {
+    if (
+      b.metadata &&
+      typeof b.metadata === "object" &&
+      !Array.isArray(b.metadata)
+    ) {
       out.body_metadata = b.metadata as Record<string, unknown>;
     }
 
     // Top-level non-standard body fields (extension keys secretly stuffed by client —— to identify client fingerprint)
     const standardKeys = new Set([
-      "model", "messages", "system", "tools", "tool_choice",
-      "temperature", "top_p", "top_k", "max_tokens",
-      "stream", "stream_options", "thinking",
-      "stop", "stop_sequences", "metadata",
-      "n", "user", "seed", "response_format", "presence_penalty", "frequency_penalty",
+      "model",
+      "messages",
+      "system",
+      "tools",
+      "tool_choice",
+      "temperature",
+      "top_p",
+      "top_k",
+      "max_tokens",
+      "stream",
+      "stream_options",
+      "thinking",
+      "stop",
+      "stop_sequences",
+      "metadata",
+      "n",
+      "user",
+      "seed",
+      "response_format",
+      "presence_penalty",
+      "frequency_penalty",
     ]);
     const extra = Object.keys(b).filter((k) => !standardKeys.has(k));
     if (extra.length) out.body_extra_keys = extra;
@@ -188,7 +213,8 @@ export function buildRequestDebugMetadata(
       for (const [rawK, v] of Object.entries(opts.headers)) {
         const k = rawK.toLowerCase();
         // skip headers containing sensitive information
-        if (k === "authorization" || k === "x-api-key" || k === "cookie") continue;
+        if (k === "authorization" || k === "x-api-key" || k === "cookie")
+          continue;
         if (!HEADER_PREFIX_WHITELIST.some((p) => k.startsWith(p))) continue;
         out[`header_${k}`] = truncate(String(v), STRING_TRUNC);
       }

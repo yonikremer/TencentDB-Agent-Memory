@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 from fakes import FakeAsyncReader, FakeAsyncStub, FakeReader, FakeStsMgr, FakeStub
 
@@ -12,16 +14,16 @@ from tencentdb_agent_memory.v3.client import (
     _validate_construction,
 )
 
-KW = dict(team_id="t1", agent_id="a1", user_id="u1")
+KW: dict[str, Any] = {"team_id": "t1", "agent_id": "a1", "user_id": "u1"}
 
 
-def _sync(**kw):
-    args = dict(KW)
+def _sync(**kw: Any) -> tuple[MemoryClient, FakeStub]:
+    args: dict[str, Any] = dict(KW)
     args.update(kw)
     stub = FakeStub()
     return MemoryClient(
         endpoint="http://e", api_key="k", service_id="s", stub=stub, **args
-    ), stub  # type: ignore[call-arg]  // FakeStub is runtime-compatible; **args unpacking defeats narrowing.
+    ), stub
 
 
 def test_helpers_and_validation():
@@ -35,8 +37,8 @@ def test_helpers_and_validation():
     with pytest.raises(ParamError):
         _normalize_delete_ids("f", [f"m{i}" for i in range(6)], 5)
     for missing in (
-        dict(team_id="", agent_id="a", user_id="u"),
-        dict(team_id="t", agent_id="", user_id="u"),
+        {"team_id": "", "agent_id": "a", "user_id": "u"},
+        {"team_id": "t", "agent_id": "", "user_id": "u"},
         dict(team_id="t", agent_id="a", user_id=""),
     ):
         with pytest.raises(ParamError):

@@ -64,7 +64,8 @@ def _validate_extract(messages: list[dict[str, Any]], isolation: dict[str, Any])
     if not isinstance(messages, list) or not messages:
         raise ParamError("extract requires at least one message")
     missing = [
-        field for field in ("user_id", "team_id", "agent_id")
+        field
+        for field in ("user_id", "team_id", "agent_id")
         if not isinstance(isolation.get(field), str) or not isolation[field].strip()
     ]
     if missing:
@@ -75,7 +76,8 @@ def _validate_conversation_add(messages: list[dict[str, Any]], isolation: dict[s
     if not isinstance(messages, list) or not messages:
         raise ParamError("conversation_add requires at least one message")
     missing = [
-        field for field in ("session_id", "user_id", "team_id", "agent_id")
+        field
+        for field in ("session_id", "user_id", "team_id", "agent_id")
         if not isinstance(isolation.get(field), str) or not isolation[field].strip()
     ]
     if missing:
@@ -86,7 +88,8 @@ def _validate_force_archive(isolation: dict[str, Any]) -> None:
     """All five isolation fields (incl. ``space_id``) are required by
     ``forceArchiveRequestSchema``."""
     missing = [
-        field for field in ("session_id", "space_id", "user_id", "team_id", "agent_id")
+        field
+        for field in ("session_id", "space_id", "user_id", "team_id", "agent_id")
         if not isinstance(isolation.get(field), str) or not isolation[field].strip()
     ]
     if missing:
@@ -132,6 +135,7 @@ class _SkillDefaults:
 # Resource-payload helpers (static — no client required)
 # ---------------------------------------------------------------------------
 
+
 def encode_utf8(
     path: str,
     content: str,
@@ -140,13 +144,15 @@ def encode_utf8(
     is_executable: bool | None = None,
 ) -> dict[str, Any]:
     """Build a utf-8 SkillResourcePayload for uploads (create / files/write)."""
-    return _strip_none({
-        "path": path,
-        "content": content,
-        "encoding": "utf-8",
-        "mime_type": mime_type,
-        "is_executable": is_executable,
-    })
+    return _strip_none(
+        {
+            "path": path,
+            "content": content,
+            "encoding": "utf-8",
+            "mime_type": mime_type,
+            "is_executable": is_executable,
+        }
+    )
 
 
 def encode_base64(
@@ -161,18 +167,21 @@ def encode_base64(
         encoded = data
     else:
         encoded = base64.b64encode(bytes(data)).decode("ascii")
-    return _strip_none({
-        "path": path,
-        "content": encoded,
-        "encoding": "base64",
-        "mime_type": mime_type,
-        "is_executable": is_executable,
-    })
+    return _strip_none(
+        {
+            "path": path,
+            "content": encoded,
+            "encoding": "base64",
+            "mime_type": mime_type,
+            "is_executable": is_executable,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
 # Synchronous client
 # ---------------------------------------------------------------------------
+
 
 class SkillClient:
     """Synchronous v3 Skill SDK."""
@@ -196,7 +205,9 @@ class SkillClient:
         else:
             if not service_id:
                 raise ParamError("service_id must be provided")
-            self._stub = HttpStub(endpoint, api_key, service_id, timeout=timeout, verify=verify)
+            self._stub = HttpStub(
+                endpoint, api_key, service_id, timeout=timeout, verify=verify
+            )
         self._defaults = _SkillDefaults(team_id, agent_id, user_id, task_id)
 
     # ── defaults / cloning ─────────────────────────────────────────────
@@ -239,13 +250,15 @@ class SkillClient:
         task_id: str | None = None,
     ) -> dict[str, Any]:
         """``POST /v3/skill/create``"""
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "name": name,
-            "content": content,
-            "resources": list(resources) if resources is not None else None,
-            "metadata": metadata,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "name": name,
+                "content": content,
+                "resources": list(resources) if resources is not None else None,
+                "metadata": metadata,
+            }
+        )
         return self._stub.post(f"{_V3}/create", body)
 
     def update(
@@ -260,12 +273,14 @@ class SkillClient:
         task_id: str | None = None,
     ) -> dict[str, Any]:
         """``POST /v3/skill/update``"""
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "skill_id": skill_id,
-            "expected_version": expected_version,
-            "content": content,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "skill_id": skill_id,
+                "expected_version": expected_version,
+                "content": content,
+            }
+        )
         return self._stub.post(f"{_V3}/update", body)
 
     def patch(
@@ -282,14 +297,16 @@ class SkillClient:
         task_id: str | None = None,
     ) -> dict[str, Any]:
         """``POST /v3/skill/patch``"""
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "skill_id": skill_id,
-            "expected_version": expected_version,
-            "old_string": old_string,
-            "new_string": new_string,
-            "replace_all": replace_all,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "skill_id": skill_id,
+                "expected_version": expected_version,
+                "old_string": old_string,
+                "new_string": new_string,
+                "replace_all": replace_all,
+            }
+        )
         return self._stub.post(f"{_V3}/patch", body)
 
     def delete(
@@ -303,11 +320,13 @@ class SkillClient:
         task_id: str | None = None,
     ) -> dict[str, Any]:
         """``POST /v3/skill/delete``"""
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "skill_id": skill_id,
-            "expected_version": expected_version,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "skill_id": skill_id,
+                "expected_version": expected_version,
+            }
+        )
         return self._stub.post(f"{_V3}/delete", body)
 
     def get(
@@ -323,13 +342,15 @@ class SkillClient:
         task_id: str | None = None,
     ) -> dict[str, Any]:
         """``POST /v3/skill/get``"""
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "skill_id": skill_id,
-            "version": version,
-            "include_content": include_content,
-            "include_manifest": include_manifest,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "skill_id": skill_id,
+                "version": version,
+                "include_content": include_content,
+                "include_manifest": include_manifest,
+            }
+        )
         return self._stub.post(f"{_V3}/get", body)
 
     def get_by_name(
@@ -356,18 +377,21 @@ class SkillClient:
         Returns the same shape as :meth:`get` (40401 when the name
         doesn't exist for the agent).
         """
-        body = _strip_none({
-            "team_id": team_id,
-            "agent_id": agent_id,
-            "skill_name": skill_name,
-            "version": version,
-            "include_content": include_content,
-            "include_manifest": include_manifest,
-            "user_id": user_id,
-            "task_id": task_id,
-        })
+        body = _strip_none(
+            {
+                "team_id": team_id,
+                "agent_id": agent_id,
+                "skill_name": skill_name,
+                "version": version,
+                "include_content": include_content,
+                "include_manifest": include_manifest,
+                "user_id": user_id,
+                "task_id": task_id,
+            }
+        )
         missing = [
-            field for field in ("team_id", "agent_id", "skill_name")
+            field
+            for field in ("team_id", "agent_id", "skill_name")
             if not isinstance(body.get(field), str) or not body[field].strip()
         ]
         if missing:
@@ -385,11 +409,13 @@ class SkillClient:
         task_id: str | None = None,
     ) -> dict[str, Any]:
         """``POST /v3/skill/list``"""
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "filters": filters,
-            "pagination": pagination,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "filters": filters,
+                "pagination": pagination,
+            }
+        )
         return self._stub.post(f"{_V3}/list", body)
 
     def search(
@@ -405,13 +431,15 @@ class SkillClient:
         task_id: str | None = None,
     ) -> dict[str, Any]:
         """``POST /v3/skill/search`` — ``mode`` ∈ {bm25, embedding, hybrid}; ``scope`` = "team" to drop agent filter."""
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "query": query,
-            "top_k": top_k,
-            "mode": mode,
-            "scope": scope,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "query": query,
+                "top_k": top_k,
+                "mode": mode,
+                "scope": scope,
+            }
+        )
         return self._stub.post(f"{_V3}/search", body)
 
     def versions(
@@ -425,11 +453,13 @@ class SkillClient:
         task_id: str | None = None,
     ) -> dict[str, Any]:
         """``POST /v3/skill/versions``"""
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "skill_id": skill_id,
-            "pagination": pagination,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "skill_id": skill_id,
+                "pagination": pagination,
+            }
+        )
         return self._stub.post(f"{_V3}/versions", body)
 
     # ── resource files ─────────────────────────────────────────────────
@@ -446,12 +476,14 @@ class SkillClient:
         task_id: str | None = None,
     ) -> dict[str, Any]:
         """``POST /v3/skill/files/write``"""
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "skill_id": skill_id,
-            "expected_version": expected_version,
-            "files": list(files),
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "skill_id": skill_id,
+                "expected_version": expected_version,
+                "files": list(files),
+            }
+        )
         return self._stub.post(f"{_V3}/files/write", body)
 
     def remove_files(
@@ -466,12 +498,14 @@ class SkillClient:
         task_id: str | None = None,
     ) -> dict[str, Any]:
         """``POST /v3/skill/files/remove``"""
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "skill_id": skill_id,
-            "expected_version": expected_version,
-            "paths": list(paths),
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "skill_id": skill_id,
+                "expected_version": expected_version,
+                "paths": list(paths),
+            }
+        )
         return self._stub.post(f"{_V3}/files/remove", body)
 
     def read_file(
@@ -487,13 +521,15 @@ class SkillClient:
         task_id: str | None = None,
     ) -> dict[str, Any]:
         """``POST /v3/skill/files/read``"""
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "skill_id": skill_id,
-            "version": version,
-            "path": path,
-            "encoding": encoding,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "skill_id": skill_id,
+                "version": version,
+                "path": path,
+                "encoding": encoding,
+            }
+        )
         return self._stub.post(f"{_V3}/files/read", body)
 
     def export_skill(
@@ -515,12 +551,14 @@ class SkillClient:
         archive bytes yourself. ``format`` defaults to ``"zip"`` (the
         only value the schema accepts).
         """
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "skill_id": skill_id,
-            "version": version,
-            "format": format,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "skill_id": skill_id,
+                "version": version,
+                "format": format,
+            }
+        )
         return self._stub.post(f"{_V3}/export", body)
 
     # ── listing / extract ─────────────────────────────────────────────
@@ -536,11 +574,13 @@ class SkillClient:
         task_id: str | None = None,
     ) -> dict[str, Any]:
         """``POST /v3/skill/listing`` — render ``<available_skills>`` block."""
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "query": query,
-            "char_budget": char_budget,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "query": query,
+                "char_budget": char_budget,
+            }
+        )
         return self._stub.post(f"{_V3}/listing", body)
 
     def extract(
@@ -570,14 +610,16 @@ class SkillClient:
         the instance the transport is scoped to; body value wins over
         header, and a mismatch is logged server-side.
         """
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "space_id": space_id,
-            "session_id": session_id,
-            "messages": messages,
-            "reason": reason,
-            "options": options,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "space_id": space_id,
+                "session_id": session_id,
+                "messages": messages,
+                "reason": reason,
+                "options": options,
+            }
+        )
         _validate_extract(messages, body)
         return self._stub.post(f"{_V3}/extract", body)
 
@@ -612,15 +654,17 @@ class SkillClient:
         ``docs/design/2026-07-15-skill-trigger-in-core-design.md`` §11.1
         for the trigger semantics.
         """
-        body = _strip_none({
-            "session_id": session_id,
-            "space_id": space_id,
-            "user_id": user_id,
-            "team_id": team_id,
-            "agent_id": agent_id,
-            "task_id": task_id,
-            "messages": messages,
-        })
+        body = _strip_none(
+            {
+                "session_id": session_id,
+                "space_id": space_id,
+                "user_id": user_id,
+                "team_id": team_id,
+                "agent_id": agent_id,
+                "task_id": task_id,
+                "messages": messages,
+            }
+        )
         _validate_conversation_add(messages, body)
         return self._stub.post(f"{_V3}/conversation/add", body)
 
@@ -659,15 +703,17 @@ class SkillClient:
           coordinates are at the top level (not nested under
           ``archived``), unlike :meth:`conversation_add`.
         """
-        body = _strip_none({
-            "session_id": session_id,
-            "space_id": space_id,
-            "user_id": user_id,
-            "team_id": team_id,
-            "agent_id": agent_id,
-            "reason": reason,
-            "task_id": task_id,
-        })
+        body = _strip_none(
+            {
+                "session_id": session_id,
+                "space_id": space_id,
+                "user_id": user_id,
+                "team_id": team_id,
+                "agent_id": agent_id,
+                "reason": reason,
+                "task_id": task_id,
+            }
+        )
         _validate_force_archive(body)
         return self._stub.post(f"{_V3}/conversation/force-archive", body)
 
@@ -686,6 +732,7 @@ class SkillClient:
 # ---------------------------------------------------------------------------
 # Asynchronous client
 # ---------------------------------------------------------------------------
+
 
 class AsyncSkillClient:
     """Asynchronous v3 Skill SDK. Method signatures match :class:`SkillClient`."""
@@ -709,7 +756,9 @@ class AsyncSkillClient:
         else:
             if not service_id:
                 raise ParamError("service_id must be provided")
-            self._stub = AsyncHttpStub(endpoint, api_key, service_id, timeout=timeout, verify=verify)
+            self._stub = AsyncHttpStub(
+                endpoint, api_key, service_id, timeout=timeout, verify=verify
+            )
         self._defaults = _SkillDefaults(team_id, agent_id, user_id, task_id)
 
     def with_defaults(
@@ -856,18 +905,21 @@ class AsyncSkillClient:
         constructor defaults — pass them explicitly. Returns the same
         shape as :meth:`get`.
         """
-        body = _strip_none({
-            "team_id": team_id,
-            "agent_id": agent_id,
-            "skill_name": skill_name,
-            "version": version,
-            "include_content": include_content,
-            "include_manifest": include_manifest,
-            "user_id": user_id,
-            "task_id": task_id,
-        })
+        body = _strip_none(
+            {
+                "team_id": team_id,
+                "agent_id": agent_id,
+                "skill_name": skill_name,
+                "version": version,
+                "include_content": include_content,
+                "include_manifest": include_manifest,
+                "user_id": user_id,
+                "task_id": task_id,
+            }
+        )
         missing = [
-            field for field in ("team_id", "agent_id", "skill_name")
+            field
+            for field in ("team_id", "agent_id", "skill_name")
             if not isinstance(body.get(field), str) or not body[field].strip()
         ]
         if missing:
@@ -1002,12 +1054,14 @@ class AsyncSkillClient:
         task_id: str | None = None,
     ) -> dict[str, Any]:
         """See :meth:`SkillClient.export_skill` for the contract."""
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "skill_id": skill_id,
-            "version": version,
-            "format": format,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "skill_id": skill_id,
+                "version": version,
+                "format": format,
+            }
+        )
         return await self._stub.post(f"{_V3}/export", body)
 
     # ── listing / extract ─────────────────────────────────────────────
@@ -1043,14 +1097,16 @@ class AsyncSkillClient:
         task_id: str | None = None,
     ) -> dict[str, Any]:
         """See :meth:`SkillClient.extract` for parameter and response docs."""
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "space_id": space_id,
-            "session_id": session_id,
-            "messages": messages,
-            "reason": reason,
-            "options": options,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "space_id": space_id,
+                "session_id": session_id,
+                "messages": messages,
+                "reason": reason,
+                "options": options,
+            }
+        )
         _validate_extract(messages, body)
         return await self._stub.post(f"{_V3}/extract", body)
 
@@ -1066,15 +1122,17 @@ class AsyncSkillClient:
         task_id: str | None = None,
     ) -> dict[str, Any]:
         """See :meth:`SkillClient.conversation_add` for the contract."""
-        body = _strip_none({
-            "session_id": session_id,
-            "space_id": space_id,
-            "user_id": user_id,
-            "team_id": team_id,
-            "agent_id": agent_id,
-            "task_id": task_id,
-            "messages": messages,
-        })
+        body = _strip_none(
+            {
+                "session_id": session_id,
+                "space_id": space_id,
+                "user_id": user_id,
+                "team_id": team_id,
+                "agent_id": agent_id,
+                "task_id": task_id,
+                "messages": messages,
+            }
+        )
         _validate_conversation_add(messages, body)
         return await self._stub.post(f"{_V3}/conversation/add", body)
 
@@ -1090,15 +1148,17 @@ class AsyncSkillClient:
         task_id: str | None = None,
     ) -> dict[str, Any]:
         """See :meth:`SkillClient.conversation_force_archive` for the contract."""
-        body = _strip_none({
-            "session_id": session_id,
-            "space_id": space_id,
-            "user_id": user_id,
-            "team_id": team_id,
-            "agent_id": agent_id,
-            "reason": reason,
-            "task_id": task_id,
-        })
+        body = _strip_none(
+            {
+                "session_id": session_id,
+                "space_id": space_id,
+                "user_id": user_id,
+                "team_id": team_id,
+                "agent_id": agent_id,
+                "reason": reason,
+                "task_id": task_id,
+            }
+        )
         _validate_force_archive(body)
         return await self._stub.post(f"{_V3}/conversation/force-archive", body)
 

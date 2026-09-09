@@ -19,10 +19,26 @@ function truncate(s: string, max: number): string {
 
 /** Extracts key fields from request body (avoids logging full body, logs ID fields for correlation). */
 function pickReqFields(body: unknown): Record<string, unknown> {
-  if (!body || typeof body !== 'object') return {};
+  if (!body || typeof body !== "object") return {};
   const b = body as Record<string, unknown>;
   const out: Record<string, unknown> = {};
-  for (const k of ['wiki_id', 'code_graph_id', 'knowledge_id', 'wiki_ids', 'code_graph_ids', 'knowledge_ids', 'team_id', 'repo_url', 'branch', 'filename', 'filenames', 'refs', 'tool_name', 'query', 'path']) {
+  for (const k of [
+    "wiki_id",
+    "code_graph_id",
+    "knowledge_id",
+    "wiki_ids",
+    "code_graph_ids",
+    "knowledge_ids",
+    "team_id",
+    "repo_url",
+    "branch",
+    "filename",
+    "filenames",
+    "refs",
+    "tool_name",
+    "query",
+    "path",
+  ]) {
     if (k in b) out[k] = b[k];
   }
   return out;
@@ -39,8 +55,8 @@ export function accessLog(): MiddlewareHandler {
 
     // Cache request body (body can only be read once, used for logging on failure)
     // Hono's bodyCache expects Promise (c.req.json()/text() calls .then() on cached value)
-    let reqBody: unknown ;
-    if (c.req.method === 'POST' || c.req.method === 'PUT') {
+    let reqBody: unknown;
+    if (c.req.method === "POST" || c.req.method === "PUT") {
       try {
         const raw = await c.req.text();
         reqBody = raw ? JSON.parse(raw) : undefined;

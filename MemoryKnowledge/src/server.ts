@@ -70,11 +70,17 @@ export function createApp() {
   const verifyCache = new Map<string, { userId: string; exp: number }>();
   const VERIFY_TTL_MS = 60_000;
   if (process.env.KNOWLEDGE_AUTH_DISABLED === "1") {
-    log.warn("KNOWLEDGE_AUTH_DISABLED=1 — all /v3/* routes are open (isolated-dev only).");
+    log.warn(
+      "KNOWLEDGE_AUTH_DISABLED=1 — all /v3/* routes are open (isolated-dev only).",
+    );
   } else if (config.coreVerifyUrl) {
-    log.info(`Knowledge /v3/* user-key auth ENABLED (verifier=${config.coreVerifyUrl})`);
+    log.info(
+      `Knowledge /v3/* user-key auth ENABLED (verifier=${config.coreVerifyUrl})`,
+    );
   } else {
-    log.error("CORE_VERIFY_URL is NOT set — /v3/* will refuse all callers until a user verifier is configured.");
+    log.error(
+      "CORE_VERIFY_URL is NOT set — /v3/* will refuse all callers until a user verifier is configured.",
+    );
   }
   api.use("*", async (c, next) => {
     const userKey = c.req.header("x-tdai-user-key")?.trim() ?? "";
@@ -86,7 +92,10 @@ export function createApp() {
       return;
     }
     if (!config.coreVerifyUrl) {
-      return c.json(wrapError(503, "user verifier unconfigured (CORE_VERIFY_URL)"), 503);
+      return c.json(
+        wrapError(503, "user verifier unconfigured (CORE_VERIFY_URL)"),
+        503,
+      );
     }
     // Positive-only cache: revocations take effect on expiry at the latest.
     const hit = verifyCache.get(userKey);
@@ -95,15 +104,21 @@ export function createApp() {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), config.coreVerifyTimeoutMs);
       try {
-        const resp = await fetch(`${config.coreVerifyUrl}/v3/meta/auth/verify`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-tdai-service-id": c.req.header("x-tdai-service-id") ?? "",
+        const resp = await fetch(
+          `${config.coreVerifyUrl}/v3/meta/auth/verify`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-tdai-service-id": c.req.header("x-tdai-service-id") ?? "",
+              ...(config.coreVerifyBearer
+                ? { Authorization: `Bearer ${config.coreVerifyBearer}` }
+                : {}),
+            },
+            body: JSON.stringify({ user_key: userKey }),
+            signal: ctrl.signal,
           },
-          body: JSON.stringify({ user_key: userKey }),
-          signal: ctrl.signal,
-        });
+        );
         clearTimeout(timer);
         if (!resp.ok) {
           return c.json(wrapError(503, "user verifier unreachable"), 503);
@@ -112,10 +127,17 @@ export function createApp() {
           code?: number;
           data?: { valid?: boolean; user?: { user_id?: string } };
         };
-        if (body.code !== 0 || body.data?.valid !== true || !body.data.user?.user_id) {
+        if (
+          body.code !== 0 ||
+          body.data?.valid !== true ||
+          !body.data.user?.user_id
+        ) {
           return c.json(wrapError(401, "invalid x-tdai-user-key"), 401);
         }
-        verifyCache.set(userKey, { userId: body.data.user.user_id, exp: Date.now() + VERIFY_TTL_MS });
+        verifyCache.set(userKey, {
+          userId: body.data.user.user_id,
+          exp: Date.now() + VERIFY_TTL_MS,
+        });
       } catch {
         clearTimeout(timer);
         return c.json(wrapError(503, "user verifier unreachable"), 503);

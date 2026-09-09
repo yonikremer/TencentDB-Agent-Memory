@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from tencentdb_agent_memory._http import AsyncStub
 
@@ -11,7 +11,7 @@ class FakeStub:
     """Synchronous fake transport recording (method, path, body)."""
 
     def __init__(self, result: Any = None) -> None:
-        self.calls: List[Tuple[str, str, Any]] = []
+        self.calls: list[tuple[str, str, Any]] = []
         self.result = {} if result is None else result
         self.closed = False
         self.endpoint = "http://mem.example.com"
@@ -76,7 +76,7 @@ class FakeAsyncPostOnly:
     """Async transport without .get — exercises the async _get() POST fallback."""
 
     def __init__(self, result: Any = None) -> None:
-        self.calls: List[Tuple[str, str, Any]] = []
+        self.calls: list[tuple[str, str, Any]] = []
         self.result = {} if result is None else result
         self.closed = False
 

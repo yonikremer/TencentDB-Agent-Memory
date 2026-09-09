@@ -31,10 +31,19 @@ import {
   reportAnalyzerTrace,
   type ForwardTarget,
 } from "./guard-adapter.js";
-import { hasCostGuardMarker, matchWhitelistEndpoint } from "./routes/whitelist.js";
+import {
+  hasCostGuardMarker,
+  matchWhitelistEndpoint,
+} from "./routes/whitelist.js";
 import { writeRequestLog } from "./requestLog.js";
-import { prepareUpstreamRequest, notifyUpstreamResponse } from "./request-prepare-adapter.js";
-import { tryReportCreditFromPath, extractSpaceIdFromPath } from "./credit-reporter.js";
+import {
+  prepareUpstreamRequest,
+  notifyUpstreamResponse,
+} from "./request-prepare-adapter.js";
+import {
+  tryReportCreditFromPath,
+  extractSpaceIdFromPath,
+} from "./credit-reporter.js";
 import { resolveModelId, isModelInPricing } from "./pricing.js";
 import { inspectAndRecord } from "./identity.js";
 import { writeFailedReportRaw } from "./clickhouse.js";
@@ -48,7 +57,10 @@ import { trackWrite, withL0Retry } from "./tdai/pending-writes.js";
 import type { TdaiIdentity, TdaiMessage } from "./tdai/types.js";
 import { triggerSkillExtractIfReady } from "./skill/handler-glue.js";
 import { emitModelIntentTelemetry } from "./session/model-intent-telemetry.js";
-import { isExtractionAllowed, logExtractionSkipped } from "./extraction-gate.js";
+import {
+  isExtractionAllowed,
+  logExtractionSkipped,
+} from "./extraction-gate.js";
 import type { RequestKind } from "./agent-adapters/index.js";
 import { buildRequestDebugMetadata } from "./common/langfuse-debug.js";
 import { resolveAgentAdapter } from "./agent-adapters/index.js";
@@ -80,8 +92,16 @@ const SKIP_RESPONSE_HEADERS = new Set([
  * land on the correct kernel tenant. Falls back to config when the request
  * carries no spaceId (older single-tenant deployments).
  */
-function createTdaiClient(config: ProxyConfig, spaceId?: string): TdaiClient | null {
-  if (!config.tdai.enabled || !config.tdai.memory.enabled || !config.tdai.endpoint) return null;
+function createTdaiClient(
+  config: ProxyConfig,
+  spaceId?: string,
+): TdaiClient | null {
+  if (
+    !config.tdai.enabled ||
+    !config.tdai.memory.enabled ||
+    !config.tdai.endpoint
+  )
+    return null;
   return new TdaiClient({
     enabled: config.tdai.enabled && config.tdai.memory.enabled,
     endpoint: config.tdai.endpoint,
@@ -197,10 +217,15 @@ export function flattenAnthropicMessagesForOpik(
       }
       for (const tc of toolCalls) {
         const t = tc as Record<string, unknown>;
-        const inputStr = typeof t.input === "string" ? t.input : JSON.stringify(t.input);
+        const inputStr =
+          typeof t.input === "string" ? t.input : JSON.stringify(t.input);
         result.push({
           role: "assistant",
-          content: JSON.stringify({ tool_call_id: t.id, tool_name: t.name, input: inputStr }, null, 2),
+          content: JSON.stringify(
+            { tool_call_id: t.id, tool_name: t.name, input: inputStr },
+            null,
+            2,
+          ),
         });
       }
     } else if (role === "user") {
@@ -233,15 +258,25 @@ export function flattenAnthropicMessagesForOpik(
         }
         result.push({
           role: "tool",
-          content: JSON.stringify({ tool_call_id: t.tool_use_id, is_error: t.is_error ?? false, result: resultContent }, null, 2),
+          content: JSON.stringify(
+            {
+              tool_call_id: t.tool_use_id,
+              is_error: t.is_error ?? false,
+              result: resultContent,
+            },
+            null,
+            2,
+          ),
         });
       }
     } else {
-      const merged = content.map((b: unknown) => {
-        const block = b as Record<string, unknown>;
-        if (block.type === "text") return block.text as string;
-        return JSON.stringify(block);
-      }).join("\n");
+      const merged = content
+        .map((b: unknown) => {
+          const block = b as Record<string, unknown>;
+          if (block.type === "text") return block.text as string;
+          return JSON.stringify(block);
+        })
+        .join("\n");
       result.push({ role, content: merged });
     }
   }
@@ -253,7 +288,8 @@ function extractApiKey(c: Context): string {
   const xApiKey = c.req.header("x-api-key");
   if (xApiKey) return xApiKey;
 
-  const authHeader = c.req.header("authorization") ?? c.req.header("Authorization") ?? "";
+  const authHeader =
+    c.req.header("authorization") ?? c.req.header("Authorization") ?? "";
   if (authHeader.startsWith("Bearer ")) {
     return authHeader.slice(7);
   }
@@ -267,7 +303,9 @@ function extractApiKey(c: Context): string {
 function hasValidThinkingSignature(block: Record<string, unknown>): boolean {
   const sig = block.signature;
   if (typeof sig !== "string" || sig.length < 40) return false;
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sig)) {
+  if (
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sig)
+  ) {
     return false;
   }
   return /^[A-Za-z0-9+/=]+$/.test(sig);
@@ -278,9 +316,10 @@ function hasValidThinkingSignature(block: Record<string, unknown>): boolean {
  *
  * Exported for unit testing.
  */
-export function sanitizeThinkingBlocks(
-  body: Record<string, unknown>,
-): { body: Record<string, unknown>; removed: number } {
+export function sanitizeThinkingBlocks(body: Record<string, unknown>): {
+  body: Record<string, unknown>;
+  removed: number;
+} {
   const messages = body.messages;
   if (!Array.isArray(messages)) return { body, removed: 0 };
 
@@ -294,7 +333,8 @@ export function sanitizeThinkingBlocks(
     let msgChanged = false;
     const newContent = (m.content as unknown[]).filter((block) => {
       const b = block as Record<string, unknown>;
-      const isThinking = b.type === "thinking" || b.type === "redacted_thinking";
+      const isThinking =
+        b.type === "thinking" || b.type === "redacted_thinking";
       if (!isThinking) return true;
       if (hasValidThinkingSignature(b)) return true;
       removed += 1;
@@ -371,6 +411,28 @@ function buildUpstreamHeaders(
 /**
  * Forward request to upstream and handle retry if retryTarget is set.
  */
+/**
+ * Fail-closed check for outbound upstream URLs.
+ *
+ * Forward targets are built exclusively from operator config (upstream.url /
+ * cost-guard retry targets), never from caller input — but a typo like
+ * `upstream.url: file:///etc/passwd` must not turn the proxy into a generic
+ * fetcher. Only http(s) are ever valid upstream schemes.
+ */
+function assertTrustedUpstreamUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`Refusing to forward to unparseable upstream URL: ${url}`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(
+      `Refusing to forward to non-http(s) upstream URL: ${parsed.protocol}//…`,
+    );
+  }
+}
+
 async function forwardWithRetry(
   target: ForwardTarget,
   upstreamHeaders: Record<string, string>,
@@ -382,6 +444,9 @@ async function forwardWithRetry(
   sessionKeyForDebug?: string,
   rateLimitContext?: { config: ProxyConfig; instanceId?: string },
 ): Promise<{ resp: Response; retried: boolean }> {
+  // Fail-closed scheme check: forward targets come from operator config, but a
+  // typo must never turn the proxy into a generic fetcher (mirrors handler.ts).
+  assertTrustedUpstreamUrl(target.url);
   let upstreamResp: Response | undefined;
   let forwardFailed = false;
 
@@ -403,29 +468,47 @@ async function forwardWithRetry(
       const sys = (upstreamBody as { system?: unknown }).system;
       // Anthropic system prompt is usually a string (CC) or an array of blocks (some SDKs)
       const sysFullStr = sys === undefined ? "" : JSON.stringify(sys);
-      const sysTextStr = typeof sys === "string"
-        ? sys
-        : Array.isArray(sys)
-          ? sys.map((b) => (b as { text?: string }).text ?? "").join("\n")
-          : "";
+      const sysTextStr =
+        typeof sys === "string"
+          ? sys
+          : Array.isArray(sys)
+            ? sys.map((b) => (b as { text?: string }).text ?? "").join("\n")
+            : "";
 
-      const msgs = (upstreamBody as { messages?: Array<Record<string, unknown>> }).messages ?? [];
+      const msgs =
+        (upstreamBody as { messages?: Array<Record<string, unknown>> })
+          .messages ?? [];
       // Find the index of the last message containing "cache_control" in content
       let anchorIdx = -1;
       for (let i = msgs.length - 1; i >= 0; i--) {
         const content = msgs[i]?.content;
         if (Array.isArray(content)) {
-          const hasCache = content.some((b) => b && typeof b === "object" && "cache_control" in (b as object));
-          if (hasCache) { anchorIdx = i; break; }
+          const hasCache = content.some(
+            (b) =>
+              b && typeof b === "object" && "cache_control" in (b as object),
+          );
+          if (hasCache) {
+            anchorIdx = i;
+            break;
+          }
         }
       }
       // cache prefix = serialization of all messages from body start up to anchor (inclusive)
       const prefixEnd = anchorIdx >= 0 ? anchorIdx + 1 : msgs.length;
       const msgsPrefixStr = JSON.stringify(msgs.slice(0, prefixEnd));
 
-      const sysFullMd5 = createHash("md5").update(sysFullStr).digest("hex").slice(0, 12);
-      const sysTextMd5 = createHash("md5").update(sysTextStr).digest("hex").slice(0, 12);
-      const msgsPrefixMd5 = createHash("md5").update(msgsPrefixStr).digest("hex").slice(0, 12);
+      const sysFullMd5 = createHash("md5")
+        .update(sysFullStr)
+        .digest("hex")
+        .slice(0, 12);
+      const sysTextMd5 = createHash("md5")
+        .update(sysTextStr)
+        .digest("hex")
+        .slice(0, 12);
+      const msgsPrefixMd5 = createHash("md5")
+        .update(msgsPrefixStr)
+        .digest("hex")
+        .slice(0, 12);
 
       // eslint-disable-next-line no-console
       console.log(
@@ -434,7 +517,9 @@ async function forwardWithRetry(
     } catch (e) {
       // Best-effort; debug logging should not crash the flow
       // eslint-disable-next-line no-console
-      console.log(`[outbound-md5] session=${sessionKeyForDebug ?? "?"} <error: ${(e as Error).message}>`);
+      console.log(
+        `[outbound-md5] session=${sessionKeyForDebug ?? "?"} <error: ${(e as Error).message}>`,
+      );
     }
   }
 
@@ -466,12 +551,19 @@ async function forwardWithRetry(
     pipe.forwardDone(upstreamResp.status);
   }
 
-  const shouldRetry = target.retryTarget &&
-    (forwardFailed || (upstreamResp && upstreamResp.status >= 400 && upstreamResp.status < 500));
+  const shouldRetry =
+    target.retryTarget &&
+    (forwardFailed ||
+      (upstreamResp &&
+        upstreamResp.status >= 400 &&
+        upstreamResp.status < 500));
 
   if (shouldRetry && target.retryTarget) {
     const reason = forwardFailed ? "timeout/error" : `${upstreamResp!.status}`;
-    pipe.info("RETRY", `Routed model failed (${reason}), retrying with ${target.retryTarget.model}`);
+    pipe.info(
+      "RETRY",
+      `Routed model failed (${reason}), retrying with ${target.retryTarget.model}`,
+    );
 
     const retryHeaders: Record<string, string> = { ...originalHeaders };
     retryHeaders["content-type"] = "application/json";
@@ -502,8 +594,14 @@ async function forwardWithRetry(
       return { resp: upstreamResp, retried: true };
     } catch (retryErr: unknown) {
       if (isRateLimitExceededError(retryErr)) throw retryErr;
-      if (retryErr instanceof DOMException && retryErr.name === "TimeoutError") {
-        pipe.error("RETRY_FORWARD", `Timeout after ${forwardTimeoutMs / 1000}s`);
+      if (
+        retryErr instanceof DOMException &&
+        retryErr.name === "TimeoutError"
+      ) {
+        pipe.error(
+          "RETRY_FORWARD",
+          `Timeout after ${forwardTimeoutMs / 1000}s`,
+        );
       } else {
         pipe.error("RETRY_FORWARD", retryErr);
       }
@@ -538,7 +636,16 @@ export async function handleAnthropicMessages(
   const earlySpaceId = extractSpaceIdFromPath(c.req.path) ?? "";
   const earlyVerify = await verifyUserKey(earlyApiKey, earlySpaceId);
   if (earlyVerify.rejected) {
-    return c.json({ type: "error", error: { type: "authentication_error", message: `Authentication failed: ${earlyVerify.rejectReason ?? "unknown"}` } }, 401);
+    return c.json(
+      {
+        type: "error",
+        error: {
+          type: "authentication_error",
+          message: `Authentication failed: ${earlyVerify.rejectReason ?? "unknown"}`,
+        },
+      },
+      401,
+    );
   }
 
   // ── Parse body ──────────────────────────────────────────────────────────
@@ -561,12 +668,20 @@ export async function handleAnthropicMessages(
   // When ccRequestRouting.enabled is off, force as main and follow legacy pipeline.
   // See docs/design/2026-07-30-cc-request-routing-plan.md for details.
   const _pathPartsEarly = c.req.path.split("/").filter(Boolean);
-  const _agentFromPathEarly = _pathPartsEarly[0]
-    && !["v1", "proxy", "skill-bridge", "memory-bridge"].includes(_pathPartsEarly[0])
-    ? _pathPartsEarly[0] : undefined;
-  const agentAdapter = resolveAgentAdapter(_agentFromPathEarly ?? "claude-code");
+  const _agentFromPathEarly =
+    _pathPartsEarly[0] &&
+    !["v1", "proxy", "skill-bridge", "memory-bridge"].includes(
+      _pathPartsEarly[0],
+    )
+      ? _pathPartsEarly[0]
+      : undefined;
+  const agentAdapter = resolveAgentAdapter(
+    _agentFromPathEarly ?? "claude-code",
+  );
   const ccRoutingEnabled = config.ccRequestRouting?.enabled === true;
-  const requestKind: RequestKind = ccRoutingEnabled ? agentAdapter.classifyRequest(body) : "main";
+  const requestKind: RequestKind = ccRoutingEnabled
+    ? agentAdapter.classifyRequest(body)
+    : "main";
 
   // ── Model gate: reject requests whose `model` is not a registered display name ──
   // When pricing table is configured, client `model` must match the `modelName`
@@ -577,7 +692,8 @@ export async function handleAnthropicMessages(
   // Internal/external users are treated equally — internal callers must also request by
   // `modelName`, ensuring upstream ids and billing/observability keys align
   // across all traffic.
-  const requestedModel = typeof body.model === "string" ? body.model : "unknown";
+  const requestedModel =
+    typeof body.model === "string" ? body.model : "unknown";
   if (!isModelInPricing(config.creditPricing, requestedModel)) {
     return c.json(
       {
@@ -597,7 +713,8 @@ export async function handleAnthropicMessages(
   // routing / logging / forwarding, so model_id stays the canonical identity
   // across the whole pipeline. No-op when `model` is already a real id/unknown.
   const modelId = resolveModelId(config.creditPricing, requestedModel);
-  const modelAliasApplied = typeof body.model === "string" && modelId !== requestedModel;
+  const modelAliasApplied =
+    typeof body.model === "string" && modelId !== requestedModel;
   if (modelAliasApplied) body.model = modelId;
 
   // ── System-user short-circuit ────────────────────────────────────────────
@@ -623,8 +740,11 @@ export async function handleAnthropicMessages(
 
   // ── Resolve agent source from URL path (e.g. /claude-code/v1/messages) ──
   const pathParts = c.req.path.split("/").filter(Boolean);
-  const agentFromPath = pathParts[0] && !["v1", "proxy", "skill-bridge", "memory-bridge"].includes(pathParts[0])
-    ? pathParts[0] : undefined;
+  const agentFromPath =
+    pathParts[0] &&
+    !["v1", "proxy", "skill-bridge", "memory-bridge"].includes(pathParts[0])
+      ? pathParts[0]
+      : undefined;
   const agentSource = agentFromPath ?? "claude-code";
 
   // ── Identity inspection ──────────────────────────────────────────────────
@@ -632,7 +752,13 @@ export async function handleAnthropicMessages(
   for (const [k, v] of c.req.raw.headers.entries()) {
     reqHeaders[k] = v;
   }
-  inspectAndRecord("POST", c.req.path, reqHeaders, body as Record<string, unknown>, agentSource);
+  inspectAndRecord(
+    "POST",
+    c.req.path,
+    reqHeaders,
+    body as Record<string, unknown>,
+    agentSource,
+  );
 
   // ── Resolve apiKey → project name ──────────────────────────────────────
   const apiKey = extractApiKey(c);
@@ -644,21 +770,24 @@ export async function handleAnthropicMessages(
     lcHeaders[k.toLowerCase()] = v;
   }
 
-// ── Session key: prefer conversation header, fallback to agent profile ───────────
+  // ── Session key: prefer conversation header, fallback to agent profile ───────────
   const { resolveConversationId } = await import("./session/session-key.js");
   const conversationId = resolveConversationId(c);
-  const sessionKey = conversationId ?? resolveSessionKey(config, lcHeaders, c.req.path, body, keyId);
+  const sessionKey =
+    conversationId ??
+    resolveSessionKey(config, lcHeaders, c.req.path, body, keyId);
 
   // ── Auth verification (user_key → user_id) ──────────────────────────────────────
   // Reuse the early verify result — it ran before body parse to decide the
   // system-user short-circuit; running verify again here would double the
   // network round-trip for every request.
   const spaceId = earlySpaceId;
-  const userId = earlyVerify.userId
-    || c.req.header("x-user-id")
-    || c.req.header("x-cb-user-id")
-    || c.req.header("x-tdai-user-token")
-    || "";
+  const userId =
+    earlyVerify.userId ||
+    c.req.header("x-user-id") ||
+    c.req.header("x-cb-user-id") ||
+    c.req.header("x-tdai-user-token") ||
+    "";
   if (userId) keyId = userId;
 
   // sk-mem key (used as x-tdai-user-key for TDAI ACL / MetadataClient) is the incoming apiKey.
@@ -672,71 +801,122 @@ export async function handleAnthropicMessages(
 
   // ── mem:session-reset pre-hook ──
   if (config.memCommand?.enabled && requestKind === "main") {
-    const { isSessionResetCommand } = await import("./mem-command/pre-intercept.js");
+    const { isSessionResetCommand } = await import(
+      "./mem-command/pre-intercept.js"
+    );
     if (isSessionResetCommand(body as Record<string, unknown>, agentSource)) {
-      const { isMemCommandAllowed, parseMemCommand } = await import("./mem-command/index.js");
-      const memCmd = parseMemCommand(body as Record<string, unknown>, agentSource);
+      const { isMemCommandAllowed, parseMemCommand } = await import(
+        "./mem-command/index.js"
+      );
+      const memCmd = parseMemCommand(
+        body as Record<string, unknown>,
+        agentSource,
+      );
       if (memCmd && isMemCommandAllowed(config.memCommand, memCmd.command)) {
         const { getSessionStore } = await import("./session/store.js");
         const store = getSessionStore();
         const compositeKey = `${agentSource}:${sessionKey}`;
-        store.bind(compositeKey, { userId: userId || "anonymous", agentSource, sessionId: sessionKey, spaceId });
+        store.bind(compositeKey, {
+          userId: userId || "anonymous",
+          agentSource,
+          sessionId: sessionKey,
+          spaceId,
+        });
 
         // ── Force-archive skill buffer for old agent (best-effort) ──
         const oldState = store.get(compositeKey);
-        if (oldState?.status === "initialized" && oldState.sessionInfo && config.coreSkill?.endpoint) {
+        if (
+          oldState?.status === "initialized" &&
+          oldState.sessionInfo &&
+          config.coreSkill?.endpoint
+        ) {
           // SAFETY: sessionInfo is a JSON-decoded plain object at runtime; treating it as a
           // string record for field extraction is sound (all reads are guarded by truthiness).
           const si = oldState.sessionInfo as unknown as Record<string, string>;
           if (si.space_id && si.user_id && si.team_id && si.agent_id) {
-            import("./skill/core-client.js").then(({ getCoreSkillClient }) => {
-              const client = getCoreSkillClient(config.coreSkill!);
-              client.forceArchive(
-                {
-                  space_id: si.space_id,
-                  user_id: si.user_id,
-                  team_id: si.team_id,
-                  agent_id: si.agent_id,
-                  session_id: sessionKey,
-                  task_id: si.task_id || undefined,
-                  reason: "session-reset",
-                },
-                { serviceId: si.space_id },
-              ).then((res) => {
-                console.log(`[session-reset] force-archive old buffer: status=${res.status} session=${sessionKey} agent=${si.agent_id}`);
-              }).catch((err) => {
-                console.warn(`[session-reset] force-archive failed (best-effort): ${err instanceof Error ? err.message : String(err)}`);
-              });
-            }).catch(() => {});
+            import("./skill/core-client.js")
+              .then(({ getCoreSkillClient }) => {
+                const client = getCoreSkillClient(config.coreSkill!);
+                client
+                  .forceArchive(
+                    {
+                      space_id: si.space_id,
+                      user_id: si.user_id,
+                      team_id: si.team_id,
+                      agent_id: si.agent_id,
+                      session_id: sessionKey,
+                      task_id: si.task_id || undefined,
+                      reason: "session-reset",
+                    },
+                    { serviceId: si.space_id },
+                  )
+                  .then((res) => {
+                    console.log(
+                      `[session-reset] force-archive old buffer: status=${res.status} session=${sessionKey} agent=${si.agent_id}`,
+                    );
+                  })
+                  .catch((err) => {
+                    console.warn(
+                      `[session-reset] force-archive failed (best-effort): ${err instanceof Error ? err.message : String(err)}`,
+                    );
+                  });
+              })
+              .catch(() => {});
           }
         }
 
         const resetEpoch = Date.now();
-        await store.set(compositeKey, { status: "uninitialized", keyId: sessionKey, startedAt: resetEpoch, attemptCount: 0, userId: userId || "anonymous", resetEpoch, resetFlow: true });
+        await store.set(compositeKey, {
+          status: "uninitialized",
+          keyId: sessionKey,
+          startedAt: resetEpoch,
+          attemptCount: 0,
+          userId: userId || "anonymous",
+          resetEpoch,
+          resetFlow: true,
+        });
         const bindingRepo = store.getBindingRepo();
-        if (bindingRepo) await bindingRepo.deleteBinding(spaceId, sessionKey).catch(() => {});
-        console.log(`[mem-command:pre] session-reset session=${sessionKey} → falling through to pop form`);
+        if (bindingRepo)
+          await bindingRepo.deleteBinding(spaceId, sessionKey).catch(() => {});
+        console.log(
+          `[mem-command:pre] session-reset session=${sessionKey} → falling through to pop form`,
+        );
       }
     }
   }
 
   // ── Session Init (before injection pipeline) ─────────────────────────────
   let sessionInfo: Record<string, unknown> | null | undefined;
-  let assetCapabilities: import("./injection/types.js").AssetCapabilityFlags | undefined;
+  let assetCapabilities:
+    | import("./injection/types.js").AssetCapabilityFlags
+    | undefined;
   let injectedSkipped = !conversationId;
   let sessionJustRegistered = false;
-  let _resetFlowResult: { agentName: string; agentIdShort: string; teamId: string; taskName?: string | null; bypassed?: boolean } | null = null;
-  console.log(`[injection-debug] conversationId=${conversationId} sessionKey=${sessionKey} userId=${userId} agentSource=${agentSource} sessionInitEnabled=${config.sessionInit?.enabled} injectionEnabled=${config.injection?.enabled} injectors=${JSON.stringify(config.injection?.injectors)} injectedSkipped=${injectedSkipped}`);
+  let _resetFlowResult: {
+    agentName: string;
+    agentIdShort: string;
+    teamId: string;
+    taskName?: string | null;
+    bypassed?: boolean;
+  } | null = null;
+  console.log(
+    `[injection-debug] conversationId=${conversationId} sessionKey=${sessionKey} userId=${userId} agentSource=${agentSource} sessionInitEnabled=${config.sessionInit?.enabled} injectionEnabled=${config.injection?.enabled} injectors=${JSON.stringify(config.injection?.injectors)} injectedSkipped=${injectedSkipped}`,
+  );
   // CC traffic split: SIDEQUERY completely skips session-init (isolated small request without session concept).
   //                   FORK allows running L2b recovery to reuse MAIN's established session, but does not enter form interaction
   //                   (borrows MAIN's sessionInfo, see kind === 'fork' branch protection below).
   const skipSessionInit = requestKind === "sidequery";
   if (config.sessionInit?.enabled && conversationId && !skipSessionInit) {
     try {
-      const { getSessionStore, handleSessionInit, parsePresetIdentity } = await import("./session/index.js");
+      const { getSessionStore, handleSessionInit, parsePresetIdentity } =
+        await import("./session/index.js");
       const { getMetadataClient } = await import("./meta/client.js");
       const store = getSessionStore();
-      const metadataClient = getMetadataClient(config.coreSkill, spaceId, apiKey);
+      const metadataClient = getMetadataClient(
+        config.coreSkill,
+        spaceId,
+        apiKey,
+      );
       const presetIdentity = parsePresetIdentity(config.sessionInit, lcHeaders);
 
       // ── Session Recovery: try L2b binding before falling into session-init form ──
@@ -751,7 +931,7 @@ export async function handleAnthropicMessages(
       };
       const recovered = await store.getOrRecover(compositeKey, identity, {
         metadataClient,
-        messages: body.messages as Array<Record<string, unknown>> ?? [],
+        messages: (body.messages as Array<Record<string, unknown>>) ?? [],
         presetIdentity,
       });
 
@@ -784,7 +964,9 @@ export async function handleAnthropicMessages(
         // Anthropic protocol: system lives on body.system (not in messages),
         // so we hand systemAppend back through the initResult and let the
         // shared apply-block below merge it into body.system.
-        const { buildSessionContextBlockWithToggles } = await import("./session/context-injector.js");
+        const { buildSessionContextBlockWithToggles } = await import(
+          "./session/context-injector.js"
+        );
         const inMsgs = (body.messages as Array<Record<string, unknown>>) ?? [];
         const systemAppend = recovered.bypassed
           ? null
@@ -808,17 +990,26 @@ export async function handleAnthropicMessages(
         // FORK borrows MAIN's established session. An L2b miss indicates MAIN hasn't completed init yet — rare case.
         // Conservatively treat fork request as no-op (no intercept, no message modification), passing raw request to upstream.
         // The worst outcome is MAIN missing sessionInfo (equivalent to disabling session-init), no worse.
-        console.log(`[session-init:cc:fork] session=${compositeKey} L2b miss on fork request → passthrough`);
-        initResult = { intercepted: false, messages: body.messages as Record<string, unknown>[] };
+        console.log(
+          `[session-init:cc:fork] session=${compositeKey} L2b miss on fork request → passthrough`,
+        );
+        initResult = {
+          intercepted: false,
+          messages: body.messages as Record<string, unknown>[],
+        };
       } else {
         wentThroughSessionInitStateMachine = true;
         initResult = await handleSessionInit(
           sessionKey,
           userId || null,
-          body.messages as Array<Record<string, unknown>> ?? [],
+          (body.messages as Array<Record<string, unknown>>) ?? [],
           config.sessionInit,
           store,
-          { stream: isStream, modelId: modelId as string, protocol: "anthropic" },
+          {
+            stream: isStream,
+            modelId: modelId as string,
+            protocol: "anthropic",
+          },
           agentSource,
           metadataClient,
           apiKey,
@@ -831,26 +1022,38 @@ export async function handleAnthropicMessages(
         return initResult.response;
       }
 
-      console.log(`[injection-debug] initResult session=${sessionKey} intercepted=${initResult.intercepted} bypassed=${initResult.bypassed} justRegistered=${initResult.justRegistered} resetFlow=${initResult.resetFlow} hasSessionInfo=${!!initResult.sessionInfo} hasAgentDetail=${!!initResult.agentDetail}`);
+      console.log(
+        `[injection-debug] initResult session=${sessionKey} intercepted=${initResult.intercepted} bypassed=${initResult.bypassed} justRegistered=${initResult.justRegistered} resetFlow=${initResult.resetFlow} hasSessionInfo=${!!initResult.sessionInfo} hasAgentDetail=${!!initResult.agentDetail}`,
+      );
       // sessionJustRegistered is used by mem-command checkFirst fallback (in the turn of the last session init
       // step "pending_task_select → initialized", executing the user's original mem: command).
       // **CRITICAL**: Only branches executing the handleSessionInit state machine inherit justRegistered;
       // L2b recovery branch's justRegistered=true is merely a rebuild signal for downstream prewarm, not session init,
       // so sessionJustRegistered is not set here — otherwise mem-command would inspect the first history user message
       // every turn, executing the initial mem:help repeatedly.
-      if (wentThroughSessionInitStateMachine && initResult.justRegistered) sessionJustRegistered = true;
+      if (wentThroughSessionInitStateMachine && initResult.justRegistered)
+        sessionJustRegistered = true;
       if (initResult.bypassed) {
         injectedSkipped = true;
-        console.log(`[session-init] session=${sessionKey} bypassed → skipping all injection`);
+        console.log(
+          `[session-init] session=${sessionKey} bypassed → skipping all injection`,
+        );
         // User chose "skip" in reset flow → also return confirmation message instead of forwarding to LLM
         if (initResult.resetFlow) {
-          _resetFlowResult = { agentName: "", agentIdShort: "", teamId: "", bypassed: true };
+          _resetFlowResult = {
+            agentName: "",
+            agentIdShort: "",
+            teamId: "",
+            bypassed: true,
+          };
         }
       }
 
       if (!initResult.bypassed && initResult.sessionInfo) {
         try {
-          const { fetchAssetCapabilities } = await import("./tdai/capabilities.js");
+          const { fetchAssetCapabilities } = await import(
+            "./tdai/capabilities.js"
+          );
           assetCapabilities = await fetchAssetCapabilities({
             endpoint: config.tdai.endpoint,
             apiKey: config.tdai.apiKey,
@@ -860,9 +1063,13 @@ export async function handleAnthropicMessages(
             userKey: callerUserKey,
             timeoutMs: config.tdai.memory.timeoutMs,
           });
-          console.log(`[asset-capability] user=${(initResult.sessionInfo as { user_id?: string }).user_id ?? "-"} flags=${JSON.stringify(assetCapabilities)}`);
+          console.log(
+            `[asset-capability] user=${(initResult.sessionInfo as { user_id?: string }).user_id ?? "-"} flags=${JSON.stringify(assetCapabilities)}`,
+          );
         } catch (err) {
-          console.warn(`[asset-capability] resolve failed: ${err instanceof Error ? err.message : String(err)}`);
+          console.warn(
+            `[asset-capability] resolve failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
 
@@ -872,14 +1079,25 @@ export async function handleAnthropicMessages(
       let memCommandPending = false;
       if (config.memCommand?.enabled && requestKind === "main") {
         try {
-          const { parseMemCommand, isMemCommandAllowed } = await import("./mem-command/index.js");
-          let peek = parseMemCommand(body as Record<string, unknown>, agentSource);
+          const { parseMemCommand, isMemCommandAllowed } = await import(
+            "./mem-command/index.js"
+          );
+          let peek = parseMemCommand(
+            body as Record<string, unknown>,
+            agentSource,
+          );
           if (!peek && sessionJustRegistered) {
-            peek = parseMemCommand(body as Record<string, unknown>, agentSource, { checkFirst: true });
+            peek = parseMemCommand(
+              body as Record<string, unknown>,
+              agentSource,
+              { checkFirst: true },
+            );
           }
           if (peek && isMemCommandAllowed(config.memCommand, peek.command)) {
             memCommandPending = true;
-            console.log(`[hook-cache] prewarm skipped: mem-command pending (cmd=${peek.command}) session=${sessionKey}`);
+            console.log(
+              `[hook-cache] prewarm skipped: mem-command pending (cmd=${peek.command}) session=${sessionKey}`,
+            );
           }
         } catch (err) {
           console.warn(
@@ -907,18 +1125,23 @@ export async function handleAnthropicMessages(
           // old agent's skill/wiki/knowledge cache must be cleared before writing new cache to avoid stale injections.
           // Always clearBefore: initial init cache is empty so clearing is a no-op;
           // clearing old agent cache during reset-flow is essential. Unified semantics are safer.
-          await mod.prewarmFromConfig(config, {
-            keyId: sessionKey,
-            userId: userId || "anonymous",
-            agentSource,
-            spaceId,
-            sessionInfo: initResult.sessionInfo as import("./session/types.js").SessionInfo,
-            agentDetail: initResult.agentDetail ?? null,
-            taskDetail: initResult.taskDetail ?? null,
-            assetCapabilities,
-            // Pass through caller's sk-mem key for TDAI ACL verification during prewarm (x-tdai-user-key)
-            callerUserKey: callerUserKey ?? undefined,
-          }, { clearBefore: true });
+          await mod.prewarmFromConfig(
+            config,
+            {
+              keyId: sessionKey,
+              userId: userId || "anonymous",
+              agentSource,
+              spaceId,
+              sessionInfo:
+                initResult.sessionInfo as import("./session/types.js").SessionInfo,
+              agentDetail: initResult.agentDetail ?? null,
+              taskDetail: initResult.taskDetail ?? null,
+              assetCapabilities,
+              // Pass through caller's sk-mem key for TDAI ACL verification during prewarm (x-tdai-user-key)
+              callerUserKey: callerUserKey ?? undefined,
+            },
+            { clearBefore: true },
+          );
         } catch (err) {
           console.warn(
             "[hook-cache] handler prewarm error (anthropic):",
@@ -939,11 +1162,22 @@ export async function handleAnthropicMessages(
       // hands the pre-built block back through `systemAppend` and we merge it
       // here with the same append helper used by the direct-inject path.
       if (initResult.systemAppend) {
-        const { appendBlockToAnthropicSystem } = await import("./session/context-injector.js");
-        body = { ...body, system: appendBlockToAnthropicSystem(body.system, initResult.systemAppend) };
+        const { appendBlockToAnthropicSystem } = await import(
+          "./session/context-injector.js"
+        );
+        body = {
+          ...body,
+          system: appendBlockToAnthropicSystem(
+            body.system,
+            initResult.systemAppend,
+          ),
+        };
       }
 
-      sessionInfo = initResult.sessionInfo as Record<string, unknown> | null | undefined;
+      sessionInfo = initResult.sessionInfo as
+        | Record<string, unknown>
+        | null
+        | undefined;
       // Legacy sessions persisted before space_id was tracked will hydrate
       // with an empty space_id. Restore it from the URL each request so
       // downstream skill / knowledge / injection paths route to the correct
@@ -955,19 +1189,31 @@ export async function handleAnthropicMessages(
       // Record resetFlow to outer scope for returning confirmation response
       // SAFETY: sessionInfo is a JSON-decoded plain object at runtime; string-keyed reads
       // with optional chaining are sound (missing keys yield undefined, handled by ?:).
-      const sessionFields = initResult.sessionInfo as unknown as Record<string, unknown> | null | undefined;
-      if (initResult.resetFlow && initResult.justRegistered && !initResult.bypassed) {
+      const sessionFields = initResult.sessionInfo as unknown as
+        | Record<string, unknown>
+        | null
+        | undefined;
+      if (
+        initResult.resetFlow &&
+        initResult.justRegistered &&
+        !initResult.bypassed
+      ) {
         _resetFlowResult = {
           agentName: initResult.agentDetail?.name ?? "Unknown",
           agentIdShort: sessionFields?.agent_id
-            ? String(sessionFields.agent_id).slice(-8) : "",
+            ? String(sessionFields.agent_id).slice(-8)
+            : "",
           teamId: sessionFields?.team_id
-            ? String(sessionFields.team_id).slice(-8) : "",
+            ? String(sessionFields.team_id).slice(-8)
+            : "",
           taskName: initResult.taskDetail?.name,
         };
       }
     } catch (err: unknown) {
-      console.error("[session-init] Error in handleSessionInit (anthropic):", err instanceof Error ? err.message : String(err));
+      console.error(
+        "[session-init] Error in handleSessionInit (anthropic):",
+        err instanceof Error ? err.message : String(err),
+      );
       sessionInfo = undefined;
       injectedSkipped = true;
     }
@@ -979,9 +1225,14 @@ export async function handleAnthropicMessages(
   // is still in body.messages; if not intercepted, it would be forwarded to LLM causing uncontrolled output.
   // Command execution is complete (new agent bound, cache refreshed) → return confirmation text without hitting LLM.
   if (_resetFlowResult) {
-    const { agentName, agentIdShort, teamId, taskName, bypassed } = _resetFlowResult;
+    const { agentName, agentIdShort, teamId, taskName, bypassed } =
+      _resetFlowResult;
     const lines = bypassed
-      ? ["✅ Skipped team asset association", "", "Subsequent conversations will not inject team assets (Skill / Memory / Knowledge)."]
+      ? [
+          "✅ Skipped team asset association",
+          "",
+          "Subsequent conversations will not inject team assets (Skill / Memory / Knowledge).",
+        ]
       : [
           "✅ Team assets rebound",
           "",
@@ -993,9 +1244,13 @@ export async function handleAnthropicMessages(
         ].filter(Boolean);
     const text = (lines as string[]).join("\n");
 
-    const { buildMemResponse } = await import("./mem-command/response-builder.js");
+    const { buildMemResponse } = await import(
+      "./mem-command/response-builder.js"
+    );
     const thinkingEnabled = !!(body as Record<string, unknown>).thinking;
-    console.log(`[mem-command:session-reset] completed: bypassed=${!!bypassed} agent=${agentName} (${agentIdShort})`);
+    console.log(
+      `[mem-command:session-reset] completed: bypassed=${!!bypassed} agent=${agentName} (${agentIdShort})`,
+    );
     return buildMemResponse(text, {
       protocol: "anthropic",
       stream: isStream,
@@ -1017,7 +1272,14 @@ export async function handleAnthropicMessages(
   // CC split: FORK/SIDEQUERY are internally constructed requests by CC client; last_user won't start with `mem:`,
   //           and synthetic responses would break fork requests' cache assumptions depending on MAIN. Skip interception.
   if (config.memCommand?.enabled && requestKind === "main") {
-    const { parseMemCommand, isMemCommandAllowed, executeMemCommand, buildMemResponse, extractSimpleMessages, truncateArgs } = await import("./mem-command/index.js");
+    const {
+      parseMemCommand,
+      isMemCommandAllowed,
+      executeMemCommand,
+      buildMemResponse,
+      extractSimpleMessages,
+      truncateArgs,
+    } = await import("./mem-command/index.js");
     // Normal check: last user message
     let memCmd = parseMemCommand(body as Record<string, unknown>, agentSource);
     // When session init state machine reaches terminal state (initialized or bypass) in this turn,
@@ -1025,7 +1287,9 @@ export async function handleAnthropicMessages(
     // — the user's initial intent. In bypass scenarios, sessionInfo=null takes the "uninitialized"
     // fallback response, preventing the initial mem: command from being swallowed into history and passed to LLM.
     if (!memCmd && sessionJustRegistered) {
-      memCmd = parseMemCommand(body as Record<string, unknown>, agentSource, { checkFirst: true });
+      memCmd = parseMemCommand(body as Record<string, unknown>, agentSource, {
+        checkFirst: true,
+      });
     }
     // session-reset was already handled in pre-hook (state set to uninitialized → session-init form pops up
     // → user submits form → completeRegistration triggers _resetFlowResult return confirmation).
@@ -1043,7 +1307,9 @@ export async function handleAnthropicMessages(
           requestId: `mem-cmd-${Date.now()}`,
           thinking: thinkingEnabled,
         });
-        console.log(`[mem-command] cmd=${memCmd.command} args="${truncateArgs(memCmd.args)}" session=${sessionKey} blocked: session not initialized`);
+        console.log(
+          `[mem-command] cmd=${memCmd.command} args="${truncateArgs(memCmd.args)}" session=${sessionKey} blocked: session not initialized`,
+        );
         return errResponse;
       }
       // Check whether request enables extended thinking (Anthropic protocol)
@@ -1062,7 +1328,9 @@ export async function handleAnthropicMessages(
         thinking: thinkingEnabled,
         // task command family uses recent conversation to generate drafts. Anthropic message content may be an array,
         // extractSimpleMessages concatenates all text segments.
-        bodyMessages: extractSimpleMessages((body as Record<string, unknown>).messages),
+        bodyMessages: extractSimpleMessages(
+          (body as Record<string, unknown>).messages,
+        ),
       });
 
       // Step 20: L0 write — ensure complete conversation timeline.
@@ -1076,10 +1344,19 @@ export async function handleAnthropicMessages(
         sessionKey,
         userKey: callerUserKey,
       });
-      if (tdaiClientForMem && tdaiIdentityForMem && isExtractionAllowed(config, "tdai-memory")) {
+      if (
+        tdaiClientForMem &&
+        tdaiIdentityForMem &&
+        isExtractionAllowed(config, "tdai-memory")
+      ) {
         const userMsg = { role: "user" as const, content: memCmd.rawMessage };
         try {
-          await recordTdaiTurn(tdaiClientForMem, tdaiIdentityForMem, userMsg, memResult.messageText);
+          await recordTdaiTurn(
+            tdaiClientForMem,
+            tdaiIdentityForMem,
+            userMsg,
+            memResult.messageText,
+          );
         } catch (err: unknown) {
           console.error("[mem-command] L0 write error:", err);
         }
@@ -1094,7 +1371,10 @@ export async function handleAnthropicMessages(
       //        to guarantee buffer persistence before returning response.
       if (isExtractionAllowed(config, "skill")) {
         try {
-          const assistantMsg = { role: "assistant", content: [{ type: "text", text: memResult.messageText }] };
+          const assistantMsg = {
+            role: "assistant",
+            content: [{ type: "text", text: memResult.messageText }],
+          };
           await triggerSkillExtractIfReady({
             config,
             sessionKey,
@@ -1106,12 +1386,17 @@ export async function handleAnthropicMessages(
             assetCapabilities,
           });
         } catch (err: unknown) {
-          console.warn("[mem-command] skill extract trigger error:", err instanceof Error ? err.message : String(err));
+          console.warn(
+            "[mem-command] skill extract trigger error:",
+            err instanceof Error ? err.message : String(err),
+          );
         }
       }
 
       // Step 18: observability
-      console.log(`[mem-command] cmd=${memCmd.command} args="${truncateArgs(memCmd.args)}" session=${sessionKey} success=${memResult.success}`);
+      console.log(
+        `[mem-command] cmd=${memCmd.command} args="${truncateArgs(memCmd.args)}" session=${sessionKey} success=${memResult.success}`,
+      );
 
       // Step 17: Langfuse — report mem-command as a generation observation.
       //   mem command interception happens before Langfuse context construction; here we
@@ -1145,7 +1430,10 @@ export async function handleAnthropicMessages(
     }
   }
 
-  const tdaiClient = assetCapabilities?.chat_memory === false ? null : createTdaiClient(config, spaceId);
+  const tdaiClient =
+    assetCapabilities?.chat_memory === false
+      ? null
+      : createTdaiClient(config, spaceId);
   const tdaiIdentity = injectedSkipped
     ? null
     : deriveTdaiIdentity({
@@ -1162,9 +1450,16 @@ export async function handleAnthropicMessages(
   //   - FORK: Run pipeline with readOnly=true (do not self-heal write cache on miss to avoid invalidating main cache)
   //   - MAIN: Run full pipeline (including self-heal)
   const skipInjection = requestKind === "sidequery";
-  if (!injectedSkipped && !skipInjection && config.injection?.enabled && config.injection.injectors.length > 0) {
+  if (
+    !injectedSkipped &&
+    !skipInjection &&
+    config.injection?.enabled &&
+    config.injection.injectors.length > 0
+  ) {
     try {
-      console.log(`[injection-debug] entering injection pipeline session=${sessionKey} turnSeq=${countHumanTurns(messages, "anthropic")} injectors=${config.injection.injectors} kind=${requestKind}`);
+      console.log(
+        `[injection-debug] entering injection pipeline session=${sessionKey} turnSeq=${countHumanTurns(messages, "anthropic")} injectors=${config.injection.injectors} kind=${requestKind}`,
+      );
       const injectionTurnSeq = countHumanTurns(messages, "anthropic");
       const { getInjectionPipeline } = await import("./injection/index.js");
       const pipeline = getInjectionPipeline(config);
@@ -1182,17 +1477,30 @@ export async function handleAnthropicMessages(
         // Pass through original request path — AssetReflectionInjector uses it to identify `/analyse` marker.
         // Other injectors do not depend on this field.
         requestPath: c.req.path,
-        custom: sessionInfo ? { session: sessionInfo, userKey: callerUserKey ?? undefined, assetCapabilities } : undefined,
+        custom: sessionInfo
+          ? {
+              session: sessionInfo,
+              userKey: callerUserKey ?? undefined,
+              assetCapabilities,
+            }
+          : undefined,
         readOnly: requestKind === "fork",
       });
       body = injectedBody;
-      messages = Array.isArray(injectedBody.messages) ? injectedBody.messages : messages;
+      messages = Array.isArray(injectedBody.messages)
+        ? injectedBody.messages
+        : messages;
       hasTools = Array.isArray(body.tools) && body.tools.length > 0;
     } catch (err: unknown) {
-      console.error("[injection] anthropic pipeline error:", err instanceof Error ? err.message : String(err));
+      console.error(
+        "[injection] anthropic pipeline error:",
+        err instanceof Error ? err.message : String(err),
+      );
     }
   } else if (skipInjection) {
-    console.log(`[injection-debug] skipping injection for kind=sidequery session=${sessionKey}`);
+    console.log(
+      `[injection-debug] skipping injection for kind=sidequery session=${sessionKey}`,
+    );
   }
 
   // ── Cost guard: resolve forward target (opaque — no routing logic here) ──
@@ -1200,14 +1508,17 @@ export async function handleAnthropicMessages(
   // prefix); both url and apiKey may be overridden per agent. When there's
   // no entry, we fall through to the Anthropic-specific global (costGuard
   // .anthropicUpstream) and finally to upstream.url — exactly as before.
-  const agentUpstreamEntry = agentFromPath ? config.upstream.agents?.[agentFromPath] : undefined;
+  const agentUpstreamEntry = agentFromPath
+    ? config.upstream.agents?.[agentFromPath]
+    : undefined;
   const defaultUpstreamUrl =
     agentUpstreamEntry?.url ||
     config.costGuard.anthropicUpstream?.url ||
     config.upstream.url;
   // Normalize the request path to the canonical upstream endpoint so the
   // extension's URL joining matches the host whitelist behavior.
-  const forwardEndpoint = matchWhitelistEndpoint(c.req.path)?.upstreamEndpoint ?? "/messages";
+  const forwardEndpoint =
+    matchWhitelistEndpoint(c.req.path)?.upstreamEndpoint ?? "/messages";
   // Isolation key is user-namespaced (`${user}:${session}`) so two users that
   // share the same client session id can't contaminate each other's state /
   // turn counting. ClickHouse keeps the raw session_key (it has its own
@@ -1229,7 +1540,9 @@ export async function handleAnthropicMessages(
     //   regardless of the URL (`/cost-guard` routes are 404 in this mode).
     // markerOptIn=true (test env): only requests with the `/cost-guard`
     //   segment activate the router; bare paths passthrough.
-    useGuard: config.costGuard.markerOptIn ? hasCostGuardMarker(c.req.path) : true,
+    useGuard: config.costGuard.markerOptIn
+      ? hasCostGuardMarker(c.req.path)
+      : true,
     agentName: agentFromPath,
   });
 
@@ -1239,10 +1552,10 @@ export async function handleAnthropicMessages(
   if (target.logLine) pipe.info("COST_GUARD", target.logLine);
   if (target.logLineExtra) pipe.info("COST_GUARD_DETAIL", target.logLineExtra);
   if (ccRoutingEnabled) {
-    console.log(`[cc-routing] session=${sessionKey} kind=${requestKind} msgs=${messages.length}`);
+    console.log(
+      `[cc-routing] session=${sessionKey} kind=${requestKind} msgs=${messages.length}`,
+    );
   }
-
-
 
   // ── Trace-level tags ──
   // agent_source specifies client family (codebuddy / claude-code / codex / …) for
@@ -1260,7 +1573,10 @@ export async function handleAnthropicMessages(
   // Prefer the extension's monotonic per-session turnSeq (survives context
   // compaction); fall back to the stateless count when it's not tracked
   // (extension disabled/unavailable, or no-tools auxiliary request).
-  const turnSeq = target.turnSeq > 0 ? target.turnSeq : countHumanTurns(messages, "anthropic");
+  const turnSeq =
+    target.turnSeq > 0
+      ? target.turnSeq
+      : countHumanTurns(messages, "anthropic");
   const lf: LangfuseTurnContext = {
     traceId: langfuseTurnTraceId(sessionKey, turnSeq),
     turnSeq,
@@ -1269,7 +1585,13 @@ export async function handleAnthropicMessages(
     sessionId: sessionKey,
     tags: traceTags,
     routeTags: target.tags,
-    userQuery: resolveLatestUserQuery(config, lcHeaders, c.req.path, body, messages),
+    userQuery: resolveLatestUserQuery(
+      config,
+      lcHeaders,
+      c.req.path,
+      body,
+      messages,
+    ),
   };
   if (target.analyzerTrace) {
     reportAnalyzerTrace(config, target.analyzerTrace, {
@@ -1332,7 +1654,13 @@ export async function handleAnthropicMessages(
   const effectiveApiKey = agentUpstreamEntry
     ? (agentUpstreamEntry.apiKey ?? "")
     : config.upstream.apiKey;
-  const upstreamHeaders = buildUpstreamHeaders(c, config, target, sessionKey, effectiveApiKey);
+  const upstreamHeaders = buildUpstreamHeaders(
+    c,
+    config,
+    target,
+    sessionKey,
+    effectiveApiKey,
+  );
 
   // Optional private preparation stage. It rewrites `body` / `messages` in
   // place, so it has to land after every host-side mutation (injection, agent
@@ -1358,7 +1686,10 @@ export async function handleAnthropicMessages(
     lf,
   });
 
-  const { body: upstreamBody, sanitizedCount } = buildUpstreamBody(body, target);
+  const { body: upstreamBody, sanitizedCount } = buildUpstreamBody(
+    body,
+    target,
+  );
   if (sanitizedCount > 0) {
     pipe.info(
       "FORWARD",
@@ -1396,9 +1727,13 @@ export async function handleAnthropicMessages(
 
   try {
     const result = await forwardWithRetry(
-      target, upstreamHeaders, upstreamBody,
-      retryBody, originalHeaders,
-      pipe, forwardTimeoutMs,
+      target,
+      upstreamHeaders,
+      upstreamBody,
+      retryBody,
+      originalHeaders,
+      pipe,
+      forwardTimeoutMs,
       sessionKey,
       { config, instanceId: spaceId || undefined },
     );
@@ -1415,7 +1750,8 @@ export async function handleAnthropicMessages(
       startTime,
       endTime: new Date().toISOString(),
       input: buildLangfuseInput(messages, body.system, langfuseDebug),
-      statusMessage: err instanceof Error ? err.message : "Upstream request failed",
+      statusMessage:
+        err instanceof Error ? err.message : "Upstream request failed",
       extraTags: ["error"],
       observationMetadata: { stage: "forward", ...debugMetadata },
     });
@@ -1434,9 +1770,8 @@ export async function handleAnthropicMessages(
   // `x-request-id`). Used for cross-system tracing/audit.
   const upstreamRequestId = upstreamResp.headers.get("x-request-id") ?? "";
 
-  const effectiveModel = retried && target.retryTarget
-    ? target.retryTarget.model
-    : target.model;
+  const effectiveModel =
+    retried && target.retryTarget ? target.retryTarget.model : target.model;
 
   // A retry falls back to the model the client asked for, so the request ends
   // up costing what it would have cost unrouted — no saving to attribute.
@@ -1451,14 +1786,20 @@ export async function handleAnthropicMessages(
   if (isStream) {
     if (!upstreamResp.body) {
       pipe.streamDone(null);
-      return new Response(null, { status: upstreamResp.status, headers: respHeaders });
+      return new Response(null, {
+        status: upstreamResp.status,
+        headers: respHeaders,
+      });
     }
 
     // Log error body for 4xx
     if (!retried && upstreamResp.status >= 400 && upstreamResp.status < 500) {
       const [errStream, clientStream] = upstreamResp.body.tee();
       const errText = await new Response(errStream).text();
-      pipe.error("UPSTREAM_4xx", `status=${upstreamResp.status} body=${errText.slice(0, 1000)}`);
+      pipe.error(
+        "UPSTREAM_4xx",
+        `status=${upstreamResp.status} body=${errText.slice(0, 1000)}`,
+      );
       writeLog(config, {
         timestamp: new Date().toISOString(),
         event: "usage",
@@ -1467,7 +1808,11 @@ export async function handleAnthropicMessages(
         sessionKey,
         upstreamUrl: target.url,
         stream: true,
-        usage: { error: true, status: upstreamResp.status, body: errText.slice(0, 500) },
+        usage: {
+          error: true,
+          status: upstreamResp.status,
+          body: errText.slice(0, 500),
+        },
         ...responseLogMeta,
         routedFrom,
         spaceId,
@@ -1482,10 +1827,17 @@ export async function handleAnthropicMessages(
         status: upstreamResp.status,
         statusMessage: errText.slice(0, 500),
         extraTags: ["error"],
-        observationMetadata: { stage: "upstream", stream: true, ...debugMetadata },
+        observationMetadata: {
+          stage: "upstream",
+          stream: true,
+          ...debugMetadata,
+        },
       });
       pipe.streamDone(null);
-      return new Response(clientStream, { status: upstreamResp.status, headers: respHeaders });
+      return new Response(clientStream, {
+        status: upstreamResp.status,
+        headers: respHeaders,
+      });
     }
 
     const [rawClientStream, tapStream] = upstreamResp.body.tee();
@@ -1524,9 +1876,14 @@ export async function handleAnthropicMessages(
       preparedStats,
     });
 
-    const clientStream = rawClientStream.pipeThrough(createSseThinkingFixStream(pipe));
+    const clientStream = rawClientStream.pipeThrough(
+      createSseThinkingFixStream(pipe),
+    );
 
-    return new Response(clientStream, { status: upstreamResp.status, headers: respHeaders });
+    return new Response(clientStream, {
+      status: upstreamResp.status,
+      headers: respHeaders,
+    });
   }
 
   // ── Non-streaming response ───────────────────────────────────────────────
@@ -1563,7 +1920,10 @@ export async function handleAnthropicMessages(
       }
       if (thinkingPatched) {
         respText = JSON.stringify(respJson);
-        pipe.info("NONSTREAM_THINKING_FIX", "patched thinking block(s) with missing 'thinking' field");
+        pipe.info(
+          "NONSTREAM_THINKING_FIX",
+          "patched thinking block(s) with missing 'thinking' field",
+        );
       }
       outputContent = textParts.join("\n");
       // Preserve full content array (incl. tool_use blocks) for skill trigger.
@@ -1585,7 +1945,10 @@ export async function handleAnthropicMessages(
             .map((b) => ({
               id: (b.id as string) ?? "",
               name: (b.name as string) ?? "",
-              arguments: typeof b.input === "string" ? b.input : JSON.stringify(b.input ?? ""),
+              arguments:
+                typeof b.input === "string"
+                  ? b.input
+                  : JSON.stringify(b.input ?? ""),
             }))
             .filter((tc) => tc.id && tc.arguments),
           usage: usage ?? {},
@@ -1600,7 +1963,8 @@ export async function handleAnthropicMessages(
           .map((b) => {
             const name = (b.name as string) ?? "";
             const input = b.input;
-            const argsStr = typeof input === "string" ? input : JSON.stringify(input ?? "");
+            const argsStr =
+              typeof input === "string" ? input : JSON.stringify(input ?? "");
             return { name, arguments: argsStr };
           })
           .filter((i) => i.name);
@@ -1658,7 +2022,9 @@ export async function handleAnthropicMessages(
       startTime,
       endTime,
       inputMessages: flattenAnthropicMessagesForOpik(messages, body.system),
-      outputMessage: outputContent ? { role: "assistant", content: outputContent } : null,
+      outputMessage: outputContent
+        ? { role: "assistant", content: outputContent }
+        : null,
       model: effectiveModel,
       usage,
       tags: retried ? ["retry"] : undefined,
@@ -1675,11 +2041,12 @@ export async function handleAnthropicMessages(
     // Langfuse: report this LLM call as a generation under the turn trace
     // When debug=true, output uses raw assistantMessage array (including tool_use / thinking /
     // raw stop_reason); when false, falls back to text concatenation to save storage.
-    const langfuseOutput = langfuseDebug && assistantMessage
-      ? assistantMessage
-      : outputContent
-      ? { role: "assistant", content: outputContent }
-      : undefined;
+    const langfuseOutput =
+      langfuseDebug && assistantMessage
+        ? assistantMessage
+        : outputContent
+          ? { role: "assistant", content: outputContent }
+          : undefined;
     langfuseReportGeneration({
       traceId: lf.traceId,
       name: effectiveModel,
@@ -1695,11 +2062,20 @@ export async function handleAnthropicMessages(
       tags: lf.tags,
       traceInput: lf.userQuery || undefined,
       traceOutput: langfuseOutput,
-      traceMetadata: { stream: false, retried, upstreamUrl: target.url, ...logMeta, ...debugMetadata },
+      traceMetadata: {
+        stream: false,
+        retried,
+        upstreamUrl: target.url,
+        ...logMeta,
+        ...debugMetadata,
+      },
       observationMetadata: { retried, ...logMeta, ...debugMetadata },
     });
   } else if (upstreamResp.status >= 400) {
-    pipe.error("UPSTREAM_4xx", `status=${upstreamResp.status} body=${respText.slice(0, 1000)}`);
+    pipe.error(
+      "UPSTREAM_4xx",
+      `status=${upstreamResp.status} body=${respText.slice(0, 1000)}`,
+    );
     langfuseReportFailure({
       lf,
       model: effectiveModel,
@@ -1709,7 +2085,11 @@ export async function handleAnthropicMessages(
       status: upstreamResp.status,
       statusMessage: respText.slice(0, 500),
       extraTags: ["error"],
-      observationMetadata: { stage: "upstream", stream: false, ...debugMetadata },
+      observationMetadata: {
+        stage: "upstream",
+        stream: false,
+        ...debugMetadata,
+      },
     });
   }
 
@@ -1735,7 +2115,9 @@ export async function handleAnthropicMessages(
   } else if (isMainDialog) {
     logExtractionSkipped(config, "skill", sessionKey);
   } else {
-    console.log(`[cc-routing] skip skill buffer for kind=${requestKind} session=${sessionKey}`);
+    console.log(
+      `[cc-routing] skip skill buffer for kind=${requestKind} session=${sessionKey}`,
+    );
   }
 
   // TDAI L0 write (non-streaming).
@@ -1744,13 +2126,23 @@ export async function handleAnthropicMessages(
   // short-term memory. **Previously only stream=true was writing**, non-stream requests (like tool/test scripts
   // using stream:false) silently dropped writes. Missing this call meant CC non-stream scenarios
   // had zero L0 memory writes.
-  if (isMainDialog && tdaiClient && isExtractionAllowed(config, "tdai-memory")) {
-    recordTdaiTurn(tdaiClient, tdaiIdentity, tdaiUserMessage, outputContent)
-      .catch((err: unknown) => pipe.error("TDAI_L0", err));
+  if (
+    isMainDialog &&
+    tdaiClient &&
+    isExtractionAllowed(config, "tdai-memory")
+  ) {
+    recordTdaiTurn(
+      tdaiClient,
+      tdaiIdentity,
+      tdaiUserMessage,
+      outputContent,
+    ).catch((err: unknown) => pipe.error("TDAI_L0", err));
   } else if (isMainDialog && tdaiClient) {
     logExtractionSkipped(config, "tdai-memory", sessionKey);
   } else if (!isMainDialog) {
-    console.log(`[cc-routing] skip L0 write for kind=${requestKind} session=${sessionKey}`);
+    console.log(
+      `[cc-routing] skip L0 write for kind=${requestKind} session=${sessionKey}`,
+    );
   }
 
   // Credit usage reporting (non-streaming). Failures are surfaced to the client
@@ -1789,9 +2181,11 @@ export async function handleAnthropicMessages(
     );
   }
 
-  return new Response(respText, { status: upstreamResp.status, headers: respHeaders });
+  return new Response(respText, {
+    status: upstreamResp.status,
+    headers: respHeaders,
+  });
 }
-
 
 /**
  * Create a TransformStream that patches Anthropic SSE events in-band.
@@ -1837,7 +2231,9 @@ function createSseThinkingFixStream(
           let patched = false;
 
           if (evt.type === "content_block_start") {
-            const block = evt.content_block as Record<string, unknown> | undefined;
+            const block = evt.content_block as
+              | Record<string, unknown>
+              | undefined;
             if (block?.type === "thinking") {
               if (block.thinking === undefined || block.thinking === null) {
                 block.thinking = "";
@@ -1886,7 +2282,10 @@ function createSseThinkingFixStream(
         controller.enqueue(encoder.encode(sseBuf));
       }
       if (patchedCount > 0) {
-        pipe.info("SSE_FIX", `patched ${patchedCount} thinking block(s) with missing 'thinking' field`);
+        pipe.info(
+          "SSE_FIX",
+          `patched ${patchedCount} thinking block(s) with missing 'thinking' field`,
+        );
       }
     },
   });
@@ -1941,8 +2340,28 @@ interface AnthropicTapContext {
 /**
  * Consume Anthropic SSE stream in background, extract usage, log + Opik.
  */
-function consumeAnthropicStream(stream: ReadableStream<Uint8Array>, ctx: AnthropicTapContext): void {
-  const { config, modelId, keyId, sessionKey, upstreamUrl, traceId, forkTraceId, startTime, inputMessages, system, retried, logMeta, pipe, lf, spaceId, upstreamRequestId } = ctx;
+function consumeAnthropicStream(
+  stream: ReadableStream<Uint8Array>,
+  ctx: AnthropicTapContext,
+): void {
+  const {
+    config,
+    modelId,
+    keyId,
+    sessionKey,
+    upstreamUrl,
+    traceId,
+    forkTraceId,
+    startTime,
+    inputMessages,
+    system,
+    retried,
+    logMeta,
+    pipe,
+    lf,
+    spaceId,
+    upstreamRequestId,
+  } = ctx;
 
   (async () => {
     const decoder = new TextDecoder();
@@ -1957,15 +2376,26 @@ function consumeAnthropicStream(stream: ReadableStream<Uint8Array>, ctx: Anthrop
     //   2. content_block_delta(type=input_json_delta) → accumulate partial_json string
     //   3. content_block_stop → block ends
     // Previous implementation only read input in (1) (always empty) — now accumulating partial_json in (2) by index.
-    const toolUseAcc = new Map<number, { id: string; name: string; inputJson: string }>();
+    const toolUseAcc = new Map<
+      number,
+      { id: string; name: string; inputJson: string }
+    >();
 
-    const timeoutHandle = setTimeout(() => {
-      if (!streamCompleted) {
-        pipe.error("STREAM_TIMEOUT", "Anthropic stream reading exceeded 5 minutes");
-        // completeStream is async; fire-and-forget here (cannot await inside timeout)
-        void completeStream().catch((err) => pipe.error("STREAM_TIMEOUT_COMPLETE", err));
-      }
-    }, 5 * 60 * 1000);
+    const timeoutHandle = setTimeout(
+      () => {
+        if (!streamCompleted) {
+          pipe.error(
+            "STREAM_TIMEOUT",
+            "Anthropic stream reading exceeded 5 minutes",
+          );
+          // completeStream is async; fire-and-forget here (cannot await inside timeout)
+          void completeStream().catch((err) =>
+            pipe.error("STREAM_TIMEOUT_COMPLETE", err),
+          );
+        }
+      },
+      5 * 60 * 1000,
+    );
 
     async function completeStream(): Promise<void> {
       if (streamCompleted) return;
@@ -2011,8 +2441,13 @@ function consumeAnthropicStream(stream: ReadableStream<Uint8Array>, ctx: Anthrop
             name: modelId,
             startTime,
             endTime,
-            inputMessages: flattenAnthropicMessagesForOpik(inputMessages, system),
-            outputMessage: outputText ? { role: "assistant", content: outputText } : null,
+            inputMessages: flattenAnthropicMessagesForOpik(
+              inputMessages,
+              system,
+            ),
+            outputMessage: outputText
+              ? { role: "assistant", content: outputText }
+              : null,
             model: modelId,
             usage,
             tags: retried ? ["retry"] : undefined,
@@ -2046,21 +2481,31 @@ function consumeAnthropicStream(stream: ReadableStream<Uint8Array>, ctx: Anthrop
             startTime,
             endTime,
             input: buildLangfuseInput(inputMessages, system, ctx.langfuseDebug),
-            output: outputText ? { role: "assistant", content: outputText } : undefined,
+            output: outputText
+              ? { role: "assistant", content: outputText }
+              : undefined,
             usage,
             traceName: lf.traceName,
             userId: lf.userId,
             sessionId: lf.sessionId,
             tags: lf.tags,
             traceInput: lf.userQuery || undefined,
-            traceOutput: outputText ? { role: "assistant", content: outputText } : undefined,
+            traceOutput: outputText
+              ? { role: "assistant", content: outputText }
+              : undefined,
             traceMetadata: {
-              stream: true, retried, upstreamUrl, ...logMeta,
-              ...ctx.debugMetadata, ...streamDebugExtra,
+              stream: true,
+              retried,
+              upstreamUrl,
+              ...logMeta,
+              ...ctx.debugMetadata,
+              ...streamDebugExtra,
             },
             observationMetadata: {
-              retried, ...logMeta,
-              ...ctx.debugMetadata, ...streamDebugExtra,
+              retried,
+              ...logMeta,
+              ...ctx.debugMetadata,
+              ...streamDebugExtra,
             },
           });
         } catch (langfuseErr: unknown) {
@@ -2072,21 +2517,31 @@ function consumeAnthropicStream(stream: ReadableStream<Uint8Array>, ctx: Anthrop
       const isMainDialog = ctx.requestKind === "main";
 
       // Tdai L0 write
-      if (isMainDialog && ctx.tdaiClient && isExtractionAllowed(ctx.config, "tdai-memory")) {
+      if (
+        isMainDialog &&
+        ctx.tdaiClient &&
+        isExtractionAllowed(ctx.config, "tdai-memory")
+      ) {
         // Streaming does not await (avoids slowing down SSE closure); trackWrite + withL0Retry handle two packet loss vectors:
         //   - trackWrite registers in-flight promise to global set; on SIGTERM index.ts runs
         //     flushPendingWrites fallback to prevent pod rolling exit before event loop flushes L0.
         //   - withL0Retry performs 3 backoff retries (~3.5s) against tdai kernel glitches / 5xx / network jitter.
         trackWrite(
-          withL0Retry(() => recordTdaiTurn(
-            ctx.tdaiClient!, ctx.tdaiIdentity, ctx.tdaiUserMessage,
-            outputText || null,
-          )).catch((err: unknown) => pipe.error("TDAI_L0", err))
+          withL0Retry(() =>
+            recordTdaiTurn(
+              ctx.tdaiClient!,
+              ctx.tdaiIdentity,
+              ctx.tdaiUserMessage,
+              outputText || null,
+            ),
+          ).catch((err: unknown) => pipe.error("TDAI_L0", err)),
         );
       } else if (isMainDialog && ctx.tdaiClient) {
         logExtractionSkipped(ctx.config, "tdai-memory", ctx.sessionKeyForSkill);
       } else if (!isMainDialog) {
-        console.log(`[cc-routing] skip L0 write (stream) for kind=${ctx.requestKind} session=${ctx.sessionKeyForSkill}`);
+        console.log(
+          `[cc-routing] skip L0 write (stream) for kind=${ctx.requestKind} session=${ctx.sessionKeyForSkill}`,
+        );
       }
 
       pipe.streamDone(Object.keys(usage).length > 0 ? usage : null);
@@ -2151,7 +2606,9 @@ function consumeAnthropicStream(stream: ReadableStream<Uint8Array>, ctx: Anthrop
       } else if (isMainDialog) {
         logExtractionSkipped(ctx.config, "skill", ctx.sessionKeyForSkill);
       } else {
-        console.log(`[cc-routing] skip skill buffer (stream) for kind=${ctx.requestKind} session=${ctx.sessionKeyForSkill}`);
+        console.log(
+          `[cc-routing] skip skill buffer (stream) for kind=${ctx.requestKind} session=${ctx.sessionKeyForSkill}`,
+        );
       }
 
       // Credit usage reporting for streaming responses. The stream has already
@@ -2168,7 +2625,10 @@ function consumeAnthropicStream(stream: ReadableStream<Uint8Array>, ctx: Anthrop
       )
         .then((outcome) => {
           if (outcome.attempted && !outcome.ok) {
-            pipe.error("CREDIT_REPORT", `[stream] ${outcome.errorMessage ?? "unknown"}`);
+            pipe.error(
+              "CREDIT_REPORT",
+              `[stream] ${outcome.errorMessage ?? "unknown"}`,
+            );
             // Persist failed report as a raw record (reuses existing usage_raw table).
             writeFailedReportRaw(
               {
@@ -2220,7 +2680,9 @@ function consumeAnthropicStream(stream: ReadableStream<Uint8Array>, ctx: Anthrop
             const evtType = evt.type as string;
 
             if (evtType === "message_start") {
-              const message = evt.message as Record<string, unknown> | undefined;
+              const message = evt.message as
+                | Record<string, unknown>
+                | undefined;
               if (message?.usage) {
                 Object.assign(usage, message.usage as Record<string, unknown>);
               }
@@ -2230,9 +2692,15 @@ function consumeAnthropicStream(stream: ReadableStream<Uint8Array>, ctx: Anthrop
               }
             } else if (evtType === "content_block_delta") {
               const delta = evt.delta as Record<string, unknown> | undefined;
-              if (delta?.type === "text_delta" && typeof delta.text === "string") {
+              if (
+                delta?.type === "text_delta" &&
+                typeof delta.text === "string"
+              ) {
                 outputText += delta.text;
-              } else if (delta?.type === "input_json_delta" && typeof delta.partial_json === "string") {
+              } else if (
+                delta?.type === "input_json_delta" &&
+                typeof delta.partial_json === "string"
+              ) {
                 // Accumulate into corresponding tool_use block (by index)
                 try {
                   const idx = evt.index as number | undefined;
@@ -2245,14 +2713,20 @@ function consumeAnthropicStream(stream: ReadableStream<Uint8Array>, ctx: Anthrop
                 }
               }
             } else if (evtType === "content_block_start") {
-              const block = evt.content_block as Record<string, unknown> | undefined;
+              const block = evt.content_block as
+                | Record<string, unknown>
+                | undefined;
               if (block?.type === "tool_use") {
                 toolUseCount++;
                 try {
                   const name = (block.name as string) ?? "";
                   const idx = evt.index as number | undefined;
                   if (name && typeof idx === "number") {
-                    toolUseAcc.set(idx, { id: (block.id as string) ?? "", name, inputJson: "" });
+                    toolUseAcc.set(idx, {
+                      id: (block.id as string) ?? "",
+                      name,
+                      inputJson: "",
+                    });
                   }
                 } catch {
                   // ignore — accumulation failures do not affect main pipeline

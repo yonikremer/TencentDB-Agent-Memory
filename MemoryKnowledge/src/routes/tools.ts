@@ -17,7 +17,12 @@ import type { WikiService, CodeGraphService } from "../store/index.js";
 import type { CodeGraphInstancePool } from "../module.js";
 import type { WikiSourceManager } from "../engines/wiki/index.js";
 import { executeTool as executeCodeTool } from "../engines/code/index.js";
-import { wrapOk, wrapError, isValidIdSegment, extractRequesterTeam } from "../api-helpers.js";
+import {
+  wrapOk,
+  wrapError,
+  isValidIdSegment,
+  extractRequesterTeam,
+} from "../api-helpers.js";
 import { isWikiId, isCodeGraphId } from "../store/ids.js";
 
 export interface ToolsRouteDeps {
@@ -55,10 +60,16 @@ const WIKI_TOOLS: HttpToolDef[] = [
   },
   {
     name: "search",
-    description: "BM25 full-text search across wiki pages. Use keywords to find relevant documents.",
+    description:
+      "BM25 full-text search across wiki pages. Use keywords to find relevant documents.",
     params: {
       query: { type: "string", required: true, description: "Search keywords" },
-      limit: { type: "integer", required: false, default: 20, description: "Maximum number of results to return" },
+      limit: {
+        type: "integer",
+        required: false,
+        default: 20,
+        description: "Maximum number of results to return",
+      },
     },
   },
   {
@@ -70,7 +81,11 @@ const WIKI_TOOLS: HttpToolDef[] = [
     name: "read_page",
     description: "Read full content of specified pages.",
     params: {
-      refs: { type: "array", required: true, description: "Array of page references (ID or path)" },
+      refs: {
+        type: "array",
+        required: true,
+        description: "Array of page references (ID or path)",
+      },
     },
   },
   {
@@ -87,7 +102,11 @@ const WIKI_TOOLS: HttpToolDef[] = [
     name: "read_raw",
     description: "Read content of specified raw files.",
     params: {
-      filenames: { type: "array", required: true, description: "Array of filenames" },
+      filenames: {
+        type: "array",
+        required: true,
+        description: "Array of filenames",
+      },
     },
   },
 ];
@@ -96,7 +115,8 @@ const WIKI_TOOLS: HttpToolDef[] = [
 const CODE_GRAPH_TOOLS: HttpToolDef[] = [
   {
     name: "get_info",
-    description: "Get code-graph metadata (repository name, status, statistics, etc.).",
+    description:
+      "Get code-graph metadata (repository name, status, statistics, etc.).",
     params: {},
   },
   {
@@ -104,14 +124,34 @@ const CODE_GRAPH_TOOLS: HttpToolDef[] = [
     description:
       "Quickly search symbols by name, returning locations only (no source code). To obtain source code directly or understand a piece of code, use explore instead.",
     params: {
-      query: { type: "string", required: true, description: "Symbol name or partial name (e.g. \"auth\", \"signIn\", \"UserService\")" },
+      query: {
+        type: "string",
+        required: true,
+        description:
+          'Symbol name or partial name (e.g. "auth", "signIn", "UserService")',
+      },
       kind: {
         type: "string",
         required: false,
-        enum: ["function", "method", "class", "interface", "type", "variable", "route", "component"],
-        description: "Filter by node type. Omit to search all types (do not pass \"any\"/\"symbol\"/\"file\" as these are invalid).",
+        enum: [
+          "function",
+          "method",
+          "class",
+          "interface",
+          "type",
+          "variable",
+          "route",
+          "component",
+        ],
+        description:
+          'Filter by node type. Omit to search all types (do not pass "any"/"symbol"/"file" as these are invalid).',
       },
-      limit: { type: "integer", required: false, default: 10, description: "Maximum number of results to return" },
+      limit: {
+        type: "integer",
+        required: false,
+        default: 10,
+        description: "Maximum number of results to return",
+      },
     },
   },
   {
@@ -122,33 +162,70 @@ const CODE_GRAPH_TOOLS: HttpToolDef[] = [
       query: {
         type: "string",
         required: true,
-        description: "Symbol name, filename, or code terms to explore (e.g. \"AuthService loginUser session-manager\"). Search can be used first to find relevant names.",
+        description:
+          'Symbol name, filename, or code terms to explore (e.g. "AuthService loginUser session-manager"). Search can be used first to find relevant names.',
       },
-      maxFiles: { type: "integer", required: false, default: 12, description: "Maximum number of files to return source code for (default 12)" },
+      maxFiles: {
+        type: "integer",
+        required: false,
+        default: 12,
+        description:
+          "Maximum number of files to return source code for (default 12)",
+      },
     },
   },
   {
     name: "callers",
-    description: "List functions that call <symbol>. Use explore to view the complete execution flow.",
+    description:
+      "List functions that call <symbol>. Use explore to view the complete execution flow.",
     params: {
-      symbol: { type: "string", required: true, description: "Function, method, or class name to check callers for" },
-      limit: { type: "integer", required: false, default: 20, description: "Maximum number of results to return (default 20)" },
+      symbol: {
+        type: "string",
+        required: true,
+        description: "Function, method, or class name to check callers for",
+      },
+      limit: {
+        type: "integer",
+        required: false,
+        default: 20,
+        description: "Maximum number of results to return (default 20)",
+      },
     },
   },
   {
     name: "callees",
-    description: "List functions called by <symbol>. Use explore to view the complete execution flow.",
+    description:
+      "List functions called by <symbol>. Use explore to view the complete execution flow.",
     params: {
-      symbol: { type: "string", required: true, description: "Function, method, or class name to check callees for" },
-      limit: { type: "integer", required: false, default: 20, description: "Maximum number of results to return (default 20)" },
+      symbol: {
+        type: "string",
+        required: true,
+        description: "Function, method, or class name to check callees for",
+      },
+      limit: {
+        type: "integer",
+        required: false,
+        default: 20,
+        description: "Maximum number of results to return (default 20)",
+      },
     },
   },
   {
     name: "impact",
-    description: "List symbols impacted by modifying <symbol>. Use to evaluate impact before refactoring.",
+    description:
+      "List symbols impacted by modifying <symbol>. Use to evaluate impact before refactoring.",
     params: {
-      symbol: { type: "string", required: true, description: "Symbol name to perform impact analysis on" },
-      depth: { type: "integer", required: false, default: 2, description: "Dependency traversal depth (default 2)" },
+      symbol: {
+        type: "string",
+        required: true,
+        description: "Symbol name to perform impact analysis on",
+      },
+      depth: {
+        type: "integer",
+        required: false,
+        default: 2,
+        description: "Dependency traversal depth (default 2)",
+      },
     },
   },
   {
@@ -156,24 +233,62 @@ const CODE_GRAPH_TOOLS: HttpToolDef[] = [
     description:
       "【Secondary Tool after explore】Get complete information for a single symbol: location, signature, call chain, and verbatim source code (when includeCode=true). Returns all matching definitions when names are overloaded.",
     params: {
-      symbol: { type: "string", required: true, description: "Symbol name to inspect" },
-      includeCode: { type: "boolean", required: false, default: false, description: "Include complete source code (default false to save context)" },
-      file: { type: "string", required: false, description: "Optional: file path or filename to disambiguate overloads (e.g. \"harness.rs\")" },
-      line: { type: "integer", required: false, description: "Optional: line number to disambiguate to nearby definition" },
+      symbol: {
+        type: "string",
+        required: true,
+        description: "Symbol name to inspect",
+      },
+      includeCode: {
+        type: "boolean",
+        required: false,
+        default: false,
+        description:
+          "Include complete source code (default false to save context)",
+      },
+      file: {
+        type: "string",
+        required: false,
+        description:
+          'Optional: file path or filename to disambiguate overloads (e.g. "harness.rs")',
+      },
+      line: {
+        type: "integer",
+        required: false,
+        description:
+          "Optional: line number to disambiguate to nearby definition",
+      },
     },
   },
   {
     name: "status",
-    description: "Index health check (file/node/edge counts). Generally not needed unless troubleshooting.",
+    description:
+      "Index health check (file/node/edge counts). Generally not needed unless troubleshooting.",
     params: {},
   },
   {
     name: "files",
-    description: "Indexed file tree containing languages and symbol counts. Faster than Glob for viewing project structure.",
+    description:
+      "Indexed file tree containing languages and symbol counts. Faster than Glob for viewing project structure.",
     params: {
-      path: { type: "string", required: false, description: "Filter by directory prefix (e.g. \"src/components\"); omit to return all" },
-      pattern: { type: "string", required: false, description: "Filter by glob pattern (e.g. \"*.tsx\", \"**/*.test.ts\")" },
-      format: { type: "string", required: false, default: "tree", enum: ["tree", "flat", "grouped"], description: "Output format: tree (default), flat (flat list), grouped (grouped by language)" },
+      path: {
+        type: "string",
+        required: false,
+        description:
+          'Filter by directory prefix (e.g. "src/components"); omit to return all',
+      },
+      pattern: {
+        type: "string",
+        required: false,
+        description: 'Filter by glob pattern (e.g. "*.tsx", "**/*.test.ts")',
+      },
+      format: {
+        type: "string",
+        required: false,
+        default: "tree",
+        enum: ["tree", "flat", "grouped"],
+        description:
+          "Output format: tree (default), flat (flat list), grouped (grouped by language)",
+      },
     },
   },
 ];
@@ -196,14 +311,18 @@ export function createToolsRoutes(deps: ToolsRouteDeps): Hono {
     const body = await c.req.json<Record<string, unknown>>();
     const serviceId = c.req.header("x-tdai-service-id");
     if (!isValidIdSegment(serviceId)) {
-      return c.json(wrapError(400, "x-tdai-service-id header is required"), 400);
+      return c.json(
+        wrapError(400, "x-tdai-service-id header is required"),
+        400,
+      );
     }
     const knowledgeId = body.knowledge_id;
     if (typeof knowledgeId !== "string" || !knowledgeId) {
       return c.json(wrapError(400, "knowledge_id is required"), 400);
     }
     const listGate = extractRequesterTeam(body);
-    if (listGate.invalid) return c.json(wrapError(400, "team_id is invalid"), 400);
+    if (listGate.invalid)
+      return c.json(wrapError(400, "team_id is invalid"), 400);
     let type: "wiki" | "code-graph";
     let tools: HttpToolDef[];
     let name: string;
@@ -214,11 +333,16 @@ export function createToolsRoutes(deps: ToolsRouteDeps): Hono {
       type = "wiki";
       tools = WIKI_TOOLS;
       const row = wikiService.getById(serviceId, knowledgeId);
-      if (!row) return c.json(wrapError(404, "knowledge resource not found"), 404);
+      if (!row)
+        return c.json(wrapError(404, "knowledge resource not found"), 404);
       // Team-scoped read: granted teams (any grant_type) see tools; others 404.
       // Absent team keeps legacy open behavior (DESIGN get-by-id unchanged).
       if (listGate.team) {
-        const listRole = wikiService.accessRoleStrict(serviceId, knowledgeId, listGate.team);
+        const listRole = wikiService.accessRoleStrict(
+          serviceId,
+          knowledgeId,
+          listGate.team,
+        );
         if (!listRole || listRole === "team_required") {
           return c.json(wrapError(404, "knowledge resource not found"), 404);
         }
@@ -230,9 +354,14 @@ export function createToolsRoutes(deps: ToolsRouteDeps): Hono {
       type = "code-graph";
       tools = CODE_GRAPH_TOOLS;
       const row = cgService.getById(serviceId, knowledgeId);
-      if (!row) return c.json(wrapError(404, "knowledge resource not found"), 404);
+      if (!row)
+        return c.json(wrapError(404, "knowledge resource not found"), 404);
       if (listGate.team) {
-        const listCgRole = cgService.accessRoleStrict(serviceId, knowledgeId, listGate.team);
+        const listCgRole = cgService.accessRoleStrict(
+          serviceId,
+          knowledgeId,
+          listGate.team,
+        );
         if (!listCgRole || listCgRole === "team_required") {
           return c.json(wrapError(404, "knowledge resource not found"), 404);
         }
@@ -241,21 +370,26 @@ export function createToolsRoutes(deps: ToolsRouteDeps): Hono {
       summary = row.summary ?? null;
       status = row.status;
     } else {
-      return c.json(wrapError(400, `invalid knowledge_id format: ${knowledgeId}`), 400);
+      return c.json(
+        wrapError(400, `invalid knowledge_id format: ${knowledgeId}`),
+        400,
+      );
     }
 
-    return c.json(wrapOk({
-      knowledge_id: knowledgeId,
-      type,
-      name,
-      summary,
-      status,
-      tools: tools.map((t) => ({
-        name: t.name,
-        description: t.description,
-        params: t.params,
-      })),
-    }));
+    return c.json(
+      wrapOk({
+        knowledge_id: knowledgeId,
+        type,
+        name,
+        summary,
+        status,
+        tools: tools.map((t) => ({
+          name: t.name,
+          description: t.description,
+          params: t.params,
+        })),
+      }),
+    );
   });
 
   // ── POST /tools/call ──
@@ -264,7 +398,10 @@ export function createToolsRoutes(deps: ToolsRouteDeps): Hono {
     const body = await c.req.json<Record<string, unknown>>();
     const serviceId = c.req.header("x-tdai-service-id");
     if (!isValidIdSegment(serviceId)) {
-      return c.json(wrapError(400, "x-tdai-service-id header is required"), 400);
+      return c.json(
+        wrapError(400, "x-tdai-service-id header is required"),
+        400,
+      );
     }
     const knowledgeId = body.knowledge_id;
     if (typeof knowledgeId !== "string" || !knowledgeId) {
@@ -272,7 +409,8 @@ export function createToolsRoutes(deps: ToolsRouteDeps): Hono {
     }
     const toolName = body.tool_name;
     const callGate = extractRequesterTeam(body);
-    if (callGate.invalid) return c.json(wrapError(400, "team_id is invalid"), 400);
+    if (callGate.invalid)
+      return c.json(wrapError(400, "team_id is invalid"), 400);
     if (typeof toolName !== "string" || !toolName) {
       return c.json(wrapError(400, "tool_name is required"), 400);
     }
@@ -286,40 +424,77 @@ export function createToolsRoutes(deps: ToolsRouteDeps): Hono {
     if (isWikiId(knowledgeId)) {
       // Whitelist check
       if (!WIKI_TOOL_NAMES.has(toolName)) {
-        return c.json(wrapError(403, `unknown tool: '${toolName}' for wiki resource '${knowledgeId}'. Use tools/list to discover available tools.`), 403);
+        return c.json(
+          wrapError(
+            403,
+            `unknown tool: '${toolName}' for wiki resource '${knowledgeId}'. Use tools/list to discover available tools.`,
+          ),
+          403,
+        );
       }
 
       const row = wikiService.getById(serviceId, knowledgeId);
       if (!row) return c.json(wrapError(404, "wiki not found"), 404);
       if (callGate.team) {
-        const callRole = wikiService.accessRoleStrict(serviceId, knowledgeId, callGate.team);
+        const callRole = wikiService.accessRoleStrict(
+          serviceId,
+          knowledgeId,
+          callGate.team,
+        );
         if (!callRole || callRole === "team_required") {
           return c.json(wrapError(404, "wiki not found"), 404);
         }
       }
 
-      return executeWikiTool(serviceId, toolName, row, toolParams, wikiService, wikiMgr);
+      return executeWikiTool(
+        serviceId,
+        toolName,
+        row,
+        toolParams,
+        wikiService,
+        wikiMgr,
+      );
     }
 
     if (isCodeGraphId(knowledgeId)) {
       // Whitelist check
       if (!CODE_GRAPH_TOOL_NAMES.has(toolName)) {
-        return c.json(wrapError(403, `unknown tool: '${toolName}' for code-graph resource '${knowledgeId}'. Use tools/list to discover available tools.`), 403);
+        return c.json(
+          wrapError(
+            403,
+            `unknown tool: '${toolName}' for code-graph resource '${knowledgeId}'. Use tools/list to discover available tools.`,
+          ),
+          403,
+        );
       }
 
       const row = cgService.getById(serviceId, knowledgeId);
       if (!row) return c.json(wrapError(404, "code graph not found"), 404);
       if (callGate.team) {
-        const callCgRole = cgService.accessRoleStrict(serviceId, knowledgeId, callGate.team);
+        const callCgRole = cgService.accessRoleStrict(
+          serviceId,
+          knowledgeId,
+          callGate.team,
+        );
         if (!callCgRole || callCgRole === "team_required") {
           return c.json(wrapError(404, "code graph not found"), 404);
         }
       }
 
-      return executeCodeGraphTool(serviceId, toolName, row, toolParams, cgService, instancePool);
+      return executeCodeGraphTool(
+        serviceId,
+        toolName,
+        row,
+        toolParams,
+        cgService,
+        instancePool,
+      );
     }
 
-    return c.json(wrapError(400, `invalid knowledge_id format: ${knowledgeId}`), 400);
+    return c.json(
+      wrapError(400, `invalid knowledge_id format: ${knowledgeId}`),
+      400,
+    );
   });
 
   return app;
@@ -342,13 +517,16 @@ async function executeWikiTool(
   switch (toolName) {
     case "get_info": {
       const detail = wikiService.get(serviceId, team_id, wiki_id);
-      if (!detail) return Response.json(wrapError(404, "wiki not found"), { status: 404 });
+      if (!detail)
+        return Response.json(wrapError(404, "wiki not found"), { status: 404 });
       return Response.json(wrapOk(detail));
     }
     case "search": {
       const query = params.query;
       if (typeof query !== "string" || !query) {
-        return Response.json(wrapError(400, "query is required"), { status: 400 });
+        return Response.json(wrapError(400, "query is required"), {
+          status: 400,
+        });
       }
       if (row.status !== "ready") {
         return Response.json(wrapOk({ results: [], links: [], count: 0 }));
@@ -362,18 +540,27 @@ async function executeWikiTool(
         return Response.json(wrapOk({ items: [] }));
       }
       const items = wikiService.pageLs(serviceId, team_id, wiki_id);
-      if (items === null) return Response.json(wrapError(404, "wiki not found"), { status: 404 });
+      if (items === null)
+        return Response.json(wrapError(404, "wiki not found"), { status: 404 });
       return Response.json(wrapOk({ items }));
     }
     case "read_page": {
       const refs = params.refs;
       if (!Array.isArray(refs) || refs.length === 0) {
-        return Response.json(wrapError(400, "refs is required (non-empty array)"), { status: 400 });
+        return Response.json(
+          wrapError(400, "refs is required (non-empty array)"),
+          { status: 400 },
+        );
       }
       if (row.status !== "ready") {
         return Response.json(wrapOk({ items: [] }));
       }
-      const result = wikiService.pageReadMany(serviceId, team_id, wiki_id, refs as string[]);
+      const result = wikiService.pageReadMany(
+        serviceId,
+        team_id,
+        wiki_id,
+        refs as string[],
+      );
       return Response.json(wrapOk({ items: result }));
     }
     case "get_graph": {
@@ -385,19 +572,30 @@ async function executeWikiTool(
     }
     case "list_raw": {
       const items = wikiService.rawLs(serviceId, team_id, wiki_id);
-      if (items === null) return Response.json(wrapError(404, "wiki not found"), { status: 404 });
+      if (items === null)
+        return Response.json(wrapError(404, "wiki not found"), { status: 404 });
       return Response.json(wrapOk({ items }));
     }
     case "read_raw": {
       const filenames = params.filenames;
       if (!Array.isArray(filenames) || filenames.length === 0) {
-        return Response.json(wrapError(400, "filenames is required (non-empty array)"), { status: 400 });
+        return Response.json(
+          wrapError(400, "filenames is required (non-empty array)"),
+          { status: 400 },
+        );
       }
-      const result = wikiService.rawReadMany(serviceId, team_id, wiki_id, filenames as string[]);
+      const result = wikiService.rawReadMany(
+        serviceId,
+        team_id,
+        wiki_id,
+        filenames as string[],
+      );
       return Response.json(wrapOk({ items: result }));
     }
     default:
-      return Response.json(wrapError(403, `unknown tool: ${toolName}`), { status: 403 });
+      return Response.json(wrapError(403, `unknown tool: ${toolName}`), {
+        status: 403,
+      });
   }
 }
 
@@ -413,7 +611,14 @@ async function executeWikiTool(
  * and validation list in toCodeGraphToolName all derive from here.
  */
 export const CODEGRAPH_QUERY_TOOL_NAMES: readonly string[] = [
-  "search", "explore", "callers", "callees", "impact", "node", "status", "files",
+  "search",
+  "explore",
+  "callers",
+  "callees",
+  "impact",
+  "node",
+  "status",
+  "files",
 ];
 
 /**
@@ -421,7 +626,9 @@ export const CODEGRAPH_QUERY_TOOL_NAMES: readonly string[] = [
  * Externally uses short names (node / status / files), internally prepends codegraph_ prefix.
  */
 export function toCodeGraphToolName(externalName: string): string | undefined {
-  return CODEGRAPH_QUERY_TOOL_NAMES.includes(externalName) ? `codegraph_${externalName}` : undefined;
+  return CODEGRAPH_QUERY_TOOL_NAMES.includes(externalName)
+    ? `codegraph_${externalName}`
+    : undefined;
 }
 
 async function executeCodeGraphTool(
@@ -437,7 +644,10 @@ async function executeCodeGraphTool(
   // get_info is a simple metadata return
   if (toolName === "get_info") {
     const detail = cgService.get(serviceId, team_id, code_graph_id);
-    if (!detail) return Response.json(wrapError(404, "code graph not found"), { status: 404 });
+    if (!detail)
+      return Response.json(wrapError(404, "code graph not found"), {
+        status: 404,
+      });
     return Response.json(wrapOk(detail));
   }
 
@@ -449,7 +659,9 @@ async function executeCodeGraphTool(
   // Map tool name to internal codegraph action
   const cgToolName = toCodeGraphToolName(toolName);
   if (!cgToolName) {
-    return Response.json(wrapError(403, `unknown tool: ${toolName}`), { status: 403 });
+    return Response.json(wrapError(403, `unknown tool: ${toolName}`), {
+      status: 403,
+    });
   }
 
   // Build toolParams — map HTTP params to code-graph executeTool params
@@ -464,7 +676,9 @@ async function executeCodeGraphTool(
     instance = await instancePool.loadIfMissing(code_graph_id, dir);
   }
   if (!instance) {
-    return Response.json(wrapError(503, "code graph instance not loaded"), { status: 503 });
+    return Response.json(wrapError(503, "code graph instance not loaded"), {
+      status: 503,
+    });
   }
 
   const result = await executeCodeTool(instance, cgToolName, toolParams);

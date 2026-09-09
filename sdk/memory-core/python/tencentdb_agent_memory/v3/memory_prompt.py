@@ -1,4 +1,5 @@
 """Clients for ``/v3/memory-prompt/*`` management APIs."""
+
 from __future__ import annotations
 
 import builtins
@@ -26,7 +27,9 @@ def _ids(values: Iterable[str], name: str) -> list[str]:
     if isinstance(values, str) or not isinstance(values, (list, tuple)):
         raise ParamError(f"{name} must be a non-empty list of non-empty strings")
     result = list(dict.fromkeys(values))
-    if not result or any(not isinstance(item, str) or not item.strip() for item in result):
+    if not result or any(
+        not isinstance(item, str) or not item.strip() for item in result
+    ):
         raise ParamError(f"{name} must be a non-empty list of non-empty strings")
     return result
 
@@ -41,15 +44,26 @@ def _target(team_id: str | None, agent_ids: list[str] | None) -> None:
 class MemoryPromptClient:
     """Synchronous Prompt CRUD, target binding, resolution and setting-log client."""
 
-    def __init__(self, endpoint: str = "", api_key: str = "", service_id: str | None = None,
-                 *, team_id: str | None = None, agent_id: str | None = None,
-                 timeout: float = 30, verify: bool = True, stub: Stub | None = None) -> None:
+    def __init__(
+        self,
+        endpoint: str = "",
+        api_key: str = "",
+        service_id: str | None = None,
+        *,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        timeout: float = 30,
+        verify: bool = True,
+        stub: Stub | None = None,
+    ) -> None:
         if stub is not None:
             self._stub = stub
         else:
             if not service_id:
                 raise ParamError("service_id must be provided")
-            self._stub = HttpStub(endpoint, api_key, service_id, timeout=timeout, verify=verify)
+            self._stub = HttpStub(
+                endpoint, api_key, service_id, timeout=timeout, verify=verify
+            )
         self._team_id = team_id
         self._agent_id = agent_id
 
@@ -58,59 +72,134 @@ class MemoryPromptClient:
         return method(path, query) if method else self._stub.post(path, query)
 
     def create(self, *, name: str, layer: str, prompt: str) -> dict[str, Any]:
-        return self._stub.post(f"{_ROOT}/create", {
-            "name": _required("name", name), "layer": layer, "prompt": _required("prompt", prompt),
-        })
+        return self._stub.post(
+            f"{_ROOT}/create",
+            {
+                "name": _required("name", name),
+                "layer": layer,
+                "prompt": _required("prompt", prompt),
+            },
+        )
 
     def get(self, memory_prompt_id: str) -> dict[str, Any]:
-        return self._get(f"{_ROOT}/get", {"memory_prompt_id": _required("memory_prompt_id", memory_prompt_id)})
+        return self._get(
+            f"{_ROOT}/get",
+            {"memory_prompt_id": _required("memory_prompt_id", memory_prompt_id)},
+        )
 
-    def list(self, *, layer: str | None = None, limit: int | None = None,
-             offset: int | None = None, time_order: str | None = None) -> dict[str, Any]:
-        return self._get(f"{_ROOT}/get", _strip_none({
-            "layer": layer, "limit": limit, "offset": offset, "time_order": time_order,
-        }))
+    def list(
+        self,
+        *,
+        layer: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        time_order: str | None = None,
+    ) -> dict[str, Any]:
+        return self._get(
+            f"{_ROOT}/get",
+            _strip_none(
+                {
+                    "layer": layer,
+                    "limit": limit,
+                    "offset": offset,
+                    "time_order": time_order,
+                }
+            ),
+        )
 
-    def get_effective(self, *, layer: str, team_id: str | None = None,
-                      agent_id: str | None = None) -> dict[str, Any]:
+    def get_effective(
+        self, *, layer: str, team_id: str | None = None, agent_id: str | None = None
+    ) -> dict[str, Any]:
         team, agent = team_id or self._team_id, agent_id or self._agent_id
         if not team:
             raise ParamError("team_id is required for effective prompt lookup")
-        return self._get(f"{_ROOT}/get", _strip_none({"team_id": team, "agent_id": agent, "layer": layer}))
+        return self._get(
+            f"{_ROOT}/get",
+            _strip_none({"team_id": team, "agent_id": agent, "layer": layer}),
+        )
 
-    def update(self, memory_prompt_id: str, *, name: str | None = None,
-               prompt: str | None = None) -> dict[str, Any]:
+    def update(
+        self,
+        memory_prompt_id: str,
+        *,
+        name: str | None = None,
+        prompt: str | None = None,
+    ) -> dict[str, Any]:
         if name is None and prompt is None:
             raise ParamError("name or prompt is required")
-        return self._stub.post(f"{_ROOT}/update", _strip_none({
-            "memory_prompt_id": _required("memory_prompt_id", memory_prompt_id), "name": name, "prompt": prompt,
-        }))
+        return self._stub.post(
+            f"{_ROOT}/update",
+            _strip_none(
+                {
+                    "memory_prompt_id": _required("memory_prompt_id", memory_prompt_id),
+                    "name": name,
+                    "prompt": prompt,
+                }
+            ),
+        )
 
     def delete(self, memory_prompt_ids: Iterable[str]) -> dict[str, Any]:
-        return self._stub.post(f"{_ROOT}/delete", {"memory_prompt_ids": _ids(memory_prompt_ids, "memory_prompt_ids")})
+        return self._stub.post(
+            f"{_ROOT}/delete",
+            {"memory_prompt_ids": _ids(memory_prompt_ids, "memory_prompt_ids")},
+        )
 
-    def apply(self, memory_prompt_id: str, *, layer: str, team_id: str | None = None,
-              agent_ids: builtins.list[str] | None = None) -> dict[str, Any]:
+    def apply(
+        self,
+        memory_prompt_id: str,
+        *,
+        layer: str,
+        team_id: str | None = None,
+        agent_ids: builtins.list[str] | None = None,
+    ) -> dict[str, Any]:
         team = team_id or self._team_id
         _target(team, agent_ids)
-        return self._stub.post(f"{_ROOT}/set", _strip_none({
-            "action": "apply", "memory_prompt_id": _required("memory_prompt_id", memory_prompt_id),
-            "team_id": team, "agent_ids": agent_ids, "layer": layer,
-        }))
+        return self._stub.post(
+            f"{_ROOT}/set",
+            _strip_none(
+                {
+                    "action": "apply",
+                    "memory_prompt_id": _required("memory_prompt_id", memory_prompt_id),
+                    "team_id": team,
+                    "agent_ids": agent_ids,
+                    "layer": layer,
+                }
+            ),
+        )
 
-    def clear(self, *, layer: str, team_id: str | None = None,
-              agent_ids: builtins.list[str] | None = None) -> dict[str, Any]:
+    def clear(
+        self,
+        *,
+        layer: str,
+        team_id: str | None = None,
+        agent_ids: builtins.list[str] | None = None,
+    ) -> dict[str, Any]:
         team = team_id or self._team_id
         _target(team, agent_ids)
-        return self._stub.post(f"{_ROOT}/set", _strip_none({
-            "action": "clear", "team_id": team, "agent_ids": agent_ids, "layer": layer,
-        }))
+        return self._stub.post(
+            f"{_ROOT}/set",
+            _strip_none(
+                {
+                    "action": "clear",
+                    "team_id": team,
+                    "agent_ids": agent_ids,
+                    "layer": layer,
+                }
+            ),
+        )
 
-    def list_settings(self, *, memory_prompt_id: str | None = None,
-                      target_type: str | None = None, team_id: str | None = None,
-                      agent_id: str | None = None, layer: str | None = None,
-                      limit: int | None = None, offset: int | None = None,
-                      time_order: str | None = None) -> dict[str, Any]:
+    def list_settings(
+        self,
+        *,
+        memory_prompt_id: str | None = None,
+        target_type: str | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        layer: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        time_order: str | None = None,
+    ) -> dict[str, Any]:
         team, agent = team_id or self._team_id, agent_id or self._agent_id
         if agent and not team:
             raise ParamError("team_id is required with agent_id")
@@ -118,27 +207,56 @@ class MemoryPromptClient:
             raise ParamError("instance target cannot include team_id or agent_id")
         if target_type == "team" and agent:
             raise ParamError("team target cannot include agent_id")
-        return self._get(f"{_ROOT}/setting/list", _strip_none({
-            "memory_prompt_id": memory_prompt_id, "target_type": target_type,
-            "team_id": team, "agent_id": agent, "layer": layer,
-            "limit": limit, "offset": offset, "time_order": time_order,
-        }))
+        return self._get(
+            f"{_ROOT}/setting/list",
+            _strip_none(
+                {
+                    "memory_prompt_id": memory_prompt_id,
+                    "target_type": target_type,
+                    "team_id": team,
+                    "agent_id": agent,
+                    "layer": layer,
+                    "limit": limit,
+                    "offset": offset,
+                    "time_order": time_order,
+                }
+            ),
+        )
 
-    def list_setting_logs(self, *, memory_prompt_id: str | None = None,
-                          start_time: str | None = None, end_time: str | None = None,
-                          team_id: str | None = None, agent_id: str | None = None,
-                          action: str | None = None, limit: int | None = None,
-                          offset: int | None = None, time_order: str | None = None) -> dict[str, Any]:
+    def list_setting_logs(
+        self,
+        *,
+        memory_prompt_id: str | None = None,
+        start_time: str | None = None,
+        end_time: str | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        action: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        time_order: str | None = None,
+    ) -> dict[str, Any]:
         team, agent = team_id or self._team_id, agent_id or self._agent_id
         if agent and not team:
             raise ParamError("team_id is required with agent_id")
         if not memory_prompt_id and not team and not agent:
             raise ParamError("memory_prompt_id or a target condition is required")
-        return self._get(f"{_ROOT}/log", _strip_none({
-            "memory_prompt_id": memory_prompt_id, "start_time": start_time, "end_time": end_time,
-            "team_id": team, "agent_id": agent, "action": action, "limit": limit,
-            "offset": offset, "time_order": time_order,
-        }))
+        return self._get(
+            f"{_ROOT}/log",
+            _strip_none(
+                {
+                    "memory_prompt_id": memory_prompt_id,
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "team_id": team,
+                    "agent_id": agent,
+                    "action": action,
+                    "limit": limit,
+                    "offset": offset,
+                    "time_order": time_order,
+                }
+            ),
+        )
 
     def close(self) -> None:
         self._stub.close()
@@ -147,53 +265,133 @@ class MemoryPromptClient:
 class AsyncMemoryPromptClient:
     """Asynchronous variant of :class:`MemoryPromptClient`."""
 
-    def __init__(self, endpoint: str = "", api_key: str = "", service_id: str | None = None,
-                 *, team_id: str | None = None, agent_id: str | None = None,
-                 timeout: float = 30, verify: bool = True, stub: AsyncStub | None = None) -> None:
+    def __init__(
+        self,
+        endpoint: str = "",
+        api_key: str = "",
+        service_id: str | None = None,
+        *,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        timeout: float = 30,
+        verify: bool = True,
+        stub: AsyncStub | None = None,
+    ) -> None:
         if stub is not None:
             self._stub = stub
         else:
             if not service_id:
                 raise ParamError("service_id must be provided")
-            self._stub = AsyncHttpStub(endpoint, api_key, service_id, timeout=timeout, verify=verify)
+            self._stub = AsyncHttpStub(
+                endpoint, api_key, service_id, timeout=timeout, verify=verify
+            )
         self._team_id, self._agent_id = team_id, agent_id
 
     async def _get(self, path: str, query: dict[str, Any]) -> dict[str, Any]:
         method = getattr(self._stub, "get", None)
-        return await method(path, query) if method else await self._stub.post(path, query)
+        return (
+            await method(path, query) if method else await self._stub.post(path, query)
+        )
 
     async def create(self, *, name: str, layer: str, prompt: str) -> dict[str, Any]:
-        return await self._stub.post(f"{_ROOT}/create", {"name": _required("name", name), "layer": layer, "prompt": _required("prompt", prompt)})
+        return await self._stub.post(
+            f"{_ROOT}/create",
+            {
+                "name": _required("name", name),
+                "layer": layer,
+                "prompt": _required("prompt", prompt),
+            },
+        )
 
     async def get(self, memory_prompt_id: str) -> dict[str, Any]:
-        return await self._get(f"{_ROOT}/get", {"memory_prompt_id": _required("memory_prompt_id", memory_prompt_id)})
+        return await self._get(
+            f"{_ROOT}/get",
+            {"memory_prompt_id": _required("memory_prompt_id", memory_prompt_id)},
+        )
 
     async def list(self, **kwargs: Any) -> dict[str, Any]:
         return await self._get(f"{_ROOT}/get", _strip_none(kwargs))
 
-    async def get_effective(self, *, layer: str, team_id: str | None = None, agent_id: str | None = None) -> dict[str, Any]:
+    async def get_effective(
+        self, *, layer: str, team_id: str | None = None, agent_id: str | None = None
+    ) -> dict[str, Any]:
         team, agent = team_id or self._team_id, agent_id or self._agent_id
         if not team:
             raise ParamError("team_id is required for effective prompt lookup")
-        return await self._get(f"{_ROOT}/get", _strip_none({"team_id": team, "agent_id": agent, "layer": layer}))
+        return await self._get(
+            f"{_ROOT}/get",
+            _strip_none({"team_id": team, "agent_id": agent, "layer": layer}),
+        )
 
-    async def update(self, memory_prompt_id: str, *, name: str | None = None, prompt: str | None = None) -> dict[str, Any]:
+    async def update(
+        self,
+        memory_prompt_id: str,
+        *,
+        name: str | None = None,
+        prompt: str | None = None,
+    ) -> dict[str, Any]:
         if name is None and prompt is None:
             raise ParamError("name or prompt is required")
-        return await self._stub.post(f"{_ROOT}/update", _strip_none({"memory_prompt_id": _required("memory_prompt_id", memory_prompt_id), "name": name, "prompt": prompt}))
+        return await self._stub.post(
+            f"{_ROOT}/update",
+            _strip_none(
+                {
+                    "memory_prompt_id": _required("memory_prompt_id", memory_prompt_id),
+                    "name": name,
+                    "prompt": prompt,
+                }
+            ),
+        )
 
     async def delete(self, memory_prompt_ids: Iterable[str]) -> dict[str, Any]:
-        return await self._stub.post(f"{_ROOT}/delete", {"memory_prompt_ids": _ids(memory_prompt_ids, "memory_prompt_ids")})
+        return await self._stub.post(
+            f"{_ROOT}/delete",
+            {"memory_prompt_ids": _ids(memory_prompt_ids, "memory_prompt_ids")},
+        )
 
-    async def apply(self, memory_prompt_id: str, *, layer: str, team_id: str | None = None, agent_ids: builtins.list[str] | None = None) -> dict[str, Any]:
+    async def apply(
+        self,
+        memory_prompt_id: str,
+        *,
+        layer: str,
+        team_id: str | None = None,
+        agent_ids: builtins.list[str] | None = None,
+    ) -> dict[str, Any]:
         team = team_id or self._team_id
         _target(team, agent_ids)
-        return await self._stub.post(f"{_ROOT}/set", _strip_none({"action": "apply", "memory_prompt_id": _required("memory_prompt_id", memory_prompt_id), "team_id": team, "agent_ids": agent_ids, "layer": layer}))
+        return await self._stub.post(
+            f"{_ROOT}/set",
+            _strip_none(
+                {
+                    "action": "apply",
+                    "memory_prompt_id": _required("memory_prompt_id", memory_prompt_id),
+                    "team_id": team,
+                    "agent_ids": agent_ids,
+                    "layer": layer,
+                }
+            ),
+        )
 
-    async def clear(self, *, layer: str, team_id: str | None = None, agent_ids: builtins.list[str] | None = None) -> dict[str, Any]:
+    async def clear(
+        self,
+        *,
+        layer: str,
+        team_id: str | None = None,
+        agent_ids: builtins.list[str] | None = None,
+    ) -> dict[str, Any]:
         team = team_id or self._team_id
         _target(team, agent_ids)
-        return await self._stub.post(f"{_ROOT}/set", _strip_none({"action": "clear", "team_id": team, "agent_ids": agent_ids, "layer": layer}))
+        return await self._stub.post(
+            f"{_ROOT}/set",
+            _strip_none(
+                {
+                    "action": "clear",
+                    "team_id": team,
+                    "agent_ids": agent_ids,
+                    "layer": layer,
+                }
+            ),
+        )
 
     async def list_settings(self, **kwargs: Any) -> dict[str, Any]:
         team = kwargs.pop("team_id", None) or self._team_id
@@ -205,7 +403,10 @@ class AsyncMemoryPromptClient:
             raise ParamError("instance target cannot include team_id or agent_id")
         if target_type == "team" and agent:
             raise ParamError("team target cannot include agent_id")
-        return await self._get(f"{_ROOT}/setting/list", _strip_none({**kwargs, "team_id": team, "agent_id": agent}))
+        return await self._get(
+            f"{_ROOT}/setting/list",
+            _strip_none({**kwargs, "team_id": team, "agent_id": agent}),
+        )
 
     async def list_setting_logs(self, **kwargs: Any) -> dict[str, Any]:
         team = kwargs.pop("team_id", None) or self._team_id
@@ -214,7 +415,9 @@ class AsyncMemoryPromptClient:
             raise ParamError("team_id is required with agent_id")
         if not kwargs.get("memory_prompt_id") and not team and not agent:
             raise ParamError("memory_prompt_id or a target condition is required")
-        return await self._get(f"{_ROOT}/log", _strip_none({**kwargs, "team_id": team, "agent_id": agent}))
+        return await self._get(
+            f"{_ROOT}/log", _strip_none({**kwargs, "team_id": team, "agent_id": agent})
+        )
 
     async def close(self) -> None:
         await self._stub.close()

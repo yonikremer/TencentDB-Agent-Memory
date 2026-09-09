@@ -1377,7 +1377,11 @@ export async function handleChatCompletions(
         | Record<string, unknown>
         | null
         | undefined;
-      if (initResult.resetFlow && initResult.justRegistered && !initResult.bypassed) {
+      if (
+        initResult.resetFlow &&
+        initResult.justRegistered &&
+        !initResult.bypassed
+      ) {
         _resetFlowResult = {
           agentName: initResult.agentDetail?.name ?? "Unknown",
           agentIdShort: sessionFields?.agent_id

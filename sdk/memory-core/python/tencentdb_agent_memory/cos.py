@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 # COS URL parser
 # ---------------------------------------------------------------------------
 
+
 def _parse_cos_url(cos_url: str) -> tuple[str, str]:
     """Parse CosUrl like ``https://bucket.cos.region.myqcloud.com`` → (bucket, region)."""
     try:
@@ -58,6 +59,7 @@ def _parse_cos_url(cos_url: str) -> tuple[str, str]:
 # STS Credential
 # ---------------------------------------------------------------------------
 
+
 class StsCredential:
     """Parsed STS credential from ``POST /v2/cos/secret``.
 
@@ -74,8 +76,13 @@ class StsCredential:
     """
 
     __slots__ = (
-        "tmp_secret_id", "tmp_secret_key", "token",
-        "bucket", "region", "prefix", "expires_at_epoch",
+        "tmp_secret_id",
+        "tmp_secret_key",
+        "token",
+        "bucket",
+        "region",
+        "prefix",
+        "expires_at_epoch",
     )
 
     def __init__(self, data: dict[str, Any]) -> None:
@@ -93,6 +100,7 @@ class StsCredential:
         expires_str = data.get("ExpirationTime", "")
         if expires_str:
             from datetime import datetime
+
             try:
                 dt = datetime.fromisoformat(expires_str.replace("Z", "+00:00"))
                 self.expires_at_epoch = dt.timestamp()
@@ -113,6 +121,7 @@ class StsCredential:
 # ---------------------------------------------------------------------------
 # STS Credential Manager
 # ---------------------------------------------------------------------------
+
 
 class StsCredentialManager:
     """Thread-safe STS credential cache with auto-refresh.
@@ -172,8 +181,12 @@ class StsCredentialManager:
 
         cred = StsCredential(data)
         self._credential = cred
-        logger.debug("[cos] STS refreshed: bucket=%s prefix=%s expires=%.0f",
-                     cred.bucket, cred.prefix, cred.expires_at_epoch)
+        logger.debug(
+            "[cos] STS refreshed: bucket=%s prefix=%s expires=%.0f",
+            cred.bucket,
+            cred.prefix,
+            cred.expires_at_epoch,
+        )
         return cred
 
     def close(self) -> None:
@@ -184,6 +197,7 @@ class StsCredentialManager:
 # ---------------------------------------------------------------------------
 # Async STS Credential Manager
 # ---------------------------------------------------------------------------
+
 
 class AsyncStsCredentialManager:
     """Async variant of StsCredentialManager."""
@@ -203,6 +217,7 @@ class AsyncStsCredentialManager:
         self._timeout = timeout
         self._credential: StsCredential | None = None
         import asyncio
+
         self._lock = asyncio.Lock()
         self._client: httpx.AsyncClient | None = None
 
@@ -219,7 +234,9 @@ class AsyncStsCredentialManager:
         self._credential = None
 
     async def _refresh(self) -> StsCredential:
-        logger.debug("[cos] Refreshing STS credential (async) via POST /v2/cos/secret ...")
+        logger.debug(
+            "[cos] Refreshing STS credential (async) via POST /v2/cos/secret ..."
+        )
         if self._client is None:
             self._client = httpx.AsyncClient(timeout=self._timeout)
 
@@ -246,6 +263,7 @@ class AsyncStsCredentialManager:
 # COS V5 Signature
 # ---------------------------------------------------------------------------
 
+
 def _cos_v5_sign(
     secret_id: str,
     secret_key: str,
@@ -260,7 +278,10 @@ def _cos_v5_sign(
     References:
       https://cloud.tencent.com/document/product/436/7778
     """
-    now = int(time.time())
+    try:
+        now = int(time.time())
+    except Exception as exc:
+        raise TDAMError(-1, "system clock unavailable for request signing") from exc
     q_sign_time = f"{start_time or (now - 60)};{end_time or (now + 600)}"
     q_key_time = q_sign_time
 
@@ -302,6 +323,7 @@ def _cos_v5_sign(
 # ---------------------------------------------------------------------------
 # Memory File Reader (sync)
 # ---------------------------------------------------------------------------
+
 
 class MemoryFileReader:
     """Sync memory file reader with STS auto-management.
@@ -398,6 +420,7 @@ class MemoryFileReader:
 # ---------------------------------------------------------------------------
 # Async Memory File Reader
 # ---------------------------------------------------------------------------
+
 
 class AsyncMemoryFileReader:
     """Async memory file reader with STS auto-management."""
