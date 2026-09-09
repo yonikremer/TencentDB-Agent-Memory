@@ -28,6 +28,7 @@ from __future__ import annotations
 import base64
 import builtins
 from collections.abc import Iterable
+from types import TracebackType
 from typing import Any
 
 from .._http import AsyncStub, Stub
@@ -725,7 +726,12 @@ class SkillClient:
     def __enter__(self) -> SkillClient:
         return self
 
-    def __exit__(self, *exc: Any) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         self.close()
 
 

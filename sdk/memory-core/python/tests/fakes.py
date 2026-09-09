@@ -72,8 +72,10 @@ class FakeAsyncStub(AsyncStub):
         self.closed = True
 
 
-class FakeAsyncPostOnly:
+class FakeAsyncPostOnly(AsyncStub):
     """Async transport without .get — exercises the async _get() POST fallback."""
+
+    get = None  # type: ignore[assignment]
 
     def __init__(self, result: Any = None) -> None:
         self.calls: list[tuple[str, str, Any]] = []

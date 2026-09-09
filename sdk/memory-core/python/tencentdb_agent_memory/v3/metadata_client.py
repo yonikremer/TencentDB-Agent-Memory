@@ -36,11 +36,11 @@ _V3 = "/v3/meta"
 _V3_KNOWLEDGE = "/v3/knowledge"
 
 
-def _strip_none(d: dict[str, Any]) -> dict[str, Any]:
+def _strip_none(d: dict[str, Any]) -> Any:
     return {k: v for k, v in d.items() if v is not None}
 
 
-def _body(p: dict[str, Any]) -> dict[str, Any]:
+def _body(p: dict[str, Any]) -> Any:
     if not isinstance(p, dict):
         raise ParamError("request payload must be a dict")
     return _strip_none(p)
@@ -891,7 +891,7 @@ class AsyncMetadataClient(_MetadataMethodsMixin):
         return await self._list_knowledge(p)
 
     async def close(self) -> None:
-        await self._stub.close()
+        await self._stub.close()  # type: ignore[misc]  # Async client always holds AsyncStub; sync member of the union returns None.
 
     async def __aenter__(self) -> AsyncMetadataClient:
         return self

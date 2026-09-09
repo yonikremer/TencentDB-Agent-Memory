@@ -23,11 +23,12 @@ def test_init_and_get_fallback():
     c, stub = _sync(team_id="t", agent_id="a")
     c.get("mp-1")
     assert stub.calls[-1][0] == "GET"
+    cpstub = PostOnlyStub()
     cp = MemoryPromptClient(
-        endpoint="http://e", api_key="k", service_id="s", stub=PostOnlyStub()
+        endpoint="http://e", api_key="k", service_id="s", stub=cpstub
     )
     cp.get("mp-1")
-    assert cp._stub.calls[-1][0] == "POST"
+    assert cpstub.calls[-1][0] == "POST"
     cp.close()
     c.close()
 

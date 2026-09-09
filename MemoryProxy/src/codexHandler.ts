@@ -343,7 +343,9 @@ export async function handleCodexEndpoint(
       );
     }
   } catch (err: unknown) {
-    console.log(`[codex-debug] tool schema inspection failed: ${(err as Error).message}`);
+    console.log(
+      `[codex-debug] tool schema inspection failed: ${(err as Error).message}`,
+    );
   }
 
   // ── 4. Classify request ────────────────────────────────────────────────────

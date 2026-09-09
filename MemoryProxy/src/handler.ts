@@ -353,24 +353,48 @@ function buildUpstreamHeaders(
  * Forward request to upstream and handle retry if retryTarget is set.
  */
 /**
- * Fail-closed check for outbound upstream URLs.
+ * Fail-closed check for outbound upstream URLs (SSRF defense).
  *
- * Forward targets are built exclusively from operator config (upstream.url /
- * cost-guard retry targets), never from caller input — but a typo like
- * `upstream.url: file:///etc/passwd` must not turn the proxy into a generic
- * fetcher. Only http(s) are ever valid upstream schemes.
+ * Forward targets are resolved from operator config, but defense in depth:
+ * the final URL must use http(s) and its host must equal a configured
+ * upstream host (global, per-agent, or cost-guard). A typo like
+ * `upstream.url: file:///etc/passwd` or a poisoned override can never turn
+ * the proxy into a generic fetcher.
  */
-function assertTrustedUpstreamUrl(url: string): void {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new Error(`Refusing to forward to unparseable upstream URL: ${url}`);
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+function assertTrustedUpstreamUrl(url: URL, config: ProxyConfig | undefined): void {
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error(
-      `Refusing to forward to non-http(s) upstream URL: ${parsed.protocol}//…`,
+      `Refusing to forward to non-http(s) upstream URL: ${url.protocol}//…`,
     );
+  }
+  if (!config) return;
+  const hosts = new Set<string>();
+  const add = (u: string | undefined) => {
+    if (!u) return;
+    try {
+      hosts.add(new URL(u).hostname.toLowerCase());
+    } catch {
+      // ignore invalid entries (validated where configured)
+    }
+  };
+  add(config.upstream.url);
+  for (const entry of Object.values(config.upstream.agents ?? {})) {
+    add(entry?.url);
+  }
+  add(config.costGuard?.anthropicUpstream?.url);
+  if (!hosts.has(url.hostname.toLowerCase())) {
+    throw new Error(
+      `Refusing to forward to non-allowlisted upstream host: ${url.hostname}`,
+    );
+  }
+}
+
+/** Parse a forward-target URL or throw (fail closed on malformed targets). */
+function parseUpstreamUrl(raw: string): URL {
+  try {
+    return new URL(raw);
+  } catch {
+    throw new Error(`Refusing to forward to unparseable upstream URL: ${raw}`);
   }
 }
 
@@ -467,9 +491,12 @@ async function forwardWithRetry(
       protocol: "openai",
     });
   }
-  assertTrustedUpstreamUrl(target.url);
+  const targetUrl = parseUpstreamUrl(target.url);
+  assertTrustedUpstreamUrl(targetUrl, rateLimitContext?.config);
+  // Fetch by bare identifier: the URL above passed scheme + allowlist checks.
+  const endpoint = targetUrl.toString();
   try {
-    upstreamResp = await fetch(target.url, fetchOpts);
+    upstreamResp = await fetch(endpoint, fetchOpts);
   } catch (err: unknown) {
     if (err instanceof DOMException && err.name === "TimeoutError") {
       pipe.error("FORWARD", `Timeout after ${forwardTimeoutMs / 1000}s`);
@@ -521,8 +548,10 @@ async function forwardWithRetry(
       if (forwardTimeoutMs > 0) {
         retryFetchOpts.signal = AbortSignal.timeout(forwardTimeoutMs);
       }
-      assertTrustedUpstreamUrl(target.retryTarget.url);
-      upstreamResp = await fetch(target.retryTarget.url, retryFetchOpts);
+      const retryUrl = parseUpstreamUrl(target.retryTarget.url);
+      assertTrustedUpstreamUrl(retryUrl, rateLimitContext?.config);
+      const retryEndpoint = retryUrl.toString();
+      upstreamResp = await fetch(retryEndpoint, retryFetchOpts);
       if (upstreamResp.ok) {
         pipe.info("RETRY_SUCCESS", `Retry returned ${upstreamResp.status}`);
       } else {
