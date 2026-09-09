@@ -139,7 +139,9 @@ export function useChatMemory(props: { activeTeamId?: string | null } = {}) {
       setBlocks(mapped);
     } catch (e: unknown) {
       if (seq !== fetchSeqRef.current) return;
-      tea.notify.error((e instanceof Error ? e.message : String(e)) || t('memory.notify.loadFailed'));
+      tea.notify.error(
+        (e instanceof Error ? e.message : String(e)) || t('memory.notify.loadFailed'),
+      );
       setBlocks([]);
     } finally {
       if (seq === fetchSeqRef.current) setBlocksLoading(false);
@@ -197,7 +199,12 @@ export function useChatMemory(props: { activeTeamId?: string | null } = {}) {
   // Deep link may land on the wrong scope tab (fixed lists one agent only).
   // Fall back to the team tab — all team blocks — before calling it missing.
   useEffect(() => {
-    if (routeBlockId && !blocksLoading && scopeTab !== 'team' && !blocks.some((b) => b.id === routeBlockId)) {
+    if (
+      routeBlockId &&
+      !blocksLoading &&
+      scopeTab !== 'team' &&
+      !blocks.some((b) => b.id === routeBlockId)
+    ) {
       setScopeTab('team');
     }
   }, [routeBlockId, blocksLoading, scopeTab, blocks]);
@@ -307,9 +314,7 @@ export function useChatMemory(props: { activeTeamId?: string | null } = {}) {
               // The total count is obtained via a request with limit=1 when the block is selected and stored in layerCounts,
               // so it cannot be overwritten here, otherwise the badge count / L0 load more judgment will be wrong.
               // Only sync the total count when there is no time filter (L2/L3, or L0/L1 after clearing the time range).
-              ...(!useTimeFilter
-                ? { layerCounts: { ...b.layerCounts, [layer]: res.total } }
-                : {}),
+              ...(!useTimeFilter ? { layerCounts: { ...b.layerCounts, [layer]: res.total } } : {}),
             };
             if (res.layer === 'L0') {
               updated.layers.L0 = res.items;
@@ -411,7 +416,9 @@ export function useChatMemory(props: { activeTeamId?: string | null } = {}) {
         return;
       }
     } catch (e: unknown) {
-      tea.notify.error((e instanceof Error ? e.message : String(e)) || t('memory.notify.layerFailed'));
+      tea.notify.error(
+        (e instanceof Error ? e.message : String(e)) || t('memory.notify.layerFailed'),
+      );
     } finally {
       setL0MoreLoading(false);
     }
@@ -457,7 +464,9 @@ export function useChatMemory(props: { activeTeamId?: string | null } = {}) {
           }),
         );
       } catch (e: unknown) {
-        tea.notify.error((e instanceof Error ? e.message : String(e)) || t('memory.notify.l2Failed'));
+        tea.notify.error(
+          (e instanceof Error ? e.message : String(e)) || t('memory.notify.l2Failed'),
+        );
       } finally {
         setLayerItemLoadingId(null);
       }
@@ -594,7 +603,9 @@ export function useChatMemory(props: { activeTeamId?: string | null } = {}) {
       setShowImport(false);
       fetchBlocks();
     } catch (e: unknown) {
-      tea.notify.error((e instanceof Error ? e.message : String(e)) || t('memory.notify.importFailed'));
+      tea.notify.error(
+        (e instanceof Error ? e.message : String(e)) || t('memory.notify.importFailed'),
+      );
     }
   }
 
@@ -619,7 +630,9 @@ export function useChatMemory(props: { activeTeamId?: string | null } = {}) {
       );
       fetchBlocks();
     } catch (e: unknown) {
-      tea.notify.error((e instanceof Error ? e.message : String(e)) || t('memory.notify.scopeFailed'));
+      tea.notify.error(
+        (e instanceof Error ? e.message : String(e)) || t('memory.notify.scopeFailed'),
+      );
     }
   }
 

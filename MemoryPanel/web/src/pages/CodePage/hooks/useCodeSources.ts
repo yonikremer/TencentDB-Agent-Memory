@@ -10,7 +10,14 @@ import { knowledgeApi, type CodeGraphDetail } from '@/lib/api/knowledge-api';
 import { useTeams, useAgents } from '@/services';
 import { readAuth } from '@/components/LoginGate';
 import { tea } from '@/lib/tea-bridge';
-import { isValidGitHttpUrl, formatRepoName, type ScopeTab, type StatusFilter, type SubView, type ViewMode } from '../constants/code-constants';
+import {
+  isValidGitHttpUrl,
+  formatRepoName,
+  type ScopeTab,
+  type StatusFilter,
+  type SubView,
+  type ViewMode,
+} from '../constants/code-constants';
 
 export function useCodeSources() {
   const { t } = useTranslation();
@@ -83,7 +90,9 @@ export function useCodeSources() {
       const items = await knowledgeApi.code.agentFixed(agentFilter);
       setFixedBoundIds(new Set(items.map((it) => it.knowledge_id)));
     } catch (e: unknown) {
-      tea.notify.error((e instanceof Error ? e.message : String(e)) || t('code.notify.loadFixedFailed'));
+      tea.notify.error(
+        (e instanceof Error ? e.message : String(e)) || t('code.notify.loadFixedFailed'),
+      );
       setFixedBoundIds(new Set());
     }
   }, [agentFilter, t]);
@@ -270,7 +279,9 @@ export function useCodeSources() {
       await fetchFixedBindings();
       await fetchSources();
     } catch (e: unknown) {
-      tea.notify.error((e instanceof Error ? e.message : String(e)) || t('code.notify.unbindFailed'));
+      tea.notify.error(
+        (e instanceof Error ? e.message : String(e)) || t('code.notify.unbindFailed'),
+      );
     }
   }
 
@@ -284,7 +295,12 @@ export function useCodeSources() {
     }
     setSubmitting(true);
     try {
-      const detail = await knowledgeApi.code.create({ teamId: activeTeamId, repoUrl: repo, branch: formBranch.trim(), repoName: repo });
+      const detail = await knowledgeApi.code.create({
+        teamId: activeTeamId,
+        repoUrl: repo,
+        branch: formBranch.trim(),
+        repoName: repo,
+      });
       setShowRegister(false);
       setFormRepo('');
       setFormBranch('main');
@@ -372,7 +388,12 @@ export function useCodeSources() {
     setSearching(true);
     setSearchResult('');
     try {
-      const res = await knowledgeApi.code.search({ codeGraphId: selectedCgId, query: searchQuery, kind: 'any', limit: 20 });
+      const res = await knowledgeApi.code.search({
+        codeGraphId: selectedCgId,
+        query: searchQuery,
+        kind: 'any',
+        limit: 20,
+      });
       setSearchResult(res?.text || JSON.stringify(res, null, 2));
     } catch (e: unknown) {
       setSearchResult('');
@@ -398,7 +419,10 @@ export function useCodeSources() {
   };
 
   // Detail lookup spans scopes (fixed tab filters the list) so deep links never false-404.
-  const selected = [...inFlight, ...sources].find((source) => source.code_graph_id === selectedCgId) ?? displaySources.find((source) => source.code_graph_id === selectedCgId) ?? null;
+  const selected =
+    [...inFlight, ...sources].find((source) => source.code_graph_id === selectedCgId) ??
+    displaySources.find((source) => source.code_graph_id === selectedCgId) ??
+    null;
 
   return {
     // context

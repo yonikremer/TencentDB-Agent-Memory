@@ -17,7 +17,7 @@ export function NotFoundPage({ message }: { message?: string }) {
               <Text theme="label">{message || t('notFound.desc')}</Text>
             </div>
             <div className="mt-4">
-              <Button type="primary" onClick={() => navigate('/', { replace: true})}>
+              <Button type="primary" onClick={() => navigate('/', { replace: true })}>
                 {t('notFound.back')}
               </Button>
             </div>

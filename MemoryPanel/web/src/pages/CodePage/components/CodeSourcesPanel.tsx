@@ -4,13 +4,43 @@
  * Markdown rendering uniformly goes through shared AssetMarkdown.
  */
 import { useTranslation } from 'react-i18next';
-import { Alert, Button, Card, Form, Input, Justify, MetricsBoard, Modal, SearchBox, Segment, Select, StatusTip, Table, Text } from 'tea-component';
-import { ChevronRightIcon, CodeIcon, DeleteIcon, RefreshIcon, UsergroupIcon, ViewListIcon, ViewModuleIcon } from 'tea-icons-react';
+import {
+  Alert,
+  Button,
+  Card,
+  Form,
+  Input,
+  Justify,
+  MetricsBoard,
+  Modal,
+  SearchBox,
+  Segment,
+  Select,
+  StatusTip,
+  Table,
+  Text,
+} from 'tea-component';
+import {
+  ChevronRightIcon,
+  CodeIcon,
+  DeleteIcon,
+  RefreshIcon,
+  UsergroupIcon,
+  ViewListIcon,
+  ViewModuleIcon,
+} from 'tea-icons-react';
 import { knowledgeApi } from '@/lib/api/knowledge-api';
 import { tea } from '@/lib/tea-bridge';
 import AllocateAssetDialog from '@/components/asset/AllocateAssetDialog';
 import { AssetPageHeader } from '@/components/asset/AssetPageHeader';
-import { formatRepoName, formatShortTime, isValidGitHttpUrl, type ScopeTab, type StatusFilter, type ViewMode } from '../constants/code-constants';
+import {
+  formatRepoName,
+  formatShortTime,
+  isValidGitHttpUrl,
+  type ScopeTab,
+  type StatusFilter,
+  type ViewMode,
+} from '../constants/code-constants';
 import { CodeOwnerLabel, statusLabel } from './code-ui';
 import { useCodeSources } from '../hooks/useCodeSources';
 import { CodeDetailView } from './code-detail-view';
@@ -296,137 +326,139 @@ export default function CodeSourcesPanel() {
             </div>
           ) : (
             <div className="_view-swap">
-            <Table
-              records={filteredSources}
-              recordKey="code_graph_id"
-              addons={[scrollable({ minWidth: 1120 })]}
-              columns={[
-                {
-                  key: 'repo_name',
-                  header: t('code.table.repo'),
-                  width: 250,
-                  render: (source) => (
-                    <button
-                      type="button"
-                      className="_codelist-row-name"
-                      onClick={() => openDetail(source.code_graph_id)}
-                      title={t('code.detail.viewDetail', {
-                        name: formatRepoName(source.repo_name, source.repo_url),
-                      })}
-                    >
-                      <CodeIcon size={14} />
-                      <span>{formatRepoName(source.repo_name, source.repo_url)}</span>
-                      <ChevronRightIcon size={12} />
-                    </button>
-                  ),
-                },
-                {
-                  key: 'status',
-                  header: t('code.table.status'),
-                  width: 120,
-                  render: (source) => statusLabel(t, source.status),
-                },
-                {
-                  key: 'branch',
-                  header: t('code.table.branch'),
-                  width: 190,
-                  render: (source) => (
-                    <span className="_codelist-branch">
-                      <span>{source.branch}</span>
-                      {source.commit_hash && (
-                        <span className="_codedetail-mono">@ {source.commit_hash}</span>
-                      )}
-                    </span>
-                  ),
-                },
-                {
-                  key: 'stats',
-                  header: t('code.table.stats'),
-                  width: 150,
-                  render: (source) =>
-                    source.stats
-                      ? t('code.stats', {
-                          nodes: source.stats.nodes.toLocaleString(),
-                          files: source.stats.files.toLocaleString(),
-                        })
-                      : '—',
-                },
-                {
-                  key: 'owner',
-                  header: t('code.table.owner'),
-                  width: 180,
-                  render: (source) =>
-                    scopeTab === 'fixed' ? (
-                      <span className="_codelist-inline-icon">
-                        <UsergroupIcon size={12} />
-                        {agentFilter || t('code.noAgent')}
-                      </span>
-                    ) : source.owner_user_id ? (
-                      <CodeOwnerLabel userId={source.owner_user_id} currentUserId={currentUser} />
-                    ) : (
-                      <Text theme="label">{t('code.teamPool')}</Text>
+              <Table
+                records={filteredSources}
+                recordKey="code_graph_id"
+                addons={[scrollable({ minWidth: 1120 })]}
+                columns={[
+                  {
+                    key: 'repo_name',
+                    header: t('code.table.repo'),
+                    width: 250,
+                    render: (source) => (
+                      <button
+                        type="button"
+                        className="_codelist-row-name"
+                        onClick={() => openDetail(source.code_graph_id)}
+                        title={t('code.detail.viewDetail', {
+                          name: formatRepoName(source.repo_name, source.repo_url),
+                        })}
+                      >
+                        <CodeIcon size={14} />
+                        <span>{formatRepoName(source.repo_name, source.repo_url)}</span>
+                        <ChevronRightIcon size={12} />
+                      </button>
                     ),
-                },
-                {
-                  key: 'last_sync_at',
-                  header: t('code.table.lastSync'),
-                  width: 140,
-                  render: (source) => (
-                    <Text theme="label">{formatShortTime(source.last_sync_at)}</Text>
-                  ),
-                },
-                {
-                  key: 'code_graph_id',
-                  header: t('code.table.codeGraphId'),
-                  width: 200,
-                  render: (source) => <span className="_codelist-id">{source.code_graph_id}</span>,
-                },
-                {
-                  key: 'actions',
-                  header: t('code.table.actions'),
-                  width: 280,
-                  fixed: 'right',
-                  render: (source) => {
-                    const repoLabel = formatRepoName(source.repo_name, source.repo_url);
-                    return (
-                      <div className="_codelist-table-actions">
-                        {scopeTab === 'fixed' ? (
-                          <Button
-                            type="link"
-                            onClick={() => handleUnbindCode(source.code_graph_id)}
-                          >
-                            {t('code.action.unbind')}
-                          </Button>
-                        ) : (
-                          <Button
-                            type="link"
-                            onClick={() =>
-                              code.setAllocateTarget({
-                                cgId: source.code_graph_id,
-                                repo: repoLabel,
-                                branch: source.branch,
-                              })
-                            }
-                          >
-                            {t('code.action.allocate')}
-                          </Button>
-                        )}
-                        <Button type="link" onClick={() => handleSync(source.code_graph_id)}>
-                          {t('code.action.sync')}
-                        </Button>
-                        <Button
-                          type="link"
-                          onClick={() => handleDelete(source.code_graph_id)}
-                          className="_codelist-delete-action"
-                        >
-                          {t('code.action.delete')}
-                        </Button>
-                      </div>
-                    );
                   },
-                },
-              ]}
-            />
+                  {
+                    key: 'status',
+                    header: t('code.table.status'),
+                    width: 120,
+                    render: (source) => statusLabel(t, source.status),
+                  },
+                  {
+                    key: 'branch',
+                    header: t('code.table.branch'),
+                    width: 190,
+                    render: (source) => (
+                      <span className="_codelist-branch">
+                        <span>{source.branch}</span>
+                        {source.commit_hash && (
+                          <span className="_codedetail-mono">@ {source.commit_hash}</span>
+                        )}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: 'stats',
+                    header: t('code.table.stats'),
+                    width: 150,
+                    render: (source) =>
+                      source.stats
+                        ? t('code.stats', {
+                            nodes: source.stats.nodes.toLocaleString(),
+                            files: source.stats.files.toLocaleString(),
+                          })
+                        : '—',
+                  },
+                  {
+                    key: 'owner',
+                    header: t('code.table.owner'),
+                    width: 180,
+                    render: (source) =>
+                      scopeTab === 'fixed' ? (
+                        <span className="_codelist-inline-icon">
+                          <UsergroupIcon size={12} />
+                          {agentFilter || t('code.noAgent')}
+                        </span>
+                      ) : source.owner_user_id ? (
+                        <CodeOwnerLabel userId={source.owner_user_id} currentUserId={currentUser} />
+                      ) : (
+                        <Text theme="label">{t('code.teamPool')}</Text>
+                      ),
+                  },
+                  {
+                    key: 'last_sync_at',
+                    header: t('code.table.lastSync'),
+                    width: 140,
+                    render: (source) => (
+                      <Text theme="label">{formatShortTime(source.last_sync_at)}</Text>
+                    ),
+                  },
+                  {
+                    key: 'code_graph_id',
+                    header: t('code.table.codeGraphId'),
+                    width: 200,
+                    render: (source) => (
+                      <span className="_codelist-id">{source.code_graph_id}</span>
+                    ),
+                  },
+                  {
+                    key: 'actions',
+                    header: t('code.table.actions'),
+                    width: 280,
+                    fixed: 'right',
+                    render: (source) => {
+                      const repoLabel = formatRepoName(source.repo_name, source.repo_url);
+                      return (
+                        <div className="_codelist-table-actions">
+                          {scopeTab === 'fixed' ? (
+                            <Button
+                              type="link"
+                              onClick={() => handleUnbindCode(source.code_graph_id)}
+                            >
+                              {t('code.action.unbind')}
+                            </Button>
+                          ) : (
+                            <Button
+                              type="link"
+                              onClick={() =>
+                                code.setAllocateTarget({
+                                  cgId: source.code_graph_id,
+                                  repo: repoLabel,
+                                  branch: source.branch,
+                                })
+                              }
+                            >
+                              {t('code.action.allocate')}
+                            </Button>
+                          )}
+                          <Button type="link" onClick={() => handleSync(source.code_graph_id)}>
+                            {t('code.action.sync')}
+                          </Button>
+                          <Button
+                            type="link"
+                            onClick={() => handleDelete(source.code_graph_id)}
+                            className="_codelist-delete-action"
+                          >
+                            {t('code.action.delete')}
+                          </Button>
+                        </div>
+                      );
+                    },
+                  },
+                ]}
+              />
             </div>
           )}
         </Card.Body>
@@ -450,7 +482,11 @@ export default function CodeSourcesPanel() {
             >
               <Modal.Body>
                 <Form>
-                  <Form.Item label={t('code.register.gitUrl')} required extra={t('code.register.gitUrlExtra')}>
+                  <Form.Item
+                    label={t('code.register.gitUrl')}
+                    required
+                    extra={t('code.register.gitUrlExtra')}
+                  >
                     <Input
                       size="full"
                       value={formRepo}

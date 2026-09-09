@@ -14,11 +14,7 @@ import { ImportBlockDialog } from './ImportBlockDialog';
 import { AllocateMemoryDialog } from './AllocateMemoryDialog';
 import { AssetPageHeader } from '@/components/asset/AssetPageHeader';
 import { AssetSplitLayout } from '@/components/asset/AssetSplitLayout';
-import {
-  AssetListPanel,
-  AssetItemBadges,
-  AssetItemTime,
-} from '@/components/asset/AssetListPanel';
+import { AssetListPanel, AssetItemBadges, AssetItemTime } from '@/components/asset/AssetListPanel';
 import { UserBadge } from '@/components/asset/UserBadge';
 import { useChatMemory } from '../hooks/useChatMemory';
 import { NotFoundPage } from '@/pages/NotFoundPage';
@@ -161,124 +157,121 @@ export default function ChatMemoryPanel(
       <AssetSplitLayout
         storageKey="memory:assetSplitWidth"
         sidebar={
-            <AssetListPanel
-              title={t('memory.blockList')}
-              count={t('memory.blockCount', { filtered: filtered.length, total: blocks.length })}
-              loading={blocksLoading}
-              items={filtered}
-              selectedId={selectedId}
-              getItemId={(b) => b.id}
-              onSelect={(b) => selectBlock(b.id)}
-              isItemDisabled={(b) =>
+          <AssetListPanel
+            title={t('memory.blockList')}
+            count={t('memory.blockCount', { filtered: filtered.length, total: blocks.length })}
+            loading={blocksLoading}
+            items={filtered}
+            selectedId={selectedId}
+            getItemId={(b) => b.id}
+            onSelect={(b) => selectBlock(b.id)}
+            isItemDisabled={(b) =>
+              scopeTab === 'fixed' &&
+              b.scope === 'private' &&
+              b.uploaded_by_user_id !== currentUserId
+            }
+            emptyText={t('memory.empty.filtered')}
+            renderItem={(b) => {
+              const isRevoked =
                 scopeTab === 'fixed' &&
                 b.scope === 'private' &&
-                b.uploaded_by_user_id !== currentUserId
-              }
-              emptyText={t('memory.empty.filtered')}
-              renderItem={(b) => {
-                const isRevoked =
-                  scopeTab === 'fixed' &&
-                  b.scope === 'private' &&
-                  b.uploaded_by_user_id !== currentUserId;
-                const isOwner = b.uploaded_by_user_id === currentUserId;
-                const canToggleScope = scopeTab === 'fixed' && isOwner && !!b.scope;
-                const canUnbind = scopeTab === 'fixed' && !isSelfChatMemory(b);
-                const l0Count = b.layer_counts?.L0_messages ?? 0;
-                return (
-                  <div className="_memory-card">
-                    {/* Line 1: Title (left) + Blue Count Badge (right) */}
-                    <div className="_memory-card-header">
-                      <span className="_memory-card-title" title={b.title}>
-                        {b.title}
-                        {isRevoked && (
-                          <span className="_memory-badge _memory-badge--warning">
-                            {t('memory.list.revoked')}
-                          </span>
-                        )}
-                      </span>
-                      {l0Count > 0 && <span className="_memory-card-count">{l0Count}</span>}
-                    </div>
-
-                    {/* Line 2: Real asset id, monospace gray */}
-                    <div className="_memory-card-id" title={b.id}>{b.id}</div>
-
-                    {/* Row 3: Username (left) + Time / Unbind (right)
-                        Reuse generic AssetItemBadges + AssetItemTime, consistent with Skills page structure */}
-                    <AssetItemBadges>
-                      {b.uploaded_by_user_id && (
-                        <UserBadge
-                          userId={b.uploaded_by_user_id}
-                          isCurrentUser={isOwner}
-                          youText={t('common.you')}
-                        />
+                b.uploaded_by_user_id !== currentUserId;
+              const isOwner = b.uploaded_by_user_id === currentUserId;
+              const canToggleScope = scopeTab === 'fixed' && isOwner && !!b.scope;
+              const canUnbind = scopeTab === 'fixed' && !isSelfChatMemory(b);
+              const l0Count = b.layer_counts?.L0_messages ?? 0;
+              return (
+                <div className="_memory-card">
+                  {/* Line 1: Title (left) + Blue Count Badge (right) */}
+                  <div className="_memory-card-header">
+                    <span className="_memory-card-title" title={b.title}>
+                      {b.title}
+                      {isRevoked && (
+                        <span className="_memory-badge _memory-badge--warning">
+                          {t('memory.list.revoked')}
+                        </span>
                       )}
-                      {canUnbind ? (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteBlock(b.id);
-                          }}
-                          title={t('memory.unbind.tooltip')}
-                          className="_memory-card-unbind"
-                        >
-                          {t('memory.unbind')}
-                        </button>
-                      ) : (
-                        <AssetItemTime>
-                          {new Date(b.updated_at_ms).toLocaleString()}
-                        </AssetItemTime>
-                      )}
-                    </AssetItemBadges>
-
-                    {/* Row 4: Shared/Private Switch (visible only to owner) */}
-                    {canToggleScope && (
-                      <div
-                        className="_memory-card-scope"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <Segment
-                          value={b.scope === 'team' ? 'team' : 'private'}
-                          onChange={(v) => handleToggleScope(b, v as 'team' | 'private')}
-                          options={[
-                            { value: 'team', text: t('memoryPersonal.shared') },
-                            { value: 'private', text: t('memoryPersonal.private') },
-                          ]}
-                        />
-                      </div>
-                    )}
+                    </span>
+                    {l0Count > 0 && <span className="_memory-card-count">{l0Count}</span>}
                   </div>
-                );
-              }}
+
+                  {/* Line 2: Real asset id, monospace gray */}
+                  <div className="_memory-card-id" title={b.id}>
+                    {b.id}
+                  </div>
+
+                  {/* Row 3: Username (left) + Time / Unbind (right)
+                        Reuse generic AssetItemBadges + AssetItemTime, consistent with Skills page structure */}
+                  <AssetItemBadges>
+                    {b.uploaded_by_user_id && (
+                      <UserBadge
+                        userId={b.uploaded_by_user_id}
+                        isCurrentUser={isOwner}
+                        youText={t('common.you')}
+                      />
+                    )}
+                    {canUnbind ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteBlock(b.id);
+                        }}
+                        title={t('memory.unbind.tooltip')}
+                        className="_memory-card-unbind"
+                      >
+                        {t('memory.unbind')}
+                      </button>
+                    ) : (
+                      <AssetItemTime>{new Date(b.updated_at_ms).toLocaleString()}</AssetItemTime>
+                    )}
+                  </AssetItemBadges>
+
+                  {/* Row 4: Shared/Private Switch (visible only to owner) */}
+                  {canToggleScope && (
+                    <div className="_memory-card-scope" onClick={(e) => e.stopPropagation()}>
+                      <Segment
+                        value={b.scope === 'team' ? 'team' : 'private'}
+                        onChange={(v) => handleToggleScope(b, v as 'team' | 'private')}
+                        options={[
+                          { value: 'team', text: t('memoryPersonal.shared') },
+                          { value: 'private', text: t('memoryPersonal.private') },
+                        ]}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            }}
+          />
+        }
+        detail={
+          !selected ? (
+            <div className="_memory-detail-empty-card">{t('memory.detail.empty')}</div>
+          ) : (
+            <BlockDetail
+              block={selected}
+              layer={layer}
+              onLayerChange={selectLayer}
+              agentLabel={agentLabel}
+              layerPage={layerPage}
+              layerPageSize={pageSize}
+              layerTotal={windowTotal}
+              layerLoading={layerLoading}
+              onLayerPageChange={handleLayerPageChange}
+              onLayerItemLoad={handleLayerItemLoad}
+              layerItemLoadingId={layerItemLoadingId}
+              onL0LoadMore={handleL0LoadMore}
+              l0MoreLoading={l0MoreLoading}
+              timeRange={timeRange}
+              onTimeRangeChange={setTimeRange}
+              rangeTooLarge={rangeTooLarge}
+              canEdit={selected.uploaded_by_user_id === currentUserId}
+              onSaveLayerItem={handleSaveLayerItem}
+              onSearchLayer={searchLayer}
             />
-          }
-          detail={
-            !selected ? (
-              <div className="_memory-detail-empty-card">{t('memory.detail.empty')}</div>
-            ) : (
-              <BlockDetail
-                block={selected}
-                layer={layer}
-                onLayerChange={selectLayer}
-                agentLabel={agentLabel}
-                layerPage={layerPage}
-                layerPageSize={pageSize}
-                layerTotal={windowTotal}
-                layerLoading={layerLoading}
-                onLayerPageChange={handleLayerPageChange}
-                onLayerItemLoad={handleLayerItemLoad}
-                layerItemLoadingId={layerItemLoadingId}
-                onL0LoadMore={handleL0LoadMore}
-                l0MoreLoading={l0MoreLoading}
-                timeRange={timeRange}
-                onTimeRangeChange={setTimeRange}
-                rangeTooLarge={rangeTooLarge}
-                canEdit={selected.uploaded_by_user_id === currentUserId}
-                onSaveLayerItem={handleSaveLayerItem}
-                onSearchLayer={searchLayer}
-              />
-            )
-          }
+          )
+        }
       />
 
       {showImport && (

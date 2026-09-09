@@ -283,7 +283,12 @@ export function useSkillsPanel() {
   // Deep link may land on the wrong scope tab (fixed lists one agent only).
   // Fall back to the team tab — the union of all agents — before calling it missing.
   useEffect(() => {
-    if (routeSkillId && !loading && tab !== 'team' && !skillsWithCache.find((s) => s.skill_id === routeSkillId)) {
+    if (
+      routeSkillId &&
+      !loading &&
+      tab !== 'team' &&
+      !skillsWithCache.find((s) => s.skill_id === routeSkillId)
+    ) {
       setTab('team');
     }
   }, [routeSkillId, loading, tab, skillsWithCache]);
@@ -389,7 +394,9 @@ export function useSkillsPanel() {
       const msg =
         errorName === 'AbortError' || errorName === 'TimeoutError'
           ? t('skills.export.timeout')
-          : (err instanceof Error ? err.message : String(err));
+          : err instanceof Error
+            ? err.message
+            : String(err);
       tea.notify.error({ description: msg });
     } finally {
       setExportLoading(false);
