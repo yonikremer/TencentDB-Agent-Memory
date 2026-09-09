@@ -40,9 +40,7 @@ vi.mock('@/pages/WikiPage/components/KnowledgeGraph', () => ({
 }));
 
 const wikiMocks = vi.hoisted(() => ({
-  teamAssets: vi.fn(async () => [
-    { wiki_id: 'w1', name: 'W1', status: 'ready', page_count: 1 },
-  ]),
+  teamAssets: vi.fn(async () => [{ wiki_id: 'w1', name: 'W1', status: 'ready', page_count: 1 }]),
   agentFixed: vi.fn(async () => []),
   graph: vi.fn(async () => null),
   pages: vi.fn(async () => []),

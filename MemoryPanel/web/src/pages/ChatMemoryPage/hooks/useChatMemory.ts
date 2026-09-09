@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { isMemoryLayer, memoryPath, navigateIfDiff } from '@/lib/asset-routes';
+import { useRoutedSelection } from '@/lib/use-routed-selection';
 import { useAgents, useTeams } from '@/services';
 import { readAuth } from '@/components/LoginGate';
 import { tea, confirmThenRun } from '@/lib/tea-bridge';
@@ -169,15 +170,15 @@ export function useChatMemory(props: { activeTeamId?: string | null } = {}) {
     void fetchBlocks();
   }, [activeTeamId, scopeTab, agentFilter, fetchBlocks]);
 
-  // URL → state: direct load, refresh, or browser back/forward.
-  useEffect(() => {
-    if (routeBlockId && routeBlockId !== selectedId) {
-      setSelectedId(routeBlockId);
-    } else if (!routeBlockId && selectedId) {
-      setSelectedId(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeBlockId]);
+  const { openDetail, closeDetail } = useRoutedSelection({
+    navigate,
+    routeId: routeBlockId,
+    selectedId,
+    listPath: '/memory',
+    detailPath: (id) => memoryPath(id, layer),
+    onEnter: (id) => setSelectedId(id),
+    onExit: () => setSelectedId(null),
+  });
 
   useEffect(() => {
     if (routeBlockId && routeLayer && routeLayer !== layer) {
@@ -187,8 +188,11 @@ export function useChatMemory(props: { activeTeamId?: string | null } = {}) {
   }, [routeLayer, routeBlockId]);
 
   const selectBlock = (id: string | null) => {
-    navigateIfDiff(navigate, memoryPath(id ?? undefined, layer));
-    setSelectedId(id);
+    if (id) openDetail(id);
+    else {
+      closeDetail();
+      setSelectedId(null);
+    }
   };
 
   const selectLayer = (l: MemoryLayer) => {

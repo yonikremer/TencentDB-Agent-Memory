@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { isWikiTab, navigateIfDiff, wikiPath, type WikiTab } from '@/lib/asset-routes';
+import { useRoutedSelection } from '@/lib/use-routed-selection';
 import {
   knowledgeApi,
   wikiProgressPercent,
@@ -518,16 +519,18 @@ export function useWikiSources() {
     fetchDetail(wikiId);
   };
 
-  // URL → state: direct load, refresh, or browser back/forward.
-  useEffect(() => {
-    if (routeWikiId && routeWikiId !== selectedWikiId) {
-      enterDetailState(routeWikiId, routeTab);
-    } else if (!routeWikiId && subView === 'detail') {
+  const { openDetail, closeDetail } = useRoutedSelection({
+    navigate,
+    routeId: routeWikiId,
+    selectedId: selectedWikiId || null,
+    listPath: '/wiki',
+    detailPath: (id) => wikiPath(id, 'overview'),
+    onEnter: (id) => enterDetailState(id, routeTab),
+    onExit: () => {
       setSubView('list');
       setSelectedWikiId('');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeWikiId]);
+    },
+  });
 
   useEffect(() => {
     if (routeWikiId && subView === 'detail' && routeTab !== activeTab) {
@@ -535,15 +538,6 @@ export function useWikiSources() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeTab, routeWikiId, subView]);
-
-  const openDetail = (wikiId: string) => {
-    navigateIfDiff(navigate, wikiPath(wikiId, 'overview'));
-    if (wikiId !== selectedWikiId) enterDetailState(wikiId, 'overview');
-  };
-
-  const closeDetail = () => {
-    navigateIfDiff(navigate, '/wiki');
-  };
 
   const selectTab = (tab: WikiTab) => {
     if (selectedWikiId) navigateIfDiff(navigate, wikiPath(selectedWikiId, tab));

@@ -172,7 +172,10 @@ async function startServer(): Promise<void> {
 }
 
 // Start server when run directly
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (
+  process.argv[1] &&
+  fileURLToPath(import.meta.url) === resolve(process.argv[1])
+) {
   void startServer().catch((err) => {
     log.error("Knowledge service failed to start", {
       error: err instanceof Error ? err.message : String(err),

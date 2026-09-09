@@ -22,8 +22,11 @@ describe('NotFoundPage', () => {
 });
 
 describe('notFound i18n', () => {
-  it.each(['notFound.title', 'notFound.desc', 'notFound.back'] as const)('has %s in en + zh', (key) => {
-    expect(enUS[key]).toBeTruthy();
-    expect(zhCN[key]).toBeTruthy();
-  });
+  it.each(['notFound.title', 'notFound.desc', 'notFound.back'] as const)(
+    'has %s in en + zh',
+    (key) => {
+      expect(enUS[key]).toBeTruthy();
+      expect(zhCN[key]).toBeTruthy();
+    },
+  );
 });

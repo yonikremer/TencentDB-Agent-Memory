@@ -68,7 +68,7 @@ it standalone (usually `cd <module> && npm install && npm run dev`).
    cd <module>
    npm test          # or pnpm test
    ```
-4. Commit using Conventional Commits + DCO sign-off (see below)
+4. Commit using Conventional Commits
 5. Push and open a PR against `develop_server_team` or `master` (follow the
    maintainer's latest guidance)
 6. Get through CI + review, then merge
@@ -81,8 +81,6 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 <type>(<scope>): <subject>
 
 <body>
-
-Signed-off-by: Your Name <your-email@example.com>
 ```
 
 ### type
@@ -119,22 +117,6 @@ docs(sdk-ts): update v3 constructor examples
 - **Naming**: prefer English, be descriptive
 - **Import order**: Node/Python builtins → third-party → project internals
 - **Tests**: add tests with new features; fix a bug with a regression test first
-
-## DCO sign-off
-
-Every commit must carry a [DCO](https://developercertificate.org/) sign-off:
-
-```bash
-git commit -s -m "feat(memory-core): ..."
-```
-
-Commits without a `Signed-off-by:` trailer will not be merged. To make it
-automatic:
-
-```bash
-git config user.name "Your Name"
-git config user.email "your-email@example.com"
-```
 
 ## Security issues
 

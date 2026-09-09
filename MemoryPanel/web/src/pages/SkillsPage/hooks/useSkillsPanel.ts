@@ -5,7 +5,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
-import { navigateIfDiff, skillPath } from '@/lib/asset-routes';
+import { skillPath } from '@/lib/asset-routes';
+import { useRoutedSelection } from '@/lib/use-routed-selection';
 import { assetsApi, agentsApi, type Asset } from '@/lib/teamApi';
 import {
   listSkills,
@@ -265,19 +266,22 @@ export function useSkillsPanel() {
   // Skip the loading intermediate state: refresh first setsSkills([]) and then refetches,
   // If we judge at the moment of clearing, it will mistakenly clear the selection (refreshing after editing and saving will lose the current selection).
   // Wait until refresh is complete (loading=false) and the list is filled, then judge, and keep the selection if the selected item is still there.
-  // URL → state: direct load, refresh, or browser back/forward.
-  useEffect(() => {
-    if (routeSkillId && routeSkillId !== selectedSkillId) {
-      setSelectedSkillId(routeSkillId);
-    } else if (!routeSkillId && selectedSkillId) {
-      setSelectedSkillId(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeSkillId]);
+  const { openDetail, closeDetail } = useRoutedSelection({
+    navigate,
+    routeId: routeSkillId,
+    selectedId: selectedSkillId,
+    listPath: '/skills',
+    detailPath: (id) => skillPath(id),
+    onEnter: (id) => setSelectedSkillId(id),
+    onExit: () => setSelectedSkillId(null),
+  });
 
   const selectSkill = (id: string | null) => {
-    navigateIfDiff(navigate, skillPath(id ?? undefined));
-    setSelectedSkillId(id);
+    if (id) openDetail(id);
+    else {
+      closeDetail();
+      setSelectedSkillId(null);
+    }
   };
 
   // Deep link may land on the wrong scope tab (fixed lists one agent only).

@@ -67,7 +67,7 @@ cp .env.example .env && $EDITOR .env
    cd <module>
    npm test          # 或 pnpm test
    ```
-4. 提交（Conventional Commits + DCO 签名，见下文）
+4. 提交（Conventional Commits）
 5. 推到 fork，发起 PR 到 `develop_server_team` 或 `master`（按维护者最新
    指示）
 6. 通过 CI + Review 后合并
@@ -80,8 +80,6 @@ cp .env.example .env && $EDITOR .env
 <type>(<scope>): <subject>
 
 <body>
-
-Signed-off-by: Your Name <your-email@example.com>
 ```
 
 ### type
@@ -118,21 +116,6 @@ docs(sdk-ts): update v3 constructor examples
 - **命名**：优先英文，有意义
 - **导入顺序**：Node.js/Python 内置 → 第三方依赖 → 项目内部模块
 - **测试**：新功能补测试，Bug 修复优先补一个能复现的测试
-
-## DCO 签名
-
-所有提交必须带 [DCO](https://developercertificate.org/) 签名：
-
-```bash
-git commit -s -m "feat(memory-core): ..."
-```
-
-没有 `Signed-off-by:` 行的提交不会被合并。可以在 `git config` 里预设：
-
-```bash
-git config user.name "Your Name"
-git config user.email "your-email@example.com"
-```
 
 ## 安全问题
 

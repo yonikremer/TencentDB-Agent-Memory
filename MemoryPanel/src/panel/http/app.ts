@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { requestLogger } from './middleware/request-logger.js';
@@ -11,8 +12,23 @@ import { registerTaskRoutes } from './routes/task.js';
 import { registerAgentOverviewRoutes } from './routes/agent-overview.js';
 import { registerAgentLifecycleRoutes } from './routes/agent-lifecycle.js';
 import { registerKnowledgeRoutes } from './routes/knowledge/index.js';
+import { registerGroupyRoutes } from './routes/groupy.js';
+import { registerAssetGrantRoutes } from './routes/asset-grant.js';
 
 const API_PREFIX = '/api/v1';
+
+/** Path prefixes owned by the client router (see MemoryPanel/web/src/routes). */
+const SPA_PREFIXES = ['/wiki', '/code', '/skills', '/memory', '/team', '/guide'];
+
+/**
+ * Whether a path is served by the SPA shell with HTTP 200.
+ * Unknown extensionless paths still get the shell (client renders NotFoundPage)
+ * but with a truthful HTTP 404 — see the fallback in buildPanelApp.
+ */
+export function isSpaShellPath(p: string): boolean {
+  if (p === '/') return true;
+  return SPA_PREFIXES.some((pre) => p === pre || p.startsWith(`${pre}/`));
+}
 
 export function buildPanelApp(deps: PanelDeps): Hono {
   const app = new Hono();
@@ -50,11 +66,18 @@ export function buildPanelApp(deps: PanelDeps): Hono {
   });
 
   const distDir = deps.config.ui.distDir;
+  // SPA shell, loaded once for the 404 case below.
+  let shellCache: Promise<string> | null = null;
+  const loadShell = (): Promise<string> =>
+    (shellCache ??= readFile(path.join(distDir, 'index.html'), 'utf8'));
   app.use('/*', serveStatic({ root: distDir }));
   app.get('*', (c, next) => {
     const p = c.req.path;
     if (p.startsWith('/api/') || p === '/health') return next();
-    return serveStatic({ path: path.join(distDir, 'index.html') })(c, next);
+    if (isSpaShellPath(p)) {
+      return serveStatic({ path: path.join(distDir, 'index.html') })(c, next);
+    }
+    return loadShell().then((html) => c.html(html, 404));
   });
 
   return app;

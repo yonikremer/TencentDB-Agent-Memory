@@ -5,7 +5,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
-import { codePath, navigateIfDiff } from '@/lib/asset-routes';
+import { codePath } from '@/lib/asset-routes';
+import { useRoutedSelection } from '@/lib/use-routed-selection';
 import { knowledgeApi, type CodeGraphDetail } from '@/lib/api/knowledge-api';
 import { useTeams, useAgents } from '@/services';
 import { readAuth } from '@/components/LoginGate';
@@ -363,25 +364,18 @@ export function useCodeSources() {
     setSubView('detail');
   };
 
-  // URL → state: direct load, refresh, or browser back/forward.
-  useEffect(() => {
-    if (routeCodeId && routeCodeId !== selectedCgId) {
-      enterDetailState(routeCodeId);
-    } else if (!routeCodeId && subView === 'detail') {
+  const { openDetail, closeDetail } = useRoutedSelection({
+    navigate,
+    routeId: routeCodeId,
+    selectedId: selectedCgId || null,
+    listPath: '/code',
+    detailPath: (id) => codePath(id),
+    onEnter: (id) => enterDetailState(id),
+    onExit: () => {
       setSubView('list');
       setSelectedCgId('');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeCodeId]);
-
-  const openDetail = (cgId: string) => {
-    navigateIfDiff(navigate, codePath(cgId));
-    if (cgId !== selectedCgId) enterDetailState(cgId);
-  };
-
-  const closeDetail = () => {
-    navigateIfDiff(navigate, '/code');
-  };
+    },
+  });
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
