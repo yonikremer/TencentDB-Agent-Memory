@@ -72,21 +72,21 @@ export function resolveSkillConfig(
   const degradations: SkillDegradation[] = [];
 
   // --------------- store ---------------
-  const requestedStore =
-    input.storeBackend ?? probe.outerStoreBackend ?? "sqlite";
-  let storeBackend: "sqlite" | "tcvdb" = requestedStore;
-  if (storeBackend === "tcvdb" && !probe.hasTcvdbCredentials) {
+  const requestedStore = (input.storeBackend ??
+    probe.outerStoreBackend ??
+    "sqlite") as string;
+  const storeBackend: "sqlite" = "sqlite";
+  if (requestedStore !== "sqlite") {
     degradations.push({
       field: "storeBackend",
-      from: "tcvdb",
+      from: requestedStore,
       to: "sqlite",
-      reason: "TCVDB credentials missing (url / apiKey / database)",
+      reason: "tcvdb removed — sqlite only",
       level: "warn",
     });
     logger.warn(
-      `${TAG} storeBackend=tcvdb requested but credentials missing — degrading to sqlite`,
+      `${TAG} storeBackend=${requestedStore} unsupported (tcvdb removed) — degrading to sqlite`,
     );
-    storeBackend = "sqlite";
   }
 
   // --------------- content ---------------
@@ -187,7 +187,11 @@ export function resolveSkillConfig(
   let envConcurrencyValid = false;
   if (envConcurrencyRaw !== undefined && envConcurrencyRaw !== "") {
     const parsed = Number.parseInt(envConcurrencyRaw, 10);
-    if (Number.isInteger(parsed) && parsed > 0 && String(parsed) === envConcurrencyRaw.trim()) {
+    if (
+      Number.isInteger(parsed) &&
+      parsed > 0 &&
+      String(parsed) === envConcurrencyRaw.trim()
+    ) {
       workerConcurrency = parsed;
       envConcurrencyValid = true;
     } else {
@@ -208,7 +212,12 @@ export function resolveSkillConfig(
     }
   }
 
-  const workerBrpopMs = validPositiveInteger(input.worker?.brpopBlockMs, DEFAULT_WORKER_BRPOP_MS, logger, "worker.brpopBlockMs");
+  const workerBrpopMs = validPositiveInteger(
+    input.worker?.brpopBlockMs,
+    DEFAULT_WORKER_BRPOP_MS,
+    logger,
+    "worker.brpopBlockMs",
+  );
   const workerExtractLockTtlMs = validPositiveInteger(
     input.worker?.extractLockTtlMs,
     DEFAULT_EXTRACT_LOCK_TTL_MS,
@@ -257,13 +266,13 @@ export function resolveSkillConfig(
       tailChars: archiveBytes,
     },
     compress: {
-      toolContentThresholdBytes: input.compress?.toolContentThresholdBytes ?? 2048,
+      toolContentThresholdBytes:
+        input.compress?.toolContentThresholdBytes ?? 2048,
       headBytes: input.compress?.headBytes ?? 1024,
       tailBytes: input.compress?.tailBytes ?? 1024,
     },
     resources: {
-      maxResourceSizeBytes:
-        input.resources?.maxResourceSizeBytes ?? 5_000_000,
+      maxResourceSizeBytes: input.resources?.maxResourceSizeBytes ?? 5_000_000,
       downloadDir: input.resources?.downloadDir ?? "/tmp/tdai-skill-resources",
       allowExecutable: input.resources?.allowExecutable === true,
     },

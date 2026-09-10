@@ -72,7 +72,7 @@ memory:
     strategy: "hybrid"
     timeoutMs: 5000
 
-  # ── Storage backend ──
+  # ── Storage backend (sqlite only; tcvdb removed) ──
   storeBackend: "sqlite"
 
   embedding:
@@ -94,8 +94,7 @@ memory:
 skill:
   enabled: true
 
-  # [reuse] If storeBackend is unset it inherits memory.storeBackend (here, sqlite);
-  #         tcvdb requires TCVDB credentials (memory.tcvdb); falls back to sqlite when missing.
+  # [reuse] If storeBackend is unset it inherits memory.storeBackend (sqlite only).
   # storeBackend: "sqlite"
   # [probe] If contentBackend is unset it auto-probes: COS credentials (cos.*) present → cos, otherwise → local.
   # contentBackend: "local"

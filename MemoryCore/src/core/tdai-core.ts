@@ -33,11 +33,31 @@ import type { MemoryTdaiConfig } from "../config.js";
 import type { IMemoryStore } from "./store/types.js";
 import type { EmbeddingService } from "./store/embedding.js";
 import type { StorageAdapter } from "./storage/adapter.js";
+
+/** OpenClaw runtime config (opaque map; parsed at pipeline-factory boundary). */
+type OpenClawRuntimeConfig = Record<string, unknown>;
+function asOpenClawConfig(v: unknown): OpenClawRuntimeConfig | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  return v as OpenClawRuntimeConfig;
+}
+function readCredit(v: unknown): number {
+  if (typeof v === "object" && v !== null && "accumulatedCredit" in v) {
+    const n = (v as { accumulatedCredit?: unknown }).accumulatedCredit;
+    if (typeof n === "number" && Number.isFinite(n)) return n;
+  }
+  return 0;
+}
 import { performAutoRecall } from "./hooks/auto-recall.js";
 import { reportRecallMetrics } from "./report/metric-tracking-recall.js";
 import { performAutoCapture } from "./hooks/auto-capture.js";
-import { executeMemorySearch, formatSearchResponse } from "./tools/memory-search.js";
-import { executeConversationSearch, formatConversationSearchResponse } from "./tools/conversation-search.js";
+import {
+  executeMemorySearch,
+  formatSearchResponse,
+} from "./tools/memory-search.js";
+import {
+  executeConversationSearch,
+  formatConversationSearchResponse,
+} from "./tools/conversation-search.js";
 import {
   initDataDirectories,
   initStores,
@@ -51,7 +71,10 @@ import {
 import { MemoryPipelineManager } from "../utils/pipeline-manager.js";
 import { CheckpointManager } from "../utils/checkpoint.js";
 import { SessionFilter } from "../utils/session-filter.js";
-import { StandaloneLLMRunner, StandaloneLLMRunnerFactory } from "../adapters/standalone/llm-runner.js";
+import {
+  StandaloneLLMRunner,
+  StandaloneLLMRunnerFactory,
+} from "../adapters/standalone/llm-runner.js";
 import { resolveStandaloneLlmForRuntime } from "../adapters/standalone/llm-provider-resolver.js";
 import { MetricTrackingRunnerFactory } from "./report/metric-tracking-runner.js";
 
@@ -242,7 +265,9 @@ export class TdaiCore {
    * Must be called once before any other methods.
    */
   async initialize(): Promise<void> {
-    this.logger.debug?.(`${TAG} Initializing TDAI Core: dataDir=${this.dataDir}`);
+    this.logger.debug?.(
+      `${TAG} Initializing TDAI Core: dataDir=${this.dataDir}`,
+    );
     initDataDirectories(this.dataDir);
 
     // Initialize stores (async)
@@ -250,13 +275,19 @@ export class TdaiCore {
 
     // Create pipeline manager (sync — does not need store)
     if (this.cfg.extraction.enabled) {
-      this.scheduler = createPipelineManager(this.cfg, this.logger, this.sessionFilter);
+      this.scheduler = createPipelineManager(
+        this.cfg,
+        this.logger,
+        this.sessionFilter,
+      );
       // Wire runners after store is ready (or after store init fails — runners
       // still work in degraded mode with JSONL fallback and no embedding)
       this.storeReady
         .then(() => this.wirePipelineRunners())
         .catch((err) => {
-          this.logger.error(`${TAG} Store init failed; wiring pipeline runners in degraded mode: ${err instanceof Error ? err.message : String(err)}`);
+          this.logger.error(
+            `${TAG} Store init failed; wiring pipeline runners in degraded mode: ${err instanceof Error ? err.message : String(err)}`,
+          );
           this.wirePipelineRunners();
         });
     }
@@ -336,8 +367,8 @@ export class TdaiCore {
       } catch (err) {
         this.logger.warn(
           `${TAG} Background-task drain timed out (${BG_DRAIN_TIMEOUT_MS}ms): ` +
-          `${err instanceof Error ? err.message : String(err)}. ` +
-          `Closing stores anyway — residual writes may surface as warnings.`,
+            `${err instanceof Error ? err.message : String(err)}. ` +
+            `Closing stores anyway — residual writes may surface as warnings.`,
         );
       } finally {
         if (drainTimeoutId !== undefined) clearTimeout(drainTimeoutId);
@@ -354,7 +385,9 @@ export class TdaiCore {
       try {
         await this.embeddingService.close();
       } catch (err) {
-        this.logger.warn(`${TAG} EmbeddingService close error: ${err instanceof Error ? err.message : String(err)}`);
+        this.logger.warn(
+          `${TAG} EmbeddingService close error: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
       this.embeddingService = undefined;
     }
@@ -371,7 +404,10 @@ export class TdaiCore {
    * Handle recall (memory retrieval) before an LLM turn.
    * Maps to: OpenClaw `before_prompt_build` / Hermes `prefetch()`.
    */
-  async handleBeforeRecall(userText: string, sessionKey: string): Promise<RecallResult> {
+  async handleBeforeRecall(
+    userText: string,
+    sessionKey: string,
+  ): Promise<RecallResult> {
     await this.storeReady?.catch(() => {});
 
     const tStart = performance.now();
@@ -435,7 +471,9 @@ export class TdaiCore {
    * Search L1 structured memories.
    * Maps to: `tdai_memory_search` tool.
    */
-  async searchMemories(params: MemorySearchParams): Promise<{ text: string; total: number; strategy: string }> {
+  async searchMemories(
+    params: MemorySearchParams,
+  ): Promise<{ text: string; total: number; strategy: string }> {
     const result = await executeMemorySearch({
       query: params.query,
       limit: params.limit ?? 5,
@@ -457,7 +495,9 @@ export class TdaiCore {
    * Search L0 raw conversations.
    * Maps to: `tdai_conversation_search` tool.
    */
-  async searchConversations(params: ConversationSearchParams): Promise<{ text: string; total: number }> {
+  async searchConversations(
+    params: ConversationSearchParams,
+  ): Promise<{ text: string; total: number }> {
     const result = await executeConversationSearch({
       query: params.query,
       limit: params.limit ?? 5,
@@ -587,7 +627,9 @@ export class TdaiCore {
     this.scheduler = manager;
     // Mark scheduler as "started" so ensureSchedulerStarted() becomes a no-op
     this.schedulerStartPromise = Promise.resolve();
-    this.logger.info("[tdai-core] Switched to StatefulPipelineManager (distributed mode)");
+    this.logger.info(
+      "[tdai-core] Switched to StatefulPipelineManager (distributed mode)",
+    );
   }
 
   /** Whether the scheduler has been started (or is currently starting). */
@@ -612,7 +654,9 @@ export class TdaiCore {
       const stores = await initStores(this.cfg, this.dataDir, this.logger);
       this.vectorStore = stores.vectorStore;
       this.embeddingService = stores.embeddingService;
-      this.logger.debug?.(`${TAG} Stores initialized: backend=${this.cfg.storeBackend}, embedding=${this.cfg.embedding.provider}`);
+      this.logger.debug?.(
+        `${TAG} Stores initialized: backend=${this.cfg.storeBackend}, embedding=${this.cfg.embedding.provider}`,
+      );
     } catch (err) {
       this.logger.warn(
         `${TAG} Store init failed; recall/dedup degraded: ${err instanceof Error ? err.message : String(err)}`,
@@ -633,7 +677,10 @@ export class TdaiCore {
     timeoutMs: number;
     stream: boolean;
   } {
-    const resolved = resolveStandaloneLlmForRuntime(this.cfg.llm, this.instanceId);
+    const resolved = resolveStandaloneLlmForRuntime(
+      this.cfg.llm,
+      this.instanceId,
+    );
     return {
       baseUrl: resolved.baseUrl,
       apiKey: resolved.apiKey,
@@ -673,11 +720,18 @@ export class TdaiCore {
 
     // Determine whether to use standalone LLM runner for extraction.
     // Priority: cfg.llm.enabled (explicit override) > hostType detection.
-    const useStandaloneRunner = this.cfg.llm.enabled || this.hostAdapter.hostType !== "openclaw";
+    const useStandaloneRunner =
+      this.cfg.llm.enabled || this.hostAdapter.hostType !== "openclaw";
 
-    const openclawConfig = (!useStandaloneRunner && this.hostAdapter.hostType === "openclaw")
-      ? (this.hostAdapter as { getOpenClawConfig?(): unknown }).getOpenClawConfig?.()
-      : undefined;
+    const openclawConfig = asOpenClawConfig(
+      !useStandaloneRunner && this.hostAdapter.hostType === "openclaw"
+        ? (
+            this.hostAdapter as {
+              getOpenClawConfig?(): OpenClawRuntimeConfig | undefined;
+            }
+          ).getOpenClawConfig?.()
+        : undefined,
+    );
 
     // When standalone runner is active, create LLM runners from the factory.
     // Override the host-provided factory whenever `cfg.llm` is enabled and
@@ -702,7 +756,7 @@ export class TdaiCore {
         });
         this.logger.debug?.(
           `${TAG} Using standalone LLM override: provider=${this.cfg.llm.provider ?? "openai"}, ` +
-          `model=${runtimeLlm.model}, baseUrl=${runtimeLlm.baseUrl}`,
+            `model=${runtimeLlm.model}, baseUrl=${runtimeLlm.baseUrl}`,
         );
       } catch (err) {
         // Most common at construction time: instanceId is still `__unset__`
@@ -717,7 +771,10 @@ export class TdaiCore {
 
     // Wrap with MetricTrackingRunnerFactory decorator (non-intrusive credit reporting)
     // When Kafka is not configured metricProducer.send() is no-op, zero overhead
-    const trackingFactory = new MetricTrackingRunnerFactory(runnerFactory, () => this.instanceId);
+    const trackingFactory = new MetricTrackingRunnerFactory(
+      runnerFactory,
+      () => this.instanceId,
+    );
 
     const l1LlmRunner = useStandaloneRunner
       ? trackingFactory.createRunner({ enableTools: false })
@@ -727,20 +784,24 @@ export class TdaiCore {
       : undefined;
 
     // L1 runner
-    this.scheduler.setL1Runner(createL1Runner({
-      pluginDataDir: this.dataDir,
-      cfg: this.cfg,
-      openclawConfig,
-      vectorStore: this.vectorStore,
-      embeddingService: this.embeddingService,
-      logger: this.logger,
-      getInstanceId: () => this.instanceId,
-      llmRunner: l1LlmRunner,
-      storage: this.storage,
-    }));
+    this.scheduler.setL1Runner(
+      createL1Runner({
+        pluginDataDir: this.dataDir,
+        cfg: this.cfg,
+        openclawConfig,
+        vectorStore: this.vectorStore,
+        embeddingService: this.embeddingService,
+        logger: this.logger,
+        getInstanceId: () => this.instanceId,
+        llmRunner: l1LlmRunner,
+        storage: this.storage,
+      }),
+    );
 
     // Persister
-    this.scheduler.setPersister(createPersister(this.dataDir, this.logger, this.storage));
+    this.scheduler.setPersister(
+      createPersister(this.dataDir, this.logger, this.storage),
+    );
 
     // L2 runner
     this.scheduler.setL2Runner(async (sessionKey: string, cursor?: string) => {
@@ -818,11 +879,17 @@ export class TdaiCore {
   private async doWireSkillModule(): Promise<void> {
     // Wait for storeReady (no-op if already resolved)
     if (this.storeReady) {
-      try { await this.storeReady; } catch { /* fall through to gate check */ }
+      try {
+        await this.storeReady;
+      } catch {
+        /* fall through to gate check */
+      }
     }
 
     if (!this.vectorStore) {
-      this.logger.debug?.(`${TAG} Skill wiring deferred: vectorStore not ready`);
+      this.logger.debug?.(
+        `${TAG} Skill wiring deferred: vectorStore not ready`,
+      );
       return;
     }
     if (!this.storage) {
@@ -831,11 +898,8 @@ export class TdaiCore {
     }
 
     try {
-      // Build the env probe — describes ambient capabilities to the resolver
-      // so it can downgrade with proper warn lines (M0 §0.3).
-      const tcvdbHasCreds = !!(
-        this.cfg.tcvdb?.url && this.cfg.tcvdb?.apiKey && this.cfg.tcvdb?.database
-      );
+      // Build the env probe — tcvdb removed, always sqlite.
+      const tcvdbHasCreds = false;
       const cosHasCreds = !!(
         this.cfg.cos?.secretId &&
         this.cfg.cos?.secretKey &&
@@ -846,7 +910,8 @@ export class TdaiCore {
         hasTcvdbCredentials: tcvdbHasCreds,
         hasCosCredentials: cosHasCreds,
         embeddingAvailable:
-          this.cfg.embedding.enabled && (this.cfg.embedding.dimensions ?? 0) > 0,
+          this.cfg.embedding.enabled &&
+          (this.cfg.embedding.dimensions ?? 0) > 0,
         llmRunnerAvailable:
           (this.cfg.llm?.enabled ?? false) &&
           !!this.cfg.llm?.baseUrl &&
@@ -856,12 +921,18 @@ export class TdaiCore {
         info: (m: string) => this.logger.info(m),
         warn: (m: string) => this.logger.warn(m),
       };
-      const resolved = resolveSkillConfig(this.cfg.skill, probe, resolverLogger);
+      const resolved = resolveSkillConfig(
+        this.cfg.skill,
+        probe,
+        resolverLogger,
+      );
       this.resolvedSkillConfig = resolved;
 
+      // SAFETY: VectorStore sqlite always exposes getRawDb/getEmbeddingDimensions; guard below handles test doubles.
       // Open the underlying DatabaseSync (raw handle escape hatch — see
       // VectorStore.getRawDb() docstring). Skill tables (skill_meta /
       // skill_fts / skill_vec / task_*) live in the SAME connection.
+      // SAFETY: VectorStore (sqlite) always exposes getRawDb/getEmbeddingDimensions; guard below handles test doubles.
       const rawDbCarrier = this.vectorStore as unknown as {
         getRawDb?: () => unknown;
         getEmbeddingDimensions?: () => number;
@@ -995,7 +1066,8 @@ export class TdaiCore {
     // when provider=proxy cfg.apiKey might be empty (true apiKey is injected by resolver from env),
     // thus construction is allowed as long as provider=proxy; keeps original baseUrl+apiKey check when provider=openai.
     if (!cfg.baseUrl) return undefined;
-    if ((cfg.provider ?? "openai") === "openai" && !cfg.apiKey) return undefined;
+    if ((cfg.provider ?? "openai") === "openai" && !cfg.apiKey)
+      return undefined;
     const logger = this.logger;
     // Construct the StandaloneLLMRunner with tools eligible by default.
     // Per-call SkillExtractor passes its own `tools` dict + enableTools=true,
@@ -1051,11 +1123,24 @@ export class TdaiCore {
      * standalone single process does not need to pass (in-process withFileLock is sufficient).
      */
     checkpointLock?: import("../utils/checkpoint.js").CheckpointLockOptions,
-  ): Promise<{ storedCount: number; creditUsed: number; hasMore: boolean; hasFullBacklog: boolean; profileScopes: string[] }> {
-    const useStandaloneRunner = this.cfg.llm.enabled || this.hostAdapter.hostType !== "openclaw";
-    const openclawConfig = (!useStandaloneRunner && this.hostAdapter.hostType === "openclaw")
-      ? (this.hostAdapter as { getOpenClawConfig?(): unknown }).getOpenClawConfig?.()
-      : undefined;
+  ): Promise<{
+    storedCount: number;
+    creditUsed: number;
+    hasMore: boolean;
+    hasFullBacklog: boolean;
+    profileScopes: string[];
+  }> {
+    const useStandaloneRunner =
+      this.cfg.llm.enabled || this.hostAdapter.hostType !== "openclaw";
+    const openclawConfig = asOpenClawConfig(
+      !useStandaloneRunner && this.hostAdapter.hostType === "openclaw"
+        ? (
+            this.hostAdapter as {
+              getOpenClawConfig?(): OpenClawRuntimeConfig | undefined;
+            }
+          ).getOpenClawConfig?.()
+        : undefined,
+    );
 
     let runnerFactory = this.runnerFactory;
     if (this.shouldOverrideRunnerFactory(useStandaloneRunner)) {
@@ -1066,11 +1151,14 @@ export class TdaiCore {
       });
       this.logger.debug?.(
         `${TAG} [L1] Using standalone LLM override: provider=${this.cfg.llm.provider ?? "openai"}, ` +
-        `model=${runtimeLlm.model}, baseUrl=${runtimeLlm.baseUrl}`,
+          `model=${runtimeLlm.model}, baseUrl=${runtimeLlm.baseUrl}`,
       );
     }
     // Wrap with MetricTrackingRunnerFactory decorator (non-intrusive credit reporting)
-    const trackingFactory = new MetricTrackingRunnerFactory(runnerFactory, () => this.instanceId);
+    const trackingFactory = new MetricTrackingRunnerFactory(
+      runnerFactory,
+      () => this.instanceId,
+    );
     const llmRunner = useStandaloneRunner
       ? trackingFactory.createRunner({ enableTools: false })
       : undefined;
@@ -1090,7 +1178,7 @@ export class TdaiCore {
     const result = await runner({ sessionKey, msg: [], bg_msg: [] });
 
     // Read accumulated credit from the tracking runner (original float, strictly consistent with monitoring side)
-    const creditUsed: number = (llmRunner as any)?.accumulatedCredit ?? 0;
+    const creditUsed: number = readCredit(llmRunner);
     const storedCount = result?.storedCount ?? 0;
     const hasMore = result?.hasMore ?? false;
     const hasFullBacklog = result?.hasFullBacklog ?? false;
@@ -1101,11 +1189,23 @@ export class TdaiCore {
   /**
    * Run L2 scene extraction using an externally provided Store.
    */
-  async runL2WithStore(sessionKey: string, store: IMemoryStore, storage?: StorageAdapter, cursor?: string): Promise<{ creditUsed: number; skipped: boolean }> {
-    const useStandaloneRunner = this.cfg.llm.enabled || this.hostAdapter.hostType !== "openclaw";
-    const openclawConfig = (!useStandaloneRunner && this.hostAdapter.hostType === "openclaw")
-      ? (this.hostAdapter as { getOpenClawConfig?(): unknown }).getOpenClawConfig?.()
-      : undefined;
+  async runL2WithStore(
+    sessionKey: string,
+    store: IMemoryStore,
+    storage?: StorageAdapter,
+    cursor?: string,
+  ): Promise<{ creditUsed: number; skipped: boolean }> {
+    const useStandaloneRunner =
+      this.cfg.llm.enabled || this.hostAdapter.hostType !== "openclaw";
+    const openclawConfig = asOpenClawConfig(
+      !useStandaloneRunner && this.hostAdapter.hostType === "openclaw"
+        ? (
+            this.hostAdapter as {
+              getOpenClawConfig?(): OpenClawRuntimeConfig | undefined;
+            }
+          ).getOpenClawConfig?.()
+        : undefined,
+    );
 
     let runnerFactory = this.runnerFactory;
     if (this.shouldOverrideRunnerFactory(useStandaloneRunner)) {
@@ -1116,11 +1216,14 @@ export class TdaiCore {
       });
       this.logger.debug?.(
         `${TAG} [L2] Using standalone LLM override: provider=${this.cfg.llm.provider ?? "openai"}, ` +
-        `model=${runtimeLlm.model}, baseUrl=${runtimeLlm.baseUrl}`,
+          `model=${runtimeLlm.model}, baseUrl=${runtimeLlm.baseUrl}`,
       );
     }
     // Wrap with MetricTrackingRunnerFactory decorator (non-intrusive credit reporting)
-    const trackingFactory = new MetricTrackingRunnerFactory(runnerFactory, () => this.instanceId);
+    const trackingFactory = new MetricTrackingRunnerFactory(
+      runnerFactory,
+      () => this.instanceId,
+    );
     const llmRunner = useStandaloneRunner
       ? trackingFactory.createRunner({ enableTools: true })
       : undefined;
@@ -1136,20 +1239,32 @@ export class TdaiCore {
       storage: storage ?? this.getStorage(),
     });
     const runnerResult = await runner(sessionKey, cursor);
-    const creditUsed: number = (llmRunner as any)?.accumulatedCredit ?? 0;
+    const creditUsed: number = readCredit(llmRunner);
     // L2 runner returns undefined when no new L1 records, or { skipped: true } on empty extraction
-    const skipped = (runnerResult === undefined && creditUsed === 0) || (runnerResult?.skipped === true);
+    const skipped =
+      (runnerResult === undefined && creditUsed === 0) ||
+      runnerResult?.skipped === true;
     return { creditUsed, skipped };
   }
 
   /**
    * Run L3 persona generation using an externally provided Store.
    */
-  async runL3WithStore(store: IMemoryStore, storage?: StorageAdapter): Promise<{ creditUsed: number }> {
-    const useStandaloneRunner = this.cfg.llm.enabled || this.hostAdapter.hostType !== "openclaw";
-    const openclawConfig = (!useStandaloneRunner && this.hostAdapter.hostType === "openclaw")
-      ? (this.hostAdapter as { getOpenClawConfig?(): unknown }).getOpenClawConfig?.()
-      : undefined;
+  async runL3WithStore(
+    store: IMemoryStore,
+    storage?: StorageAdapter,
+  ): Promise<{ creditUsed: number }> {
+    const useStandaloneRunner =
+      this.cfg.llm.enabled || this.hostAdapter.hostType !== "openclaw";
+    const openclawConfig = asOpenClawConfig(
+      !useStandaloneRunner && this.hostAdapter.hostType === "openclaw"
+        ? (
+            this.hostAdapter as {
+              getOpenClawConfig?(): OpenClawRuntimeConfig | undefined;
+            }
+          ).getOpenClawConfig?.()
+        : undefined,
+    );
 
     let runnerFactory = this.runnerFactory;
     if (this.shouldOverrideRunnerFactory(useStandaloneRunner)) {
@@ -1160,11 +1275,14 @@ export class TdaiCore {
       });
       this.logger.debug?.(
         `${TAG} [L3] Using standalone LLM override: provider=${this.cfg.llm.provider ?? "openai"}, ` +
-        `model=${runtimeLlm.model}, baseUrl=${runtimeLlm.baseUrl}`,
+          `model=${runtimeLlm.model}, baseUrl=${runtimeLlm.baseUrl}`,
       );
     }
     // Wrap with MetricTrackingRunnerFactory decorator (non-intrusive credit reporting)
-    const trackingFactory = new MetricTrackingRunnerFactory(runnerFactory, () => this.instanceId);
+    const trackingFactory = new MetricTrackingRunnerFactory(
+      runnerFactory,
+      () => this.instanceId,
+    );
     const llmRunner = useStandaloneRunner
       ? trackingFactory.createRunner({ enableTools: true })
       : undefined;
@@ -1180,7 +1298,7 @@ export class TdaiCore {
       storage: storage ?? this.getStorage(),
     });
     await runner();
-    const creditUsed: number = (llmRunner as any)?.accumulatedCredit ?? 0;
+    const creditUsed: number = readCredit(llmRunner);
     return { creditUsed };
   }
 
@@ -1197,12 +1315,18 @@ export class TdaiCore {
     const scheduler = this.scheduler;
     this.schedulerStartPromise = (async () => {
       try {
-        const checkpoint = new CheckpointManager(this.dataDir, this.logger, this.storage);
+        const checkpoint = new CheckpointManager(
+          this.dataDir,
+          this.logger,
+          this.storage,
+        );
         const cp = await checkpoint.read();
         scheduler.start(checkpoint.getAllPipelineStates(cp));
         this.logger.debug?.(`${TAG} Scheduler started`);
       } catch (err) {
-        this.logger.error(`${TAG} Failed to restore checkpoint: ${err instanceof Error ? err.message : String(err)}`);
+        this.logger.error(
+          `${TAG} Failed to restore checkpoint: ${err instanceof Error ? err.message : String(err)}`,
+        );
         scheduler.start({});
       }
     })();

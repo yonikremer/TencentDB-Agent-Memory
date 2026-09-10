@@ -24,7 +24,10 @@ import { CheckpointManager } from "./checkpoint.js";
 import type { PipelineSessionState } from "./checkpoint.js";
 import { createStoreBundle } from "../core/store/factory.js";
 import type { IMemoryStore } from "../core/store/types.js";
-import { memoryPromptResolveKey, resolveMemoryPrompts } from "../core/memory-prompt/resolver.js";
+import {
+  memoryPromptResolveKey,
+  resolveMemoryPrompts,
+} from "../core/memory-prompt/resolver.js";
 import {
   buildGenerationLogIdentity,
   buildGenerationProvenance,
@@ -58,7 +61,10 @@ import {
   type ProfileIsolation,
   type ProfileScopeOptions,
 } from "../core/profile/profile-sync.js";
-import { createScopedStorageAdapter, StorageAdapter } from "../core/storage/adapter.js";
+import {
+  createScopedStorageAdapter,
+  StorageAdapter,
+} from "../core/storage/adapter.js";
 import type { Logger } from "../core/types.js";
 
 const TAG = "[memory-tdai] [pipeline-factory]";
@@ -98,7 +104,9 @@ function buildIsolationScope(ctx?: ProfileIsolation): string {
 }
 
 export function buildProfileL2Key(ctx?: ProfileIsolation): string {
-  const sourceSession = ctx?.sessionId ? `|session:${encodeURIComponent(ctx.sessionId)}` : "";
+  const sourceSession = ctx?.sessionId
+    ? `|session:${encodeURIComponent(ctx.sessionId)}`
+    : "";
   return `${PROFILE_L2_KEY_PREFIX}${buildIsolationScope(ctx)}${sourceSession}`;
 }
 
@@ -111,13 +119,27 @@ function profileStoragePrefixForScope(scope: string): string {
   return `profiles/${encodeURIComponent(scope)}/`;
 }
 
-function scopedStorage(storage: StorageAdapter | undefined, ctx?: ProfileIsolation): StorageAdapter | undefined {
-  return storage ? createScopedStorageAdapter(storage, profileStoragePrefixForScope(buildIsolationScope(ctx))) : undefined;
+function scopedStorage(
+  storage: StorageAdapter | undefined,
+  ctx?: ProfileIsolation,
+): StorageAdapter | undefined {
+  return storage
+    ? createScopedStorageAdapter(
+        storage,
+        profileStoragePrefixForScope(buildIsolationScope(ctx)),
+      )
+    : undefined;
 }
 
-function scopedStorageForScope(storage: StorageAdapter | undefined, scope: string): StorageAdapter | undefined {
+function scopedStorageForScope(
+  storage: StorageAdapter | undefined,
+  scope: string,
+): StorageAdapter | undefined {
   if (!storage || scope === DEFAULT_PROFILE_SCOPE) return storage;
-  return createScopedStorageAdapter(storage, profileStoragePrefixForScope(scope));
+  return createScopedStorageAdapter(
+    storage,
+    profileStoragePrefixForScope(scope),
+  );
 }
 
 function scopedDataDir(dataDir: string, ctx?: ProfileIsolation): string {
@@ -125,30 +147,47 @@ function scopedDataDir(dataDir: string, ctx?: ProfileIsolation): string {
 }
 
 function scopedDataDirForScope(dataDir: string, scope: string): string {
-  return scope === DEFAULT_PROFILE_SCOPE ? dataDir : path.join(dataDir, "profiles", encodeURIComponent(scope));
+  return scope === DEFAULT_PROFILE_SCOPE
+    ? dataDir
+    : path.join(dataDir, "profiles", encodeURIComponent(scope));
 }
 
-function profileOptionsForScope(scope: string): ProfileScopeOptions | undefined {
+function profileOptionsForScope(
+  scope: string,
+): ProfileScopeOptions | undefined {
   if (scope === DEFAULT_PROFILE_SCOPE) return undefined;
   return { scope, isolation: parseProfileIsolationScope(scope) };
 }
 
-async function discoverProfileScopes(dataDir: string, storage: StorageAdapter | undefined, logger: Logger): Promise<string[]> {
+async function discoverProfileScopes(
+  dataDir: string,
+  storage: StorageAdapter | undefined,
+  logger: Logger,
+): Promise<string[]> {
   const scopes = new Set<string>();
   if (storage) {
     try {
-      const result = await storage.getBackend().listObjects("profiles/", { recursive: true, maxKeys: 10000 });
+      const result = await storage
+        .getBackend()
+        .listObjects("profiles/", { recursive: true, maxKeys: 10000 });
       for (const entry of result.entries) {
-        const rest = entry.key.startsWith("profiles/") ? entry.key.slice("profiles/".length) : "";
+        const rest = entry.key.startsWith("profiles/")
+          ? entry.key.slice("profiles/".length)
+          : "";
         const encoded = rest.split("/")[0];
         if (encoded) scopes.add(decodeURIComponent(encoded));
       }
     } catch (err) {
-      logger.debug?.(`${TAG} [L3] Failed to discover storage profile scopes: ${err instanceof Error ? err.message : String(err)}`);
+      logger.debug?.(
+        `${TAG} [L3] Failed to discover storage profile scopes: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   } else {
     try {
-      const entries = await fs.promises.readdir(path.join(dataDir, "profiles"), { withFileTypes: true });
+      const entries = await fs.promises.readdir(
+        path.join(dataDir, "profiles"),
+        { withFileTypes: true },
+      );
       for (const entry of entries) {
         if (entry.isDirectory()) scopes.add(decodeURIComponent(entry.name));
       }
@@ -216,9 +255,18 @@ export interface PipelineInstance {
  * When a StorageAdapter is provided, local directory creation is skipped
  * because files are stored remotely (COS). The backend handles path creation.
  */
-export function initDataDirectories(dataDir: string, storage?: StorageAdapter): void {
+export function initDataDirectories(
+  dataDir: string,
+  storage?: StorageAdapter,
+): void {
   if (storage) return; // COS mode: no local directories needed
-  const dirs = ["conversations", "records", "scene_blocks", ".metadata", ".backup"];
+  const dirs = [
+    "conversations",
+    "records",
+    "scene_blocks",
+    ".metadata",
+    ".backup",
+  ];
   for (const sub of dirs) {
     fs.mkdirSync(path.join(dataDir, sub), { recursive: true });
   }
@@ -252,7 +300,7 @@ const _storeInitCache = new Map<string, Promise<StoreInitResult>>();
  * calls with the same dir return the cached Promise immediately.
  * Call `resetStores()` during shutdown to clear the cache.
  *
- * Supports both SQLite (sync init) and TCVDB (async init) backends.
+ * Supports SQLite (sync init) backend.
  */
 export function initStores(
   cfg: MemoryTdaiConfig,
@@ -309,7 +357,9 @@ async function _doInitStores(
     const initResult = await vectorStore.init(providerInfo);
 
     if (vectorStore.isDegraded()) {
-      throw new Error(`${TAG} VectorStore is in degraded mode — refusing to proceed without functional store`);
+      throw new Error(
+        `${TAG} VectorStore is in degraded mode — refusing to proceed without functional store`,
+      );
     } else {
       logger.debug?.(
         `${TAG} Store initialized: backend=${cfg.storeBackend}, provider=${cfg.embedding.provider}`,
@@ -331,20 +381,24 @@ async function _doInitStores(
             seed: null,
           };
           writeManifest(pluginDataDir, manifest);
-          logger.debug?.(`${TAG} Manifest created: ${JSON.stringify(currentStoreInfo)}`);
+          logger.debug?.(
+            `${TAG} Manifest created: ${JSON.stringify(currentStoreInfo)}`,
+          );
         } else {
           // Compare persisted store binding against current config
           const diffs = diffStoreBinding(existing.store, currentStoreInfo);
           if (diffs.length > 0) {
             logger.debug?.(
               `${TAG} Store config differs from initial binding recorded in manifest ` +
-              `(${diffs.join("; ")}). ` +
-              `This is expected if the storage backend was switched intentionally.`,
+                `(${diffs.join("; ")}). ` +
+                `This is expected if the storage backend was switched intentionally.`,
             );
           }
         }
       } catch (err) {
-        logger.warn(`${TAG} Failed to read/write manifest (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+        logger.warn(
+          `${TAG} Failed to read/write manifest (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
   } catch (err) {
@@ -400,16 +454,40 @@ export function createL1Runner(opts: {
   hasFullBacklog: boolean;
   profileScopes: string[];
 }> {
-  const { pluginDataDir, cfg, openclawConfig, vectorStore, embeddingService, logger, getInstanceId, llmRunner, storage, checkpointLock } = opts;
+  const {
+    pluginDataDir,
+    cfg,
+    openclawConfig,
+    vectorStore,
+    embeddingService,
+    logger,
+    getInstanceId,
+    llmRunner,
+    storage,
+    checkpointLock,
+  } = opts;
   const config = openclawConfig as Record<string, unknown> | undefined;
 
   return async ({ sessionKey }) => {
     if (!config && !llmRunner) {
-      logger.debug?.(`${TAG} [l1] No OpenClaw config and no LLM runner, skipping L1 extraction`);
-      return { processedCount: 0, storedCount: 0, hasMore: false, hasFullBacklog: false, profileScopes: [] };
+      logger.debug?.(
+        `${TAG} [l1] No OpenClaw config and no LLM runner, skipping L1 extraction`,
+      );
+      return {
+        processedCount: 0,
+        storedCount: 0,
+        hasMore: false,
+        hasFullBacklog: false,
+        profileScopes: [],
+      };
     }
 
-    const checkpoint = new CheckpointManager(pluginDataDir, logger, storage, checkpointLock);
+    const checkpoint = new CheckpointManager(
+      pluginDataDir,
+      logger,
+      storage,
+      checkpointLock,
+    );
     const cp = await checkpoint.read();
     const runnerState = checkpoint.getRunnerState(cp, sessionKey);
 
@@ -424,15 +502,27 @@ export function createL1Runner(opts: {
       // the oldest L1_BATCH_PROCESS (= N) for actual processing and use the
       // remaining rows merely as a *signal* to detect backlog. See file-level
       // comment on L1_BATCH_PROCESS / L1_BATCH_QUERY for rationale.
-      type FlatMessage = ConversationMessage & { sessionId: string; teamId?: string; taskId?: string; userId: string; agentId: string; recordedAtMs: number };
+      type FlatMessage = ConversationMessage & {
+        sessionId: string;
+        teamId?: string;
+        taskId?: string;
+        userId: string;
+        agentId: string;
+        recordedAtMs: number;
+      };
       let flat: FlatMessage[] = [];
       let queriedCount = 0;
 
       if (vectorStore && !vectorStore.isDegraded()) {
-        const l1Cursor = runnerState.last_l1_cursor > 0
-          ? runnerState.last_l1_cursor
-          : undefined;
-        const dbGroups = await vectorStore.queryL0GroupedBySessionId(sessionKey, l1Cursor, L1_BATCH_QUERY);
+        const l1Cursor =
+          runnerState.last_l1_cursor > 0
+            ? runnerState.last_l1_cursor
+            : undefined;
+        const dbGroups = await vectorStore.queryL0GroupedBySessionId(
+          sessionKey,
+          l1Cursor,
+          L1_BATCH_QUERY,
+        );
         for (const g of dbGroups) {
           for (const m of g.messages) {
             flat.push({
@@ -450,9 +540,13 @@ export function createL1Runner(opts: {
           }
         }
         queriedCount = flat.length;
-        logger.debug?.(`${TAG} [l1] L0 data source: VectorStore DB, fetched ${queriedCount} rows (limit=${L1_BATCH_QUERY})`);
+        logger.debug?.(
+          `${TAG} [l1] L0 data source: VectorStore DB, fetched ${queriedCount} rows (limit=${L1_BATCH_QUERY})`,
+        );
       } else {
-        logger.debug?.(`${TAG} [l1] L0 data source: JSONL files (VectorStore unavailable)`);
+        logger.debug?.(
+          `${TAG} [l1] L0 data source: JSONL files (VectorStore unavailable)`,
+        );
         const jsonlGroups = await readConversationMessagesGroupedBySessionId(
           sessionKey,
           pluginDataDir,
@@ -484,18 +578,31 @@ export function createL1Runner(opts: {
           }
         }
         // Force chronological (oldest-first) ordering by recordedAtMs ↑ then timestamp ↑.
-        flat.sort((a, b) => (a.recordedAtMs - b.recordedAtMs) || (a.timestamp - b.timestamp));
+        flat.sort(
+          (a, b) =>
+            a.recordedAtMs - b.recordedAtMs || a.timestamp - b.timestamp,
+        );
         queriedCount = flat.length;
       }
 
       if (queriedCount === 0) {
-        logger.debug?.(`${TAG} [l1] No new L0 messages for session ${sessionKey}`);
-        return { processedCount: 0, storedCount: 0, hasMore: false, hasFullBacklog: false, profileScopes: [] };
+        logger.debug?.(
+          `${TAG} [l1] No new L0 messages for session ${sessionKey}`,
+        );
+        return {
+          processedCount: 0,
+          storedCount: 0,
+          hasMore: false,
+          hasFullBacklog: false,
+          profileScopes: [],
+        };
       }
 
       // Re-sort by recordedAtMs ascending (DB path returns ASC already, but
       // groupBy may have permuted ordering across groups; this is cheap).
-      flat.sort((a, b) => (a.recordedAtMs - b.recordedAtMs) || (a.timestamp - b.timestamp));
+      flat.sort(
+        (a, b) => a.recordedAtMs - b.recordedAtMs || a.timestamp - b.timestamp,
+      );
 
       // ── Step 2: slice the first L1_BATCH_PROCESS rows + same-ms boundary alignment ──
       //
@@ -513,26 +620,58 @@ export function createL1Runner(opts: {
       let sliceEnd = Math.min(L1_BATCH_PROCESS, flat.length);
       if (sliceEnd < flat.length) {
         const boundaryMs = flat[sliceEnd - 1].recordedAtMs;
-        while (sliceEnd < flat.length && flat[sliceEnd].recordedAtMs === boundaryMs) {
+        while (
+          sliceEnd < flat.length &&
+          flat[sliceEnd].recordedAtMs === boundaryMs
+        ) {
           sliceEnd++;
         }
       }
       const processed = flat.slice(0, sliceEnd);
 
       // ── Step 3: re-group sliced messages by isolation tuple + sessionId (chronological within each group) ──
-      const groupMap = new Map<string, { sessionId: string; teamId?: string; taskId?: string; userId: string; agentId: string; messages: ConversationMessage[] }>();
+      const groupMap = new Map<
+        string,
+        {
+          sessionId: string;
+          teamId?: string;
+          taskId?: string;
+          userId: string;
+          agentId: string;
+          messages: ConversationMessage[];
+        }
+      >();
       let maxRecordedAtMs = 0;
       for (const m of processed) {
         if (m.recordedAtMs > maxRecordedAtMs) maxRecordedAtMs = m.recordedAtMs;
         const groupKey = `${m.userId}\u0000${m.agentId}\u0000${m.sessionId}`;
         let g = groupMap.get(groupKey);
         if (!g) {
-          g = { sessionId: m.sessionId, teamId: m.teamId, taskId: m.taskId, userId: m.userId, agentId: m.agentId, messages: [] };
+          g = {
+            sessionId: m.sessionId,
+            teamId: m.teamId,
+            taskId: m.taskId,
+            userId: m.userId,
+            agentId: m.agentId,
+            messages: [],
+          };
           groupMap.set(groupKey, g);
         }
-        g.messages.push({ id: m.id, role: m.role, content: m.content, timestamp: m.timestamp });
+        g.messages.push({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          timestamp: m.timestamp,
+        });
       }
-      const groups: Array<{ sessionId: string; teamId?: string; taskId?: string; userId: string; agentId: string; messages: ConversationMessage[] }> = [];
+      const groups: Array<{
+        sessionId: string;
+        teamId?: string;
+        taskId?: string;
+        userId: string;
+        agentId: string;
+        messages: ConversationMessage[];
+      }> = [];
       for (const group of groupMap.values()) {
         groups.push(group);
       }
@@ -565,14 +704,15 @@ export function createL1Runner(opts: {
       // TODO(known-issue): switch to (recorded_at, record_id) composite cursor
       //   to defend against ≥2N rows sharing one recorded_at_ms.
       const hasUnprocessedInBatch = queriedCount > sliceEnd;
-      const hasFullBacklog = queriedCount === L1_BATCH_QUERY && hasUnprocessedInBatch;
+      const hasFullBacklog =
+        queriedCount === L1_BATCH_QUERY && hasUnprocessedInBatch;
       const hasMore = hasUnprocessedInBatch && !hasFullBacklog;
 
       const totalMessages = processed.length;
       logger.info(
         `${TAG} [l1] Processing ${totalMessages} L0 messages across ${groups.length} sessionId group(s) ` +
-        `for session ${sessionKey} (queried=${queriedCount}, sliceEnd=${sliceEnd}, ` +
-        `hasMore=${hasMore}, hasFullBacklog=${hasFullBacklog})`,
+          `for session ${sessionKey} (queried=${queriedCount}, sliceEnd=${sliceEnd}, ` +
+          `hasMore=${hasMore}, hasFullBacklog=${hasFullBacklog})`,
       );
 
       let totalExtracted = 0;
@@ -584,7 +724,10 @@ export function createL1Runner(opts: {
         agentId: group.agentId,
         layer: "l1" as const,
       }));
-      const l1Prompts = await resolveMemoryPrompts(vectorStore, l1PromptTargets);
+      const l1Prompts = await resolveMemoryPrompts(
+        vectorStore,
+        l1PromptTargets,
+      );
 
       for (const group of groups) {
         logger.debug?.(
@@ -606,16 +749,20 @@ export function createL1Runner(opts: {
             maxMemoriesPerSession: cfg.extraction.maxMemoriesPerSession,
             model: cfg.extraction.model,
             promptMode: cfg.extraction.promptMode,
-            memoryPrompt: l1Prompts.get(memoryPromptResolveKey({
-              teamId: group.teamId,
-              agentId: group.agentId,
-              layer: "l1",
-            })),
-            previousSceneName: lastSceneName ?? (runnerState.last_scene_name || undefined),
+            memoryPrompt: l1Prompts.get(
+              memoryPromptResolveKey({
+                teamId: group.teamId,
+                agentId: group.agentId,
+                layer: "l1",
+              }),
+            ),
+            previousSceneName:
+              lastSceneName ?? (runnerState.last_scene_name || undefined),
             vectorStore,
             embeddingService,
             conflictRecallTopK: cfg.embedding.conflictRecallTopK,
-            embeddingTimeoutMs: cfg.embedding.captureTimeoutMs ?? cfg.embedding.timeoutMs,
+            embeddingTimeoutMs:
+              cfg.embedding.captureTimeoutMs ?? cfg.embedding.timeoutMs,
             llmRunner,
           },
           logger,
@@ -630,12 +777,14 @@ export function createL1Runner(opts: {
           // stay bounded to the source session that just produced L1. Encode the
           // source session in the L2 task key; buildIsolationScope() will ignore
           // it later when choosing the profile output directory.
-          profileScopes.add(buildProfileL2Key({
-            teamId: group.teamId,
-            userId: group.userId,
-            agentId: group.agentId,
-            sessionId: group.sessionId,
-          }));
+          profileScopes.add(
+            buildProfileL2Key({
+              teamId: group.teamId,
+              userId: group.userId,
+              agentId: group.agentId,
+              sessionId: group.sessionId,
+            }),
+          );
         }
         if (l1Result.lastSceneName) {
           lastSceneName = l1Result.lastSceneName;
@@ -645,14 +794,27 @@ export function createL1Runner(opts: {
       // Use maxRecordedAtMs (write time) of the **processed** slice as cursor —
       // always positive, TCVDB-safe. Boundary alignment guarantees we will not
       // skip same-ms siblings on the next round.
-      await checkpoint.markL1ExtractionComplete(sessionKey, totalStored, maxRecordedAtMs || undefined, lastSceneName);
+      await checkpoint.markL1ExtractionComplete(
+        sessionKey,
+        totalStored,
+        maxRecordedAtMs || undefined,
+        lastSceneName,
+      );
       logger.info(
         `${TAG} [l1] L1 complete: extracted=${totalExtracted}, stored=${totalStored} (${groups.length} group(s))`,
       );
 
-      return { processedCount: totalMessages, storedCount: totalStored, hasMore, hasFullBacklog, profileScopes: Array.from(profileScopes) };
+      return {
+        processedCount: totalMessages,
+        storedCount: totalStored,
+        hasMore,
+        hasFullBacklog,
+        profileScopes: Array.from(profileScopes),
+      };
     } catch (err) {
-      logger.error(`${TAG} [l1] L1 failed: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
+      logger.error(
+        `${TAG} [l1] L1 failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
+      );
       throw err;
     }
   };
@@ -707,8 +869,21 @@ export function createL2Runner(opts: {
    */
   checkpointLock?: import("./checkpoint.js").CheckpointLockOptions;
 }): L2Runner {
-  const { pluginDataDir, cfg, openclawConfig, vectorStore, logger, instanceId, llmRunner, storage, checkpointLock } = opts;
-  let profileBaseline = new Map<string, { version: number; contentMd5: string; createdAtMs: number }>();
+  const {
+    pluginDataDir,
+    cfg,
+    openclawConfig,
+    vectorStore,
+    logger,
+    instanceId,
+    llmRunner,
+    storage,
+    checkpointLock,
+  } = opts;
+  let profileBaseline = new Map<
+    string,
+    { version: number; contentMd5: string; createdAtMs: number }
+  >();
 
   return async (sessionKey: string, cursor?: string) => {
     const profileFilter = parseProfileL2Key(sessionKey);
@@ -717,24 +892,44 @@ export function createL2Runner(opts: {
     );
 
     if (!openclawConfig && !llmRunner) {
-      logger.warn(`${TAG} [L2] No OpenClaw config and no LLM runner, skipping scene extraction`);
+      logger.warn(
+        `${TAG} [L2] No OpenClaw config and no LLM runner, skipping scene extraction`,
+      );
       return;
     }
 
-    let records: Array<{ content: string; created_at: string; id: string; updatedAt: string; teamId?: string; userId?: string; agentId?: string; sessionId?: string; taskId?: string }>;
+    let records: Array<{
+      content: string;
+      created_at: string;
+      id: string;
+      updatedAt: string;
+      teamId?: string;
+      userId?: string;
+      agentId?: string;
+      sessionId?: string;
+      taskId?: string;
+    }>;
 
     if (vectorStore && !vectorStore.isDegraded()) {
-      const { queryMemoryRecords } = await import("../core/record/l1-reader.js");
-      const memRecords = await queryMemoryRecords(vectorStore, profileFilter ? {
-        teamId: profileFilter.teamId,
-        userId: profileFilter.userId,
-        agentId: profileFilter.agentId,
-        sessionId: profileFilter.sessionId,
-        updatedAfter: cursor,
-      } : {
-        sessionKey,
-        updatedAfter: cursor,
-      }, logger);
+      const { queryMemoryRecords } = await import(
+        "../core/record/l1-reader.js"
+      );
+      const memRecords = await queryMemoryRecords(
+        vectorStore,
+        profileFilter
+          ? {
+              teamId: profileFilter.teamId,
+              userId: profileFilter.userId,
+              agentId: profileFilter.agentId,
+              sessionId: profileFilter.sessionId,
+              updatedAfter: cursor,
+            }
+          : {
+              sessionKey,
+              updatedAfter: cursor,
+            },
+        logger,
+      );
 
       if (memRecords.length === 0) {
         logger.debug?.(
@@ -759,11 +954,15 @@ export function createL2Runner(opts: {
         taskId: r.taskId,
       }));
     } else {
-      throw new Error(`${TAG} [L2] VectorStore unavailable — cannot read L1 memories for scene extraction (session=${sessionKey})`);
+      throw new Error(
+        `${TAG} [L2] VectorStore unavailable — cannot read L1 memories for scene extraction (session=${sessionKey})`,
+      );
     }
 
     if (records.length === 0) {
-      logger.debug?.(`${TAG} [L2] No new L1 records found (session=${sessionKey}), skipping scene extraction`);
+      logger.debug?.(
+        `${TAG} [L2] No new L1 records found (session=${sessionKey}), skipping scene extraction`,
+      );
       return;
     }
 
@@ -789,28 +988,42 @@ export function createL2Runner(opts: {
       const groupDataDir = scopedDataDir(pluginDataDir, ctx);
       const groupScope = buildIsolationScope(ctx);
       const groupProfileOptions = profileOptionsForScope(groupScope);
-      const groupBaseline = vectorStore?.pullProfiles && !vectorStore.isDegraded()
-        ? await pullProfilesToLocal(groupDataDir, vectorStore, logger, groupStorage, groupProfileOptions)
-        : profileBaseline;
+      const groupBaseline =
+        vectorStore?.pullProfiles && !vectorStore.isDegraded()
+          ? await pullProfilesToLocal(
+              groupDataDir,
+              vectorStore,
+              logger,
+              groupStorage,
+              groupProfileOptions,
+            )
+          : profileBaseline;
 
       const extractor = new SceneExtractor({
         dataDir: groupDataDir,
         config: openclawConfig!,
         model: cfg.persona.model,
         promptMode: cfg.persona.promptMode,
-        memoryPrompt: l2Prompts.get(memoryPromptResolveKey({
-          teamId: ctx.teamId,
-          agentId: ctx.agentId,
-          layer: "l2",
-        })),
+        memoryPrompt: l2Prompts.get(
+          memoryPromptResolveKey({
+            teamId: ctx.teamId,
+            agentId: ctx.agentId,
+            layer: "l2",
+          }),
+        ),
         maxScenes: cfg.persona.maxScenes,
         sceneBackupCount: cfg.persona.sceneBackupCount,
         logger,
         instanceId,
         llmRunner,
         storage: groupStorage,
-          // langfuse: pass identity quadruple, allowing UI column filtering by user/session
-        traceContext: { teamId: ctx.teamId, userId: ctx.userId, agentId: ctx.agentId, sessionId: ctx.sessionId },
+        // langfuse: pass identity quadruple, allowing UI column filtering by user/session
+        traceContext: {
+          teamId: ctx.teamId,
+          userId: ctx.userId,
+          agentId: ctx.agentId,
+          sessionId: ctx.sessionId,
+        },
       });
 
       const memories = groupRecords.map((r) => ({
@@ -819,34 +1032,49 @@ export function createL2Runner(opts: {
         id: r.id,
       }));
 
-      const preCheckpoint = new CheckpointManager(groupDataDir, logger, groupStorage, checkpointLock);
+      const preCheckpoint = new CheckpointManager(
+        groupDataDir,
+        logger,
+        groupStorage,
+        checkpointLock,
+      );
       const preState = await preCheckpoint.read();
       const preScenesProcessed = preState.scenes_processed;
       const preTotalProcessed = preState.total_processed;
 
       const l2StartMs = Date.now();
-      const resolvedL2Prompt = l2Prompts.get(memoryPromptResolveKey({
-        teamId: ctx.teamId,
-        agentId: ctx.agentId,
-        layer: "l2",
-      }));
+      const resolvedL2Prompt = l2Prompts.get(
+        memoryPromptResolveKey({
+          teamId: ctx.teamId,
+          agentId: ctx.agentId,
+          layer: "l2",
+        }),
+      );
       const extractResult = await extractor.extract(memories);
-      if (!(extractResult.success && extractResult.memoriesProcessed > 0)) continue;
+      if (!(extractResult.success && extractResult.memoriesProcessed > 0))
+        continue;
       if (extractResult.emptyExtraction) {
         anyEmptyExtraction = true;
-        logger.warn(`${TAG} [L2] Extraction produced no file changes (empty run), skipping checkpoint increment`);
+        logger.warn(
+          `${TAG} [L2] Extraction produced no file changes (empty run), skipping checkpoint increment`,
+        );
         continue;
       }
 
-          //⚠️ Here we **cannot** use checkpoint.write({...postState}):
+      //⚠️ Here we **cannot** use checkpoint.write({...postState}):
       //
-          // postState is a stale snapshot spanning the entire L2 LLM extraction (seconds~tens of seconds), while write()
-          // is "whole object override + in-process lock only". Writing it back would wipe out all runner_states / pipeline_states
-          // legally advanced by other nodes during this time (L1 cursor lost → repeated extraction).
+      // postState is a stale snapshot spanning the entire L2 LLM extraction (seconds~tens of seconds), while write()
+      // is "whole object override + in-process lock only". Writing it back would wipe out all runner_states / pipeline_states
+      // legally advanced by other nodes during this time (L1 cursor lost → repeated extraction).
       //
-          // Correct approach: use repairMonotonicCounters(), re-read within critical section protected by distributed lock,
-          // only monotonically maximize these two scalars, never touching other fields.
-      const checkpoint = new CheckpointManager(groupDataDir, logger, groupStorage, checkpointLock);
+      // Correct approach: use repairMonotonicCounters(), re-read within critical section protected by distributed lock,
+      // only monotonically maximize these two scalars, never touching other fields.
+      const checkpoint = new CheckpointManager(
+        groupDataDir,
+        logger,
+        groupStorage,
+        checkpointLock,
+      );
       const repaired = await checkpoint.repairMonotonicCounters({
         scenes_processed: preScenesProcessed,
         total_processed: preTotalProcessed,
@@ -854,28 +1082,46 @@ export function createL2Runner(opts: {
       if (repaired) {
         logger.warn(
           `${TAG} [L2] ⚠️ Checkpoint counter regression detected and repaired ` +
-          `(scenes_processed >= ${preScenesProcessed}, total_processed >= ${preTotalProcessed})`,
+            `(scenes_processed >= ${preScenesProcessed}, total_processed >= ${preTotalProcessed})`,
         );
       }
 
       const l2FinishedAt = Date.now();
       const l2PromptRef = buildPromptGenerationRef(resolvedL2Prompt, "l2");
-      let changedProfiles = (await listLocalProfiles(groupDataDir, groupStorage, groupProfileOptions))
-        .filter((profile) => groupBaseline.get(profile.id)?.contentMd5 !== profile.contentMd5 || !groupBaseline.has(profile.id));
+      let changedProfiles = (
+        await listLocalProfiles(groupDataDir, groupStorage, groupProfileOptions)
+      ).filter(
+        (profile) =>
+          groupBaseline.get(profile.id)?.contentMd5 !== profile.contentMd5 ||
+          !groupBaseline.has(profile.id),
+      );
       if (vectorStore && supportsProfileSyncWrite(vectorStore)) {
-        changedProfiles = (await syncLocalProfilesToStore(
-          groupDataDir, vectorStore, groupBaseline, logger, groupStorage, groupProfileOptions,
-        )) ?? changedProfiles;
+        changedProfiles =
+          (await syncLocalProfilesToStore(
+            groupDataDir,
+            vectorStore,
+            groupBaseline,
+            logger,
+            groupStorage,
+            groupProfileOptions,
+          )) ?? changedProfiles;
       }
       if (changedProfiles.length === 0) {
-        logger.debug?.(`${TAG} [L2] No changed Scene profiles, skipping generation provenance`);
+        logger.debug?.(
+          `${TAG} [L2] No changed Scene profiles, skipping generation provenance`,
+        );
         await checkpoint.incrementScenesProcessed();
         processedTotal += extractResult.memoriesProcessed;
         continue;
       }
-      const l2Identity = buildGenerationLogIdentity("l2", l2FinishedAt, changedProfiles[0]?.id);
+      const l2Identity = buildGenerationLogIdentity(
+        "l2",
+        l2FinishedAt,
+        changedProfiles[0]?.id,
+      );
       const l2Provenance = buildGenerationProvenance(l2Identity, l2PromptRef);
-      const rootStorage = storage ?? new StorageAdapter(new LocalStorageBackend(pluginDataDir));
+      const rootStorage =
+        storage ?? new StorageAdapter(new LocalStorageBackend(pluginDataDir));
       const l2Log: MemoryGenerationLog = {
         schema_version: 1,
         log_id: l2Identity.logId,
@@ -890,36 +1136,57 @@ export function createL2Runner(opts: {
         task_id: ctx.taskId,
         prompt: l2PromptRef,
         anchor_memory_id: changedProfiles[0]?.id,
-        input_refs: groupRecords.map((record) => ({ layer: "l1", record_id: record.id })),
-        output_refs: changedProfiles.map((profile) => ({ layer: "l2", record_id: profile.id })),
+        input_refs: groupRecords.map((record) => ({
+          layer: "l1",
+          record_id: record.id,
+        })),
+        output_refs: changedProfiles.map((profile) => ({
+          layer: "l2",
+          record_id: profile.id,
+        })),
         model: cfg.persona.model,
         prompt_mode: cfg.persona.promptMode,
         started_at_ms: l2StartMs,
         finished_at_ms: l2FinishedAt,
         latency_ms: l2FinishedAt - l2StartMs,
       };
-      const l2LogStore = new MemoryGenerationLogStore(rootStorage, instanceId ?? "standalone");
+      const l2LogStore = new MemoryGenerationLogStore(
+        rootStorage,
+        instanceId ?? "standalone",
+      );
       await writeGenerationProvenanceBestEffort({
         layer: "l2",
         logger,
         writeLog: () => l2LogStore.write(l2Log, l2Identity.key),
-        writeRefs: vectorStore?.upsertMemoryGenerationRefs && changedProfiles.length > 0
-          ? () => vectorStore.upsertMemoryGenerationRefs!(changedProfiles.map((profile) => ({
-              generation_ref_id: buildMemoryGenerationRefId("l2", profile.id),
-              layer: "l2" as const,
-              memory_id: profile.id,
-              ...l2Provenance,
-              created_at_ms: l2FinishedAt,
-            })))
-          : undefined,
+        writeRefs:
+          vectorStore?.upsertMemoryGenerationRefs && changedProfiles.length > 0
+            ? () =>
+                vectorStore.upsertMemoryGenerationRefs!(
+                  changedProfiles.map((profile) => ({
+                    generation_ref_id: buildMemoryGenerationRefId(
+                      "l2",
+                      profile.id,
+                    ),
+                    layer: "l2" as const,
+                    memory_id: profile.id,
+                    ...l2Provenance,
+                    created_at_ms: l2FinishedAt,
+                  })),
+                )
+            : undefined,
       });
       await checkpoint.incrementScenesProcessed();
       processedTotal += extractResult.memoriesProcessed;
     }
 
     if (processedTotal > 0) {
-      const latestCursor = records.reduce((latest, r) => r.updatedAt > latest ? r.updatedAt : latest, "");
-      logger.debug?.(`${TAG} [L2] Extraction complete: processed=${processedTotal}, latestCursor=${latestCursor}`);
+      const latestCursor = records.reduce(
+        (latest, r) => (r.updatedAt > latest ? r.updatedAt : latest),
+        "",
+      );
+      logger.debug?.(
+        `${TAG} [L2] Extraction complete: processed=${processedTotal}, latestCursor=${latestCursor}`,
+      );
       return { latestCursor: latestCursor || undefined };
     }
     if (anyEmptyExtraction) return { skipped: true };
@@ -948,15 +1215,29 @@ export function createL3Runner(opts: {
   /** StorageAdapter for file operations (COS/local). */
   storage?: StorageAdapter;
 }): L3Runner {
-  const { pluginDataDir, cfg, openclawConfig, vectorStore, logger, instanceId, llmRunner, storage } = opts;
+  const {
+    pluginDataDir,
+    cfg,
+    openclawConfig,
+    vectorStore,
+    logger,
+    instanceId,
+    llmRunner,
+    storage,
+  } = opts;
 
   return async () => {
     const scopes = await discoverProfileScopes(pluginDataDir, storage, logger);
-    const executionScopes = scopes.length > 0 ? scopes : [DEFAULT_PROFILE_SCOPE];
+    const executionScopes =
+      scopes.length > 0 ? scopes : [DEFAULT_PROFILE_SCOPE];
     let generatedAny = false;
     const l3PromptTargets = executionScopes.map((scope) => {
       const isolation = parseProfileIsolationScope(scope);
-      return { teamId: isolation.teamId, agentId: isolation.agentId, layer: "l3" as const };
+      return {
+        teamId: isolation.teamId,
+        agentId: isolation.agentId,
+        layer: "l3" as const,
+      };
     });
     const l3Prompts = await resolveMemoryPrompts(vectorStore, l3PromptTargets);
 
@@ -974,12 +1255,16 @@ export function createL3Runner(opts: {
 
       const { should, reason } = await trigger.shouldGenerate();
       if (!should) {
-        logger.debug?.(`${TAG} [L3] Persona generation not needed (scope=${scope})`);
+        logger.debug?.(
+          `${TAG} [L3] Persona generation not needed (scope=${scope})`,
+        );
         continue;
       }
 
       if (!openclawConfig && !llmRunner) {
-        logger.warn(`${TAG} [L3] No OpenClaw config and no LLM runner, skipping persona generation`);
+        logger.warn(
+          `${TAG} [L3] No OpenClaw config and no LLM runner, skipping persona generation`,
+        );
         return;
       }
 
@@ -988,27 +1273,42 @@ export function createL3Runner(opts: {
       const { readSceneIndex } = await import("../core/scene/scene-index.js");
       const sceneIndex = await readSceneIndex(scopedDir, scopedStore);
       if (sceneIndex.length === 0) {
-        logger.info(`${TAG} [L3] No scene files available for scope=${scope}, skipping (checkpoint unchanged)`);
+        logger.info(
+          `${TAG} [L3] No scene files available for scope=${scope}, skipping (checkpoint unchanged)`,
+        );
         continue;
       }
 
       // Pull remote profiles to establish fresh baseline before generation.
       // This ensures syncLocalProfilesToStore() has correct baselineVersion
       // for the optimistic-lock check instead of defaulting to 0.
-      let profileBaseline = new Map<string, { version: number; contentMd5: string; createdAtMs: number }>();
+      let profileBaseline = new Map<
+        string,
+        { version: number; contentMd5: string; createdAtMs: number }
+      >();
       if (vectorStore?.pullProfiles && !vectorStore.isDegraded()) {
-        profileBaseline = await pullProfilesToLocal(scopedDir, vectorStore, logger, scopedStore, profileOptions);
+        profileBaseline = await pullProfilesToLocal(
+          scopedDir,
+          vectorStore,
+          logger,
+          scopedStore,
+          profileOptions,
+        );
       }
 
-      logger.info(`${TAG} [L3] Starting persona generation: ${reason} (scope=${scope})`);
+      logger.info(
+        `${TAG} [L3] Starting persona generation: ${reason} (scope=${scope})`,
+      );
       // Reverse scope to get back teamId/userId/agentId/sessionId for langfuse trace
       const scopeIsolation = parseProfileIsolationScope(scope);
       const l3StartMs = Date.now();
-      const resolvedL3Prompt = l3Prompts.get(memoryPromptResolveKey({
-        teamId: scopeIsolation.teamId,
-        agentId: scopeIsolation.agentId,
-        layer: "l3",
-      }));
+      const resolvedL3Prompt = l3Prompts.get(
+        memoryPromptResolveKey({
+          teamId: scopeIsolation.teamId,
+          agentId: scopeIsolation.agentId,
+          layer: "l3",
+        }),
+      );
       const generator = new PersonaGenerator({
         dataDir: scopedDir,
         config: openclawConfig,
@@ -1029,29 +1329,49 @@ export function createL3Runner(opts: {
       const personaMarker = cp.total_processed;
 
       if (!genResult) {
-        logger.info(`${TAG} [L3] Persona generation skipped (no changes, scope=${scope})`);
+        logger.info(
+          `${TAG} [L3] Persona generation skipped (no changes, scope=${scope})`,
+        );
         await checkpoint.markPersonaGenerated(personaMarker);
         continue;
       }
 
       const l3FinishedAt = Date.now();
       const l3PromptRef = buildPromptGenerationRef(resolvedL3Prompt, "l3");
-      let changedProfiles = (await listLocalProfiles(scopedDir, scopedStore, profileOptions))
-        .filter((profile) => profileBaseline.get(profile.id)?.contentMd5 !== profile.contentMd5 || !profileBaseline.has(profile.id));
+      let changedProfiles = (
+        await listLocalProfiles(scopedDir, scopedStore, profileOptions)
+      ).filter(
+        (profile) =>
+          profileBaseline.get(profile.id)?.contentMd5 !== profile.contentMd5 ||
+          !profileBaseline.has(profile.id),
+      );
       if (vectorStore && supportsProfileSyncWrite(vectorStore)) {
-        changedProfiles = (await syncLocalProfilesToStore(
-          scopedDir, vectorStore, profileBaseline, logger, scopedStore, profileOptions,
-        )) ?? changedProfiles;
+        changedProfiles =
+          (await syncLocalProfilesToStore(
+            scopedDir,
+            vectorStore,
+            profileBaseline,
+            logger,
+            scopedStore,
+            profileOptions,
+          )) ?? changedProfiles;
       }
       if (changedProfiles.length === 0) {
-        logger.debug?.(`${TAG} [L3] No changed Persona profiles, skipping generation provenance`);
+        logger.debug?.(
+          `${TAG} [L3] No changed Persona profiles, skipping generation provenance`,
+        );
         await checkpoint.markPersonaGenerated(personaMarker);
         generatedAny = true;
         continue;
       }
-      const l3Identity = buildGenerationLogIdentity("l3", l3FinishedAt, changedProfiles[0]?.id);
+      const l3Identity = buildGenerationLogIdentity(
+        "l3",
+        l3FinishedAt,
+        changedProfiles[0]?.id,
+      );
       const l3Provenance = buildGenerationProvenance(l3Identity, l3PromptRef);
-      const rootStorage = storage ?? new StorageAdapter(new LocalStorageBackend(pluginDataDir));
+      const rootStorage =
+        storage ?? new StorageAdapter(new LocalStorageBackend(pluginDataDir));
       const l3Log: MemoryGenerationLog = {
         schema_version: 1,
         log_id: l3Identity.logId,
@@ -1065,28 +1385,44 @@ export function createL3Runner(opts: {
         session_id: scopeIsolation.sessionId,
         prompt: l3PromptRef,
         anchor_memory_id: changedProfiles[0]?.id,
-        input_refs: sceneIndex.map((scene) => ({ layer: "l2", record_id: scene.filename })),
-        output_refs: changedProfiles.map((profile) => ({ layer: "l3", record_id: profile.id })),
+        input_refs: sceneIndex.map((scene) => ({
+          layer: "l2",
+          record_id: scene.filename,
+        })),
+        output_refs: changedProfiles.map((profile) => ({
+          layer: "l3",
+          record_id: profile.id,
+        })),
         model: cfg.persona.model,
         prompt_mode: cfg.persona.promptMode,
         started_at_ms: l3StartMs,
         finished_at_ms: l3FinishedAt,
         latency_ms: l3FinishedAt - l3StartMs,
       };
-      const l3LogStore = new MemoryGenerationLogStore(rootStorage, instanceId ?? "standalone");
+      const l3LogStore = new MemoryGenerationLogStore(
+        rootStorage,
+        instanceId ?? "standalone",
+      );
       await writeGenerationProvenanceBestEffort({
         layer: "l3",
         logger,
         writeLog: () => l3LogStore.write(l3Log, l3Identity.key),
-        writeRefs: vectorStore?.upsertMemoryGenerationRefs && changedProfiles.length > 0
-          ? () => vectorStore.upsertMemoryGenerationRefs!(changedProfiles.map((profile) => ({
-              generation_ref_id: buildMemoryGenerationRefId("l3", profile.id),
-              layer: "l3" as const,
-              memory_id: profile.id,
-              ...l3Provenance,
-              created_at_ms: l3FinishedAt,
-            })))
-          : undefined,
+        writeRefs:
+          vectorStore?.upsertMemoryGenerationRefs && changedProfiles.length > 0
+            ? () =>
+                vectorStore.upsertMemoryGenerationRefs!(
+                  changedProfiles.map((profile) => ({
+                    generation_ref_id: buildMemoryGenerationRefId(
+                      "l3",
+                      profile.id,
+                    ),
+                    layer: "l3" as const,
+                    memory_id: profile.id,
+                    ...l3Provenance,
+                    created_at_ms: l3FinishedAt,
+                  })),
+                )
+            : undefined,
       });
 
       await checkpoint.markPersonaGenerated(personaMarker);
@@ -1141,8 +1477,17 @@ export function createPipelineManager(
  * Callers should attach L2/L3 runners after creation using `createL2Runner()`
  * and `createL3Runner()` from this module.
  */
-export async function createPipeline(opts: PipelineFactoryOptions): Promise<PipelineInstance> {
-  const { pluginDataDir, cfg, openclawConfig, logger, sessionFilter, l1LlmRunner } = opts;
+export async function createPipeline(
+  opts: PipelineFactoryOptions,
+): Promise<PipelineInstance> {
+  const {
+    pluginDataDir,
+    cfg,
+    openclawConfig,
+    logger,
+    sessionFilter,
+    l1LlmRunner,
+  } = opts;
 
   // Ensure data directories exist
   initDataDirectories(pluginDataDir);
@@ -1155,15 +1500,17 @@ export async function createPipeline(opts: PipelineFactoryOptions): Promise<Pipe
   const scheduler = createPipelineManager(cfg, logger, sessionFilter);
 
   // Wire L1 runner
-  scheduler.setL1Runner(createL1Runner({
-    pluginDataDir,
-    cfg,
-    openclawConfig,
-    vectorStore,
-    embeddingService,
-    logger,
-    llmRunner: l1LlmRunner,
-  }));
+  scheduler.setL1Runner(
+    createL1Runner({
+      pluginDataDir,
+      cfg,
+      openclawConfig,
+      vectorStore,
+      embeddingService,
+      logger,
+      llmRunner: l1LlmRunner,
+    }),
+  );
 
   // Wire persister
   scheduler.setPersister(createPersister(pluginDataDir, logger));
@@ -1181,7 +1528,9 @@ export async function createPipeline(opts: PipelineFactoryOptions): Promise<Pipe
         logger.info(`${TAG} Closing EmbeddingService`);
         await embeddingService.close();
       } catch (err) {
-        logger.warn(`${TAG} Error closing EmbeddingService: ${err instanceof Error ? err.message : String(err)}`);
+        logger.warn(
+          `${TAG} Error closing EmbeddingService: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
     resetStores(pluginDataDir);

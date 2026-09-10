@@ -157,7 +157,7 @@ export interface BM25Config {
   language: "zh" | "en";
 }
 
-/** Tencent Cloud VectorDB configuration. */
+/** @deprecated TCVDB removed. Kept for backward-compat parsing only; ignored at runtime. */
 export interface TcvdbConfig {
   /** Instance URL (e.g. "http://10.0.1.1:80" or external domain) */
   url: string;
@@ -179,8 +179,8 @@ export interface TcvdbConfig {
   caPemPath?: string;
 }
 
-/** Storage backend type. */
-export type StoreBackend = "sqlite" | "tcvdb";
+/** Storage backend type — sqlite only (tcvdb removed). */
+export type StoreBackend = "sqlite";
 
 /** Report settings — controls metric/event reporting. */
 export interface ReportConfig {
@@ -336,9 +336,9 @@ export interface MemoryTdaiConfig {
   pipeline: PipelineTriggerConfig;
   recall: RecallConfig;
   embedding: EmbeddingConfig;
-  /** Storage backend: "sqlite" (default) or "tcvdb" */
+  /** Storage backend: "sqlite" only. */
   storeBackend: StoreBackend;
-  /** Tencent Cloud VectorDB configuration (required when storeBackend = "tcvdb") */
+  /** @deprecated tcvdb removed; parsed but ignored. */
   tcvdb: TcvdbConfig;
   /** BM25 sparse vector encoding (local @tencentdb-agent-memory/tcvdb-text) */
   bm25: BM25Config;
@@ -370,19 +370,24 @@ export interface MemoryTdaiConfig {
  * Parse plugin config from raw user input.
  * All fields have sensible defaults — minimal config is just {}.
  */
-export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTdaiConfig {
+export function parseConfig(
+  raw: Record<string, unknown> | undefined,
+): MemoryTdaiConfig {
   const c = raw ?? {};
 
   // --- Prompt mode (L1-L3) ---
   const promptsGroup = obj(c, "prompts");
-  const globalPromptMode = normalizePromptMode(str(c, "promptMode") ?? str(promptsGroup, "mode"));
+  const globalPromptMode = normalizePromptMode(
+    str(c, "promptMode") ?? str(promptsGroup, "mode"),
+  );
 
   // --- Capture (L0) ---
   const captureGroup = obj(c, "capture");
 
   // --- Retention days validation (from capture.l0l1RetentionDays) ---
   const rawRetentionDays = num(captureGroup, "l0l1RetentionDays") ?? 0;
-  const allowAggressiveCleanup = bool(captureGroup, "allowAggressiveCleanup") ?? false;
+  const allowAggressiveCleanup =
+    bool(captureGroup, "allowAggressiveCleanup") ?? false;
 
   let retentionDays: number | undefined;
   if (rawRetentionDays <= 0) {
@@ -445,7 +450,8 @@ export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTda
     if (!embeddingBaseUrl) missingFields.push("baseUrl");
     if (!embeddingApiKey) missingFields.push("apiKey");
     if (!embeddingModelRaw) missingFields.push("model");
-    if (embeddingDimensionsRaw == null || embeddingDimensionsRaw <= 0) missingFields.push("dimensions");
+    if (embeddingDimensionsRaw == null || embeddingDimensionsRaw <= 0)
+      missingFields.push("dimensions");
 
     if (missingFields.length > 0) {
       const errorMsg =
@@ -463,7 +469,8 @@ export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTda
     if (!embeddingApiKey) missingFields.push("apiKey");
     if (!embeddingBaseUrl) missingFields.push("baseUrl");
     if (!embeddingModelRaw) missingFields.push("model");
-    if (embeddingDimensionsRaw == null || embeddingDimensionsRaw <= 0) missingFields.push("dimensions");
+    if (embeddingDimensionsRaw == null || embeddingDimensionsRaw <= 0)
+      missingFields.push("dimensions");
 
     if (missingFields.length > 0) {
       // Configuration error: disable embedding and log detailed error
@@ -485,18 +492,17 @@ export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTda
   // This avoids creating vec0 tables with a placeholder dimension that would
   // mismatch if the user later enables a different-dimensional provider.
   const defaultDimensions =
-    embeddingProvider === "none" ? 0 :
-    embeddingDimensionsRaw ?? 0;
+    embeddingProvider === "none" ? 0 : (embeddingDimensionsRaw ?? 0);
   const defaultModel = embeddingProvider === "none" ? "" : embeddingModelRaw;
 
-  const cleanTime = normalizeCleanTime(str(captureGroup, "cleanTime")) ?? "03:00";
+  const cleanTime =
+    normalizeCleanTime(str(captureGroup, "cleanTime")) ?? "03:00";
 
   // --- BM25 (local @tencentdb-agent-memory/tcvdb-text encoder) ---
   const bm25Group = obj(c, "bm25");
 
-  // --- Store backend ---
-  const storeBackendRaw = str(c, "storeBackend") ?? "sqlite";
-  const storeBackend: StoreBackend = storeBackendRaw === "tcvdb" ? "tcvdb" : "sqlite";
+  // --- Store backend (sqlite only; legacy "tcvdb" degrades with warn at factory) ---
+  const storeBackend: StoreBackend = "sqlite";
 
   // --- TCVDB config ---
   const tcvdbGroup = obj(c, "tcvdb");
@@ -519,7 +525,13 @@ export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTda
 
   const offloadMode: "local" | "backend" | "client" | "collect" = (() => {
     const raw = optStr(offloadGroup, "mode");
-    if (raw === "local" || raw === "backend" || raw === "client" || raw === "collect") return raw;
+    if (
+      raw === "local" ||
+      raw === "backend" ||
+      raw === "client" ||
+      raw === "collect"
+    )
+      return raw;
     // Auto-derive: if backendUrl is set → "backend"; if server.url is set → "client"; else "local"
     if (optStr(offloadGroup, "backendUrl")) return "backend";
     if (serverUrl) return "client";
@@ -539,12 +551,15 @@ export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTda
     l2NullThreshold: num(offloadGroup, "l2NullThreshold") ?? 4,
     l2TimeoutSeconds: num(offloadGroup, "l2TimeoutSeconds") ?? 300,
     mildOffloadRatio: num(offloadGroup, "mildOffloadRatio") ?? 0.5,
-    aggressiveCompressRatio: num(offloadGroup, "aggressiveCompressRatio") ?? 0.85,
+    aggressiveCompressRatio:
+      num(offloadGroup, "aggressiveCompressRatio") ?? 0.85,
     mmdMaxTokenRatio: num(offloadGroup, "mmdMaxTokenRatio") ?? 0.2,
     backendUrl: optStr(offloadGroup, "backendUrl"),
     backendApiKey: optStr(offloadGroup, "backendApiKey"),
     backendTimeoutMs: num(offloadGroup, "backendTimeoutMs") ?? 120000,
-    offloadRetentionDays: normalizeOffloadRetentionDays(num(offloadGroup, "offloadRetentionDays") ?? 0),
+    offloadRetentionDays: normalizeOffloadRetentionDays(
+      num(offloadGroup, "offloadRetentionDays") ?? 0,
+    ),
     logMaxSizeMb: num(offloadGroup, "logMaxSizeMb") ?? 50,
     userId: optStr(offloadGroup, "userId"),
     // Client mode fields — fall back to top-level server config when not explicitly set
@@ -567,9 +582,13 @@ export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTda
     extraction: {
       enabled: bool(extractionGroup, "enabled") ?? true,
       enableDedup: bool(extractionGroup, "enableDedup") ?? true,
-      maxMemoriesPerSession: num(extractionGroup, "maxMemoriesPerSession") ?? 20,
+      maxMemoriesPerSession:
+        num(extractionGroup, "maxMemoriesPerSession") ?? 20,
       model: optStr(extractionGroup, "model"),
-      promptMode: normalizePromptMode(str(extractionGroup, "promptMode"), globalPromptMode),
+      promptMode: normalizePromptMode(
+        str(extractionGroup, "promptMode"),
+        globalPromptMode,
+      ),
     },
     persona: {
       triggerEveryN: num(personaGroup, "triggerEveryN") ?? 50,
@@ -577,7 +596,10 @@ export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTda
       backupCount: num(personaGroup, "backupCount") ?? 3,
       sceneBackupCount: num(personaGroup, "sceneBackupCount") ?? 10,
       model: optStr(personaGroup, "model"),
-      promptMode: normalizePromptMode(str(personaGroup, "promptMode"), globalPromptMode),
+      promptMode: normalizePromptMode(
+        str(personaGroup, "promptMode"),
+        globalPromptMode,
+      ),
     },
     pipeline: {
       everyNConversations: num(pipelineGroup, "everyNConversations") ?? 5,
@@ -586,7 +608,8 @@ export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTda
       l2DelayAfterL1Seconds: num(pipelineGroup, "l2DelayAfterL1Seconds") ?? 10,
       l2MinIntervalSeconds: num(pipelineGroup, "l2MinIntervalSeconds") ?? 900,
       l2MaxIntervalSeconds: num(pipelineGroup, "l2MaxIntervalSeconds") ?? 3600,
-      sessionActiveWindowHours: num(pipelineGroup, "sessionActiveWindowHours") ?? 24,
+      sessionActiveWindowHours:
+        num(pipelineGroup, "sessionActiveWindowHours") ?? 24,
     },
     recall: {
       enabled: bool(recallGroup, "enabled") ?? true,
@@ -628,7 +651,9 @@ export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTda
     },
     bm25: {
       enabled: bool(bm25Group, "enabled") ?? true,
-      language: (str(bm25Group, "language") === "en" ? "en" : "zh") as "zh" | "en",
+      language: (str(bm25Group, "language") === "en" ? "en" : "zh") as
+        | "zh"
+        | "en",
     },
     memoryCleanup,
     report: {
@@ -652,7 +677,8 @@ export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTda
         stream: bool(llmGroup, "stream") ?? false,
         proxy: {
           // Default true: when going through proxy use memory system user key as Authorization.
-          useMemorySystemUserKey: bool(proxyGroup, "useMemorySystemUserKey") ?? true,
+          useMemorySystemUserKey:
+            bool(proxyGroup, "useMemorySystemUserKey") ?? true,
         },
       };
     })(),
@@ -660,9 +686,10 @@ export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTda
     // Skill: passthrough — let the host wiring call resolveSkillConfig() with
     // ambient probes (TCVDB / COS / embedding / LLMRunner). We don't apply
     // defaults here so the resolver remains the single source of truth.
-    skill: (c.skill && typeof c.skill === "object" && !Array.isArray(c.skill))
-      ? (c.skill as import("./core/skill/types.js").SkillConfigInput)
-      : undefined,
+    skill:
+      c.skill && typeof c.skill === "object" && !Array.isArray(c.skill)
+        ? (c.skill as import("./core/skill/types.js").SkillConfigInput)
+        : undefined,
   };
 }
 
@@ -673,7 +700,9 @@ export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTda
 /** Get sub-object by key, or empty object if missing. */
 function obj(c: Record<string, unknown>, key: string): Record<string, unknown> {
   const v = c[key];
-  return v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : {};
+  return v && typeof v === "object" && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : {};
 }
 
 function str(src: Record<string, unknown>, key: string): string | undefined {
@@ -681,7 +710,10 @@ function str(src: Record<string, unknown>, key: string): string | undefined {
   return typeof v === "string" && v.trim() ? v.trim() : undefined;
 }
 
-function normalizePromptMode(value: string | undefined, fallback: MemoryPromptMode = "chat"): MemoryPromptMode {
+function normalizePromptMode(
+  value: string | undefined,
+  fallback: MemoryPromptMode = "chat",
+): MemoryPromptMode {
   if (value === "code" || value === "chat") return value;
   return fallback;
 }
@@ -701,19 +733,31 @@ function bool(src: Record<string, unknown>, key: string): boolean | undefined {
   return typeof v === "boolean" ? v : undefined;
 }
 
-function strArray(src: Record<string, unknown>, key: string): string[] | undefined {
+function strArray(
+  src: Record<string, unknown>,
+  key: string,
+): string[] | undefined {
   const v = src[key];
   if (!Array.isArray(v)) return undefined;
-  return v.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+  return v.filter(
+    (item): item is string =>
+      typeof item === "string" && item.trim().length > 0,
+  );
 }
 
-const VALID_STRATEGIES: RecallConfig["strategy"][] = ["embedding", "keyword", "hybrid"];
+const VALID_STRATEGIES: RecallConfig["strategy"][] = [
+  "embedding",
+  "keyword",
+  "hybrid",
+];
 
 /**
  * Validate recall strategy against whitelist.
  * Returns the strategy if valid, undefined otherwise (caller falls back to default).
  */
-function validateStrategy(value: string | undefined): RecallConfig["strategy"] | undefined {
+function validateStrategy(
+  value: string | undefined,
+): RecallConfig["strategy"] | undefined {
   if (!value) return undefined;
   return VALID_STRATEGIES.includes(value as RecallConfig["strategy"])
     ? (value as RecallConfig["strategy"])

@@ -736,15 +736,13 @@ export class TdaiGateway {
           }
         });
       }
-      wrapWithTrace(req, res, () => this.handleRequest(req, res)).catch(
-        (err) => {
-          // wrapWithTrace already records the error internally, here we only do fallback
-          if (!res.headersSent) {
-            res.writeHead(500, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "Internal Server Error" }));
-          }
-        },
-      );
+      wrapWithTrace(req, res, () => this.handleRequest(req, res)).catch(() => {
+        // wrapWithTrace already records the error internally, here we only do fallback
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Internal Server Error" }));
+        }
+      });
     });
 
     // TCP-level: new socket logs a debug, to check if keepalive hits (same src ip:port
@@ -1020,15 +1018,9 @@ export class TdaiGateway {
       // Service mode: inject per-instance resolvers (storePool + configProvider + COS)
       if (this.storePool && this.configProvider) {
         const storePool = this.storePool;
-        const configProvider = this.configProvider;
-        const logger = this.logger;
 
         v3Deps.resolveStore = async (instanceId: string) => {
-          const vdbConfig =
-            storePool["mode"] === "tcvdb"
-              ? await configProvider.resolveVdb(instanceId)
-              : null;
-          const pooled = await storePool.getStore(instanceId, vdbConfig);
+          const pooled = await storePool.getStore(instanceId, null);
           return { store: pooled.store, embedding: pooled.embedding };
         };
 
@@ -1061,30 +1053,14 @@ export class TdaiGateway {
           v3Deps.quotaManager = this.quotaManager;
         }
 
-        // ── Skill: per-instance resolver (TcvdbSkillStore + COS storage) ──
-        // Reuse the COS adapter on the Memory side to create a per-instance SkillCore.
-        // If the Skill queue + worker is already started in tdai-core, reuse it; otherwise
-        // it can be started separately here in service mode.
-        if (storePool.mode === "tcvdb") {
-          // per-instance resolvers extracted private methods (the same implementation is shared by handler and skill worker).
-          skillDeps.resolveSkillCore = (instanceId: string) =>
-            this.resolveSkillCoreForInstance(instanceId);
-          skillDeps.buildSkillExtractor = (core, instanceId) =>
-            this.buildSkillExtractorForInstance(core, instanceId);
-        }
-        // /v3/skill/conversation/add + /v3/skill/extract{,result} wiring:
-        //   - tcvdb (service): goes through ensureConversationAddForInstance (per-instance TCVDB + COS)
-        //   - sqlite (standalone): goes through ensureConversationAddForStandalone (singleton SqliteSkillStore + LocalStorage/memory queue)
+        // ── Skill: sqlite only (tcvdb removed); per-instance resolvers unused. ──
+        // /v3/skill/conversation/add + /v3/skill/extract{,result} wiring (sqlite only):
         //
         // Return complete WiredConversationAdd:
         //   - handleConversationAdd with .handler
         //   - handleExtract with .trigger (direct-trigger)
         skillDeps.resolveConversationAdd = async (instanceId: string) => {
-          const wired =
-            storePool.mode === "tcvdb"
-              ? await this.ensureConversationAddForInstance(instanceId)
-              : await this.ensureConversationAddForStandalone(instanceId);
-          return wired;
+          return await this.ensureConversationAddForStandalone(instanceId);
         };
       }
 
@@ -1300,10 +1276,12 @@ export class TdaiGateway {
     if (allow.length === 0) return; // strict default — no headers
 
     if (allow.includes("*")) {
-      // Wildcard — preserves the legacy permissive behaviour for callers that
-      // opt in explicitly via config. Note: with wildcard we deliberately do
-      // not echo back the request Origin and do not send `Vary: Origin`,
-      // mirroring how the gateway behaved before this change.
+      // Explicit opt-in only: operator set corsOrigins=["*"]. No credentials
+      // served here (no Allow-Credentials header), so wildcard is safe for
+      // public non-credentialed APIs. Deliberately no Origin echo / Vary.
+      this.logger.warn(
+        '[gateway] CORS wildcard enabled via corsOrigins=["*"] (explicit opt-in, no credentials)',
+      );
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
       res.setHeader(
@@ -2028,13 +2006,14 @@ export class TdaiGateway {
     // VDB is available — set STORE_MODE=sqlite to keep the VDB-dependent
     // pieces local while exercising the rest of the service-mode wiring.
     const storeModeOverride =
-      process.env.STORE_MODE === "sqlite" || process.env.STORE_MODE === "tcvdb"
-        ? (process.env.STORE_MODE as "sqlite" | "tcvdb")
+      process.env.STORE_MODE === "sqlite"
+        ? (process.env.STORE_MODE as "sqlite")
         : undefined;
+    if (process.env.STORE_MODE === "tcvdb") {
+      this.logger.warn("[gateway] STORE_MODE=tcvdb removed — using sqlite");
+    }
     this.storePool = new StorePool({
-      mode:
-        storeModeOverride ??
-        (this.config.deployMode === "service" ? "tcvdb" : "sqlite"),
+      mode: storeModeOverride ?? "sqlite",
       memoryCfg: this.config.memory,
       dataDir: this.config.data.baseDir,
       maxStores: this.config.shark.maxInstances,
@@ -2752,11 +2731,7 @@ export class TdaiGateway {
     let store: IMemoryStore | undefined;
 
     if (this.storePool && this.configProvider) {
-      const vdbConfig =
-        this.storePool.mode === "tcvdb"
-          ? await this.configProvider.resolveVdb(instanceId)
-          : null;
-      const pooled = await this.storePool.getStore(instanceId, vdbConfig);
+      const pooled = await this.storePool.getStore(instanceId, null);
       store = pooled.store;
     } else {
       store = this.core.getVectorStore();
@@ -3007,11 +2982,7 @@ export class TdaiGateway {
           `Task ${task.id} missing instanceId in service mode (task.data.instanceId is required)`,
         );
       }
-      const vdbConfig =
-        storePool.mode === "tcvdb"
-          ? await configProvider.resolveVdb(instanceId)
-          : null;
-      return storePool.getStore(instanceId, vdbConfig);
+      return storePool.getStore(instanceId, null);
     };
 
     const resolveStorage = async (task: TaskPayload) => {
@@ -3298,8 +3269,10 @@ export class TdaiGateway {
             const { StoragePaths } = await import("../core/storage/types.js");
             const idx = await storage.readFile(StoragePaths.sceneIndex);
             if (idx) sceneCountBefore = JSON.parse(idx).length;
-          } catch {
-            /* ok */
+          } catch (err) {
+            gateway.logger.debug?.(
+              `[executor] L2 scene count read failed (best-effort): ${err instanceof Error ? err.message : String(err)}`,
+            );
           }
         }
 
@@ -3328,8 +3301,10 @@ export class TdaiGateway {
                   0,
                   JSON.parse(idx).length - sceneCountBefore,
                 );
-            } catch {
-              /* ok */
+            } catch (err) {
+              gateway.logger.debug?.(
+                `[executor] L2 new-scenes read failed (best-effort): ${err instanceof Error ? err.message : String(err)}`,
+              );
             }
           }
           // In provider=proxy mode, credit is reported by context_proxy, and here only the memory delta is reported.
@@ -3373,8 +3348,10 @@ export class TdaiGateway {
           try {
             const { StoragePaths } = await import("../core/storage/types.js");
             personaExistedBefore = await storage.exists(StoragePaths.persona);
-          } catch {
-            /* ok */
+          } catch (err) {
+            gateway.logger.debug?.(
+              `[executor] L3 persona check failed (best-effort): ${err instanceof Error ? err.message : String(err)}`,
+            );
           }
         }
 

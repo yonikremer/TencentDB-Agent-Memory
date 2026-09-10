@@ -21,9 +21,9 @@
       },
       "storeBackend": {
         "type": "string",
-        "enum": ["sqlite", "tcvdb"],
+        "enum": ["sqlite"],
         "default": "sqlite",
-        "description": "Storage backend: sqlite (local SQLite + sqlite-vec) or tcvdb (Tencent Cloud vector database). Only effective in local/function mode"
+        "description": "Storage backend: sqlite only (local SQLite + sqlite-vec). Legacy tcvdb removed." 
       },
       "server": {
         "type": "object",
@@ -111,23 +111,9 @@
           "captureTimeoutMs": { "type": "number", "description": "capture path embedding timeout (milliseconds), overrides timeoutMs. Runs in the background, can be set longer (e.g. 15000)" }
         }
       },
-      "tcvdb": {
-        "type": "object",
-        "description": "Tencent Cloud Vector Database configuration (effective only when storeBackend=tcvdb)",
-        "properties": {
-          "url": { "type": "string", "description": "Instance URL (required, e.g., http://10.0.1.1:8100)" },
-          "username": { "type": "string", "default": "root", "description": "Account name" },
-          "apiKey": { "type": "string", "description": "API Key (required)" },
-          "database": { "type": "string", "description": "Database name (auto-generated based on instance ID if not filled in)" },
-          "alias": { "type": "string", "description": "User-friendly alias (optional, used for identification in database.json)" },
-          "embeddingModel": { "type": "string", "default": "bge-large-zh", "description": "Server-side embedding model" },
-          "timeout": { "type": "number", "default": 10000, "description": "Request timeout (milliseconds)" },
-          "caPemPath": { "type": "string", "description": "CA certificate PEM file path (used for HTTPS connections)" }
-        }
-      },
       "bm25": {
         "type": "object",
-        "description": "BM25 sparse vector encoding settings (mainly for the tcvdb backend)"
+        "description": "BM25 sparse vector encoding settings (local)"
         "properties": {
           "enabled": { "type": "boolean", "default": true, "description": "Whether to enable BM25 sparse vector encoding" },
           "language": { "type": "string", "enum": ["zh", "en"], "default": "zh", "description": "Tokenization language: zh (Chinese) or en (English)" }
