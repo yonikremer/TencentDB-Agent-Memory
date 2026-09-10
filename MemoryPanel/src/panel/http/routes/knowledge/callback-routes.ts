@@ -20,7 +20,7 @@ import type { Hono } from "hono";
 import type { PanelDeps } from "../../../panel-deps.js";
 import { respondControlError } from "../../envelope.js";
 
-/** Logged once per process when accepting unsigned S2S callbacks (legacy open). */
+/** Logged once per process when rejecting unsigned S2S callbacks (secret unset). */
 let warnedOpenCallback = false;
 import type {
   KernelCredentials,
@@ -162,11 +162,16 @@ export function registerKnowledgeCallbackRoutes(
       if (!provided || a.length !== b.length || !timingSafeEqual(a, b)) {
         return respondControlError(c, 401, "INVALID_CALLBACK_SECRET");
       }
-    } else if (!warnedOpenCallback) {
-      warnedOpenCallback = true;
-      log.warn(
-        "[knowledge-callback] KNOWLEDGE_CALLBACK_SECRET unset — accepting unsigned callbacks (legacy open). Set it on both sides.",
-      );
+    } else {
+      // Fail closed: unsigned callbacks are forged ingest-state updates.
+      // Set KNOWLEDGE_CALLBACK_SECRET on both sides (same value).
+      if (!warnedOpenCallback) {
+        warnedOpenCallback = true;
+        log.warn(
+          "[knowledge-callback] KNOWLEDGE_CALLBACK_SECRET unset — rejecting unsigned callbacks. Set it on both sides.",
+        );
+      }
+      return respondControlError(c, 401, "MISSING_CALLBACK_SECRET");
     }
     const body = await safeJson(c);
 

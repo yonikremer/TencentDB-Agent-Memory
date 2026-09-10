@@ -92,15 +92,15 @@ describe("v3 read guards", () => {
     fx = await setup();
   });
 
-  it("team/list scoped to caller: bob cannot list alice teams", async () => {
+  it("team/list scoped to caller: bob cannot list alice teams (404, no oracle)", async () => {
     const r = await callRoute(
       fx.svc,
       "/v3/meta/team/list",
       { user_id: fx.ids.alice },
       fx.keys.bob,
     );
-    expect(r.status).toBe(403);
-    expect(JSON.stringify(r.payload)).toMatch(/permission_denied/);
+    expect(r.status).toBe(404);
+    expect(JSON.stringify(r.payload)).toMatch(/user_not_found/);
   });
 
   it("team/get hidden from non-members (404, no oracle)", async () => {
@@ -133,13 +133,14 @@ describe("v3 read guards", () => {
     expect(r.status).toBe(404);
   });
 
-  it("user/get scoped to caller", async () => {
+  it("user/get scoped to caller (404, no oracle)", async () => {
     const r = await callRoute(
       fx.svc,
       "/v3/meta/user/get",
       { user_id: fx.ids.alice },
       fx.keys.bob,
     );
-    expect(r.status).toBe(403);
+    expect(r.status).toBe(404);
+    expect(JSON.stringify(r.payload)).toMatch(/user_not_found/);
   });
 });

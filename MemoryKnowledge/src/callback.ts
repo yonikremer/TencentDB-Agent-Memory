@@ -18,7 +18,7 @@ import type { IngestProgress, ProgressFn } from "./engines/wiki/manager.js";
 const TAG = "[callback]";
 const RETRY_DELAY_MS = 1000;
 
-/** Shared secret authenticating Knowledge→Panel callbacks; empty = legacy open. */
+/** Shared secret authenticating Knowledge→Panel callbacks; panel rejects unsigned (fail closed). */
 function callbackSecret(): string {
   return (process.env.KNOWLEDGE_CALLBACK_SECRET ?? "").trim();
 }

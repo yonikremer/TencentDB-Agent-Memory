@@ -46,8 +46,13 @@ def _body(p: dict[str, Any]) -> Any:
     return _strip_none(p)
 
 
-def _require_any(payload: dict[str, Any], fields: tuple[str, ...], operation: str) -> None:
-    if not any(isinstance(payload.get(field), str) and payload[field].strip() for field in fields):
+def _require_any(
+    payload: dict[str, Any], fields: tuple[str, ...], operation: str
+) -> None:
+    if not any(
+        isinstance(payload.get(field), str) and payload[field].strip()
+        for field in fields
+    ):
         raise ParamError(f"{operation} requires one of {', '.join(fields)}")
 
 
@@ -143,7 +148,9 @@ class _MetadataMethodsMixin:
         return self._stub.post(f"{_V3}/team-member/add", _body(p))
 
     def _remove_team_member(self, team_id: str, user_id: str) -> Any:
-        return self._stub.post(f"{_V3}/team-member/remove", {"team_id": team_id, "user_id": user_id})
+        return self._stub.post(
+            f"{_V3}/team-member/remove", {"team_id": team_id, "user_id": user_id}
+        )
 
     def _list_team_members(
         self,
@@ -151,10 +158,14 @@ class _MetadataMethodsMixin:
         *,
         pagination: dict[str, Any] | None = None,
     ) -> Any:
-        return self._stub.post(f"{_V3}/team-member/list", _body({"team_id": team_id, **(pagination or {})}))
+        return self._stub.post(
+            f"{_V3}/team-member/list", _body({"team_id": team_id, **(pagination or {})})
+        )
 
     def _get_team_member(self, team_id: str, user_id: str) -> Any:
-        return self._stub.post(f"{_V3}/team-member/get", {"team_id": team_id, "user_id": user_id})
+        return self._stub.post(
+            f"{_V3}/team-member/get", {"team_id": team_id, "user_id": user_id}
+        )
 
     # ── Agent ──
 
@@ -227,7 +238,9 @@ class _MetadataMethodsMixin:
         )
 
     def _unlink_task_agent(self, task_id: str, agent_id: str) -> Any:
-        return self._stub.post(f"{_V3}/task-agent/unlink", {"task_id": task_id, "agent_id": agent_id})
+        return self._stub.post(
+            f"{_V3}/task-agent/unlink", {"task_id": task_id, "agent_id": agent_id}
+        )
 
     def _list_task_agents(
         self,
@@ -235,7 +248,9 @@ class _MetadataMethodsMixin:
         *,
         pagination: dict[str, Any] | None = None,
     ) -> Any:
-        return self._stub.post(f"{_V3}/task-agent/list", _body({"task_id": task_id, **(pagination or {})}))
+        return self._stub.post(
+            f"{_V3}/task-agent/list", _body({"task_id": task_id, **(pagination or {})})
+        )
 
     # ── ParticipationLog ──
 
@@ -270,8 +285,12 @@ class _MetadataMethodsMixin:
 
     # ── AgentFixedAsset ──
 
-    def _set_agent_fixed_assets(self, agent_id: str, bindings: list[dict[str, Any]]) -> Any:
-        return self._stub.post(f"{_V3}/agent-fixed-asset/set", {"agent_id": agent_id, "bindings": bindings})
+    def _set_agent_fixed_assets(
+        self, agent_id: str, bindings: list[dict[str, Any]]
+    ) -> Any:
+        return self._stub.post(
+            f"{_V3}/agent-fixed-asset/set", {"agent_id": agent_id, "bindings": bindings}
+        )
 
     def _list_agent_fixed_assets(
         self,
@@ -279,7 +298,10 @@ class _MetadataMethodsMixin:
         *,
         pagination: dict[str, Any] | None = None,
     ) -> Any:
-        return self._stub.post(f"{_V3}/agent-fixed-asset/list", _body({"agent_id": agent_id, **(pagination or {})}))
+        return self._stub.post(
+            f"{_V3}/agent-fixed-asset/list",
+            _body({"agent_id": agent_id, **(pagination or {})}),
+        )
 
     def _list_agent_fixed_assets_with_detail(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/agent-fixed-asset/list-with-detail", _body(p))
@@ -301,7 +323,9 @@ class _MetadataMethodsMixin:
         *,
         pagination: dict[str, Any] | None = None,
     ) -> Any:
-        return self._stub.post(f"{_V3}/acl/list", _body({"asset_id": asset_id, **(pagination or {})}))
+        return self._stub.post(
+            f"{_V3}/acl/list", _body({"asset_id": asset_id, **(pagination or {})})
+        )
 
     def _check_acl(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3}/acl/check", _body(p))
@@ -336,7 +360,9 @@ class _MetadataMethodsMixin:
     def _update_knowledge(self, p: dict[str, Any]) -> Any:
         return self._stub.post(f"{_V3_KNOWLEDGE}/update", _body(p))
 
-    def _delete_knowledge(self, knowledge_ids: list[str], team_id: str | None = None) -> Any:
+    def _delete_knowledge(
+        self, knowledge_ids: list[str], team_id: str | None = None
+    ) -> Any:
         return self._stub.post(
             f"{_V3_KNOWLEDGE}/delete",
             _body({"knowledge_ids": knowledge_ids, "team_id": team_id}),
@@ -499,7 +525,9 @@ class MetadataClient(_MetadataMethodsMixin):
         status: str | None = None,
         pagination: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return self._list_tasks(team_id_or_request, status=status, pagination=pagination)
+        return self._list_tasks(
+            team_id_or_request, status=status, pagination=pagination
+        )
 
     def archive_task(self, task_id: str) -> dict[str, Any]:
         return self._archive_task(task_id)
@@ -558,7 +586,9 @@ class MetadataClient(_MetadataMethodsMixin):
 
     # ── AgentFixedAsset ──
 
-    def set_agent_fixed_assets(self, agent_id: str, bindings: list[dict[str, Any]]) -> dict[str, Any]:
+    def set_agent_fixed_assets(
+        self, agent_id: str, bindings: list[dict[str, Any]]
+    ) -> dict[str, Any]:
         return self._set_agent_fixed_assets(agent_id, bindings)
 
     def list_agent_fixed_assets(
@@ -572,7 +602,9 @@ class MetadataClient(_MetadataMethodsMixin):
     def list_agent_fixed_assets_with_detail(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._list_agent_fixed_assets_with_detail(p)
 
-    def summarize_agent_fixed_assets_by_agents(self, p: dict[str, Any]) -> dict[str, Any]:
+    def summarize_agent_fixed_assets_by_agents(
+        self, p: dict[str, Any]
+    ) -> dict[str, Any]:
         return self._summarize_agent_fixed_assets_by_agents(p)
 
     # ── ACL ──
@@ -615,13 +647,17 @@ class MetadataClient(_MetadataMethodsMixin):
     def create_knowledge(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._create_knowledge(p)
 
-    def get_knowledge(self, knowledge_id: str, team_id: str | None = None) -> dict[str, Any]:
+    def get_knowledge(
+        self, knowledge_id: str, team_id: str | None = None
+    ) -> dict[str, Any]:
         return self._get_knowledge(knowledge_id, team_id)
 
     def update_knowledge(self, p: dict[str, Any]) -> dict[str, Any]:
         return self._update_knowledge(p)
 
-    def delete_knowledge(self, knowledge_ids: list[str], team_id: str | None = None) -> dict[str, Any]:
+    def delete_knowledge(
+        self, knowledge_ids: list[str], team_id: str | None = None
+    ) -> dict[str, Any]:
         return self._delete_knowledge(knowledge_ids, team_id)
 
     def list_knowledge(self, p: dict[str, Any]) -> dict[str, Any]:
@@ -778,7 +814,9 @@ class AsyncMetadataClient(_MetadataMethodsMixin):
         status: str | None = None,
         pagination: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return await self._list_tasks(team_id_or_request, status=status, pagination=pagination)
+        return await self._list_tasks(
+            team_id_or_request, status=status, pagination=pagination
+        )
 
     async def archive_task(self, task_id: str) -> dict[str, Any]:
         return await self._archive_task(task_id)
@@ -829,7 +867,9 @@ class AsyncMetadataClient(_MetadataMethodsMixin):
     async def touch_asset_usage(self, asset_id: str) -> dict[str, Any]:
         return await self._touch_asset_usage(asset_id)
 
-    async def set_agent_fixed_assets(self, agent_id: str, bindings: list[dict[str, Any]]) -> dict[str, Any]:
+    async def set_agent_fixed_assets(
+        self, agent_id: str, bindings: list[dict[str, Any]]
+    ) -> dict[str, Any]:
         return await self._set_agent_fixed_assets(agent_id, bindings)
 
     async def list_agent_fixed_assets(
@@ -840,10 +880,14 @@ class AsyncMetadataClient(_MetadataMethodsMixin):
     ) -> dict[str, Any]:
         return await self._list_agent_fixed_assets(agent_id, pagination=pagination)
 
-    async def list_agent_fixed_assets_with_detail(self, p: dict[str, Any]) -> dict[str, Any]:
+    async def list_agent_fixed_assets_with_detail(
+        self, p: dict[str, Any]
+    ) -> dict[str, Any]:
         return await self._list_agent_fixed_assets_with_detail(p)
 
-    async def summarize_agent_fixed_assets_by_agents(self, p: dict[str, Any]) -> dict[str, Any]:
+    async def summarize_agent_fixed_assets_by_agents(
+        self, p: dict[str, Any]
+    ) -> dict[str, Any]:
         return await self._summarize_agent_fixed_assets_by_agents(p)
 
     async def grant_acl(self, p: dict[str, Any]) -> dict[str, Any]:
@@ -878,13 +922,17 @@ class AsyncMetadataClient(_MetadataMethodsMixin):
     async def create_knowledge(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._create_knowledge(p)
 
-    async def get_knowledge(self, knowledge_id: str, team_id: str | None = None) -> dict[str, Any]:
+    async def get_knowledge(
+        self, knowledge_id: str, team_id: str | None = None
+    ) -> dict[str, Any]:
         return await self._get_knowledge(knowledge_id, team_id)
 
     async def update_knowledge(self, p: dict[str, Any]) -> dict[str, Any]:
         return await self._update_knowledge(p)
 
-    async def delete_knowledge(self, knowledge_ids: list[str], team_id: str | None = None) -> dict[str, Any]:
+    async def delete_knowledge(
+        self, knowledge_ids: list[str], team_id: str | None = None
+    ) -> dict[str, Any]:
         return await self._delete_knowledge(knowledge_ids, team_id)
 
     async def list_knowledge(self, p: dict[str, Any]) -> dict[str, Any]:

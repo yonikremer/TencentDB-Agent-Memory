@@ -79,7 +79,7 @@ export interface ServiceConfig {
  publicBaseUrl: string;
  /** TMC callback URL for status notifications (empty = no callback). */
  tmcCallbackUrl: string;
- /** Shared secret for Knowledge→Panel status callbacks (empty = legacy open, warns). */
+ /** Shared secret for Knowledge→Panel status callbacks (panel rejects unsigned when empty). */
  callbackSecret: string;
  /** Core verify endpoint for the single identity plane, e.g. http://core:8080 (empty = fail closed, warns). */
  coreVerifyUrl: string;

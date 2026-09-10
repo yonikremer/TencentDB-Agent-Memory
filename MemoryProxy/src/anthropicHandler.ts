@@ -420,7 +420,7 @@ function buildUpstreamHeaders(
  * `upstream.url: file:///etc/passwd` or a poisoned override can never turn
  * the proxy into a generic fetcher.
  */
-function assertTrustedUpstreamUrl(
+export function assertTrustedUpstreamUrl(
   url: URL,
   config: ProxyConfig | undefined,
 ): void {

@@ -61,7 +61,9 @@ def _strip_none(d: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in d.items() if v is not None}
 
 
-def _validate_extract(messages: list[dict[str, Any]], isolation: dict[str, Any]) -> None:
+def _validate_extract(
+    messages: list[dict[str, Any]], isolation: dict[str, Any]
+) -> None:
     if not isinstance(messages, list) or not messages:
         raise ParamError("extract requires at least one message")
     missing = [
@@ -73,7 +75,9 @@ def _validate_extract(messages: list[dict[str, Any]], isolation: dict[str, Any])
         raise ParamError(f"extract requires non-empty {', '.join(missing)}")
 
 
-def _validate_conversation_add(messages: list[dict[str, Any]], isolation: dict[str, Any]) -> None:
+def _validate_conversation_add(
+    messages: list[dict[str, Any]], isolation: dict[str, Any]
+) -> None:
     if not isinstance(messages, list) or not messages:
         raise ParamError("conversation_add requires at least one message")
     missing = [
@@ -802,13 +806,15 @@ class AsyncSkillClient:
         user_id: str | None = None,
         task_id: str | None = None,
     ) -> dict[str, Any]:
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "name": name,
-            "content": content,
-            "resources": list(resources) if resources is not None else None,
-            "metadata": metadata,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "name": name,
+                "content": content,
+                "resources": list(resources) if resources is not None else None,
+                "metadata": metadata,
+            }
+        )
         return await self._stub.post(f"{_V3}/create", body)
 
     async def update(
@@ -822,12 +828,14 @@ class AsyncSkillClient:
         user_id: str | None = None,
         task_id: str | None = None,
     ) -> dict[str, Any]:
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "skill_id": skill_id,
-            "expected_version": expected_version,
-            "content": content,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "skill_id": skill_id,
+                "expected_version": expected_version,
+                "content": content,
+            }
+        )
         return await self._stub.post(f"{_V3}/update", body)
 
     async def patch(
@@ -843,14 +851,16 @@ class AsyncSkillClient:
         user_id: str | None = None,
         task_id: str | None = None,
     ) -> dict[str, Any]:
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "skill_id": skill_id,
-            "expected_version": expected_version,
-            "old_string": old_string,
-            "new_string": new_string,
-            "replace_all": replace_all,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "skill_id": skill_id,
+                "expected_version": expected_version,
+                "old_string": old_string,
+                "new_string": new_string,
+                "replace_all": replace_all,
+            }
+        )
         return await self._stub.post(f"{_V3}/patch", body)
 
     async def delete(
@@ -863,11 +873,13 @@ class AsyncSkillClient:
         user_id: str | None = None,
         task_id: str | None = None,
     ) -> dict[str, Any]:
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "skill_id": skill_id,
-            "expected_version": expected_version,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "skill_id": skill_id,
+                "expected_version": expected_version,
+            }
+        )
         return await self._stub.post(f"{_V3}/delete", body)
 
     async def get(
@@ -882,13 +894,15 @@ class AsyncSkillClient:
         user_id: str | None = None,
         task_id: str | None = None,
     ) -> dict[str, Any]:
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "skill_id": skill_id,
-            "version": version,
-            "include_content": include_content,
-            "include_manifest": include_manifest,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "skill_id": skill_id,
+                "version": version,
+                "include_content": include_content,
+                "include_manifest": include_manifest,
+            }
+        )
         return await self._stub.post(f"{_V3}/get", body)
 
     async def get_by_name(
@@ -942,11 +956,13 @@ class AsyncSkillClient:
         user_id: str | None = None,
         task_id: str | None = None,
     ) -> dict[str, Any]:
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "filters": filters,
-            "pagination": pagination,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "filters": filters,
+                "pagination": pagination,
+            }
+        )
         return await self._stub.post(f"{_V3}/list", body)
 
     async def search(
@@ -961,13 +977,15 @@ class AsyncSkillClient:
         user_id: str | None = None,
         task_id: str | None = None,
     ) -> dict[str, Any]:
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "query": query,
-            "top_k": top_k,
-            "mode": mode,
-            "scope": scope,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "query": query,
+                "top_k": top_k,
+                "mode": mode,
+                "scope": scope,
+            }
+        )
         return await self._stub.post(f"{_V3}/search", body)
 
     async def versions(
@@ -980,11 +998,13 @@ class AsyncSkillClient:
         user_id: str | None = None,
         task_id: str | None = None,
     ) -> dict[str, Any]:
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "skill_id": skill_id,
-            "pagination": pagination,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "skill_id": skill_id,
+                "pagination": pagination,
+            }
+        )
         return await self._stub.post(f"{_V3}/versions", body)
 
     # ── resource files ─────────────────────────────────────────────────
@@ -1000,12 +1020,14 @@ class AsyncSkillClient:
         user_id: str | None = None,
         task_id: str | None = None,
     ) -> dict[str, Any]:
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "skill_id": skill_id,
-            "expected_version": expected_version,
-            "files": list(files),
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "skill_id": skill_id,
+                "expected_version": expected_version,
+                "files": list(files),
+            }
+        )
         return await self._stub.post(f"{_V3}/files/write", body)
 
     async def remove_files(
@@ -1019,12 +1041,14 @@ class AsyncSkillClient:
         user_id: str | None = None,
         task_id: str | None = None,
     ) -> dict[str, Any]:
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "skill_id": skill_id,
-            "expected_version": expected_version,
-            "paths": list(paths),
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "skill_id": skill_id,
+                "expected_version": expected_version,
+                "paths": list(paths),
+            }
+        )
         return await self._stub.post(f"{_V3}/files/remove", body)
 
     async def read_file(
@@ -1039,13 +1063,15 @@ class AsyncSkillClient:
         user_id: str | None = None,
         task_id: str | None = None,
     ) -> dict[str, Any]:
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "skill_id": skill_id,
-            "version": version,
-            "path": path,
-            "encoding": encoding,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "skill_id": skill_id,
+                "version": version,
+                "path": path,
+                "encoding": encoding,
+            }
+        )
         return await self._stub.post(f"{_V3}/files/read", body)
 
     async def export_skill(
@@ -1082,11 +1108,13 @@ class AsyncSkillClient:
         user_id: str | None = None,
         task_id: str | None = None,
     ) -> dict[str, Any]:
-        body = _strip_none({
-            **self._defaults.merge(team_id, agent_id, user_id, task_id),
-            "query": query,
-            "char_budget": char_budget,
-        })
+        body = _strip_none(
+            {
+                **self._defaults.merge(team_id, agent_id, user_id, task_id),
+                "query": query,
+                "char_budget": char_budget,
+            }
+        )
         return await self._stub.post(f"{_V3}/listing", body)
 
     async def extract(

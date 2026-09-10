@@ -36,6 +36,7 @@ import {
   emitBridgeToolCallTelemetry,
   emitBridgeRejectTelemetry,
   agentSourceFromSessionKey,
+  type BridgeRejectTelemetryInput,
 } from "../memory/bridge-telemetry.js";
 import { getCoreSkillClient, type CoreSkillClient } from "./core-client.js";
 
@@ -359,6 +360,17 @@ function envelope(code: number, message: string, httpStatus = 200) {
   );
 }
 
+/** Emit reject telemetry + return the error envelope (one call per early-exit). */
+function reject(
+  telemetry: BridgeRejectTelemetryInput,
+  code: number,
+  message: string,
+  httpStatus: number,
+) {
+  emitBridgeRejectTelemetry(telemetry);
+  return envelope(code, message, httpStatus);
+}
+
 function extractSubpath(path: string): string | null {
   // path comes in as `/skill-bridge/v3/skill/<sub...>` (or the segment after
   // the bridge prefix, depending on how it was mounted).
@@ -484,49 +496,57 @@ export function createSkillBridgeHandler(
     // before each return. sessionKey may not be derived yet here, so "" is allowed
     // (the helper falls back to agentSource='unknown').
     if (!sub) {
-      emitBridgeRejectTelemetry({
-        sessionKey: "",
-        bridgeSource: "skill-bridge",
-        rejectReason: "unknown_path",
-        httpStatus: 404,
-      });
-      return envelope(40401, `${TAG} unknown path ${path}`, 404);
+      return reject(
+        {
+          sessionKey: "",
+          bridgeSource: "skill-bridge",
+          rejectReason: "unknown_path",
+          httpStatus: 404,
+        },
+        40401,
+        `${TAG} unknown path ${path}`,
+        404,
+      );
     }
     if (!ALLOWED_SUBPATHS.has(sub)) {
-      emitBridgeRejectTelemetry({
-        sessionKey: "",
-        bridgeSource: "skill-bridge",
-        rejectReason: "subpath_forbidden",
-        httpStatus: 403,
-        executedEndpoint: sub,
-      });
-      return envelope(
+      return reject(
+        {
+          sessionKey: "",
+          bridgeSource: "skill-bridge",
+          rejectReason: "subpath_forbidden",
+          httpStatus: 403,
+          executedEndpoint: sub,
+        },
         40301,
         `${TAG} subpath '${sub}' not allowed via bridge`,
         403,
       );
     }
     if (c.req.method !== "POST") {
-      emitBridgeRejectTelemetry({
-        sessionKey: "",
-        bridgeSource: "skill-bridge",
-        rejectReason: "method_not_allowed",
-        httpStatus: 405,
-        executedEndpoint: sub,
-      });
-      return envelope(40501, `${TAG} method ${c.req.method} not allowed`, 405);
+      return reject(
+        {
+          sessionKey: "",
+          bridgeSource: "skill-bridge",
+          rejectReason: "method_not_allowed",
+          httpStatus: 405,
+          executedEndpoint: sub,
+        },
+        40501,
+        `${TAG} method ${c.req.method} not allowed`,
+        405,
+      );
     }
 
     const ct = c.req.header("content-type") ?? "";
     if (!ct.toLowerCase().includes("application/json")) {
-      emitBridgeRejectTelemetry({
-        sessionKey: "",
-        bridgeSource: "skill-bridge",
-        rejectReason: "content_type_invalid",
-        httpStatus: 415,
-        executedEndpoint: sub,
-      });
-      return envelope(
+      return reject(
+        {
+          sessionKey: "",
+          bridgeSource: "skill-bridge",
+          rejectReason: "content_type_invalid",
+          httpStatus: 415,
+          executedEndpoint: sub,
+        },
         41501,
         `${TAG} content-type must be application/json`,
         415,
@@ -538,14 +558,14 @@ export function createSkillBridgeHandler(
     // on an L1 miss those two are used to look up nottl/<spaceId>/<sessionId>/binding.json.
     const sessionKey = deriveSessionId(c);
     if (!sessionKey) {
-      emitBridgeRejectTelemetry({
-        sessionKey: "",
-        bridgeSource: "skill-bridge",
-        rejectReason: "missing_conversation_id",
-        httpStatus: 401,
-        executedEndpoint: sub,
-      });
-      return envelope(
+      return reject(
+        {
+          sessionKey: "",
+          bridgeSource: "skill-bridge",
+          rejectReason: "missing_conversation_id",
+          httpStatus: 401,
+          executedEndpoint: sub,
+        },
         40101,
         `${TAG} missing x-conversation-id (or x-session-id / x-chat-id / x-thread-id) header`,
         401,
@@ -572,15 +592,15 @@ export function createSkillBridgeHandler(
       ids = await loadSessionIdsL2(bindingRepoInline, spaceId, sessionKey);
     }
     if (!ids) {
-      emitBridgeRejectTelemetry({
-        sessionKey,
-        bridgeSource: "skill-bridge",
-        rejectReason: "session_not_initialized",
-        httpStatus: 401,
-        executedEndpoint: sub,
-        spaceId,
-      });
-      return envelope(
+      return reject(
+        {
+          sessionKey,
+          bridgeSource: "skill-bridge",
+          rejectReason: "session_not_initialized",
+          httpStatus: 401,
+          executedEndpoint: sub,
+          spaceId,
+        },
         40101,
         `${TAG} session not initialized; cannot derive identity`,
         401,
@@ -593,19 +613,19 @@ export function createSkillBridgeHandler(
     // Ablation experiment: reject write operations when allowLlmWrite=false
     const allowLlmWrite = config.skillRuntime?.allowLlmWrite ?? false;
     if (!allowLlmWrite && WRITE_SUBPATHS.has(sub)) {
-      emitBridgeRejectTelemetry({
-        sessionKey,
-        bridgeSource: "skill-bridge",
-        rejectReason: "write_ops_disabled",
-        httpStatus: 403,
-        executedEndpoint: sub,
-        spaceId: ids.space_id,
-        userId: ids.user_id,
-        teamId: ids.team_id,
-        agentId: ids.agent_id,
-        agentSource: ids.agent_source,
-      });
-      return envelope(
+      return reject(
+        {
+          sessionKey,
+          bridgeSource: "skill-bridge",
+          rejectReason: "write_ops_disabled",
+          httpStatus: 403,
+          executedEndpoint: sub,
+          spaceId: ids.space_id,
+          userId: ids.user_id,
+          teamId: ids.team_id,
+          agentId: ids.agent_id,
+          agentSource: ids.agent_source,
+        },
         40302,
         `${TAG} LLM write access to skill is disabled (skillRuntime.allowLlmWrite=false)`,
         403,
@@ -621,36 +641,40 @@ export function createSkillBridgeHandler(
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
           inboundBody = parsed as Record<string, unknown>;
         } else {
-          emitBridgeRejectTelemetry({
-            sessionKey,
-            bridgeSource: "skill-bridge",
-            rejectReason: "body_not_object",
-            httpStatus: 400,
-            executedEndpoint: sub,
-            requestBody: raw.slice(0, 512),
-            spaceId: ids.space_id,
-            userId: ids.user_id,
-            teamId: ids.team_id,
-            agentId: ids.agent_id,
-            agentSource: ids.agent_source,
-          });
-          return envelope(40001, `${TAG} body must be a JSON object`, 400);
+          return reject(
+            {
+              sessionKey,
+              bridgeSource: "skill-bridge",
+              rejectReason: "body_not_object",
+              httpStatus: 400,
+              executedEndpoint: sub,
+              requestBody: raw.slice(0, 512),
+              spaceId: ids.space_id,
+              userId: ids.user_id,
+              teamId: ids.team_id,
+              agentId: ids.agent_id,
+              agentSource: ids.agent_source,
+            },
+            40001,
+            `${TAG} body must be a JSON object`,
+            400,
+          );
         }
       }
     } catch (err) {
-      emitBridgeRejectTelemetry({
-        sessionKey,
-        bridgeSource: "skill-bridge",
-        rejectReason: "invalid_json_body",
-        httpStatus: 400,
-        executedEndpoint: sub,
-        spaceId: ids.space_id,
-        userId: ids.user_id,
-        teamId: ids.team_id,
-        agentId: ids.agent_id,
-        agentSource: ids.agent_source,
-      });
-      return envelope(
+      return reject(
+        {
+          sessionKey,
+          bridgeSource: "skill-bridge",
+          rejectReason: "invalid_json_body",
+          httpStatus: 400,
+          executedEndpoint: sub,
+          spaceId: ids.space_id,
+          userId: ids.user_id,
+          teamId: ids.team_id,
+          agentId: ids.agent_id,
+          agentSource: ids.agent_source,
+        },
         40001,
         `${TAG} invalid JSON body: ${(err as Error).message}`,
         400,

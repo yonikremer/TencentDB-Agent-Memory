@@ -107,10 +107,9 @@ function assertSelfOrAdmin(
   if (!targetUserId || ctx.isSystemAdmin || targetUserId === ctx.userId) return;
   if (notFound)
     throw new MetadataError(notFound.code, `not found: ${notFound.id}`);
-  throw new MetadataError(
-    "permission_denied",
-    "cannot query another user's data",
-  );
+  // Default denies as user_not_found (404): a 403 here would let callers probe
+  // which user ids exist across teams. Matches the documented 404-never-403 rule.
+  throw new MetadataError("user_not_found", `not found: ${targetUserId}`);
 }
 
 /**

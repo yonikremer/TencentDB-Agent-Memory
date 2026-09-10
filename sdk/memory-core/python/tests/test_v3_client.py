@@ -210,7 +210,9 @@ async def test_async_mirror():
     c = AsyncMemoryClient(
         endpoint="http://e", api_key="k", service_id="s", stub=FakeAsyncStub(), **KW
     )  # type: ignore[call-arg]  // FakeAsyncStub is runtime-compatible.
-    stub = cast(FakeAsyncStub, c._stub)  # Runtime is FakeAsyncStub; narrows the Stub | AsyncStub union.
+    stub = cast(
+        FakeAsyncStub, c._stub
+    )  # Runtime is FakeAsyncStub; narrows the Stub | AsyncStub union.
     c2 = c.with_isolation(session_id=None)
     await c2.query_conversation()
     assert "session_id" not in stub.calls[-1][2]
@@ -293,7 +295,9 @@ async def test_async_offload_and_read_file(monkeypatch):
     c = AsyncMemoryClient(
         endpoint="http://e", api_key="k", service_id="s", stub=FakeAsyncStub(), **KW
     )  # type: ignore[call-arg]  // FakeAsyncStub is runtime-compatible.
-    stub = cast(FakeAsyncStub, c._stub)  # Runtime is FakeAsyncStub; narrows the Stub | AsyncStub union.
+    stub = cast(
+        FakeAsyncStub, c._stub
+    )  # Runtime is FakeAsyncStub; narrows the Stub | AsyncStub union.
     await c.offload_ingest("s", [])
     await c.offload_compact("s", [], 0.5, 10)
     await c.offload_query_mmd("s")
