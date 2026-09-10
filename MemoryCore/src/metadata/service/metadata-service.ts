@@ -29,7 +29,6 @@ import {
 import {
   maskUserKey,
   isUserKeyExpired,
-  DEFAULT_MAX_ACTIVE_USER_KEYS,
 } from "../utils/user-key.js";
 import {
   lookupMemorySystemUser,
@@ -815,14 +814,6 @@ export class MetadataService {
   ): Promise<UserKeyCreated> {
     await this.requireUser(userId);
 
-    const active = await this.store.countActiveUserKeys(userId);
-    if (active >= this.maxActiveUserKeys) {
-      throw new MetadataError(
-        "key_limit_exceeded",
-        `active user key limit ${this.maxActiveUserKeys} reached`,
-      );
-    }
-
     const entity = await this.store.createUserKey({
       user_id: userId,
       name: input.name,
@@ -943,13 +934,6 @@ export class MetadataService {
         `user key not found: ${keyId}`,
       );
     return this.toPublicUserKey(updated);
-  }
-
-  private get maxActiveUserKeys(): number {
-    const fromEnv = Number(process.env.TDAI_USER_KEY_MAX_ACTIVE);
-    return Number.isFinite(fromEnv) && fromEnv > 0
-      ? fromEnv
-      : DEFAULT_MAX_ACTIVE_USER_KEYS;
   }
 
   // ============================================================

@@ -667,7 +667,6 @@ function mapErrorCode(code: string): number {
     case "asset_not_bindable":
     case "duplicate_entry":
     case "duplicate_user_key":
-    case "key_limit_exceeded":
     case "user_limit_exceeded":
     case "team_limit_exceeded":
     case "last_key_cannot_revoke":

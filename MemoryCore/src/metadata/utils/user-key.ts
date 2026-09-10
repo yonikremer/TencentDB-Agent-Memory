@@ -33,5 +33,3 @@ export function isUserKeyExpired(expiresAt: string | null | undefined, now = Dat
   const t = Date.parse(expiresAt);
   return Number.isFinite(t) && t <= now;
 }
-
-export const DEFAULT_MAX_ACTIVE_USER_KEYS = 20;

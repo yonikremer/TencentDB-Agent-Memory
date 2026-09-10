@@ -1085,7 +1085,7 @@ Thoroughly cleans up all instance data (state/store/COS/quota + v3 metadata DBs)
 | 401 | invalid_credentials / invalid_password / unauthorized | auth failure |
 | 403 | permission_denied / agent_team_mismatch / task_agent_not_linked / user_inactive | permission/ownership |
 | 404 | `*_not_found` (team/agent/task/asset/user_key etc.) | resource not found |
-| 409 | duplicate_entry / duplicate_user_key / key_limit_exceeded / user_limit_exceeded / team_limit_exceeded / last_key_cannot_revoke / already_initialized / last_system_admin / member_already_exists / asset_not_bindable | conflict/limit |
+| 409 | duplicate_entry / duplicate_user_key / user_limit_exceeded / team_limit_exceeded / last_key_cannot_revoke / already_initialized / last_system_admin / member_already_exists / asset_not_bindable | conflict/limit |
 
 #### Data-plane / knowledge / chat-memory / memory-prompt / generation-log (standard HTTP code; message plain text or enum)
 
