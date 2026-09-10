@@ -1,8 +1,8 @@
 # ============================================================
 # TDAI Gateway — Standalone (single-machine) configuration
 # ============================================================
-# Use cases: local development / Hermes sidecar / single-agent standalone deployment
-# Highlights: zero external dependencies (no Redis/Shark), in-process state management
+# Use cases: local dev / Hermes sidecar / single-agent deploy
+# Highlights: zero external deps (no Redis/Shark), in-process state
 # ============================================================
 
 deployMode: standalone
@@ -53,20 +53,8 @@ memory:
     strategy: "hybrid"
     timeoutMs: 5000
 
-  # ── Storage backend ──
-  # sqlite: local SQLite (default, zero config)
-  # tcvdb:  Tencent Cloud Vector Database (requires the tcvdb config below)
+  # ── Storage backend (sqlite only; tcvdb removed) ──
   storeBackend: "sqlite"
-
-  # To use TCVDB, uncomment and fill in:
-  # storeBackend: "tcvdb"
-  # tcvdb:
-  #   url: "http://10.0.1.1:80"
-  #   username: "root"
-  #   apiKey: ""
-  #   database: ""
-  #   embeddingModel: "bge-large-zh"
-  #   timeout: 10000
 
   embedding:
     provider: "none"               # vector search off by default; BM25 only
@@ -89,7 +77,7 @@ memory:
 #   enabled: true
 #   routing:
 #     mode: "bm25"
-#     searchTopK: 20        # max skills injected into the listing API (name+description)
+#     searchTopK: 20  # max skills in listing API (name+desc)
 #   extraction:
 #     enabled: true         # requires a valid llm config
 #     maxIterations: 16

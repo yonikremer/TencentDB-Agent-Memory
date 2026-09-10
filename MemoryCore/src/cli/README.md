@@ -19,7 +19,7 @@ openclaw memory-tdai seed --input <file> [options]
 Parameters
 
 | Parameter | Required | Description |
-|------|------|------|
+| ------ | ------ | ------ |
 | `--input <file>` | ✅ | Input JSON file path |
 | `--output-dir <dir>` | — | Output directory (default auto-generated directory with timestamp) |
 | `--session-key <key>` | — | Fallback session key (used when input data is missing) |
@@ -92,7 +92,7 @@ Supports two types of JSON formats:
 Field Description
 
 | Field | Type | Required | Description |
-|------|------|------|------|
+| ------ | ------ | ------ | ------ |
 | `sessionKey` | string | ✅ | Session identifier (e.g., user ID, channel name) |
 | `sessionId` | string | — | Session instance ID (multiple sessionIds can exist under the same sessionKey) |
 | `conversations` | message[][] | ✅ | Conversation turn array, where each turn is a set of messages |
@@ -122,21 +122,7 @@ Common scenarios: use more aggressive pipeline parameters when seeding to accele
 }
 ```
 
-If you need to seed an independent TCVDB database:
-
-```json
-{
-  "storeBackend": "tcvdb",
-  "tcvdb": {
-    "database": "my_seed_test_db"
-  },
-  "pipeline": {
-    "everyNConversations": 3,
-    "enableWarmup": false,
-    "l1IdleTimeoutSeconds": 2
-  }
-}
-```
+Seeding always uses the local sqlite backend.
 
 ### Output directory structure
 

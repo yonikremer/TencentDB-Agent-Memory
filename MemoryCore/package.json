@@ -5,8 +5,6 @@
   "type": "module",
   "main": "./dist/index.mjs",
   "bin": {
-    "migrate-sqlite-to-tcvdb": "./bin/migrate-sqlite-to-tcvdb.mjs",
-    "export-tencent-vdb": "./bin/export-tencent-vdb.mjs",
     "read-local-memory": "./bin/read-local-memory.mjs"
   },
   "exports": {
@@ -18,12 +16,8 @@
   "scripts": {
     "build": "npm run build:plugin && npm run build:scripts",
     "build:plugin": "tsdown",
-    "build:scripts": "npm run build:migrate-sqlite-to-vdb && npm run build:export-tencent-vdb && npm run build:read-local-memory",
+    "build:scripts": "npm run build:read-local-memory",
     "prepack": "npm run build",
-    "build:migrate-sqlite-to-vdb": "tsc -p scripts/migrate-sqlite-to-tcvdb/tsconfig.json --noEmitOnError false",
-    "migrate-sqlite-to-tcvdb": "node ./bin/migrate-sqlite-to-tcvdb.mjs",
-    "build:export-tencent-vdb": "tsc --project scripts/export-tencent-vdb/tsconfig.json",
-    "export-tencent-vdb": "node ./bin/export-tencent-vdb.mjs",
     "build:read-local-memory": "tsc --project scripts/read-local-memory/tsconfig.json",
     "read-local-memory": "node ./bin/read-local-memory.mjs",
     "test": "vitest run",
@@ -41,18 +35,13 @@
     "smoke:skill:router": "tsx scripts/smoke-skill/smoke-skill-router.ts",
     "smoke:skill:inject": "tsx scripts/smoke-skill/smoke-skill-inject.ts",
     "smoke:skill:all": "tsx scripts/smoke-skill/smoke-skill-all.ts",
-    "e2e:memory-prompt:vdb-cos": "tsx scripts/e2e-memory-prompt-vdb-cos.ts",
     "import:opik": "tsx scripts/import-opik-to-memory-core/index.ts",
     "postinstall": "bash scripts/openclaw-after-tool-call-messages.patch.sh 2>/dev/null || true"
   },
   "files": [
     "dist/",
-    "bin/migrate-sqlite-to-tcvdb.mjs",
-    "bin/export-tencent-vdb.mjs",
     "bin/read-local-memory.mjs",
     "index.ts",
-    "scripts/migrate-sqlite-to-tcvdb/dist/",
-    "scripts/export-tencent-vdb/dist/",
     "scripts/read-local-memory/dist/",
     "scripts/import-opik-to-memory-core/",
     "scripts/memory-tencentdb-ctl.sh",

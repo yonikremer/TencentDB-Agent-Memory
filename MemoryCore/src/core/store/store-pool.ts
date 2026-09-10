@@ -1,9 +1,7 @@
 /**
  * StorePool — Store instance pool per-instanceId
  *
- * Dual mode support:
- *   - standalone: Uses SQLite local storage (one SQLite file per instanceId)
- *   - service: Uses TCVDB vector database (one remote VDB connection per instanceId)
+ * SQLite only (tcvdb removed): one SQLite file per instanceId.
  *
  * Works with InstanceConfigProvider:
  *   1. When a request arrives, fetches the VDB config for the instanceId from InstanceConfigProvider
@@ -22,8 +20,7 @@ import type { IMemoryStore, StoreLogger } from "./types.js";
 import type { EmbeddingService } from "./embedding.js";
 import { createEmbeddingService, NoopEmbeddingService } from "./embedding.js";
 import { VectorStore } from "./sqlite.js";
-import { TcvdbMemoryStore } from "./tcvdb.js";
-import { TcvdbSkillStore } from "./tcvdb-skill-store.js";
+import { SqliteSkillStore } from "../skill/skill-store.js";
 import { createBM25Encoder } from "./bm25-local.js";
 import type { BM25LocalEncoder } from "./bm25-local.js";
 import type { VdbConfig } from "../instance-config-provider.js";
@@ -56,7 +53,7 @@ interface Logger {
   error: (message: string) => void;
 }
 
-export type StoreMode = "sqlite" | "tcvdb";
+export type StoreMode = "sqlite";
 
 export interface KafkaMetricOptions {
   /** Kafka Broker list (comma separated or array) */
@@ -68,7 +65,7 @@ export interface KafkaMetricOptions {
 }
 
 export interface StorePoolOptions {
-  /** Storage mode: "sqlite" (standalone local) or "tcvdb" (service remote) */
+  /** Storage mode: "sqlite" only (tcvdb removed). */
   mode: StoreMode;
   /** Memory plugin config (used for BM25/embedding settings) */
   memoryCfg: MemoryTdaiConfig;
@@ -102,8 +99,6 @@ export class StorePool {
   /** Skill store last access time (for LRU eviction) */
   private skillStoreAccessTimes = new Map<string, number>();
 
-
-
   /**
    * Grace-close tracking: entries removed from pool but whose underlying close is delayed.
    * CR-5 mitigation (2026-05-19): evict / config-change do not immediately close the underlying store,
@@ -124,12 +119,17 @@ export class StorePool {
     this.logger = opts.logger;
 
     // Create BM25 encoder once upon initialization, shared across all Stores
-    this.sharedBm25Encoder = createBM25Encoder(this.memoryCfg.bm25, this.logger as StoreLogger);
+    this.sharedBm25Encoder = createBM25Encoder(
+      this.memoryCfg.bm25,
+      this.logger as StoreLogger,
+    );
 
     // Initialize Kafka Metric Producer (async, does not block construction)
     this.initKafkaMetricProducer(opts.kafka);
 
-    this.logger.info(`${TAG} Initialized: mode=${this.mode}, maxStores=${this.maxStores}, maxSkillStores=${this.maxSkillStores}, bm25=${this.sharedBm25Encoder ? "shared" : "disabled"}`);
+    this.logger.info(
+      `${TAG} Initialized: mode=${this.mode}, maxStores=${this.maxStores}, maxSkillStores=${this.maxSkillStores}, bm25=${this.sharedBm25Encoder ? "shared" : "disabled"}`,
+    );
   }
 
   /**
@@ -142,37 +142,42 @@ export class StorePool {
     const rawBrokers = kafka?.brokers ?? "";
     const brokers = Array.isArray(rawBrokers)
       ? rawBrokers
-      : rawBrokers.split(",").map(s => s.trim()).filter(Boolean);
+      : rawBrokers
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
 
     const enabled = kafka?.enabled ?? brokers.length > 0;
     if (!enabled || brokers.length === 0) {
-      this.logger.info(`${TAG} Kafka metric producer disabled (no brokers configured)`);
+      this.logger.info(
+        `${TAG} Kafka metric producer disabled (no brokers configured)`,
+      );
       return;
     }
 
     // Async initialization, does not block business logic
-    metricProducer.initialize({
-      brokers,
-      topic: kafka?.topic ?? "memory_monitor",
-      enabled: true,
-    }).catch((err) => {
-      // Initialization failures are silently handled, does not affect business logic
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`${TAG} Kafka metric producer init failed: ${msg}. Metrics disabled.`);
-    });
+    metricProducer
+      .initialize({
+        brokers,
+        topic: kafka?.topic ?? "memory_monitor",
+        enabled: true,
+      })
+      .catch((err) => {
+        // Initialization failures are silently handled, does not affect business logic
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `${TAG} Kafka metric producer init failed: ${msg}. Metrics disabled.`,
+        );
+      });
   }
 
-  /**
-   * Get the Store instance corresponding to the specified instanceId
-   *
-   * - standalone (sqlite): vdbConfig can be null, creates SQLite Store
-   * - service (tcvdb): creates TCVDB Store based on vdbConfig
-   */
-  async getStore(instanceId: string, vdbConfig: VdbConfig | null): Promise<PooledStore> {
+  /** Get the Store instance for instanceId (sqlite only; vdbConfig ignored). */
+  async getStore(
+    instanceId: string,
+    _vdbConfig: VdbConfig | null,
+  ): Promise<PooledStore> {
     const now = Date.now();
-    const fingerprint = this.mode === "tcvdb" && vdbConfig
-      ? this.computeFingerprint(vdbConfig)
-      : `sqlite:${instanceId}`;
+    const fingerprint = `sqlite:${instanceId}`;
     const cached = this.pool.get(instanceId);
 
     // Cache hit and config unchanged
@@ -183,7 +188,9 @@ export class StorePool {
 
     // Config changed → close the old one
     if (cached) {
-      this.logger.info(`${TAG} Config changed for ${instanceId}, recreating store`);
+      this.logger.info(
+        `${TAG} Config changed for ${instanceId}, recreating store`,
+      );
       await this.closeEntry(instanceId, cached);
     }
 
@@ -192,10 +199,8 @@ export class StorePool {
       await this.evictLru();
     }
 
-    // Create new Store
-    const pooledStore = this.mode === "tcvdb" && vdbConfig
-      ? this.createTcvdbStore(vdbConfig)
-      : this.createSqliteStore(instanceId);
+    // Create new Store (sqlite only)
+    const pooledStore = this.createSqliteStore(instanceId);
 
     this.pool.set(instanceId, {
       pooledStore,
@@ -203,9 +208,7 @@ export class StorePool {
       lastAccessedAt: now,
     });
 
-    const storeDesc = this.mode === "tcvdb" && vdbConfig
-      ? `${vdbConfig.url} / ${vdbConfig.database}`
-      : `sqlite @ ${this.getSqlitePath(instanceId)}`;
+    const storeDesc = `sqlite @ ${this.getSqlitePath(instanceId)}`;
     this.logger.info(
       `${TAG} Created ${this.mode} store for ${instanceId}: ${storeDesc} (pool size: ${this.pool.size})`,
     );
@@ -245,7 +248,7 @@ export class StorePool {
     this.pool.clear();
     // Trigger delayed close (these promises will be automatically added to pendingCloses)
     for (const [id, entry] of entries) {
-      await this.closeEntry(id, entry);  // closeEntry returns immediately without blocking internally
+      await this.closeEntry(id, entry); // closeEntry returns immediately without blocking internally
     }
 
     // Close Skill store cache
@@ -262,7 +265,9 @@ export class StorePool {
 
     // Wait for all pending closes to complete (including this time + remnants from previous evicts)
     await Promise.allSettled([...this.pendingCloses]);
-    this.logger.info(`${TAG} All stores closed (${entries.length} memory + skill caches cleared)`);
+    this.logger.info(
+      `${TAG} All stores closed (${entries.length} memory + skill caches cleared)`,
+    );
   }
 
   /**
@@ -280,7 +285,9 @@ export class StorePool {
       }
       this.skillStoreCache.delete(key);
       this.skillStoreAccessTimes.delete(key);
-      this.logger.info(`${TAG} Evicted skill store for ${instanceId} (cached: ${this.skillStoreCache.size})`);
+      this.logger.info(
+        `${TAG} Evicted skill store for ${instanceId} (cached: ${this.skillStoreCache.size})`,
+      );
     }
   }
 
@@ -292,16 +299,21 @@ export class StorePool {
     this.graceCloseDelayMs = Math.max(0, ms);
   }
 
-  get size(): number { return this.pool.size; }
-  has(instanceId: string): boolean { return this.pool.has(instanceId); }
+  get size(): number {
+    return this.pool.size;
+  }
+  has(instanceId: string): boolean {
+    return this.pool.has(instanceId);
+  }
 
   /**
-   * Get the Skill Store (TCVDB) for the specified instanceId.
-   *
-   * Uses the same VDB instance as getStore(), just a different Collection ({db}_skills).
-   * Skill store has an independent cache (skillStoreCache), unaffected by Memory store pooled management.
+   * Get the Skill Store (sqlite) for the specified instanceId.
+   * Backed by the same SQLite file as getStore() — shares connection.
    */
-  async getSkillStore(instanceId: string, vdbConfig: VdbConfig): Promise<ISkillStore> {
+  async getSkillStore(
+    instanceId: string,
+    _vdbConfig?: VdbConfig | null,
+  ): Promise<ISkillStore> {
     const key = `skill:${instanceId}`;
     const cached = this.skillStoreCache.get(key);
     if (cached) {
@@ -314,56 +326,37 @@ export class StorePool {
       this.evictSkillStoreLru();
     }
 
-    const store = new TcvdbSkillStore({
-      url: vdbConfig.url,
-      username: vdbConfig.user,
-      apiKey: vdbConfig.apiKey,
-      database: vdbConfig.database,
-      embeddingModel: this.memoryCfg.tcvdb?.embeddingModel ?? "bge-large-zh",
-      timeout: this.memoryCfg.tcvdb?.timeout ?? 10000,
+    const pooled = await this.getStore(instanceId, null);
+    const carrier = pooled.store as unknown as {
+      getRawDb?: () => unknown;
+      getEmbeddingDimensions?: () => number;
+    };
+    // SAFETY: VectorStore always exposes getRawDb/getEmbeddingDimensions; guard exists for test doubles.
+    if (typeof carrier.getRawDb !== "function") {
+      throw new Error(
+        `${TAG} sqlite store for ${instanceId} does not expose getRawDb()`,
+      );
+    }
+    const db = carrier.getRawDb() as import("node:sqlite").DatabaseSync;
+    const dimensions =
+      typeof carrier.getEmbeddingDimensions === "function"
+        ? carrier.getEmbeddingDimensions()
+        : (this.memoryCfg.embedding.dimensions ?? 0);
+    const store = new SqliteSkillStore({
+      db,
+      dimensions,
       logger: this.logger as StoreLogger,
-      bm25Encoder: this.sharedBm25Encoder,
     });
     store.init();
     this.skillStoreCache.set(key, store);
     this.skillStoreAccessTimes.set(key, Date.now());
-    this.logger.info(`${TAG} Created skill store for ${instanceId}: ${vdbConfig.url}/${vdbConfig.database} (cached: ${this.skillStoreCache.size})`);
+    this.logger.info(
+      `${TAG} Created sqlite skill store for ${instanceId} (cached: ${this.skillStoreCache.size})`,
+    );
     return store;
   }
 
   private skillStoreCache = new Map<string, ISkillStore>();
-
-  // ════════════════════════════════════════════════════════
-  // Internal — TCVDB Store
-  // ════════════════════════════════════════════════════════
-
-  private createTcvdbStore(vdbConfig: VdbConfig): PooledStore {
-    // [DEBUG] For local debugging: CA certificate is required when connecting to VDB via public HTTPS.
-    // Intranet deployments via HTTP port 80 do not need this logic.
-    // Specify the PEM file path via the VDB_CA_PEM_PATH environment variable.
-    const caPemPath = vdbConfig.url.startsWith("https://")
-      ? (process.env.VDB_CA_PEM_PATH || undefined)
-      : undefined;
-
-    const store = new TcvdbMemoryStore({
-      url: vdbConfig.url,
-      username: vdbConfig.user,
-      apiKey: vdbConfig.apiKey,
-      database: vdbConfig.database,
-      embeddingEnabled: this.memoryCfg.tcvdb?.embeddingEnabled,
-      embeddingModel: this.memoryCfg.tcvdb?.embeddingModel ?? "bge-large-zh",
-      timeout: this.memoryCfg.tcvdb?.timeout ?? 10000,
-      caPemPath,
-      logger: this.logger as StoreLogger,
-      bm25Encoder: this.sharedBm25Encoder ?? undefined,
-    });
-
-    return {
-      store,
-      embedding: new NoopEmbeddingService() as unknown as EmbeddingService,
-      bm25Encoder: this.sharedBm25Encoder,
-    };
-  }
 
   // ════════════════════════════════════════════════════════
   // Internal — SQLite Store
@@ -373,15 +366,23 @@ export class StorePool {
     // Embedding service (Remote API, e.g. OpenAI text-embedding)
     let embeddingService: EmbeddingService | undefined;
     const embCfg = this.memoryCfg.embedding;
-    if (embCfg.enabled && embCfg.provider !== "local" && embCfg.provider !== "none" && embCfg.apiKey) {
-      embeddingService = createEmbeddingService({
-        provider: embCfg.provider,
-        baseUrl: embCfg.baseUrl,
-        apiKey: embCfg.apiKey,
-        model: embCfg.model,
-        dimensions: embCfg.dimensions,
-        maxInputChars: embCfg.maxInputChars,
-      }, this.logger as StoreLogger);
+    if (
+      embCfg.enabled &&
+      embCfg.provider !== "local" &&
+      embCfg.provider !== "none" &&
+      embCfg.apiKey
+    ) {
+      embeddingService = createEmbeddingService(
+        {
+          provider: embCfg.provider,
+          baseUrl: embCfg.baseUrl,
+          apiKey: embCfg.apiKey,
+          model: embCfg.model,
+          dimensions: embCfg.dimensions,
+          maxInputChars: embCfg.maxInputChars,
+        },
+        this.logger as StoreLogger,
+      );
     }
 
     const dims = embCfg.dimensions ?? 0;
@@ -395,7 +396,9 @@ export class StorePool {
 
     return {
       store,
-      embedding: (embeddingService ?? new NoopEmbeddingService()) as unknown as EmbeddingService,
+      // SAFETY: NoopEmbeddingService satisfies EmbeddingService surface used by callers; undefined means disabled.
+      embedding: (embeddingService ??
+        new NoopEmbeddingService()) as unknown as EmbeddingService,
       bm25Encoder: this.sharedBm25Encoder,
     };
   }
@@ -416,11 +419,10 @@ export class StorePool {
   // Internal — Common
   // ════════════════════════════════════════════════════════
 
-  private computeFingerprint(cfg: VdbConfig): string {
-    return `tcvdb:${cfg.url}|${cfg.database}|${cfg.apiKey}`;
-  }
-
-  private async closeEntry(instanceId: string, entry: PoolEntry): Promise<void> {
+  private async closeEntry(
+    instanceId: string,
+    entry: PoolEntry,
+  ): Promise<void> {
     // CR-5 mitigation: Immediately remove from pool (new requests won't get this entry, will create a new store),
     // but delay underlying store.close() by graceCloseDelayMs, allowing any in-flight requests holding a reference
     // to this entry time to complete. No reference counting added to avoid modifying all callers;
@@ -440,7 +442,9 @@ export class StorePool {
       }
       try {
         await entry.pooledStore.store.close();
-        this.logger.debug?.(`${TAG} Closed store for ${instanceId} (after ${this.graceCloseDelayMs}ms grace)`);
+        this.logger.debug?.(
+          `${TAG} Closed store for ${instanceId} (after ${this.graceCloseDelayMs}ms grace)`,
+        );
       } catch (e) {
         this.logger.warn(`${TAG} Error closing store for ${instanceId}: ${e}`);
       }
@@ -487,7 +491,9 @@ export class StorePool {
         try {
           store.close();
         } catch (e) {
-          this.logger.warn(`${TAG} Error closing skill store ${oldestKey} during LRU evict: ${e}`);
+          this.logger.warn(
+            `${TAG} Error closing skill store ${oldestKey} during LRU evict: ${e}`,
+          );
         }
       }
       this.skillStoreCache.delete(oldestKey);

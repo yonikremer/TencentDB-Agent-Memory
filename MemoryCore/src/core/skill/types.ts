@@ -16,8 +16,8 @@
 export interface SkillConfigInput {
   enabled?: boolean;
 
-  /** Override for skill metadata + vector store backend. Falls back to outer storeBackend, then 'sqlite'. */
-  storeBackend?: "sqlite" | "tcvdb";
+  /** Override for skill metadata + vector store backend. sqlite only (legacy "tcvdb" degrades). */
+  storeBackend?: "sqlite";
 
   /** Override for skill content (SKILL.md + resources) backend. Falls back to env probe → 'local'. */
   contentBackend?: "local" | "cos";
@@ -100,7 +100,7 @@ export interface SkillConfigInput {
 
 export interface ResolvedSkillConfig {
   enabled: true; // when this object exists, skill is enabled
-  storeBackend: "sqlite" | "tcvdb";
+  storeBackend: "sqlite";
   contentBackend: "local" | "cos";
 
   routing: {
@@ -188,11 +188,11 @@ export interface SkillDegradation {
  * implicit env/process reads inside resolveSkillConfig itself.
  */
 export interface SkillEnvProbe {
-  /** Outer storeBackend from MemoryTdaiConfig. */
-  outerStoreBackend?: "sqlite" | "tcvdb";
+  /** Outer storeBackend from MemoryTdaiConfig (sqlite only). */
+  outerStoreBackend?: "sqlite";
 
-  /** TCVDB credentials present (url + apiKey + database all set). */
-  hasTcvdbCredentials: boolean;
+  /** @deprecated tcvdb removed; always false. Kept for compat. */
+  hasTcvdbCredentials?: boolean;
 
   /** COS credentials present (secretId + secretKey + bucket all set). */
   hasCosCredentials: boolean;
@@ -368,4 +368,3 @@ export interface ExtractorLLMRunner {
     signal?: AbortSignal;
   }): Promise<string>;
 }
-
