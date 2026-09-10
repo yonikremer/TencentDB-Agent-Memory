@@ -69,11 +69,7 @@ export function createApp() {
   // (/docs, /openapi.json) stay public by design.
   const verifyCache = new Map<string, { userId: string; exp: number }>();
   const VERIFY_TTL_MS = 60_000;
-  if (process.env.KNOWLEDGE_AUTH_DISABLED === "1") {
-    log.warn(
-      "KNOWLEDGE_AUTH_DISABLED=1 — all /v3/* routes are open (isolated-dev only).",
-    );
-  } else if (config.coreVerifyUrl) {
+  if (config.coreVerifyUrl) {
     log.info(
       `Knowledge /v3/* user-key auth ENABLED (verifier=${config.coreVerifyUrl})`,
     );
@@ -86,10 +82,6 @@ export function createApp() {
     const userKey = c.req.header("x-tdai-user-key")?.trim() ?? "";
     if (!userKey) {
       return c.json(wrapError(401, "x-tdai-user-key header is required"), 401);
-    }
-    if (process.env.KNOWLEDGE_AUTH_DISABLED === "1") {
-      await next();
-      return;
     }
     if (!config.coreVerifyUrl) {
       return c.json(
