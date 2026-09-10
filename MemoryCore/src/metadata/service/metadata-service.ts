@@ -16,7 +16,6 @@ import {
   DuplicateUserKeyError,
   type IMetadataStore,
 } from "../store/interface.js";
-import type { GroupyScheduler } from "../groupy/scheduler.js";
 import { applyAssetShare as applyGroupyAssetShare } from "../groupy/grant-service.js";
 import {
   checkPermission,
@@ -26,14 +25,10 @@ import {
   type PermCheckResult,
   type PermCheckLogger,
 } from "./permission-checker.js";
-import {
-  maskUserKey,
-  isUserKeyExpired,
-} from "../utils/user-key.js";
+import { maskUserKey } from "../utils/user-key.js";
 import {
   lookupMemorySystemUser,
   isMemorySystemUserKey,
-  toMemorySystemVerifyUser,
   type MemorySystemUserConfig,
 } from "../system-user.js";
 import { resolveUserId } from "./resolve-user-id.js";
@@ -159,21 +154,6 @@ export type ChatMemoryContentCleaner = (params: {
   teamId: string;
   agentId: string;
 }) => Promise<void>;
-
-/** Detect unique constraint violation (SQLite UNIQUE or MongoDB E11000) on a specific column. */
-function isUniqueViolation(err: unknown, column?: string): boolean {
-  if (!(err instanceof Error)) return false;
-  const msg = err.message;
-  if (/UNIQUE constraint failed/.test(msg)) {
-    return column ? msg.includes(column) : true;
-  }
-  if ((err as any).code === 11000) {
-    if (!column) return true;
-    const kp = (err as any).keyPattern;
-    return kp ? column in kp : msg.includes(column);
-  }
-  return false;
-}
 
 export interface AgentBasicData {
   agent_id: string;

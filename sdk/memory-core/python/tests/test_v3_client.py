@@ -39,7 +39,7 @@ def test_helpers_and_validation():
     for missing in (
         {"team_id": "", "agent_id": "a", "user_id": "u"},
         {"team_id": "t", "agent_id": "", "user_id": "u"},
-        dict(team_id="t", agent_id="a", user_id=""),
+        {"team_id": "t", "agent_id": "a", "user_id": ""},
     ):
         with pytest.raises(ParamError):
             _validate_construction(**missing)
