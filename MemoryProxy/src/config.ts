@@ -150,6 +150,7 @@ export const DEFAULT_CONFIG: ProxyConfig = {
     enabled: false,
     url: "",
     timeoutMs: 5000,
+    bearerToken: "",
   },
   systemUsers: [],
   admin: { apiKey: "" },
@@ -598,6 +599,11 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
       enabled: yaml.auth?.enabled ?? DEFAULT_CONFIG.auth.enabled,
       url: yaml.auth?.url ?? DEFAULT_CONFIG.auth.url,
       timeoutMs: yaml.auth?.timeoutMs ?? DEFAULT_CONFIG.auth.timeoutMs,
+      // Core runs Bearer-gated (TDAI_GATEWAY_API_KEY unset refuses boot);
+      // expandEnv matches the systemUsers convention for ${VAR} secrets.
+      bearerToken: expandEnv(
+        yaml.auth?.bearerToken ?? DEFAULT_CONFIG.auth.bearerToken,
+      ).trim(),
     },
     // Entries without a non-empty userId are silently dropped — matching is
     // by userId now, and an empty userId would otherwise collide with

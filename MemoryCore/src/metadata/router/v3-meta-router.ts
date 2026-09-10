@@ -96,9 +96,17 @@ function orNotFound<T>(entity: T | null, code: string, id: string): T {
  * reads historically ignored ctx (`_c`). Denials use 404 (never 403) so callers
  * cannot probe object existence across teams.
  */
-/** Caller may only resolve their own id unless system admin (IDOR guard). */
-function assertSelfOrAdmin(targetUserId: string | undefined, ctx: Ctx): void {
+/** Caller may only resolve their own id unless system admin (IDOR guard).
+ * Optional notFound override keeps the existence oracle closed on read paths
+ * (denials surface as 404, never 403). */
+function assertSelfOrAdmin(
+  targetUserId: string | undefined,
+  ctx: Ctx,
+  notFound?: { code: string; id: string },
+): void {
   if (!targetUserId || ctx.isSystemAdmin || targetUserId === ctx.userId) return;
+  if (notFound)
+    throw new MetadataError(notFound.code, `not found: ${notFound.id}`);
   throw new MetadataError(
     "permission_denied",
     "cannot query another user's data",

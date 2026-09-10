@@ -654,6 +654,8 @@ export interface AuthConfig {
  url: string;
  /** Request timeout in ms. Default: 5000. */
  timeoutMs: number;
+ /** Gateway shared key (Core server.apiKey): sent as Bearer on auth/verify when Core runs Bearer-gated. Empty = legacy no-token. */
+ bearerToken: string;
 }
 
 /**
@@ -881,6 +883,8 @@ export interface RawYamlConfig {
   enabled?: boolean;
   url?: string;
   timeoutMs?: number;
+  /** Gateway shared key (Core server.apiKey) sent as Bearer on auth/verify. */
+  bearerToken?: string;
  };
  systemUsers?: Partial<SystemUserEntry>[];
  admin?: {

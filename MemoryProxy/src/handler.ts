@@ -361,7 +361,10 @@ function buildUpstreamHeaders(
  * `upstream.url: file:///etc/passwd` or a poisoned override can never turn
  * the proxy into a generic fetcher.
  */
-function assertTrustedUpstreamUrl(url: URL, config: ProxyConfig | undefined): void {
+function assertTrustedUpstreamUrl(
+  url: URL,
+  config: ProxyConfig | undefined,
+): void {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error(
       `Refusing to forward to non-http(s) upstream URL: ${url.protocol}//…`,

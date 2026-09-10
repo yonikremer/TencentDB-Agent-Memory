@@ -1848,7 +1848,7 @@ export async function handleForceArchive(
 
   try {
     // Read the current buffer
-    const [current, meta] = await Promise.all([
+    const [current, _meta] = await Promise.all([
       wired.buffer.readCurrent(sess),
       wired.buffer.readMeta(sess),
     ]);

@@ -67,10 +67,19 @@ export function isAuthEnabled(): boolean {
  * This function never throws.
  * Each call directly queries the auth service (no caching).
  */
-export async function verifyUserKey(userKey: string, serviceId: string): Promise<VerifyUserResult> {
+export async function verifyUserKey(
+  userKey: string,
+  serviceId: string,
+): Promise<VerifyUserResult> {
   if (!config) return { userId: "", rejected: false };
-  if (!serviceId) return { userId: "", rejected: true, rejectReason: "missing service_id (spaceId not in request path)" };
-  if (!userKey) return { userId: "", rejected: true, rejectReason: "missing user_key" };
+  if (!serviceId)
+    return {
+      userId: "",
+      rejected: true,
+      rejectReason: "missing service_id (spaceId not in request path)",
+    };
+  if (!userKey)
+    return { userId: "", rejected: true, rejectReason: "missing user_key" };
 
   try {
     const fetchOpts: RequestInit = {
@@ -78,6 +87,11 @@ export async function verifyUserKey(userKey: string, serviceId: string): Promise
       headers: {
         "content-type": "application/json",
         "x-tdai-service-id": serviceId,
+        // Core Bearer-gates every /v3/* route, so the verify call must carry
+        // the gateway shared key when configured (auth.bearerToken).
+        ...(config.bearerToken
+          ? { authorization: `Bearer ${config.bearerToken}` }
+          : {}),
       },
       body: JSON.stringify({ user_key: userKey }),
     };
@@ -94,23 +108,29 @@ export async function verifyUserKey(userKey: string, serviceId: string): Promise
       return { userId: "", rejected: true, rejectReason: reason };
     }
 
-    const body = await resp.json() as {
+    const body = (await resp.json()) as {
       code?: number;
       data?: { valid?: boolean; user?: { user_id?: string } };
     };
 
     // Only accept: code=0 AND valid=true AND user_id present
-    if (body.code === 0 && body.data?.valid === true && body.data.user?.user_id) {
+    if (
+      body.code === 0 &&
+      body.data?.valid === true &&
+      body.data.user?.user_id
+    ) {
       return { userId: body.data.user.user_id, rejected: false };
     }
 
     // Everything else is a rejection
-    const reason = body.data?.valid === false
-      ? "invalid user_key"
-      : `unexpected verify response (code=${body.code})`;
+    const reason =
+      body.data?.valid === false
+        ? "invalid user_key"
+        : `unexpected verify response (code=${body.code})`;
     return { userId: "", rejected: true, rejectReason: reason };
   } catch (err: unknown) {
-    const isTimeout = err instanceof DOMException && err.name === "TimeoutError";
+    const isTimeout =
+      err instanceof DOMException && err.name === "TimeoutError";
     const reason = isTimeout
       ? `auth service timeout (${config.timeoutMs}ms)`
       : `auth service error: ${err instanceof Error ? err.message : String(err)}`;

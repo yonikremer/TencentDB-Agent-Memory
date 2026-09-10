@@ -47,6 +47,7 @@ const deps = {
   getStore: () => undefined,
   getEmbedding: () => undefined,
   getStorage: () => undefined,
+  getMetadataService: async () => fakeUserService as never,
   deployMode: "standalone",
   logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
 } as unknown as V3RouterDeps;
@@ -127,6 +128,7 @@ describe("v3 offload routing", () => {
       sendJson as never,
       {
         getStorage: () => storage as never,
+        getMetadataService: async () => fakeUserService as never,
         logger: { info: () => {}, warn: () => {}, error: () => {} },
       },
     );
