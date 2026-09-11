@@ -22,7 +22,9 @@ const ksSeen: string[] = [];
 function readBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve) => {
     let buf = "";
-    req.on("data", (c) => { buf += c; });
+    req.on("data", (c) => {
+      buf += c;
+    });
     req.on("end", () => resolve(buf ? JSON.parse(buf) : {}));
   });
 }
@@ -30,20 +32,30 @@ function readBody(req: IncomingMessage): Promise<any> {
 beforeAll(async () => {
   ks = http.createServer(async (req, res) => {
     const body = await readBody(req);
-    ksSeen.push(`${req.url} query=${(body as any).query ?? (body as any).symbol ?? ""}`);
+    ksSeen.push(
+      `${req.url} query=${(body as any).query ?? (body as any).symbol ?? ""}`,
+    );
     res.setHeader("content-type", "application/json");
     if (ksMode === "error") {
       res.writeHead(500);
-      res.end(JSON.stringify({ code: 500, message: "fake ks boom", data: null }));
+      res.end(
+        JSON.stringify({ code: 500, message: "fake ks boom", data: null }),
+      );
       return;
     }
     const data = (req.url ?? "").includes("code-graph")
       ? { text: "fake symbol body", isError: false }
-      : { results: [{ ref: "p1", snippet: "fake wiki hit" }], links: [], count: 1 };
+      : {
+          results: [{ ref: "p1", snippet: "fake wiki hit" }],
+          links: [],
+          count: 1,
+        };
     res.writeHead(200);
     res.end(JSON.stringify({ code: 0, message: "ok", data }));
   });
-  await new Promise<void>((resolve) => ks.listen(0, "127.0.0.1", () => resolve()));
+  await new Promise<void>((resolve) =>
+    ks.listen(0, "127.0.0.1", () => resolve()),
+  );
   ksBase = `http://127.0.0.1:${(ks.address() as AddressInfo).port}`;
 });
 
@@ -54,7 +66,10 @@ afterAll(async () => {
 async function linkedClient() {
   const server = createMcpServer({ baseUrl: ksBase });
   const [clientT, serverT] = InMemoryTransport.createLinkedPair();
-  const client = new Client({ name: "test", version: "0" }, { capabilities: {} });
+  const client = new Client(
+    { name: "test", version: "0" },
+    { capabilities: {} },
+  );
   await Promise.all([server.connect(serverT), client.connect(clientT)]);
   return { server, client };
 }
@@ -82,7 +97,10 @@ describe("MCP tools/call -> KS HTTP", () => {
     try {
       ksMode = "ok";
       ksSeen.length = 0;
-      const res = await client.callTool({ name: "wiki_search", arguments: { wiki_id: "wiki-x", query: "koi" } });
+      const res = await client.callTool({
+        name: "wiki_search",
+        arguments: { wiki_id: "wiki-x", query: "koi" },
+      });
       expect((res as any).isError).toBeFalsy();
       expect(JSON.stringify(res)).toContain("fake wiki hit");
       expect(ksSeen.join()).toContain("/v3/wiki/search");
@@ -96,7 +114,10 @@ describe("MCP tools/call -> KS HTTP", () => {
     const { server, client } = await linkedClient();
     try {
       ksMode = "ok";
-      const res = await client.callTool({ name: "code_search", arguments: { code_graph_id: "cg-x", query: "auth" } });
+      const res = await client.callTool({
+        name: "code_search",
+        arguments: { code_graph_id: "cg-x", query: "auth" },
+      });
       expect((res as any).isError).toBe(false);
       expect(JSON.stringify(res)).toContain("fake symbol body");
     } finally {
@@ -120,7 +141,10 @@ describe("MCP tools/call -> KS HTTP", () => {
     const { server, client } = await linkedClient();
     try {
       ksMode = "error";
-      const res = await client.callTool({ name: "wiki_search", arguments: { wiki_id: "wiki-x", query: "koi" } });
+      const res = await client.callTool({
+        name: "wiki_search",
+        arguments: { wiki_id: "wiki-x", query: "koi" },
+      });
       expect((res as any).isError).toBe(true);
       expect(JSON.stringify(res)).toContain("fake ks boom");
     } finally {

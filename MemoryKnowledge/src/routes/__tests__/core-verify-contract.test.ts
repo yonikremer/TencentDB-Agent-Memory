@@ -34,8 +34,12 @@ const savedEnv: Record<string, string | undefined> = {};
 async function rmRetry(path: string) {
   // Windows holds SQLite handles briefly after close; retry before giving up.
   for (let i = 0; i < 10; i++) {
-    try { rmSync(path, { recursive: true, force: true }); return; }
-    catch { await new Promise((r) => setTimeout(r, 200)); }
+    try {
+      rmSync(path, { recursive: true, force: true });
+      return;
+    } catch {
+      await new Promise((r) => setTimeout(r, 200));
+    }
   }
 }
 
@@ -44,13 +48,20 @@ function setEnv(k: string, v: string) {
   process.env[k] = v;
 }
 
-async function reqKs(path: string, body: unknown, headers: Record<string, string> = {}) {
+async function reqKs(
+  path: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+) {
   const res = await fetch(`${ksBase}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
   });
-  return { status: res.status, json: (await res.json()) as { code: number; message: string; data: any } };
+  return {
+    status: res.status,
+    json: (await res.json()) as { code: number; message: string; data: any },
+  };
 }
 
 beforeAll(async () => {
@@ -65,29 +76,56 @@ beforeAll(async () => {
   await svc.initAdminUser({ username: "root", user_key: ADMIN_KEY });
 
   coreServer = http.createServer(async (req, res) => {
-    if (req.method === "POST" && (req.url ?? "").endsWith("/v3/meta/auth/verify")) {
+    if (
+      req.method === "POST" &&
+      (req.url ?? "").endsWith("/v3/meta/auth/verify")
+    ) {
       seenAuthHeader = (req.headers.authorization as string) ?? "";
     }
     const u = new URL(req.url ?? "/", "http://x");
-    const sendJson = (r: http.ServerResponse, status: number, body: unknown) => {
+    const sendJson = (
+      r: http.ServerResponse,
+      status: number,
+      body: unknown,
+    ) => {
       r.writeHead(status, { "content-type": "application/json" });
       r.end(JSON.stringify(body));
     };
     const parseJsonBody = async <T>(rq: http.IncomingMessage): Promise<T> =>
       new Promise((resolve, reject) => {
         let raw = "";
-        rq.on("data", (c) => { raw += c; });
+        rq.on("data", (c) => {
+          raw += c;
+        });
         rq.on("end", () => {
-          try { resolve(raw ? (JSON.parse(raw) as T) : ({} as T)); }
-          catch (e) { reject(e); }
+          try {
+            resolve(raw ? (JSON.parse(raw) as T) : ({} as T));
+          } catch (e) {
+            reject(e);
+          }
         });
       });
-    await handleV3MetaRoute(req, res, u.pathname, req.method ?? "", parseJsonBody, sendJson, {
-      getMetadataService: (id) => (id === INST ? svc : undefined),
-      logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} } as any,
-    });
+    await handleV3MetaRoute(
+      req,
+      res,
+      u.pathname,
+      req.method ?? "",
+      parseJsonBody,
+      sendJson,
+      {
+        getMetadataService: (id) => (id === INST ? svc : undefined),
+        logger: {
+          debug: () => {},
+          info: () => {},
+          warn: () => {},
+          error: () => {},
+        } as any,
+      },
+    );
   });
-  await new Promise<void>((resolve) => coreServer.listen(0, "127.0.0.1", () => resolve()));
+  await new Promise<void>((resolve) =>
+    coreServer.listen(0, "127.0.0.1", () => resolve()),
+  );
   const coreAddr = coreServer.address() as AddressInfo;
   const coreBase = `http://127.0.0.1:${coreAddr.port}`;
 
@@ -99,8 +137,14 @@ beforeAll(async () => {
   setEnv("KNOWLEDGE_CLICKHOUSE_ENABLED", "");
   const created = createApp();
   const { serve } = await import("@hono/node-server");
-  ksServer = serve({ fetch: created.app.fetch, port: 0, hostname: "127.0.0.1" });
-  await new Promise<void>((r) => (ksServer as Server).on("listening", () => r()));
+  ksServer = serve({
+    fetch: created.app.fetch,
+    port: 0,
+    hostname: "127.0.0.1",
+  });
+  await new Promise<void>((r) =>
+    (ksServer as Server).on("listening", () => r()),
+  );
   const ksAddr = (ksServer as Server).address() as AddressInfo;
   ksBase = `http://127.0.0.1:${ksAddr.port}`;
 }, 60_000);
@@ -112,7 +156,11 @@ afterAll(async () => {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
   }
-  try { (globalThis as any).__coreKsStore?.close(); } catch { /* ignore */ }
+  try {
+    (globalThis as any).__coreKsStore?.close();
+  } catch {
+    /* ignore */
+  }
   await rmRetry(tmpCore);
   await rmRetry(tmpKs);
 });
@@ -120,20 +168,28 @@ afterAll(async () => {
 describe("Core<->Knowledge verify wire contract (both stacks real)", () => {
   it("real Core admin key passes Knowledge auth + bearer forwarded (first call populates verify cache)", async () => {
     seenAuthHeader = "";
-    const { status, json } = await reqKs("/v3/wiki/list", { team_id: "t" }, {
-      "x-tdai-service-id": INST,
-      "x-tdai-user-key": ADMIN_KEY,
-    });
+    const { status, json } = await reqKs(
+      "/v3/wiki/list",
+      { team_id: "t" },
+      {
+        "x-tdai-service-id": INST,
+        "x-tdai-user-key": ADMIN_KEY,
+      },
+    );
     expect(status).toBe(200);
     expect(json.code).toBe(0);
     expect(seenAuthHeader).toBe(`Bearer ${BEARER}`);
   });
 
   it("bogus key rejected 401 against real Core", async () => {
-    const { status, json } = await reqKs("/v3/wiki/list", { team_id: "t" }, {
-      "x-tdai-service-id": INST,
-      "x-tdai-user-key": "bogus-key",
-    });
+    const { status, json } = await reqKs(
+      "/v3/wiki/list",
+      { team_id: "t" },
+      {
+        "x-tdai-service-id": INST,
+        "x-tdai-user-key": "bogus-key",
+      },
+    );
     expect(status).toBe(401);
     expect(json.code).toBe(401);
   });

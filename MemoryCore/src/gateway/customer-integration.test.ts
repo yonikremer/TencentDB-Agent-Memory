@@ -41,7 +41,11 @@ function req(pathname: string, headers: Record<string, string> = {}) {
   } as never;
 }
 
-async function route(pathname: string, headers: Record<string, string> = {}, body: unknown = {}) {
+async function route(
+  pathname: string,
+  headers: Record<string, string> = {},
+  body: unknown = {},
+) {
   const seen: Array<{ status: number; body: any }> = [];
   const handled = await handleV3Route(
     req(pathname, headers),
@@ -49,14 +53,22 @@ async function route(pathname: string, headers: Record<string, string> = {}, bod
     pathname,
     "POST",
     async <T>(): Promise<T> => body as T,
-    ((_res: unknown, status: number, b: unknown) => { seen.push({ status, body: b }); }) as never,
+    ((_res: unknown, status: number, b: unknown) => {
+      seen.push({ status, body: b });
+    }) as never,
     {
       getStore: () => undefined,
       getEmbedding: () => undefined,
       getStorage: () => undefined,
-      getMetadataService: async (id) => (id === INST ? (svc as never) : undefined),
+      getMetadataService: async (id) =>
+        id === INST ? (svc as never) : undefined,
       deployMode: "standalone",
-      logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+      logger: {
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+        debug: () => {},
+      },
     } as unknown as V3RouterDeps,
   );
   const last = seen[seen.length - 1];
@@ -73,7 +85,11 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  try { (globalThis as any).__gwStore?.close(); } catch { /* ignore */ }
+  try {
+    (globalThis as any).__gwStore?.close();
+  } catch {
+    /* ignore */
+  }
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -84,17 +100,25 @@ describe("data-plane auth with real metadata stack", () => {
   });
 
   it("bogus key -> 401", async () => {
-    const r = await route("/v3/conversation/add", { ...TRIAD, "x-tdai-user-key": "bogus" });
+    const r = await route("/v3/conversation/add", {
+      ...TRIAD,
+      "x-tdai-user-key": "bogus",
+    });
     expect(r.status).toBe(401);
   });
 
   it("valid key without triad -> 422 (isolation, not auth)", async () => {
-    const r = await route("/v3/conversation/add", { "x-tdai-user-key": ADMIN_KEY });
+    const r = await route("/v3/conversation/add", {
+      "x-tdai-user-key": ADMIN_KEY,
+    });
     expect(r.status).toBe(422);
   });
 
   it("valid key + triad passes auth (503 no-store proves dispatch reached)", async () => {
-    const r = await route("/v3/conversation/add", { ...TRIAD, "x-tdai-user-key": ADMIN_KEY });
+    const r = await route("/v3/conversation/add", {
+      ...TRIAD,
+      "x-tdai-user-key": ADMIN_KEY,
+    });
     expect(r.handled).toBe(true);
     expect(r.status).not.toBe(401);
     expect(r.status).not.toBe(422);
@@ -109,14 +133,21 @@ describe("data-plane auth with real metadata stack", () => {
       "/v3/conversation/add",
       "POST",
       async <T>(): Promise<T> => ({}) as T,
-      ((_res: unknown, status: number) => { seen.push({ status }); }) as never,
+      ((_res: unknown, status: number) => {
+        seen.push({ status });
+      }) as never,
       {
         getStore: () => undefined,
         getEmbedding: () => undefined,
         getStorage: () => undefined,
         getMetadataService: async () => undefined,
         deployMode: "standalone",
-        logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+        logger: {
+          info: () => {},
+          warn: () => {},
+          error: () => {},
+          debug: () => {},
+        },
       } as unknown as V3RouterDeps,
     );
     expect(seen[seen.length - 1]?.status).toBe(503);

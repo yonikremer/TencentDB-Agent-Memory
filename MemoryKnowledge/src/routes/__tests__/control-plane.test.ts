@@ -23,16 +23,29 @@ let server: Server;
 let tmp = "";
 
 async function post(path: string, body: unknown, svc: string | null = SVC) {
-  const headers: Record<string, string> = { "content-type": "application/json" };
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
   if (svc) headers["x-tdai-service-id"] = svc;
-  const res = await fetch(base + path, { method: "POST", headers, body: JSON.stringify(body) });
-  return { status: res.status, json: (await res.json()) as { code: number; message: string; data: any } };
+  const res = await fetch(base + path, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+  return {
+    status: res.status,
+    json: (await res.json()) as { code: number; message: string; data: any },
+  };
 }
 
 async function rmRetry(path: string) {
   for (let i = 0; i < 10; i++) {
-    try { rmSync(path, { recursive: true, force: true }); return; }
-    catch { await new Promise((r) => setTimeout(r, 200)); }
+    try {
+      rmSync(path, { recursive: true, force: true });
+      return;
+    } catch {
+      await new Promise((r) => setTimeout(r, 200));
+    }
   }
 }
 
@@ -44,18 +57,44 @@ beforeAll(async () => {
     dataDir: join(tmp, "data"),
     db,
     llmConfig: {
-      mode: "proxy", protocol: "openai", provider: "custom", apiKey: "",
-      model: "m", baseUrl: "", maxTokens: 100, timeoutMs: 1000,
+      mode: "proxy",
+      protocol: "openai",
+      provider: "custom",
+      apiKey: "",
+      model: "m",
+      baseUrl: "",
+      maxTokens: 100,
+      timeoutMs: 1000,
     },
     wikiWorker: async () => ({ pageCount: 1 }),
   });
   const app = new Hono();
   const api = new Hono();
-  api.route("/wiki", createWikiRoutes({ wikiService: mod.wikiService, wikiMgr: mod.wikiMgr, publicBaseUrl: "" }));
-  api.route("/internal/llm-binding", createLlmBindingRoutes({ llmBindingStore: mod.llmBindingStore }));
-  api.route("/", createAutoSyncRoutes({ scheduler: mod.autoSyncScheduler, config: mod.autoSyncConfig }));
+  api.route(
+    "/wiki",
+    createWikiRoutes({
+      wikiService: mod.wikiService,
+      wikiMgr: mod.wikiMgr,
+      publicBaseUrl: "",
+    }),
+  );
+  api.route(
+    "/internal/llm-binding",
+    createLlmBindingRoutes({ llmBindingStore: mod.llmBindingStore }),
+  );
+  api.route(
+    "/",
+    createAutoSyncRoutes({
+      scheduler: mod.autoSyncScheduler,
+      config: mod.autoSyncConfig,
+    }),
+  );
   app.route("/v3", api);
-  server = serve({ fetch: app.fetch, port: 0, hostname: "127.0.0.1" }) as unknown as Server;
+  server = serve({
+    fetch: app.fetch,
+    port: 0,
+    hostname: "127.0.0.1",
+  }) as unknown as Server;
   await new Promise<void>((r) => (server as any).on("listening", () => r()));
   const addr = (server as any).address() as AddressInfo;
   base = `http://127.0.0.1:${addr.port}`;
@@ -63,7 +102,11 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise<void>((r) => server?.close(() => r()));
-  try { (globalThis as any).__knowCtrlRaw?.close(); } catch { /* ignore */ }
+  try {
+    (globalThis as any).__knowCtrlRaw?.close();
+  } catch {
+    /* ignore */
+  }
   await rmRetry(tmp);
 });
 
@@ -79,13 +122,18 @@ describe("llm-binding (per-instance LLM routing)", () => {
   });
 
   it("byo without api_key on first create -> 400", async () => {
-    const r = await post("/v3/internal/llm-binding/set", { mode: "byo", base_url: "http://x/v1" });
+    const r = await post("/v3/internal/llm-binding/set", {
+      mode: "byo",
+      base_url: "http://x/v1",
+    });
     expect(r.status).toBe(400);
   });
 
   it("set byo + status never leaks api_key", async () => {
     const s = await post("/v3/internal/llm-binding/set", {
-      mode: "byo", base_url: "http://127.0.0.1:1/v1", api_key: "super-secret",
+      mode: "byo",
+      base_url: "http://127.0.0.1:1/v1",
+      api_key: "super-secret",
     });
     expect(s.json.code).toBe(0);
     const st = await post("/v3/internal/llm-binding/status", {});
@@ -98,11 +146,17 @@ describe("llm-binding (per-instance LLM routing)", () => {
     const l = await post("/v3/internal/llm-binding/list", {}, null);
     expect(l.json.code).toBe(0);
     expect(JSON.stringify(l.json.data)).not.toContain("super-secret");
-    expect(l.json.data.items[0]).toMatchObject({ has_api_key: true, mode: "byo" });
+    expect(l.json.data.items[0]).toMatchObject({
+      has_api_key: true,
+      mode: "byo",
+    });
   });
 
   it("re-set without api_key retains previous value", async () => {
-    const s = await post("/v3/internal/llm-binding/set", { mode: "byo", base_url: "http://127.0.0.1:2/v1" });
+    const s = await post("/v3/internal/llm-binding/set", {
+      mode: "byo",
+      base_url: "http://127.0.0.1:2/v1",
+    });
     expect(s.json.code).toBe(0);
     const st = await post("/v3/internal/llm-binding/list", {}, null);
     expect(st.json.data.items[0].has_api_key).toBe(true);
