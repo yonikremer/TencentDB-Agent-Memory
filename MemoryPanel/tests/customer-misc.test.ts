@@ -55,6 +55,10 @@ const metaKernel = {
         return ok({ team_id: TEAM, user_id: USER_ID });
       case "acl/check":
         return ok({ allowed: true });
+      case "asset/get":
+        return (body.asset_id as string) === SEARCH_BLOCK
+          ? ok({ asset_id: SEARCH_BLOCK, name: "searchable", asset_type: "chat_memory", visibility: "team", status: "active", owner_user_id: USER_ID, team_id: TEAM, updated_at: "2026-01-01T00:00:00.000Z" })
+          : { code: 404, message: "no", request_id: "t", data: null };
       case "task/list":
         return ok({ items: [{ task_id: "task-1", title: "t1" }], total: 1 });
       case "task-agent/list":
@@ -102,6 +106,9 @@ const metaKernel = {
     }
   },
 };
+
+const kernelSeen: Array<{ path: string; body: unknown }> = [];
+const SEARCH_BLOCK = `chat_memory-${TEAM}-agt${AGENT}`;
 
 const nullLogger = {
   debug() {},
@@ -151,6 +158,15 @@ beforeAll(async () => {
     ]),
     metaKernel,
     skillKernel,
+    kernelHttp: {
+      async postEnvelope(path: string, body: Record<string, unknown>) {
+        kernelSeen.push({ path, body });
+        if (path === "/v3/atomic/search") {
+          return { code: 0, message: "ok", request_id: "t", data: { items: [{ id: "l1-1", content: "fake atomic hit", score: 0.9 }] } };
+        }
+        return { code: 0, message: "ok", request_id: "t", data: { messages: [] } };
+      },
+    },
     knowledgeClientFactory: () => ({}),
     knowledgeTaskRegistry: { record: () => {} },
     ingestProgressStore: { get: () => null },
@@ -223,5 +239,33 @@ describe("chat-memory", () => {
     });
     expect(r.json.code).toBe(0);
     expect(r.json.data).toMatchObject({ id: "cm-new", title: "notes" });
+  });
+});
+
+describe("chat-memory search + mine", () => {
+  it("missing block/query -> 400", async () => {
+    const b = await post("/api/v1/chat-memory/search", { query: "x" });
+    expect(b.json.code).toBe(400);
+    const q = await post("/api/v1/chat-memory/search", { block_id: SEARCH_BLOCK });
+    expect(q.json.code).toBe(400);
+  });
+
+  it("unknown block -> 404 BLOCK_NOT_FOUND", async () => {
+    const r = await post("/api/v1/chat-memory/search", { block_id: "chat_memory-nope-agtx", query: "x" });
+    expect(r.json.code).toBe(404);
+  });
+
+  it("L1 search maps kernel items to blocks", async () => {
+    kernelSeen.length = 0;
+    const r = await post("/api/v1/chat-memory/search", { block_id: SEARCH_BLOCK, query: "koi" });
+    expect(r.json.code).toBe(0);
+    expect(r.json.data.items).toEqual([{ id: "l1-1", title: "atomic", body: "fake atomic hit", tags: [], refs: [], score: 0.9, created_at: undefined }]);
+    expect(kernelSeen[0].path).toBe("/v3/atomic/search");
+  });
+
+  it("mine lists caller assets", async () => {
+    const r = await post("/api/v1/chat-memory/mine", { team_id: TEAM });
+    expect(r.json.code).toBe(0);
+    expect(Array.isArray(r.json.data.items)).toBe(true);
   });
 });
