@@ -33,7 +33,11 @@ function cfg(): ProxyConfig {
 beforeAll(async () => {
   initAuth({ enabled: false } as never);
   const app: Hono = createApp(cfg());
-  server = serve({ fetch: app.fetch, port: 0, hostname: "127.0.0.1" }) as unknown as Server;
+  server = serve({
+    fetch: app.fetch,
+    port: 0,
+    hostname: "127.0.0.1",
+  }) as unknown as Server;
   await new Promise<void>((r) => (server as any).on("listening", () => r()));
   const addr = (server as any).address() as AddressInfo;
   base = `http://127.0.0.1:${addr.port}`;
@@ -56,7 +60,9 @@ describe("health + whoami (no upstream, no auth service)", () => {
   });
 
   it("GET /whoami with bearer -> 200 key id (derived locally)", async () => {
-    const res = await fetch(base + "/whoami", { headers: { authorization: "Bearer fake-cust-key" } });
+    const res = await fetch(base + "/whoami", {
+      headers: { authorization: "Bearer fake-cust-key" },
+    });
     expect(res.status).toBe(200);
     expect((await res.text()).trim().length).toBeGreaterThan(0);
   });
@@ -64,23 +70,39 @@ describe("health + whoami (no upstream, no auth service)", () => {
 
 describe("marker gates (markerOptIn=false must 404, never passthrough)", () => {
   it("POST /cost-guard/ path -> 404 cost_guard_marker_disabled", async () => {
-    const res = await fetch(base + "/claude-code/svc-fake/cost-guard/v1/messages", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: "m", messages: [{ role: "user", content: "hi" }] }),
-    });
+    const res = await fetch(
+      base + "/claude-code/svc-fake/cost-guard/v1/messages",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "m",
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      },
+    );
     expect(res.status).toBe(404);
-    expect((await res.json()) as any).toMatchObject({ error: "cost_guard_marker_disabled" });
+    expect((await res.json()) as any).toMatchObject({
+      error: "cost_guard_marker_disabled",
+    });
   });
 
   it("POST /analyse/ path -> 404 analyse_marker_disabled", async () => {
-    const res = await fetch(base + "/claude-code/svc-fake/analyse/v1/messages", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: "m", messages: [{ role: "user", content: "hi" }] }),
-    });
+    const res = await fetch(
+      base + "/claude-code/svc-fake/analyse/v1/messages",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "m",
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      },
+    );
     expect(res.status).toBe(404);
-    expect((await res.json()) as any).toMatchObject({ error: "analyse_marker_disabled" });
+    expect((await res.json()) as any).toMatchObject({
+      error: "analyse_marker_disabled",
+    });
   });
 });
 
