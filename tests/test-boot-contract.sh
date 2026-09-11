@@ -6,11 +6,18 @@
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 G="$DIR/../deploy/global-images"
-PASS=0; FAIL=0
+PASS=0
+FAIL=0
 check() { # $1=name $2=command...
-  local name="$1"; shift
-  if "$@" >/dev/null 2>&1; then echo "PASS $name"; PASS=$((PASS+1));
-  else echo "FAIL $name"; FAIL=$((FAIL+1)); fi
+  local name="$1"
+  shift
+  if "$@" >/dev/null 2>&1; then
+    echo "PASS $name"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL $name"
+    FAIL=$((FAIL + 1))
+  fi
 }
 check "bash-syntax-all" bash -n "$G/start-all.sh"
 check "bash-syntax-lib" bash -n "$G/_lib.sh"
@@ -44,7 +51,10 @@ done
 # appear in stop-all.sh (loose tdai-* matching false-positives on config
 # files like tdai-gateway.yaml and x-tdai-* headers, so match assignments).
 started=$(grep -hoE "^CONTAINER=[a-z-]+" "$G/start-memory-core.sh" "$G/start-memory-hub.sh" "$G/start-proxy.sh" | cut -d= -f2 | sort -u)
-[ -n "$started" ] || { echo "FAIL no-containers-found"; FAIL=$((FAIL+1)); }
+[ -n "$started" ] || {
+  echo "FAIL no-containers-found"
+  FAIL=$((FAIL + 1))
+}
 for c in $started; do
   check "stop-covers-$c" grep -q "$c" "$G/stop-all.sh"
 done

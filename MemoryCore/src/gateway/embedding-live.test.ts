@@ -24,7 +24,9 @@ import type { EmbeddingService } from "../core/store/embedding.js";
 
 const LIVE = loadLiveLlmConfig();
 const live = LIVE.live ? describe : describe.skip;
-const EMB_MODEL = process.env.LLM_TEST_EMBED_MODEL?.trim() || "liquid/lfm-2.5-embedding-350m:free";
+const EMB_MODEL =
+  process.env.LLM_TEST_EMBED_MODEL?.trim() ||
+  "liquid/lfm-2.5-embedding-350m:free";
 const EMB_DIMS = Number(process.env.LLM_TEST_EMBED_DIMS ?? 1024);
 
 const INST = "test-emb-1";
@@ -36,13 +38,21 @@ let tmp = "";
 let svc: MetadataService;
 let store: any;
 let bundle: any;
-const nullLogger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} };
+const nullLogger = {
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+  debug: () => {},
+};
 
 function orEmbedding(): EmbeddingService {
   const call = async (texts: string[]): Promise<Float32Array[]> => {
     const res = await fetch(`${LIVE.baseUrl}/embeddings`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${LIVE.key}`, "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${LIVE.key}`,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({ model: EMB_MODEL, input: texts }),
     });
     if (!res.ok) throw new Error(`embedding upstream ${res.status}`);
@@ -76,18 +86,26 @@ async function route(pathname: string, body: unknown) {
     {
       url: pathname,
       method: "POST",
-      headers: { authorization: "Bearer k", "x-tdai-service-id": INST, "x-tdai-user-key": ADMIN_KEY, ...triad() },
+      headers: {
+        authorization: "Bearer k",
+        "x-tdai-service-id": INST,
+        "x-tdai-user-key": ADMIN_KEY,
+        ...triad(),
+      },
     } as never,
     {} as never,
     pathname,
     "POST",
     async <T>(): Promise<T> => body as T,
-    ((_res: unknown, status: number, b: unknown) => { seen.push({ status, body: b }); }) as never,
+    ((_res: unknown, status: number, b: unknown) => {
+      seen.push({ status, body: b });
+    }) as never,
     {
       getStore: () => store,
       getEmbedding: () => embedding,
       getStorage: () => undefined,
-      getMetadataService: async (id: string) => (id === INST ? (svc as never) : undefined),
+      getMetadataService: async (id: string) =>
+        id === INST ? (svc as never) : undefined,
       deployMode: "standalone",
       logger: nullLogger,
     } as unknown as V3RouterDeps,
@@ -127,8 +145,16 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!LIVE.live) return;
-  try { await (globalThis as any).__embBundle?.store?.close?.(); } catch { /* ignore */ }
-  try { (globalThis as any).__embMeta?.close(); } catch { /* ignore */ }
+  try {
+    await (globalThis as any).__embBundle?.store?.close?.();
+  } catch {
+    /* ignore */
+  }
+  try {
+    (globalThis as any).__embMeta?.close();
+  } catch {
+    /* ignore */
+  }
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -147,9 +173,13 @@ live("vector search with live embeddings (zero-overlap probe)", () => {
       ],
     });
     expect([200, 201, 202]).toContain(add.status);
-    const s = await route("/v3/conversation/search", { query: "aquatic pets temperature needs", limit: 5 });
+    const s = await route("/v3/conversation/search", {
+      query: "aquatic pets temperature needs",
+      limit: 5,
+    });
     expect(s.status).toBe(200);
-    const results = (s.body as any)?.data?.results ?? (s.body as any)?.data?.messages ?? [];
+    const results =
+      (s.body as any)?.data?.results ?? (s.body as any)?.data?.messages ?? [];
     expect(results.length).toBeGreaterThan(0);
     expect(JSON.stringify(results[0])).toContain("koi");
   }, 180_000);
