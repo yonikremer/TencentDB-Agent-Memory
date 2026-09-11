@@ -11,13 +11,13 @@ import { initTelemetry } from "./telemetry.js";
 initTelemetry();
 
 import { Hono } from "hono";
-import { serve } from "@hono/node-server";
-import { swaggerUI } from "@hono/swagger-ui";
 import { readFileSync } from "node:fs";
 import { timingSafeEqual } from "node:crypto";
-import { wrapError } from "./api-helpers.js";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
+import { serve } from "@hono/node-server";
+import { swaggerUI } from "@hono/swagger-ui";
+import { wrapError } from "./api-helpers.js";
 
 import { loadConfig } from "./config.js";
 import { createDb } from "./db/client.js";
