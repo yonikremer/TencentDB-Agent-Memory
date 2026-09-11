@@ -28,17 +28,29 @@ const metaSeen: string[] = [];
 const skillKernel = {
   async invoke(action: string, body: Record<string, unknown>) {
     skillSeen.push({ action, body });
-    return { code: 0, message: "ok", request_id: "t", data: { items: [{ skill_id: "skl-fake1" }], action } };
+    return {
+      code: 0,
+      message: "ok",
+      request_id: "t",
+      data: { items: [{ skill_id: "skl-fake1" }], action },
+    };
   },
 };
 
 const metaKernel = {
   async invoke(action: string, body: Record<string, unknown>) {
     metaSeen.push(action);
-    const ok = (data: unknown) => ({ code: 0, message: "ok", request_id: "t", data });
+    const ok = (data: unknown) => ({
+      code: 0,
+      message: "ok",
+      request_id: "t",
+      data,
+    });
     switch (action) {
       case "auth/verify":
-        return body.user_key === USER_KEY ? ok({ valid: true, user: { user_id: USER_ID } }) : ok({ valid: false });
+        return body.user_key === USER_KEY
+          ? ok({ valid: true, user: { user_id: USER_ID } })
+          : ok({ valid: false });
       case "team-member/get":
         return ok({ team_id: TEAM, user_id: USER_ID });
       case "acl/check":
@@ -50,40 +62,93 @@ const metaKernel = {
       case "asset/list":
         return ok({
           items: [
-            { asset_id: "cm-1", name: "shared", asset_type: "chat_memory", visibility: "team", status: "active", owner_user_id: USER_ID, updated_at: "2026-01-01T00:00:00.000Z" },
-            { asset_id: "cm-old", name: "archived", asset_type: "chat_memory", visibility: "team", status: "archived", owner_user_id: USER_ID, updated_at: "2026-01-01T00:00:00.000Z" },
+            {
+              asset_id: "cm-1",
+              name: "shared",
+              asset_type: "chat_memory",
+              visibility: "team",
+              status: "active",
+              owner_user_id: USER_ID,
+              updated_at: "2026-01-01T00:00:00.000Z",
+            },
+            {
+              asset_id: "cm-old",
+              name: "archived",
+              asset_type: "chat_memory",
+              visibility: "team",
+              status: "archived",
+              owner_user_id: USER_ID,
+              updated_at: "2026-01-01T00:00:00.000Z",
+            },
           ],
           total: 2,
         });
       case "asset/create":
-        return ok({ asset_id: "cm-new", name: body.name, asset_type: "chat_memory", visibility: body.visibility ?? "team", owner_user_id: USER_ID, updated_at: "2026-01-01T00:00:00.000Z" });
+        return ok({
+          asset_id: "cm-new",
+          name: body.name,
+          asset_type: "chat_memory",
+          visibility: body.visibility ?? "team",
+          owner_user_id: USER_ID,
+          updated_at: "2026-01-01T00:00:00.000Z",
+        });
       default:
-        return { code: 400, message: `unsupported: ${action}`, request_id: "t", data: null };
+        return {
+          code: 400,
+          message: `unsupported: ${action}`,
+          request_id: "t",
+          data: null,
+        };
     }
   },
 };
 
-const nullLogger = { debug() {}, info() {}, warn() {}, error() {}, child() { return nullLogger; } } as unknown;
+const nullLogger = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+  child() {
+    return nullLogger;
+  },
+} as unknown;
 
 let base = "";
 let server: Server;
 
-async function post(path: string, body: unknown, headers: Record<string, string> = {}) {
+async function post(
+  path: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+) {
   const res = await fetch(`${base}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-tdai-service-id": INST, "x-tdai-user-key": USER_KEY, ...headers },
+    headers: {
+      "content-type": "application/json",
+      "x-tdai-service-id": INST,
+      "x-tdai-user-key": USER_KEY,
+      ...headers,
+    },
     body: JSON.stringify(body),
   });
-  return { status: res.status, json: (await res.json()) as { code: number; message: string; data: any } };
+  return {
+    status: res.status,
+    json: (await res.json()) as { code: number; message: string; data: any },
+  };
 }
 
 beforeAll(async () => {
   const deps = {
     config: {},
     logger: nullLogger,
-    instanceRegistry: new InstanceRegistry([{
-      instance_id: INST, name: "t", gateway_endpoint: "http://127.0.0.1:9", api_key: "k",
-    }]),
+    instanceRegistry: new InstanceRegistry([
+      {
+        instance_id: INST,
+        name: "t",
+        gateway_endpoint: "http://127.0.0.1:9",
+        api_key: "k",
+      },
+    ]),
     metaKernel,
     skillKernel,
     knowledgeClientFactory: () => ({}),
@@ -131,7 +196,10 @@ describe("task list-with-agents", () => {
   it("joins agents onto tasks (no N+1 for client)", async () => {
     const r = await post("/api/v1/task/list-with-agents", { team_id: TEAM });
     expect(r.json.code).toBe(0);
-    expect(r.json.data.items[0]).toMatchObject({ task_id: "task-1", agents: [{ agent_id: AGENT }] });
+    expect(r.json.data.items[0]).toMatchObject({
+      task_id: "task-1",
+      agents: [{ agent_id: AGENT }],
+    });
     expect(r.json.data.total).toBe(1);
   });
 });
@@ -144,9 +212,15 @@ describe("chat-memory", () => {
   });
 
   it("create validates title", async () => {
-    const bad = await post("/api/v1/chat-memory/create", { team_id: TEAM, title: "" });
+    const bad = await post("/api/v1/chat-memory/create", {
+      team_id: TEAM,
+      title: "",
+    });
     expect(bad.json.code).toBe(400);
-    const r = await post("/api/v1/chat-memory/create", { team_id: TEAM, title: "notes" });
+    const r = await post("/api/v1/chat-memory/create", {
+      team_id: TEAM,
+      title: "notes",
+    });
     expect(r.json.code).toBe(0);
     expect(r.json.data).toMatchObject({ id: "cm-new", title: "notes" });
   });

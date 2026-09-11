@@ -8,11 +8,25 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { AutoSyncScheduler } from "./auto-sync-scheduler.js";
 
-const READY = { service_id: "s", team_id: "t", code_graph_id: "cg-ready01", status: "ready" };
-const BUSY = { service_id: "s", team_id: "t", code_graph_id: "cg-busy0001", status: "syncing" };
+const READY = {
+  service_id: "s",
+  team_id: "t",
+  code_graph_id: "cg-ready01",
+  status: "ready",
+};
+const BUSY = {
+  service_id: "s",
+  team_id: "t",
+  code_graph_id: "cg-busy0001",
+  status: "syncing",
+};
 
 function fakes() {
-  const synced: Array<{ service_id: string; team_id: string; code_graph_id: string }> = [
+  const synced: Array<{
+    service_id: string;
+    team_id: string;
+    code_graph_id: string;
+  }> = [
     { service_id: "s", team_id: "t", code_graph_id: "cg-ready01" },
     { service_id: "s", team_id: "t", code_graph_id: "cg-busy0001" },
   ];
@@ -23,7 +37,8 @@ function fakes() {
   const syncCalls: string[] = [];
   const store = {
     listSyncedCodeGraphs: () => synced,
-    getCodeGraph: (svc: string, team: string, id: string) => rows.get(id) ?? null,
+    getCodeGraph: (svc: string, team: string, id: string) =>
+      rows.get(id) ?? null,
   };
   const cgService = {
     sync: async (_svc: string, _team: string, id: string) => {
@@ -47,14 +62,21 @@ function sched(maxConcurrentSyncs = 1) {
 async function waitFor(cond: () => boolean, ms = 5000) {
   const t0 = Date.now();
   while (!cond()) {
-    if (Date.now() - t0 > ms) throw new Error("timed out waiting for condition");
+    if (Date.now() - t0 > ms)
+      throw new Error("timed out waiting for condition");
     await new Promise((r) => setTimeout(r, 25));
   }
 }
 
 let active: AutoSyncScheduler[] = [];
 afterEach(() => {
-  for (const s of active) { try { s.stop(); } catch { /* ignore */ } }
+  for (const s of active) {
+    try {
+      s.stop();
+    } catch {
+      /* ignore */
+    }
+  }
   active = [];
 });
 
@@ -88,7 +110,9 @@ describe("triggerScan + workers", () => {
     s.triggerScan();
     await waitFor(() => syncCalls.length === 1);
     expect(syncCalls).toEqual(["cg-ready01"]);
-    await waitFor(() => s.getStatus().queueLength === 0 && s.getStatus().activeSyncs === 0);
+    await waitFor(
+      () => s.getStatus().queueLength === 0 && s.getStatus().activeSyncs === 0,
+    );
   });
 
   it("double trigger does not double-sync (in-flight dedupe)", async () => {

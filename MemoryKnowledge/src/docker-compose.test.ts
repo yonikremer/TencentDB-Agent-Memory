@@ -11,7 +11,11 @@ import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const COMPOSE_FILE = join(dirname(fileURLToPath(import.meta.url)), "..", "docker-compose.yml");
+const COMPOSE_FILE = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "docker-compose.yml",
+);
 
 function haveDocker(): boolean {
   const r = spawnSync("docker", ["--version"], { encoding: "utf-8" });
@@ -37,7 +41,10 @@ live("docker compose config (boot path validation)", () => {
   it("fails loudly without PUBLIC_URL (fail fast, not half-boot)", () => {
     const env = { ...process.env };
     delete env.PUBLIC_URL;
-    const r = spawnSync("docker", ["compose", "-f", COMPOSE_FILE, "config"], { encoding: "utf-8", env });
+    const r = spawnSync("docker", ["compose", "-f", COMPOSE_FILE, "config"], {
+      encoding: "utf-8",
+      env,
+    });
     expect(r.status).not.toBe(0);
   });
 
