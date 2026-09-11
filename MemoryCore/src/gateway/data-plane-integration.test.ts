@@ -46,9 +46,15 @@ const hashEmbedding: EmbeddingService = {
   async embedBatch(texts: string[]): Promise<Float32Array[]> {
     return Promise.all(texts.map((t) => this.embed(t)));
   },
-  getDimensions(): number { return 8; },
-  getProviderInfo() { return { provider: "test", model: "hash-8" }; },
-  isReady(): boolean { return true; },
+  getDimensions(): number {
+    return 8;
+  },
+  getProviderInfo() {
+    return { provider: "test", model: "hash-8" };
+  },
+  isReady(): boolean {
+    return true;
+  },
   startWarmup(): void {},
 };
 
@@ -61,7 +67,12 @@ function triad(team: string) {
   };
 }
 
-async function route(pathname: string, team: string, body: unknown, key: string = ADMIN_KEY) {
+async function route(
+  pathname: string,
+  team: string,
+  body: unknown,
+  key: string = ADMIN_KEY,
+) {
   const seen: Array<{ status: number; body: any }> = [];
   const headers: Record<string, string> = {
     authorization: "Bearer k",
@@ -75,12 +86,15 @@ async function route(pathname: string, team: string, body: unknown, key: string 
     pathname,
     "POST",
     async <T>(): Promise<T> => body as T,
-    ((_res: unknown, status: number, b: unknown) => { seen.push({ status, body: b }); }) as never,
+    ((_res: unknown, status: number, b: unknown) => {
+      seen.push({ status, body: b });
+    }) as never,
     {
       getStore: () => store,
       getEmbedding: () => hashEmbedding,
       getStorage: () => undefined,
-      getMetadataService: async (id: string) => (id === INST ? (svc as never) : undefined),
+      getMetadataService: async (id: string) =>
+        id === INST ? (svc as never) : undefined,
       deployMode: "standalone",
       logger: nullLogger,
     } as unknown as V3RouterDeps,
@@ -90,14 +104,22 @@ async function route(pathname: string, team: string, body: unknown, key: string 
 }
 
 beforeAll(async () => {
-  nullLogger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} };
+  nullLogger = {
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    debug: () => {},
+  };
   tmp = mkdtempSync(join(tmpdir(), "core-dp-"));
   const meta = new SqliteMetadataStore(join(tmp, "meta.db"));
   (globalThis as any).__dpMeta = meta;
   meta.init();
   svc = new MetadataService(meta, INST, { debug: () => {} } as never);
   await svc.initAdminUser({ username: "root", user_key: ADMIN_KEY });
-  const bundle = createStoreBundle(parseConfig({}), { dataDir: join(tmp, "store"), logger: nullLogger });
+  const bundle = createStoreBundle(parseConfig({}), {
+    dataDir: join(tmp, "store"),
+    logger: nullLogger,
+  });
   store = bundle.store;
   // VectorStore requires explicit init (loads sqlite-vec + schema); without
   // it every write is silently skipped while handlers still report success.
@@ -106,8 +128,16 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  try { await (globalThis as any).__dpBundle?.store?.close?.(); } catch { /* ignore */ }
-  try { (globalThis as any).__dpMeta?.close(); } catch { /* ignore */ }
+  try {
+    await (globalThis as any).__dpBundle?.store?.close?.();
+  } catch {
+    /* ignore */
+  }
+  try {
+    (globalThis as any).__dpMeta?.close();
+  } catch {
+    /* ignore */
+  }
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -121,30 +151,44 @@ describe("L0 conversation round-trip (real sqlite store)", () => {
     });
     expect(r.handled).toBe(true);
     expect([200, 201, 202]).toContain(r.status);
-    const ids = (r.body as any)?.data?.accepted_ids ?? (r.body as any)?.data?.ids ?? [];
+    const ids =
+      (r.body as any)?.data?.accepted_ids ?? (r.body as any)?.data?.ids ?? [];
     expect(ids.length).toBeGreaterThan(0);
     msgId = ids[0];
   });
 
   it("query returns the written message", async () => {
-    const r = await route("/v3/conversation/query", TEAM_A, { session_id: SESSION, limit: 20 });
+    const r = await route("/v3/conversation/query", TEAM_A, {
+      session_id: SESSION,
+      limit: 20,
+    });
     expect(r.status).toBe(200);
     expect(JSON.stringify((r.body as any)?.data)).toContain(MARKER);
   });
 
   it("other team cannot read (isolation)", async () => {
-    const r = await route("/v3/conversation/query", TEAM_B, { session_id: SESSION, limit: 20 });
+    const r = await route("/v3/conversation/query", TEAM_B, {
+      session_id: SESSION,
+      limit: 20,
+    });
     expect(r.status).toBe(200);
     expect(JSON.stringify((r.body as any)?.data)).not.toContain(MARKER);
   });
 
   it("count reflects write; delete removes", async () => {
-    const c1 = await route("/v3/conversation/count", TEAM_A, { session_id: SESSION });
+    const c1 = await route("/v3/conversation/count", TEAM_A, {
+      session_id: SESSION,
+    });
     expect((c1.body as any)?.data?.total).toBeGreaterThan(0);
-    const d = await route("/v3/conversation/delete", TEAM_A, { message_ids: [msgId] });
+    const d = await route("/v3/conversation/delete", TEAM_A, {
+      message_ids: [msgId],
+    });
     expect(d.status).toBe(200);
     if (d.status === 200) {
-      const q = await route("/v3/conversation/query", TEAM_A, { session_id: SESSION, limit: 20 });
+      const q = await route("/v3/conversation/query", TEAM_A, {
+        session_id: SESSION,
+        limit: 20,
+      });
       expect(JSON.stringify((q.body as any)?.data)).not.toContain(MARKER);
     }
   });

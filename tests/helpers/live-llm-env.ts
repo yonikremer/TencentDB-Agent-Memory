@@ -45,6 +45,8 @@ export function loadLiveLlmConfig(): LiveLlmConfig {
     key,
     baseUrl: pick("LLM_TEST_BASE_URL") || "https://openrouter.ai/api/v1",
     model: pick("LLM_TEST_MODEL") || "nvidia/nemotron-3.5-lightning:free",
-    live: key.length > 0 && (fileEnv.LLM_LIVE ?? process.env.LLM_LIVE ?? "") === "1",
+    live:
+      key.length > 0 &&
+      (fileEnv.LLM_LIVE ?? process.env.LLM_LIVE ?? "") === "1",
   };
 }
