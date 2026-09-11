@@ -39,7 +39,9 @@ function startVerifier(): Promise<void> {
   return new Promise((resolve) => {
     verifyServer = http.createServer((req, res) => {
       let raw = "";
-      req.on("data", (c) => { raw += c; });
+      req.on("data", (c) => {
+        raw += c;
+      });
       req.on("end", () => {
         const body = raw ? JSON.parse(raw) : {};
         lastVerify = {
@@ -49,9 +51,17 @@ function startVerifier(): Promise<void> {
         };
         const ok = body.user_key === GOOD_KEY;
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify(ok
-          ? { code: 0, message: "ok", data: { valid: true, user: { user_id: "u-cust-1" } } }
-          : { code: 0, message: "ok", data: { valid: false } }));
+        res.end(
+          JSON.stringify(
+            ok
+              ? {
+                  code: 0,
+                  message: "ok",
+                  data: { valid: true, user: { user_id: "u-cust-1" } },
+                }
+              : { code: 0, message: "ok", data: { valid: false } },
+          ),
+        );
       });
     });
     verifyServer.listen(0, "127.0.0.1", () => {
@@ -80,7 +90,9 @@ function restoreEnv() {
   }
 }
 
-async function bootFullApp(env: Record<string, string>): Promise<{ app: Hono; server: Server; base: string; tmp: string }> {
+async function bootFullApp(
+  env: Record<string, string>,
+): Promise<{ app: Hono; server: Server; base: string; tmp: string }> {
   const tmp = mkdtempSync(join(tmpdir(), "know-cust-a-"));
   for (const [k, v] of Object.entries(env)) setEnv(k, v);
   setEnv("KNOWLEDGE_DATA_DIR", join(tmp, "data"));
@@ -88,19 +100,30 @@ async function bootFullApp(env: Record<string, string>): Promise<{ app: Hono; se
   setEnv("KNOWLEDGE_CLICKHOUSE_ENABLED", "");
   const created = createApp();
   const app = created.app as unknown as Hono;
-  const server = serve({ fetch: app.fetch, port: 0, hostname: "127.0.0.1" }) as unknown as Server;
+  const server = serve({
+    fetch: app.fetch,
+    port: 0,
+    hostname: "127.0.0.1",
+  }) as unknown as Server;
   await new Promise<void>((r) => (server as any).on("listening", () => r()));
   const addr = (server as any).address() as AddressInfo;
   return { app, server, base: `http://127.0.0.1:${addr.port}`, tmp };
 }
 
-async function reqA(path: string, body: unknown, headers: Record<string, string> = {}) {
+async function reqA(
+  path: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+) {
   const res = await fetch(baseA + path, {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
   });
-  return { status: res.status, json: (await res.json()) as { code: number; message: string; data: any } };
+  return {
+    status: res.status,
+    json: (await res.json()) as { code: number; message: string; data: any },
+  };
 }
 
 // ── Harness B: route-stack with stub worker ──
@@ -118,20 +141,31 @@ async function reqB(path: string, body: unknown, svc = SVC) {
     headers: { "content-type": "application/json", "x-tdai-service-id": svc },
     body: JSON.stringify(body),
   });
-  return { status: res.status, json: (await res.json()) as { code: number; message: string; data: any } };
+  return {
+    status: res.status,
+    json: (await res.json()) as { code: number; message: string; data: any },
+  };
 }
 
 async function rmRetry(path: string) {
   for (let i = 0; i < 10; i++) {
-    try { rmSync(path, { recursive: true, force: true }); return; }
-    catch { await new Promise((r) => setTimeout(r, 200)); }
+    try {
+      rmSync(path, { recursive: true, force: true });
+      return;
+    } catch {
+      await new Promise((r) => setTimeout(r, 200));
+    }
   }
 }
 
 beforeAll(async () => {
   await startVerifier();
   // Harness A — full app behind stub verifier, bearer configured.
-  ({ server: serverA, base: baseA, tmp: tmpA } = await bootFullApp({
+  ({
+    server: serverA,
+    base: baseA,
+    tmp: tmpA,
+  } = await bootFullApp({
     CORE_VERIFY_URL: verifyBase,
     CORE_VERIFY_BEARER: "test-bearer",
   }));
@@ -143,23 +177,58 @@ beforeAll(async () => {
     dataDir: join(tmpB, "data"),
     db,
     llmConfig: {
-      mode: "custom", protocol: "openai", provider: "custom", apiKey: "k",
-      model: "m", baseUrl: "http://127.0.0.1:1", maxTokens: 100, timeoutMs: 1000,
+      mode: "custom",
+      protocol: "openai",
+      provider: "custom",
+      apiKey: "k",
+      model: "m",
+      baseUrl: "http://127.0.0.1:1",
+      maxTokens: 100,
+      timeoutMs: 1000,
     },
     wikiWorker: async () => ({ pageCount: 1 }),
   });
   const app = new Hono();
   app.route("/", createHealthRoutes());
   const api = new Hono();
-  api.route("/wiki", createWikiRoutes({ wikiService: mod.wikiService, wikiMgr: mod.wikiMgr, publicBaseUrl: "" }));
-  api.route("/code-graph", createCodeGraphRoutes({ cgService: mod.cgService, instancePool: mod.instancePool, publicBaseUrl: "" }));
-  api.route("/grants", createGrantsRoutes({ wikiService: mod.wikiService, cgService: mod.cgService }));
-  api.route("/tools", createToolsRoutes({
-    wikiService: mod.wikiService, wikiMgr: mod.wikiMgr,
-    cgService: mod.cgService, instancePool: mod.instancePool,
-  }));
+  api.route(
+    "/wiki",
+    createWikiRoutes({
+      wikiService: mod.wikiService,
+      wikiMgr: mod.wikiMgr,
+      publicBaseUrl: "",
+    }),
+  );
+  api.route(
+    "/code-graph",
+    createCodeGraphRoutes({
+      cgService: mod.cgService,
+      instancePool: mod.instancePool,
+      publicBaseUrl: "",
+    }),
+  );
+  api.route(
+    "/grants",
+    createGrantsRoutes({
+      wikiService: mod.wikiService,
+      cgService: mod.cgService,
+    }),
+  );
+  api.route(
+    "/tools",
+    createToolsRoutes({
+      wikiService: mod.wikiService,
+      wikiMgr: mod.wikiMgr,
+      cgService: mod.cgService,
+      instancePool: mod.instancePool,
+    }),
+  );
   app.route("/v3", api);
-  serverB = serve({ fetch: app.fetch, port: 0, hostname: "127.0.0.1" }) as unknown as Server;
+  serverB = serve({
+    fetch: app.fetch,
+    port: 0,
+    hostname: "127.0.0.1",
+  }) as unknown as Server;
   await new Promise<void>((r) => (serverB as any).on("listening", () => r()));
   const addr = (serverB as any).address() as AddressInfo;
   baseB = `http://127.0.0.1:${addr.port}`;
@@ -170,7 +239,11 @@ afterAll(async () => {
   await new Promise<void>((r) => serverB?.close(() => r()));
   await new Promise<void>((r) => verifyServer?.close(() => r()));
   restoreEnv();
-  try { (globalThis as any).__knowCustRaw?.close(); } catch { /* ignore */ }
+  try {
+    (globalThis as any).__knowCustRaw?.close();
+  } catch {
+    /* ignore */
+  }
   await rmRetry(tmpA);
   await rmRetry(tmpB);
 });
@@ -183,22 +256,32 @@ describe("A. auth plane (full server.ts — the seam route tests skip)", () => {
   });
 
   it("missing x-tdai-user-key -> 401 envelope", async () => {
-    const { status, json } = await reqA("/v3/wiki/list", { team_id: "t" }, { "x-tdai-service-id": "s" });
+    const { status, json } = await reqA(
+      "/v3/wiki/list",
+      { team_id: "t" },
+      { "x-tdai-service-id": "s" },
+    );
     expect(status).toBe(401);
     expect(json.code).toBe(401);
   });
 
   it("invalid key -> 401 (Core says valid:false)", async () => {
-    const { status, json } = await reqA("/v3/wiki/list", { team_id: "t" },
-      { "x-tdai-service-id": "s", "x-tdai-user-key": "bogus" });
+    const { status, json } = await reqA(
+      "/v3/wiki/list",
+      { team_id: "t" },
+      { "x-tdai-service-id": "s", "x-tdai-user-key": "bogus" },
+    );
     expect(status).toBe(401);
     expect(json.code).toBe(401);
   });
 
   it("valid key passes; bearer + user_key forwarded to Core verify", async () => {
     lastVerify = null;
-    const { status, json } = await reqA("/v3/wiki/list", { team_id: "t" },
-      { "x-tdai-service-id": SVC, "x-tdai-user-key": GOOD_KEY });
+    const { status, json } = await reqA(
+      "/v3/wiki/list",
+      { team_id: "t" },
+      { "x-tdai-service-id": SVC, "x-tdai-user-key": GOOD_KEY },
+    );
     expect(status).toBe(200);
     expect(json.code).toBe(0);
     expect(lastVerify?.auth).toBe("Bearer test-bearer");
@@ -207,16 +290,27 @@ describe("A. auth plane (full server.ts — the seam route tests skip)", () => {
   });
 
   it("valid key but missing x-tdai-service-id still -> 400 (tenant header not bypassed by auth)", async () => {
-    const { status } = await reqA("/v3/wiki/list", { team_id: "t" }, { "x-tdai-user-key": GOOD_KEY });
+    const { status } = await reqA(
+      "/v3/wiki/list",
+      { team_id: "t" },
+      { "x-tdai-user-key": GOOD_KEY },
+    );
     expect(status).toBe(400);
   });
 
   it("unreachable verifier -> 503 (fail closed, envelope)", async () => {
-    const second = await bootFullApp({ CORE_VERIFY_URL: "http://127.0.0.1:1", CORE_VERIFY_BEARER: "" });
+    const second = await bootFullApp({
+      CORE_VERIFY_URL: "http://127.0.0.1:1",
+      CORE_VERIFY_BEARER: "",
+    });
     try {
       const res = await fetch(second.base + "/v3/wiki/list", {
         method: "POST",
-        headers: { "content-type": "application/json", "x-tdai-service-id": "s", "x-tdai-user-key": GOOD_KEY },
+        headers: {
+          "content-type": "application/json",
+          "x-tdai-service-id": "s",
+          "x-tdai-user-key": GOOD_KEY,
+        },
         body: JSON.stringify({ team_id: "t" }),
       });
       expect(res.status).toBe(503);
@@ -233,7 +327,10 @@ describe("B. customer wiki lifecycle (status codes + envelope + search round-tri
   const MARKER = "custflowmarker";
 
   it("create -> 201 + wiki_id", async () => {
-    const { status, json } = await reqB("/v3/wiki/create", { team_id: TEAM_A, name: "cust-wiki" });
+    const { status, json } = await reqB("/v3/wiki/create", {
+      team_id: TEAM_A,
+      name: "cust-wiki",
+    });
     expect(status).toBe(201);
     expect(json.code).toBe(0);
     expect(json.data.wiki_id).toMatch(/^wiki-/);
@@ -242,8 +339,11 @@ describe("B. customer wiki lifecycle (status codes + envelope + search round-tri
 
   it("write -> ingest 202 -> ready; search finds content via route AND tools/call", async () => {
     const w = await reqB("/v3/wiki/raw/write", {
-      team_id: TEAM_A, wiki_id: wikiId,
-      files: [{ filename: "notes.md", content: `# Guide\n\n${MARKER} body.\n` }],
+      team_id: TEAM_A,
+      wiki_id: wikiId,
+      files: [
+        { filename: "notes.md", content: `# Guide\n\n${MARKER} body.\n` },
+      ],
     });
     expect(w.json.code).toBe(0);
     const ing = await reqB("/v3/wiki/ingest", { wiki_id: wikiId });
@@ -251,7 +351,10 @@ describe("B. customer wiki lifecycle (status codes + envelope + search round-tri
     let ready = false;
     for (let i = 0; i < 100; i++) {
       const g = await reqB("/v3/wiki/get", { wiki_id: wikiId });
-      if (g.json.data?.status === "ready") { ready = true; break; }
+      if (g.json.data?.status === "ready") {
+        ready = true;
+        break;
+      }
       await new Promise((r) => setTimeout(r, 200));
     }
     expect(ready).toBe(true);
@@ -262,10 +365,15 @@ describe("B. customer wiki lifecycle (status codes + envelope + search round-tri
     expect(s.json.code).toBe(0);
     expect(s.json.data).toMatchObject({ results: [], links: [], count: 0 });
     const t = await reqB("/v3/tools/call", {
-      knowledge_id: wikiId, tool_name: "search", params: { query: MARKER },
+      knowledge_id: wikiId,
+      tool_name: "search",
+      params: { query: MARKER },
     });
     expect(t.json.code).toBe(0);
-    const rd = await reqB("/v3/wiki/raw/read", { wiki_id: wikiId, filenames: ["notes.md"] });
+    const rd = await reqB("/v3/wiki/raw/read", {
+      wiki_id: wikiId,
+      filenames: ["notes.md"],
+    });
     expect(rd.json.code).toBe(0);
     expect(JSON.stringify(rd.json.data)).toContain(MARKER);
   });
@@ -278,11 +386,22 @@ describe("B. customer wiki lifecycle (status codes + envelope + search round-tri
   });
 
   it("tools validation: unknown tool 403, missing params 400, bad id 400", async () => {
-    const u = await reqB("/v3/tools/call", { knowledge_id: wikiId, tool_name: "nope", params: {} });
+    const u = await reqB("/v3/tools/call", {
+      knowledge_id: wikiId,
+      tool_name: "nope",
+      params: {},
+    });
     expect(u.status).toBe(403);
-    const m = await reqB("/v3/tools/call", { knowledge_id: wikiId, tool_name: "search" });
+    const m = await reqB("/v3/tools/call", {
+      knowledge_id: wikiId,
+      tool_name: "search",
+    });
     expect(m.status).toBe(400);
-    const b = await reqB("/v3/tools/call", { knowledge_id: "bogus-id", tool_name: "search", params: { query: "x" } });
+    const b = await reqB("/v3/tools/call", {
+      knowledge_id: "bogus-id",
+      tool_name: "search",
+      params: { query: "x" },
+    });
     expect(b.status).toBe(400);
     const l = await reqB("/v3/tools/list", { knowledge_id: "bogus-id" });
     expect(l.status).toBe(400);
@@ -300,26 +419,45 @@ describe("C. grants enforcement across teams", () => {
   let wikiId = "";
 
   it("team A wiki invisible to team B until shared", async () => {
-    const c = await reqB("/v3/wiki/create", { team_id: TEAM_A, name: "grant-wiki" });
+    const c = await reqB("/v3/wiki/create", {
+      team_id: TEAM_A,
+      name: "grant-wiki",
+    });
     wikiId = c.json.data.wiki_id;
     await reqB("/v3/wiki/raw/write", {
-      team_id: TEAM_A, wiki_id: wikiId, files: [{ filename: "n.md", content: "# T\n\nx\n" }],
+      team_id: TEAM_A,
+      wiki_id: wikiId,
+      files: [{ filename: "n.md", content: "# T\n\nx\n" }],
     });
     const list = await reqB("/v3/wiki/list", { team_id: TEAM_B });
     expect(list.json.data.total).toBe(0);
   });
 
   it("viewer sees list + can search, but cannot ingest", async () => {
-    await reqB("/v3/grants/set", { kind: "wiki", knowledge_id: wikiId, grants: [{ team_id: TEAM_B }] });
+    await reqB("/v3/grants/set", {
+      kind: "wiki",
+      knowledge_id: wikiId,
+      grants: [{ team_id: TEAM_B }],
+    });
     const list = await reqB("/v3/wiki/list", { team_id: TEAM_B });
     expect(list.json.data.total).toBe(1);
-    const denied = await reqB("/v3/wiki/ingest", { wiki_id: wikiId, team_id: TEAM_B });
+    const denied = await reqB("/v3/wiki/ingest", {
+      wiki_id: wikiId,
+      team_id: TEAM_B,
+    });
     expect(denied.status).toBe(403);
   });
 
   it("editor can ingest; clear revokes visibility", async () => {
-    await reqB("/v3/grants/set", { kind: "wiki", knowledge_id: wikiId, grants: [{ team_id: TEAM_B, grant_type: "editor" }] });
-    const ok = await reqB("/v3/wiki/ingest", { wiki_id: wikiId, team_id: TEAM_B });
+    await reqB("/v3/grants/set", {
+      kind: "wiki",
+      knowledge_id: wikiId,
+      grants: [{ team_id: TEAM_B, grant_type: "editor" }],
+    });
+    const ok = await reqB("/v3/wiki/ingest", {
+      wiki_id: wikiId,
+      team_id: TEAM_B,
+    });
     expect(ok.status).toBe(202);
     await reqB("/v3/grants/clear", { kind: "wiki", knowledge_id: wikiId });
     const list = await reqB("/v3/wiki/list", { team_id: TEAM_B });
@@ -333,7 +471,10 @@ describe("D. code-graph mgmt without indexing (create/get/list/isolation)", () =
   it("create -> 201; get round-trips; missing repo_url 400", async () => {
     const bad = await reqB("/v3/code-graph/create", { team_id: TEAM_A });
     expect(bad.status).toBe(400);
-    const c = await reqB("/v3/code-graph/create", { team_id: TEAM_A, repo_url: "https://example.com/r.git" });
+    const c = await reqB("/v3/code-graph/create", {
+      team_id: TEAM_A,
+      repo_url: "https://example.com/r.git",
+    });
     expect([200, 201]).toContain(c.status);
     expect(c.json.code).toBe(0);
     cgId = c.json.data.code_graph_id;
@@ -342,7 +483,11 @@ describe("D. code-graph mgmt without indexing (create/get/list/isolation)", () =
   });
 
   it("foreign tenant gets 404; tools/list on missing id 404", async () => {
-    const g = await reqB("/v3/code-graph/get", { code_graph_id: cgId }, SVC_OTHER);
+    const g = await reqB(
+      "/v3/code-graph/get",
+      { code_graph_id: cgId },
+      SVC_OTHER,
+    );
     expect(g.status).toBe(404);
     const l = await reqB("/v3/tools/list", { knowledge_id: "cg-00000000" });
     expect(l.status).toBe(404);
