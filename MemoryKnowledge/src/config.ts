@@ -81,6 +81,8 @@ export interface ServiceConfig {
  tmcCallbackUrl: string;
  /** Shared secret for Knowledge→Panel status callbacks (panel rejects unsigned when empty). */
  callbackSecret: string;
+ /** Shared service bearer for /v3/internal/* control plane (panel sends it; empty = user-key only, fail closed). */
+ internalAuthToken: string;
  /** Core verify endpoint for the single identity plane, e.g. http://core:8080 (empty = fail closed, warns). */
  coreVerifyUrl: string;
  /** Timeout for Core auth/verify calls in ms. */
@@ -237,6 +239,7 @@ export function loadConfig(): ServiceConfig {
   publicBaseUrl: env("KNOWLEDGE_PUBLIC_BASE_URL", ""),
   tmcCallbackUrl: env("TMC_CALLBACK_URL", ""),
   callbackSecret: env("KNOWLEDGE_CALLBACK_SECRET", ""),
+  internalAuthToken: env("KNOWLEDGE_AUTH_TOKEN", ""),
   coreVerifyUrl: env("CORE_VERIFY_URL", "").replace(/\/+$/, ""),
   coreVerifyTimeoutMs: envInt("CORE_VERIFY_TIMEOUT_MS", 3000),
   coreVerifyBearer: env("CORE_VERIFY_BEARER", ""),

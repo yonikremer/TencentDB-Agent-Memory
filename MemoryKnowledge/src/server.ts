@@ -79,6 +79,16 @@ export function createApp() {
     );
   }
   api.use("*", async (c, next) => {
+    // Control plane (/v3/internal/*): accept the shared service bearer so
+    // panel automation (no end-user identity) can provision LLM bindings.
+    // Unset token or mismatch falls through to user-key verification (fail closed).
+    if (config.internalAuthToken && c.req.path.startsWith(`${config.apiPrefix}/internal/`)) {
+      const auth = c.req.header("authorization")?.trim() ?? "";
+      if (auth === `Bearer ${config.internalAuthToken}`) {
+        await next();
+        return;
+      }
+    }
     const userKey = c.req.header("x-tdai-user-key")?.trim() ?? "";
     if (!userKey) {
       return c.json(wrapError(401, "x-tdai-user-key header is required"), 401);
