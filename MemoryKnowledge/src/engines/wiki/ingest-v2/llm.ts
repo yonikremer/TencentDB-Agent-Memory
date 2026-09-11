@@ -96,6 +96,16 @@ export interface LlmClient {
 }
 
 export function createLlmClient(config: NormalizedLlmConfig): LlmClient {
+  // Fail fast: resolveLlmConfig blanks baseUrl when no usable binding exists
+  // (proxy mode). Throw here so ingest fails loudly with an actionable message
+  // instead of a cryptic per-file URL parse error at first chat call.
+  if (!config.baseUrl || !config.baseUrl.trim()) {
+    throw new Error(
+      "LLM endpoint not configured (no usable llm_binding and LLM_MODE is not custom). " +
+        "Bind via POST /v3/internal/llm-binding/set, " +
+        "or set LLM_MODE=custom with LLM_BASE_URL/LLM_API_KEY.",
+    );
+  }
   const provider =
     config.protocol === "anthropic"
       ? createAnthropic({ apiKey: config.apiKey })
