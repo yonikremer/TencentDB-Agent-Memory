@@ -26,17 +26,47 @@ function loadEnv(): void {
     if (!existsSync(p)) return;
     for (const line of readFileSync(p, "utf-8").split("\n")) {
       const m = line.match(/^\s*([A-Za-z_]+)\s*=\s*(.*?)\s*$/);
-      if (m && !(m[1] in process.env) && (m[2] ?? "").replace(/^["']|["']$/g, "")) {
+      if (
+        m &&
+        !(m[1] in process.env) &&
+        (m[2] ?? "").replace(/^["']|["']$/g, "")
+      ) {
         process.env[m[1]] = (m[2] ?? "").replace(/^["']|["']$/g, "");
       }
     }
-  } catch { /* skip */ }
+  } catch {
+    /* skip */
+  }
 }
 loadEnv();
 
-const API_KEY = (process.env.OPENROUTER_API_KEY ?? process.env.OPENCODE_API_KEY ?? "").trim();
-const BASE = process.env.LLM_TEST_BASE_URL?.trim() || "https://opencode.ai/zen/v1";
-const MODEL = process.env.LLM_TEST_MODEL?.trim() || "nemotron-3.5-lightning-free";
+function testEnvFileKey(): string {
+  // Explicit tests/.env OPENROUTER key wins over ambient shell env.
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const p = join(here, "..", "..", "..", "tests", ".env");
+    if (!existsSync(p)) return "";
+    for (const line of readFileSync(p, "utf-8").split("\n")) {
+      const m = line.match(/^\s*OPENROUTER_API_KEY\s*=\s*(.*?)\s*$/);
+      const v = (m?.[1] ?? "").replace(/^["']|["']$/g, "");
+      if (m && v) return v;
+    }
+  } catch {
+    /* ignore */
+  }
+  return "";
+}
+
+const API_KEY = (
+  testEnvFileKey() ||
+  process.env.OPENROUTER_API_KEY ||
+  process.env.OPENCODE_API_KEY ||
+  ""
+).trim();
+const BASE =
+  process.env.LLM_TEST_BASE_URL?.trim() || "https://openrouter.ai/api/v1";
+const MODEL =
+  process.env.LLM_TEST_MODEL?.trim() || "nvidia/nemotron-3.5-lightning:free";
 const live = API_KEY && process.env.LLM_LIVE === "1" ? describe : describe.skip;
 
 let base = "";
@@ -62,7 +92,11 @@ beforeAll(async () => {
   if (!API_KEY) return;
   initAuth({ enabled: false } as never);
   const app: Hono = createApp(cfg());
-  server = serve({ fetch: app.fetch, port: 0, hostname: "127.0.0.1" }) as unknown as Server;
+  server = serve({
+    fetch: app.fetch,
+    port: 0,
+    hostname: "127.0.0.1",
+  }) as unknown as Server;
   await new Promise<void>((r) => (server as any).on("listening", () => r()));
   const addr = (server as any).address() as AddressInfo;
   base = `http://127.0.0.1:${addr.port}`;
@@ -78,7 +112,11 @@ live("live upstream chat completions (OpenAI protocol)", () => {
     const res = await fetch(`${base}/v1/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: MODEL, max_tokens: 32, messages: [{ role: "user", content: "Reply with exactly: live-ok" }] }),
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 32,
+        messages: [{ role: "user", content: "Reply with exactly: live-ok" }],
+      }),
     });
     expect(res.status).toBe(200);
     const json = (await res.json()) as any;

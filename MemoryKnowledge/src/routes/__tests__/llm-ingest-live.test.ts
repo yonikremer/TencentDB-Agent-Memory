@@ -34,7 +34,11 @@ function loadTestEnvFile(): void {
     if (!existsSync(envPath)) return;
     for (const line of readFileSync(envPath, "utf-8").split("\n")) {
       const m = line.match(/^\s*([A-Za-z_]+)\s*=\s*(.*?)\s*$/);
-      if (m && !(m[1] in process.env) && (m[2] ?? "").replace(/^["']|["']$/g, "")) {
+      if (
+        m &&
+        !(m[1] in process.env) &&
+        (m[2] ?? "").replace(/^["']|["']$/g, "")
+      ) {
         process.env[m[1]] = (m[2] ?? "").replace(/^["']|["']$/g, "");
       }
     }
@@ -43,14 +47,39 @@ function loadTestEnvFile(): void {
   }
 }
 loadTestEnvFile();
-const MODEL = process.env.LLM_TEST_MODEL?.trim() || "nemotron-3.5-lightning-free";
-const ENDPOINT = process.env.LLM_TEST_BASE_URL?.trim() || "https://opencode.ai/zen/v1";
+const MODEL =
+  process.env.LLM_TEST_MODEL?.trim() || "nvidia/nemotron-3.5-lightning:free";
+const ENDPOINT =
+  process.env.LLM_TEST_BASE_URL?.trim() || "https://openrouter.ai/api/v1";
 const SVC = "svc-live-1";
 const TEAM = "team-live-1";
 
+function testEnvFileKey(): string {
+  // Explicit tests/.env OPENROUTER key wins over ambient shell env
+  // (lets a local OpenRouter key override e.g. a Zen-only shell key).
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const envPath = join(here, "..", "..", "..", "..", "tests", ".env");
+    if (!existsSync(envPath)) return "";
+    for (const line of readFileSync(envPath, "utf-8").split("\n")) {
+      const m = line.match(/^\s*OPENROUTER_API_KEY\s*=\s*(.*?)\s*$/);
+      const v = (m?.[1] ?? "").replace(/^["']|["']$/g, "");
+      if (m && v) return v;
+    }
+  } catch {
+    /* ignore */
+  }
+  return "";
+}
+
 export function loadTestKey(): string {
   // loadTestEnvFile already merged tests/.env into process.env.
-  return (process.env.OPENROUTER_API_KEY ?? process.env.OPENCODE_API_KEY ?? "").trim();
+  return (
+    testEnvFileKey() ||
+    process.env.OPENROUTER_API_KEY ||
+    process.env.OPENCODE_API_KEY ||
+    ""
+  ).trim();
 }
 
 const API_KEY = loadTestKey();
@@ -131,17 +160,41 @@ beforeAll(async () => {
     dataDir: join(tmp, "data-byo"),
     db,
     llmConfig: {
-      mode: "proxy", protocol: "openai", provider: "custom", apiKey: "",
-      model: MODEL, baseUrl: "", maxTokens: 8192, timeoutMs: 300000,
+      mode: "proxy",
+      protocol: "openai",
+      provider: "custom",
+      apiKey: "",
+      model: MODEL,
+      baseUrl: "",
+      maxTokens: 8192,
+      timeoutMs: 300000,
     },
   });
-  modByo.llmBindingStore.upsert(SVC_BYO, { mode: "byo", base_url: ENDPOINT, api_key: API_KEY });
+  modByo.llmBindingStore.upsert(SVC_BYO, {
+    mode: "byo",
+    base_url: ENDPOINT,
+    api_key: API_KEY,
+  });
   const app2 = new Hono();
   const api2 = new Hono();
-  api2.route("/wiki", createWikiRoutes({ wikiService: modByo.wikiService, wikiMgr: modByo.wikiMgr, publicBaseUrl: "" }));
-  api2.route("/internal/llm-binding", createLlmBindingRoutes({ llmBindingStore: modByo.llmBindingStore }));
+  api2.route(
+    "/wiki",
+    createWikiRoutes({
+      wikiService: modByo.wikiService,
+      wikiMgr: modByo.wikiMgr,
+      publicBaseUrl: "",
+    }),
+  );
+  api2.route(
+    "/internal/llm-binding",
+    createLlmBindingRoutes({ llmBindingStore: modByo.llmBindingStore }),
+  );
   app2.route("/v3", api2);
-  serverByo = serve({ fetch: app2.fetch, port: 0, hostname: "127.0.0.1" }) as unknown as Server;
+  serverByo = serve({
+    fetch: app2.fetch,
+    port: 0,
+    hostname: "127.0.0.1",
+  }) as unknown as Server;
   await new Promise<void>((r) => (serverByo as any).on("listening", () => r()));
   const addr2 = (serverByo as any).address() as AddressInfo;
   baseByo = `http://127.0.0.1:${addr2.port}`;
@@ -150,10 +203,16 @@ beforeAll(async () => {
 async function postByo(path: string, body: unknown) {
   const res = await fetch(baseByo + path, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-tdai-service-id": SVC_BYO },
+    headers: {
+      "content-type": "application/json",
+      "x-tdai-service-id": SVC_BYO,
+    },
     body: JSON.stringify(body),
   });
-  return { status: res.status, json: (await res.json()) as { code: number; message: string; data: any } };
+  return {
+    status: res.status,
+    json: (await res.json()) as { code: number; message: string; data: any },
+  };
 }
 
 afterAll(async () => {
@@ -226,12 +285,21 @@ live("live LLM ingest via byo binding (proxy mode, no global creds)", () => {
   });
 
   it("ingest resolves key from binding and reaches ready", async () => {
-    const c = await postByo("/v3/wiki/create", { team_id: TEAM, name: "live-byo" });
+    const c = await postByo("/v3/wiki/create", {
+      team_id: TEAM,
+      name: "live-byo",
+    });
     expect(c.status).toBe(201);
     wikiId = c.json.data.wiki_id;
     const w = await postByo("/v3/wiki/raw/write", {
-      team_id: TEAM, wiki_id: wikiId,
-      files: [{ filename: "guide.md", content: "# Tea\n\nBrew green tea below boiling.\n" }],
+      team_id: TEAM,
+      wiki_id: wikiId,
+      files: [
+        {
+          filename: "guide.md",
+          content: "# Tea\n\nBrew green tea below boiling.\n",
+        },
+      ],
     });
     expect(w.json.code).toBe(0);
     const ing = await postByo("/v3/wiki/ingest", { wiki_id: wikiId });
@@ -244,7 +312,10 @@ live("live LLM ingest via byo binding (proxy mode, no global creds)", () => {
       await new Promise((r) => setTimeout(r, 3000));
     }
     expect(detail.status).toBe("ready");
-    const s = await postByo("/v3/wiki/search", { wiki_id: wikiId, query: "tea brew" });
+    const s = await postByo("/v3/wiki/search", {
+      wiki_id: wikiId,
+      query: "tea brew",
+    });
     expect(s.json.data.count).toBeGreaterThan(0);
   }, 500_000);
 });
