@@ -1,73 +1,25 @@
 /**
  * proxy-live.test.ts — real upstream chat completions through OpenAI protocol.
  *
- * Gated on tests/.env key (OPENROUTER_API_KEY or OPENCODE_API_KEY) +
- * LLM_TEST_BASE_URL / LLM_TEST_MODEL. Defaults target Opencode Zen.
- * NOTE: Zen free-tier models are API-blocked ("only in OpenCode"); live runs
- * need a paid model in LLM_TEST_MODEL.
+ * Config from tests/helpers/live-llm-env.ts (OPENROUTER_API_KEY,
+ * LLM_TEST_BASE_URL / LLM_TEST_MODEL overrides, LLM_LIVE=1 opt-in).
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import type { Server, AddressInfo } from "node:net";
-import { readFileSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { loadLiveLlmConfig } from "../../../tests/helpers/live-llm-env.js";
 
 import { createApp } from "../server.js";
 import { initAuth } from "../auth.js";
 import type { ProxyConfig } from "../types.js";
 
-function loadEnv(): void {
-  if (process.env.OPENROUTER_API_KEY || process.env.OPENCODE_API_KEY) return;
-  const here = dirname(fileURLToPath(import.meta.url));
-  const p = join(here, "..", "..", "..", "tests", ".env");
-  try {
-    if (!existsSync(p)) return;
-    for (const line of readFileSync(p, "utf-8").split("\n")) {
-      const m = line.match(/^\s*([A-Za-z_]+)\s*=\s*(.*?)\s*$/);
-      if (
-        m &&
-        !(m[1] in process.env) &&
-        (m[2] ?? "").replace(/^["']|["']$/g, "")
-      ) {
-        process.env[m[1]] = (m[2] ?? "").replace(/^["']|["']$/g, "");
-      }
-    }
-  } catch {
-    /* skip */
-  }
-}
-loadEnv();
-
-function testEnvFileKey(): string {
-  // Explicit tests/.env OPENROUTER key wins over ambient shell env.
-  try {
-    const here = dirname(fileURLToPath(import.meta.url));
-    const p = join(here, "..", "..", "..", "tests", ".env");
-    if (!existsSync(p)) return "";
-    for (const line of readFileSync(p, "utf-8").split("\n")) {
-      const m = line.match(/^\s*OPENROUTER_API_KEY\s*=\s*(.*?)\s*$/);
-      const v = (m?.[1] ?? "").replace(/^["']|["']$/g, "");
-      if (m && v) return v;
-    }
-  } catch {
-    /* ignore */
-  }
-  return "";
-}
-
-const API_KEY = (
-  testEnvFileKey() ||
-  process.env.OPENROUTER_API_KEY ||
-  process.env.OPENCODE_API_KEY ||
-  ""
-).trim();
-const BASE =
-  process.env.LLM_TEST_BASE_URL?.trim() || "https://openrouter.ai/api/v1";
-const MODEL =
-  process.env.LLM_TEST_MODEL?.trim() || "nvidia/nemotron-3.5-lightning:free";
-const live = API_KEY && process.env.LLM_LIVE === "1" ? describe : describe.skip;
+// Shared live-LLM config: key + endpoint + model + LLM_LIVE opt-in gate.
+const LIVE = loadLiveLlmConfig();
+const API_KEY = LIVE.key;
+const BASE = LIVE.baseUrl;
+const MODEL = LIVE.model;
+const live = LIVE.live ? describe : describe.skip;
 
 let base = "";
 let server: Server;

@@ -1,10 +1,9 @@
 /**
- * llm-ingest-live.test.ts — real LLM ingest through an OpenAI-compatible endpoint.
+ * llm-ingest-live.test.ts — real LLM ingest through OpenRouter.
  *
- * Default: Opencode Zen nemotron-3.5-lightning-free (user key is Zen).
- * Override via tests/.env LLM_BASE_URL + LLM_MODEL for real OpenRouter
- * (model nvidia/nemotron-3.5-lightning:free). Key in tests/.env (gitignored,
- * NEVER committed). Without a key the suite skips.
+ * Default model nvidia/nemotron-3.5-lightning:free. Key in tests/.env
+ * (gitignored, NEVER committed); override endpoint/model via
+ * LLM_TEST_BASE_URL + LLM_TEST_MODEL. Runs only with LLM_LIVE=1.
  *
  * Customer value: stub-worker suites prove routing/persistence but never that
  * a real model turns source files into searchable pages. This closes that.
@@ -13,11 +12,11 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import type { Server, AddressInfo } from "node:net";
-import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
+import { loadLiveLlmConfig } from "../../../../tests/helpers/live-llm-env.js";
 import { createDb } from "../../db/client.js";
 import { createKnowledgeModule } from "../../module.js";
 import { createWikiRoutes } from "../wiki.js";
@@ -25,66 +24,15 @@ import { createLlmBindingRoutes } from "../llm-binding.js";
 
 const SVC_BYO = "svc-live-byo";
 
-// tests/.env values load first so MODEL/ENDPOINT below respect them.
-function loadTestEnvFile(): void {
-  if (process.env.OPENROUTER_API_KEY || process.env.OPENCODE_API_KEY) return;
-  const here = dirname(fileURLToPath(import.meta.url));
-  const envPath = join(here, "..", "..", "..", "..", "tests", ".env");
-  try {
-    if (!existsSync(envPath)) return;
-    for (const line of readFileSync(envPath, "utf-8").split("\n")) {
-      const m = line.match(/^\s*([A-Za-z_]+)\s*=\s*(.*?)\s*$/);
-      if (
-        m &&
-        !(m[1] in process.env) &&
-        (m[2] ?? "").replace(/^["']|["']$/g, "")
-      ) {
-        process.env[m[1]] = (m[2] ?? "").replace(/^["']|["']$/g, "");
-      }
-    }
-  } catch {
-    /* missing file = skip */
-  }
-}
-loadTestEnvFile();
-const MODEL =
-  process.env.LLM_TEST_MODEL?.trim() || "nvidia/nemotron-3.5-lightning:free";
-const ENDPOINT =
-  process.env.LLM_TEST_BASE_URL?.trim() || "https://openrouter.ai/api/v1";
+// Shared live-LLM config: key + endpoint + model + LLM_LIVE opt-in gate.
+const LIVE = loadLiveLlmConfig();
+const MODEL = LIVE.model;
+const ENDPOINT = LIVE.baseUrl;
+const API_KEY = LIVE.key;
 const SVC = "svc-live-1";
 const TEAM = "team-live-1";
 
-function testEnvFileKey(): string {
-  // Explicit tests/.env OPENROUTER key wins over ambient shell env
-  // (lets a local OpenRouter key override e.g. a Zen-only shell key).
-  try {
-    const here = dirname(fileURLToPath(import.meta.url));
-    const envPath = join(here, "..", "..", "..", "..", "tests", ".env");
-    if (!existsSync(envPath)) return "";
-    for (const line of readFileSync(envPath, "utf-8").split("\n")) {
-      const m = line.match(/^\s*OPENROUTER_API_KEY\s*=\s*(.*?)\s*$/);
-      const v = (m?.[1] ?? "").replace(/^["']|["']$/g, "");
-      if (m && v) return v;
-    }
-  } catch {
-    /* ignore */
-  }
-  return "";
-}
-
-export function loadTestKey(): string {
-  // loadTestEnvFile already merged tests/.env into process.env.
-  return (
-    testEnvFileKey() ||
-    process.env.OPENROUTER_API_KEY ||
-    process.env.OPENCODE_API_KEY ||
-    ""
-  ).trim();
-}
-
-const API_KEY = loadTestKey();
-// Live runs cost money / hit rate limits: explicit opt-in even with a key.
-const live = API_KEY && process.env.LLM_LIVE === "1" ? describe : describe.skip;
+const live = LIVE.live ? describe : describe.skip;
 
 let base = "";
 let server: Server;
