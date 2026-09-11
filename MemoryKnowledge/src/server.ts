@@ -103,6 +103,10 @@ export function createApp() {
             headers: {
               "Content-Type": "application/json",
               "x-tdai-service-id": c.req.header("x-tdai-service-id") ?? "",
+              // ponytail: spread adds header only when a bearer is configured
+              ...(config.coreVerifyBearer
+                ? { Authorization: `Bearer ${config.coreVerifyBearer}` }
+                : {}),
             },
             body: JSON.stringify({ user_key: userKey }),
             signal: ctrl.signal,

@@ -85,6 +85,8 @@ export interface ServiceConfig {
  coreVerifyUrl: string;
  /** Timeout for Core auth/verify calls in ms. */
  coreVerifyTimeoutMs: number;
+ /** Bearer key for Core gateway /v3/* (empty = no Authorization header). */
+ coreVerifyBearer: string;
  /** Optional ClickHouse request telemetry. Disabled by default. */
  clickhouse: ClickHouseTelemetryConfig;
 }
@@ -237,6 +239,7 @@ export function loadConfig(): ServiceConfig {
   callbackSecret: env("KNOWLEDGE_CALLBACK_SECRET", ""),
   coreVerifyUrl: env("CORE_VERIFY_URL", "").replace(/\/+$/, ""),
   coreVerifyTimeoutMs: envInt("CORE_VERIFY_TIMEOUT_MS", 3000),
+  coreVerifyBearer: env("CORE_VERIFY_BEARER", ""),
   clickhouse,
   llm: {
    mode: env("LLM_MODE", "proxy") === "custom" ? "custom" : "proxy",
