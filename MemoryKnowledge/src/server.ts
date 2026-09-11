@@ -14,6 +14,7 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { swaggerUI } from "@hono/swagger-ui";
 import { readFileSync } from "node:fs";
+import { timingSafeEqual } from "node:crypto";
 import { wrapError } from "./api-helpers.js";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -65,8 +66,9 @@ export function createApp() {
   const api = new Hono();
   // Single identity plane: every /v3/* caller authenticates with x-tdai-user-key,
   // verified against Core's user table via {CORE_VERIFY_URL}/v3/meta/auth/verify.
-  // No service-level shared secret is accepted here. Health (/health) and docs
-  // (/docs, /openapi.json) stay public by design.
+  // Exception: /v3/internal/* additionally accepts the KNOWLEDGE_AUTH_TOKEN
+  // service bearer (control-plane automation has no end-user identity).
+  // Health (/health) and docs (/docs, /openapi.json) stay public by design.
   const verifyCache = new Map<string, { userId: string; exp: number }>();
   const VERIFY_TTL_MS = 60_000;
   if (config.coreVerifyUrl) {
@@ -82,9 +84,14 @@ export function createApp() {
     // Control plane (/v3/internal/*): accept the shared service bearer so
     // panel automation (no end-user identity) can provision LLM bindings.
     // Unset token or mismatch falls through to user-key verification (fail closed).
-    if (config.internalAuthToken && c.req.path.startsWith(`${config.apiPrefix}/internal/`)) {
-      const auth = c.req.header("authorization")?.trim() ?? "";
-      if (auth === `Bearer ${config.internalAuthToken}`) {
+    if (
+      config.internalAuthToken &&
+      c.req.path.startsWith(`${config.apiPrefix}/internal/`)
+    ) {
+      // ponytail: constant-time compare, bearer is a shared secret
+      const actual = Buffer.from(c.req.header("authorization")?.trim() ?? "");
+      const expected = Buffer.from(`Bearer ${config.internalAuthToken}`);
+      if (actual.length === expected.length && timingSafeEqual(actual, expected)) {
         await next();
         return;
       }
