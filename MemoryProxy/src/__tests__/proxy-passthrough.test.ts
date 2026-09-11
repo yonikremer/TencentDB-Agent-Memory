@@ -25,7 +25,9 @@ const upstreamSeen: Array<{ url: string; key: string; body: any }> = [];
 function readBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve) => {
     let buf = "";
-    req.on("data", (c) => { buf += c; });
+    req.on("data", (c) => {
+      buf += c;
+    });
     req.on("end", () => resolve(buf ? JSON.parse(buf) : {}));
   });
 }
@@ -33,21 +35,38 @@ function readBody(req: IncomingMessage): Promise<any> {
 async function startUpstream(): Promise<void> {
   upstream = http.createServer(async (req, res) => {
     const body = await readBody(req);
-    upstreamSeen.push({ url: req.url ?? "", key: (req.headers["x-api-key"] as string) ?? "", body });
+    upstreamSeen.push({
+      url: req.url ?? "",
+      key: (req.headers["x-api-key"] as string) ?? "",
+      body,
+    });
     res.setHeader("content-type", "application/json");
     if (upstreamMode === "error") {
       res.writeHead(500);
-      res.end(JSON.stringify({ type: "error", error: { type: "api_error", message: "fake boom" } }));
+      res.end(
+        JSON.stringify({
+          type: "error",
+          error: { type: "api_error", message: "fake boom" },
+        }),
+      );
       return;
     }
     res.writeHead(200);
-    res.end(JSON.stringify({
-      id: "msg_fake1", type: "message", role: "assistant", model: UPSTREAM_MODEL,
-      content: [{ type: "text", text: "fake upstream reply" }],
-      stop_reason: "end_turn", usage: { input_tokens: 5, output_tokens: 4 },
-    }));
+    res.end(
+      JSON.stringify({
+        id: "msg_fake1",
+        type: "message",
+        role: "assistant",
+        model: UPSTREAM_MODEL,
+        content: [{ type: "text", text: "fake upstream reply" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 5, output_tokens: 4 },
+      }),
+    );
   });
-  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", () => resolve()));
+  await new Promise<void>((resolve) =>
+    upstream.listen(0, "127.0.0.1", () => resolve()),
+  );
   const addr = upstream.address() as AddressInfo;
   upstreamBase = `http://127.0.0.1:${addr.port}/v1`;
 }
@@ -74,19 +93,30 @@ function cfg(): ProxyConfig {
 async function messages(body: unknown) {
   const res = await fetch(`${base}/v1/messages`, {
     method: "POST",
-    headers: { "content-type": "application/json", "anthropic-version": "2023-06-01" },
+    headers: {
+      "content-type": "application/json",
+      "anthropic-version": "2023-06-01",
+    },
     body: JSON.stringify(body),
   });
   return { status: res.status, json: (await res.json()) as any };
 }
 
-const REQ = { model: UPSTREAM_MODEL, max_tokens: 16, messages: [{ role: "user", content: "ping" }] };
+const REQ = {
+  model: UPSTREAM_MODEL,
+  max_tokens: 16,
+  messages: [{ role: "user", content: "ping" }],
+};
 
 beforeAll(async () => {
   await startUpstream();
   initAuth({ enabled: false } as never);
   const app: Hono = createApp(cfg());
-  server = serve({ fetch: app.fetch, port: 0, hostname: "127.0.0.1" }) as unknown as Server;
+  server = serve({
+    fetch: app.fetch,
+    port: 0,
+    hostname: "127.0.0.1",
+  }) as unknown as Server;
   await new Promise<void>((r) => (server as any).on("listening", () => r()));
   const addr = (server as any).address() as AddressInfo;
   base = `http://127.0.0.1:${addr.port}`;
