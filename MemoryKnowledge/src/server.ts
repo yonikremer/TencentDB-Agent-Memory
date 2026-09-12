@@ -58,8 +58,15 @@ export function createApp() {
   app.use("*", accessLog());
   app.onError(errorHandler);
 
-  // Health (no prefix)
-  app.route("/", createHealthRoutes());
+  // Health (no prefix). Booleans/counts only — keys and URLs never leave the process.
+  app.route(
+    "/",
+    createHealthRoutes({
+      llmMode: config.llm.mode,
+      globalConfigured: Boolean(config.llm.baseUrl?.trim() && config.llm.apiKey?.trim()),
+      bindingCount: knowledgeModule.llmBindingStore.listAll().length,
+    }),
+  );
 
   // /v3 prefix applied once here — routes define paths without prefix
   const api = new Hono();

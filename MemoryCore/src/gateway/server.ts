@@ -56,6 +56,7 @@ import { initOTelSDK, shutdownOTelSDK } from "../core/report/otel-sdk-init.js";
 import { initObservabilityBackend } from "../core/report/factory.js";
 import type { ObservabilityConfig as CoreObservabilityConfig } from "../core/report/types.js";
 import { TracedTaskExecutor } from "../core/report/traced-task-executor.js";
+import { embeddingDependency } from "../core/report/dependency-health.js";
 import { StorePool } from "../core/store/store-pool.js";
 import {
   validateAndNormalizeRaw,
@@ -1489,6 +1490,9 @@ export class TdaiGateway {
       stores: {
         vectorStore: !!this.core.getVectorStore(),
         embeddingService: !!this.core.getEmbeddingService(),
+      },
+      dependencies: {
+        embedding: embeddingDependency(this.core.getEmbeddingService()),
       },
       // Integrated services status
       services: {

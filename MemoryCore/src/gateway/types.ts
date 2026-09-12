@@ -29,6 +29,14 @@ export interface HealthResponse {
     pipelineWorker: unknown;
     stateBackend: string;
   };
+  /** Model dependency detail: cheap local state + last observed request-path error (no live inference on scrapes). */
+  dependencies?: {
+    embedding: {
+      configured: boolean;
+      ready: boolean;
+      lastError: { message: string; at: string } | null;
+    };
+  };
 }
 
 // ============================

@@ -19,6 +19,10 @@ import { parseConfig } from "../config.js";
 import { createStoreBundle } from "../core/store/factory.js";
 import type { EmbeddingService } from "../core/store/embedding.js";
 import { EmbeddingNotReadyError } from "../core/store/embedding.js";
+import {
+  lastDependencyError,
+  resetDependencyErrors,
+} from "../core/report/dependency-health.js";
 
 const INST = "test-dp-1";
 const ADMIN_KEY = "dp-admin-fake-key";
@@ -221,12 +225,14 @@ describe("embedding failure is a 503, never silent success", () => {
     messages: [{ role: "user", content: "x" }],
   };
 
-  it("NotReady model on add -> 503", async () => {
+  it("NotReady model on add -> 503 + recorded for /health", async () => {
+    resetDependencyErrors();
     const r = await route("/v3/conversation/add", TEAM_A, ADD, ADMIN_KEY, {
       embedding: throwingEmbedding(new EmbeddingNotReadyError()),
     });
     expect(r.status).toBe(503);
     expect((r.body as any)?.code).toBe(503);
+    expect(lastDependencyError("embedding")?.message).toContain("not ready");
   });
 
   it("generic embed error on add -> 503", async () => {
