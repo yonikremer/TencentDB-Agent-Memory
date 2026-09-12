@@ -72,7 +72,10 @@ export interface EmbeddingService {
   /** Get embedding for a single text */
   embed(text: string, options?: EmbeddingCallOptions): Promise<Float32Array>;
   /** Get embeddings for multiple texts (batched API call) */
-  embedBatch(texts: string[], options?: EmbeddingCallOptions): Promise<Float32Array[]>;
+  embedBatch(
+    texts: string[],
+    options?: EmbeddingCallOptions,
+  ): Promise<Float32Array[]>;
   /** Return the configured vector dimensions */
   getDimensions(): number;
   /** Return provider + model identifiers for change detection */
@@ -102,7 +105,10 @@ export interface EmbeddingService {
  */
 export class EmbeddingNotReadyError extends Error {
   constructor(message?: string) {
-    super(message ?? "Local embedding model is not ready yet (still downloading or loading)");
+    super(
+      message ??
+        "Local embedding model is not ready yet (still downloading or loading)",
+    );
     this.name = "EmbeddingNotReadyError";
   }
 }
@@ -160,7 +166,9 @@ export type ImportLlamaFn = () => Promise<{
   LlamaLogLevel: { error: number };
 }>;
 
-const defaultImportLlama: ImportLlamaFn = () => import("node-llama-cpp") as unknown as ReturnType<ImportLlamaFn>;
+// SAFETY: untyped native binding boundary; a shape mismatch rejects at model load (warmup), never silently.
+const defaultImportLlama: ImportLlamaFn = () =>
+  import("node-llama-cpp") as unknown as ReturnType<ImportLlamaFn>;
 
 export class LocalEmbeddingService implements EmbeddingService {
   private readonly modelPath: string;
@@ -173,10 +181,16 @@ export class LocalEmbeddingService implements EmbeddingService {
   private initPromise: Promise<void> | null = null;
   private initError: Error | null = null;
   private embeddingContext: {
-    getEmbeddingFor: (text: string) => Promise<{ vector: Float32Array | number[] }>;
+    getEmbeddingFor: (
+      text: string,
+    ) => Promise<{ vector: Float32Array | number[] }>;
   } | null = null;
 
-  constructor(config?: LocalEmbeddingConfig, logger?: Logger, importLlama?: ImportLlamaFn) {
+  constructor(
+    config?: LocalEmbeddingConfig,
+    logger?: Logger,
+    importLlama?: ImportLlamaFn,
+  ) {
     this.modelPath = config?.modelPath?.trim() || DEFAULT_LOCAL_MODEL;
     this.modelCacheDir = config?.modelCacheDir?.trim();
     this.logger = logger;
@@ -207,21 +221,25 @@ export class LocalEmbeddingService implements EmbeddingService {
     if (this.initState === "initializing" || this.initState === "ready") {
       return; // already in progress or done
     }
-    this.logger?.info(`${TAG} Starting background warmup for local embedding model...`);
+    this.logger?.info(
+      `${TAG} Starting background warmup for local embedding model...`,
+    );
     this.initState = "initializing";
     this.initError = null;
 
     this.initPromise = this._doInitialize()
       .then(() => {
         this.initState = "ready";
-        this.logger?.info(`${TAG} Background warmup complete — local embedding ready`);
+        this.logger?.info(
+          `${TAG} Background warmup complete — local embedding ready`,
+        );
       })
       .catch((err) => {
         this.initState = "failed";
         this.initError = err instanceof Error ? err : new Error(String(err));
         this.logger?.error(
           `${TAG} Background warmup failed: ${this.initError.message}. ` +
-          `embed() calls will throw EmbeddingNotReadyError until retried.`,
+            `embed() calls will throw EmbeddingNotReadyError until retried.`,
         );
       });
   }
@@ -230,7 +248,10 @@ export class LocalEmbeddingService implements EmbeddingService {
    * Get embedding for a single text.
    * @throws {EmbeddingNotReadyError} if model is not yet ready.
    */
-  async embed(text: string, _options?: EmbeddingCallOptions): Promise<Float32Array> {
+  async embed(
+    text: string,
+    _options?: EmbeddingCallOptions,
+  ): Promise<Float32Array> {
     this.assertReady();
     const truncated = this.truncateInput(text);
     const embedding = await this.embeddingContext!.getEmbeddingFor(truncated);
@@ -241,7 +262,10 @@ export class LocalEmbeddingService implements EmbeddingService {
    * Get embeddings for multiple texts.
    * @throws {EmbeddingNotReadyError} if model is not yet ready.
    */
-  async embedBatch(texts: string[], _options?: EmbeddingCallOptions): Promise<Float32Array[]> {
+  async embedBatch(
+    texts: string[],
+    _options?: EmbeddingCallOptions,
+  ): Promise<Float32Array[]> {
     if (texts.length === 0) return [];
     this.assertReady();
 
@@ -261,7 +285,10 @@ export class LocalEmbeddingService implements EmbeddingService {
   close(): void {
     if (this.embeddingContext) {
       try {
-        const ctx = this.embeddingContext as unknown as { dispose?: () => void };
+        // SAFETY: optional dispose on an opaque native handle; guarded by ?. and best-effort by design.
+        const ctx = this.embeddingContext as unknown as {
+          dispose?: () => void;
+        };
         ctx.dispose?.();
       } catch {
         // best-effort cleanup
@@ -284,7 +311,7 @@ export class LocalEmbeddingService implements EmbeddingService {
     if (this.initState === "failed") {
       throw new EmbeddingNotReadyError(
         `Local embedding model initialization failed: ${this.initError?.message ?? "unknown error"}. ` +
-        `Call startWarmup() to retry.`,
+          `Call startWarmup() to retry.`,
       );
     }
     if (this.initState === "initializing") {
@@ -317,12 +344,17 @@ export class LocalEmbeddingService implements EmbeddingService {
    */
   private async _doInitialize(): Promise<void> {
     // Track partially-initialized resources for cleanup on failure
-    let model: { createEmbeddingContext: () => Promise<unknown>; dispose?: () => void } | undefined;
+    let model:
+      | { createEmbeddingContext: () => Promise<unknown>; dispose?: () => void }
+      | undefined;
     try {
-      this.logger?.debug?.(`${TAG} Loading node-llama-cpp for local embedding...`);
+      this.logger?.debug?.(
+        `${TAG} Loading node-llama-cpp for local embedding...`,
+      );
 
       // Dynamic import — node-llama-cpp is a peer dependency of OpenClaw
-      const { getLlama, resolveModelFile, LlamaLogLevel } = await this.importLlama();
+      const { getLlama, resolveModelFile, LlamaLogLevel } =
+        await this.importLlama();
 
       const llama = await getLlama({ logLevel: LlamaLogLevel.error });
       this.logger?.debug?.(`${TAG} Llama instance created`);
@@ -333,15 +365,29 @@ export class LocalEmbeddingService implements EmbeddingService {
       );
       this.logger?.debug?.(`${TAG} Model resolved: ${resolvedPath}`);
 
-      model = await (llama as unknown as { loadModel: (opts: { modelPath: string }) => Promise<typeof model> }).loadModel({ modelPath: resolvedPath });
-      this.logger?.debug?.(`${TAG} Model loaded, creating embedding context...`);
+      // SAFETY: untyped native binding; wrong shape rejects here at warmup, loudly, before serving.
+      model = await (
+        llama as unknown as {
+          loadModel: (opts: { modelPath: string }) => Promise<typeof model>;
+        }
+      ).loadModel({ modelPath: resolvedPath });
+      this.logger?.debug?.(
+        `${TAG} Model loaded, creating embedding context...`,
+      );
 
-      this.embeddingContext = await model!.createEmbeddingContext() as typeof this.embeddingContext;
-      this.logger?.info(`${TAG} Local embedding ready (model=${this.modelPath}, dims=${LOCAL_DIMENSIONS})`);
+      this.embeddingContext =
+        (await model!.createEmbeddingContext()) as typeof this.embeddingContext;
+      this.logger?.info(
+        `${TAG} Local embedding ready (model=${this.modelPath}, dims=${LOCAL_DIMENSIONS})`,
+      );
     } catch (err) {
       // Clean up partially-initialized resources to prevent leaks
       if (model?.dispose) {
-        try { model.dispose(); } catch { /* best-effort */ }
+        try {
+          model.dispose();
+        } catch {
+          /* best-effort */
+        }
       }
       this.embeddingContext = null;
       throw err;
@@ -385,7 +431,9 @@ class EmbeddingApiError extends Error {
   }
   /** Returns true for 4xx errors that should NOT be retried (excluding 429). */
   isClientError(): boolean {
-    return this.httpStatus >= 400 && this.httpStatus < 500 && this.httpStatus !== 429;
+    return (
+      this.httpStatus >= 400 && this.httpStatus < 500 && this.httpStatus !== 429
+    );
   }
 }
 
@@ -414,16 +462,24 @@ export class OpenAIEmbeddingService implements EmbeddingService {
 
   constructor(config: OpenAIEmbeddingConfig, logger?: Logger) {
     if (!config.apiKey) {
-      throw new Error("EmbeddingService: apiKey is required for remote provider");
+      throw new Error(
+        "EmbeddingService: apiKey is required for remote provider",
+      );
     }
     if (!config.baseUrl) {
-      throw new Error("EmbeddingService: baseUrl is required for remote provider");
+      throw new Error(
+        "EmbeddingService: baseUrl is required for remote provider",
+      );
     }
     if (!config.model) {
-      throw new Error("EmbeddingService: model is required for remote provider");
+      throw new Error(
+        "EmbeddingService: model is required for remote provider",
+      );
     }
     if (!config.dimensions || config.dimensions <= 0) {
-      throw new Error("EmbeddingService: dimensions is required for remote provider (must be a positive integer)");
+      throw new Error(
+        "EmbeddingService: dimensions is required for remote provider (must be a positive integer)",
+      );
     }
     this.baseUrl = config.baseUrl.replace(/\/+$/, "");
     this.apiKey = config.apiKey;
@@ -432,8 +488,14 @@ export class OpenAIEmbeddingService implements EmbeddingService {
     this.sendDimensions = config.sendDimensions ?? true;
     this.providerName = config.provider || "openai";
     this.proxyUrl = config.proxyUrl?.trim() || undefined;
-    this.maxInputChars = config.maxInputChars && config.maxInputChars > 0 ? config.maxInputChars : undefined;
-    this.timeoutMs = config.timeoutMs && config.timeoutMs > 0 ? config.timeoutMs : DEFAULT_API_TIMEOUT_MS;
+    this.maxInputChars =
+      config.maxInputChars && config.maxInputChars > 0
+        ? config.maxInputChars
+        : undefined;
+    this.timeoutMs =
+      config.timeoutMs && config.timeoutMs > 0
+        ? config.timeoutMs
+        : DEFAULT_API_TIMEOUT_MS;
     this.logger = logger;
   }
 
@@ -455,12 +517,18 @@ export class OpenAIEmbeddingService implements EmbeddingService {
     // nothing to do — remote API is stateless
   }
 
-  async embed(text: string, options?: EmbeddingCallOptions): Promise<Float32Array> {
+  async embed(
+    text: string,
+    options?: EmbeddingCallOptions,
+  ): Promise<Float32Array> {
     const [result] = await this.embedBatch([text], options);
     return result;
   }
 
-  async embedBatch(texts: string[], options?: EmbeddingCallOptions): Promise<Float32Array[]> {
+  async embedBatch(
+    texts: string[],
+    options?: EmbeddingCallOptions,
+  ): Promise<Float32Array[]> {
     if (texts.length === 0) return [];
 
     // Truncate texts exceeding maxInputChars limit
@@ -494,7 +562,10 @@ export class OpenAIEmbeddingService implements EmbeddingService {
     return text.slice(0, this.maxInputChars);
   }
 
-  private async _callApi(texts: string[], timeoutOverride?: number): Promise<Float32Array[]> {
+  private async _callApi(
+    texts: string[],
+    timeoutOverride?: number,
+  ): Promise<Float32Array[]> {
     const body: Record<string, unknown> = {
       input: texts,
       model: this.model,
@@ -522,7 +593,10 @@ export class OpenAIEmbeddingService implements EmbeddingService {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), timeoutOverride ?? this.timeoutMs);
+        const timeoutId = setTimeout(
+          () => controller.abort(),
+          timeoutOverride ?? this.timeoutMs,
+        );
 
         try {
           const resp = await fetch(fetchUrl, {
@@ -533,13 +607,19 @@ export class OpenAIEmbeddingService implements EmbeddingService {
           });
 
           if (!resp.ok) {
-            const errBody = await resp.text().catch(() => "(unable to read body)");
+            const errBody = await resp
+              .text()
+              .catch(() => "(unable to read body)");
             const err = new EmbeddingApiError(
               `Embedding API error: HTTP ${resp.status} ${resp.statusText} — ${errBody.slice(0, 500)}`,
               resp.status,
             );
             // Don't retry on 4xx client errors (except 429 rate limit)
-            if (resp.status >= 400 && resp.status < 500 && resp.status !== 429) {
+            if (
+              resp.status >= 400 &&
+              resp.status < 500 &&
+              resp.status !== 429
+            ) {
               throw err;
             }
             lastError = err;
@@ -549,7 +629,9 @@ export class OpenAIEmbeddingService implements EmbeddingService {
           const json = (await resp.json()) as OpenAIEmbeddingResponse;
 
           if (!json.data || !Array.isArray(json.data)) {
-            throw new Error("Embedding API returned unexpected format: missing 'data' array");
+            throw new Error(
+              "Embedding API returned unexpected format: missing 'data' array",
+            );
           }
 
           // Sort by index to ensure correct order, then sanitize+normalize for consistency with local provider
@@ -599,20 +681,31 @@ export function createEmbeddingService(
   logger?: Logger,
 ): EmbeddingService {
   // Remote OpenAI-compatible provider: any provider value other than "local"
-  if (config && config.provider !== "local" && "apiKey" in config && config.apiKey) {
-    logger?.debug?.(`${TAG} Using remote embedding (provider=${config.provider}, model=${config.model})`);
+  if (
+    config &&
+    config.provider !== "local" &&
+    "apiKey" in config &&
+    config.apiKey
+  ) {
+    logger?.debug?.(
+      `${TAG} Using remote embedding (provider=${config.provider}, model=${config.model})`,
+    );
     return new OpenAIEmbeddingService(config as OpenAIEmbeddingConfig, logger);
   }
 
   // Explicit local config
   if (config && config.provider === "local") {
     const localConfig = config as LocalEmbeddingConfig;
-    logger?.debug?.(`${TAG} Using local embedding (node-llama-cpp, model=${localConfig.modelPath ?? DEFAULT_LOCAL_MODEL})`);
+    logger?.debug?.(
+      `${TAG} Using local embedding (node-llama-cpp, model=${localConfig.modelPath ?? DEFAULT_LOCAL_MODEL})`,
+    );
     return new LocalEmbeddingService(localConfig, logger);
   }
 
   // Fallback: no config or empty apiKey → use local
-  logger?.debug?.(`${TAG} No remote embedding configured, falling back to local embedding (node-llama-cpp)`);
+  logger?.debug?.(
+    `${TAG} No remote embedding configured, falling back to local embedding (node-llama-cpp)`,
+  );
   return new LocalEmbeddingService(undefined, logger);
 }
 

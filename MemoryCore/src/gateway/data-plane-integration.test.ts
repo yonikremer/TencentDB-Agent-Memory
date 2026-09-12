@@ -92,9 +92,9 @@ async function route(
       seen.push({ status, body: b });
     }) as never,
     {
-      getStore: () => (overrides.store ?? store),
+      getStore: () => overrides.store ?? store,
       getEmbedding: () =>
-        overrides.embedding !== undefined ? overrides.embedding : hashEmbedding,
+        "embedding" in overrides ? overrides.embedding : hashEmbedding,
       getStorage: () => undefined,
       getMetadataService: async (id: string) =>
         id === INST ? (svc as never) : undefined,
@@ -202,8 +202,12 @@ describe("L0 conversation round-trip (real sqlite store)", () => {
 // a 200 with silently missing vectors.
 function throwingEmbedding(err: Error): EmbeddingService {
   return {
-    embed: async () => { throw err; },
-    embedBatch: async () => { throw err; },
+    embed: async () => {
+      throw err;
+    },
+    embedBatch: async () => {
+      throw err;
+    },
     getDimensions: () => 8,
     getProviderInfo: () => ({ provider: "test", model: "throwing" }),
     isReady: () => false,
@@ -212,7 +216,10 @@ function throwingEmbedding(err: Error): EmbeddingService {
 }
 
 describe("embedding failure is a 503, never silent success", () => {
-  const ADD = { session_id: SESSION, messages: [{ role: "user", content: "x" }] };
+  const ADD = {
+    session_id: SESSION,
+    messages: [{ role: "user", content: "x" }],
+  };
 
   it("NotReady model on add -> 503", async () => {
     const r = await route("/v3/conversation/add", TEAM_A, ADD, ADMIN_KEY, {
@@ -233,7 +240,9 @@ describe("embedding failure is a 503, never silent success", () => {
     const deadStore = new Proxy(store, {
       get: (t, p) => (p === "upsertL0" ? async () => false : (t as any)[p]),
     });
-    const r = await route("/v3/conversation/add", TEAM_A, ADD, ADMIN_KEY, { store: deadStore });
+    const r = await route("/v3/conversation/add", TEAM_A, ADD, ADMIN_KEY, {
+      store: deadStore,
+    });
     expect(r.status).toBe(503);
   });
 
@@ -248,8 +257,20 @@ describe("embedding failure is a 503, never silent success", () => {
     expect(r.status).toBe(503);
   });
 
-  it("no embedding service configured still writes metadata-only (explicit opt-out)", async () => {
-    const r = await route("/v3/conversation/add", TEAM_A, ADD, ADMIN_KEY, { embedding: undefined });
-    expect(r.status).not.toBe(503);
+  it("no embedding service configured is invalid deployment (add/search 503)", async () => {
+    const add = await route("/v3/conversation/add", TEAM_A, ADD, ADMIN_KEY, {
+      embedding: undefined,
+    });
+    expect(add.status).toBe(503);
+    const search = await route(
+      "/v3/conversation/search",
+      TEAM_A,
+      { query: "x" },
+      ADMIN_KEY,
+      {
+        embedding: undefined,
+      },
+    );
+    expect(search.status).toBe(503);
   });
 });

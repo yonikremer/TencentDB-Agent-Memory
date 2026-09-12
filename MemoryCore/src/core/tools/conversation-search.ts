@@ -10,7 +10,11 @@
  * The tool is registered via `api.registerTool()` in index.ts.
  */
 
-import type { IMemoryStore, IsolationFilter, L0SearchResult } from "../store/types.js";
+import type {
+  IMemoryStore,
+  IsolationFilter,
+  L0SearchResult,
+} from "../store/types.js";
 import { buildFtsQuery } from "../store/sqlite.js";
 import type { EmbeddingService } from "../store/embedding.js";
 import { EmbeddingNotReadyError } from "../store/embedding.js";
@@ -59,8 +63,13 @@ const RRF_K = 60;
  * Returns items sorted by descending RRF score. The `score` field of each
  * returned item is replaced by the RRF score for consistent ranking semantics.
  */
-function rrfMergeL0(...lists: ConversationSearchResultItem[][]): ConversationSearchResultItem[] {
-  const map = new Map<string, { item: ConversationSearchResultItem; rrfScore: number }>();
+function rrfMergeL0(
+  ...lists: ConversationSearchResultItem[][]
+): ConversationSearchResultItem[] {
+  const map = new Map<
+    string,
+    { item: ConversationSearchResultItem; rrfScore: number }
+  >();
 
   for (const list of lists) {
     for (let rank = 0; rank < list.length; rank++) {
@@ -105,9 +114,9 @@ export async function executeConversationSearch(params: {
 
   logger?.debug?.(
     `${TAG} CALLED: query="${query.slice(0, 100)}", limit=${limit}, ` +
-    `sessionFilter=${sessionFilter ?? "(none)"}, ` +
-    `vectorStore=${vectorStore ? "available" : "UNAVAILABLE"}, ` +
-    `embeddingService=${embeddingService ? "available" : "UNAVAILABLE"}`,
+      `sessionFilter=${sessionFilter ?? "(none)"}, ` +
+      `vectorStore=${vectorStore ? "available" : "UNAVAILABLE"}, ` +
+      `embeddingService=${embeddingService ? "available" : "UNAVAILABLE"}`,
   );
 
   if (!query || query.trim().length === 0) {
@@ -125,7 +134,9 @@ export async function executeConversationSearch(params: {
   const hasFts = vectorStore.isFtsAvailable();
 
   if (!hasEmbedding && !hasFts) {
-    logger?.warn?.(`${TAG} Neither EmbeddingService nor FTS5 available — cannot search`);
+    logger?.warn?.(
+      `${TAG} Neither EmbeddingService nor FTS5 available — cannot search`,
+    );
     return {
       results: [],
       total: 0,
@@ -144,10 +155,15 @@ export async function executeConversationSearch(params: {
   // If the store natively supports hybrid search (dense + sparse + RRF in a
   // single API call), skip the dual-path FTS+Vector logic to avoid a redundant
   // second HTTP request with garbled FTS tokens as embedding input.
-  if (vectorStore.getCapabilities().nativeHybridSearch && vectorStore.searchL0Hybrid) {
+  if (
+    vectorStore.getCapabilities().nativeHybridSearch &&
+    vectorStore.searchL0Hybrid
+  ) {
     logger?.debug?.(`${TAG} [native-hybrid] Single-call hybrid search...`);
     const results = await vectorStore.searchL0Hybrid(
-      isolationFilter ? { query, topK: candidateK, filter: isolationFilter } : { query, topK: candidateK },
+      isolationFilter
+        ? { query, topK: candidateK, filter: isolationFilter }
+        : { query, topK: candidateK },
     );
     let items: ConversationSearchResultItem[] = results.map((r) => ({
       id: r.record_id,
@@ -168,7 +184,7 @@ export async function executeConversationSearch(params: {
     const trimmed = items.slice(0, limit);
     logger?.debug?.(
       `${TAG} RESULT (strategy=native-hybrid): returning ${trimmed.length} messages ` +
-      `(scores: [${trimmed.map((r) => r.score.toFixed(3)).join(", ")}])`,
+        `(scores: [${trimmed.map((r) => r.score.toFixed(3)).join(", ")}])`,
     );
     return { results: trimmed, total: trimmed.length, strategy: "hybrid" };
   }
@@ -181,14 +197,18 @@ export async function executeConversationSearch(params: {
       try {
         const ftsQuery = buildFtsQuery(query);
         if (!ftsQuery) {
-          logger?.debug?.(`${TAG} [hybrid-fts] No usable FTS tokens from query`);
+          logger?.debug?.(
+            `${TAG} [hybrid-fts] No usable FTS tokens from query`,
+          );
           return [];
         }
         logger?.debug?.(`${TAG} [hybrid-fts] FTS5 query: "${ftsQuery}"`);
         const ftsResults = isolationFilter
           ? await vectorStore.searchL0Fts(ftsQuery, candidateK, isolationFilter)
           : await vectorStore.searchL0Fts(ftsQuery, candidateK);
-        logger?.debug?.(`${TAG} [hybrid-fts] FTS5 returned ${ftsResults.length} candidates`);
+        logger?.debug?.(
+          `${TAG} [hybrid-fts] FTS5 returned ${ftsResults.length} candidates`,
+        );
         return ftsResults.map((r) => ({
           id: r.record_id,
           session_key: r.session_key,
@@ -215,9 +235,16 @@ export async function executeConversationSearch(params: {
           `${TAG} [hybrid-vec] Embedding OK, dims=${queryEmbedding.length}, searching top-${candidateK}...`,
         );
         const vecResults: L0SearchResult[] = isolationFilter
-          ? await vectorStore.searchL0Vector(queryEmbedding, candidateK, query, isolationFilter)
+          ? await vectorStore.searchL0Vector(
+              queryEmbedding,
+              candidateK,
+              query,
+              isolationFilter,
+            )
           : await vectorStore.searchL0Vector(queryEmbedding, candidateK, query);
-        logger?.debug?.(`${TAG} [hybrid-vec] Vector search returned ${vecResults.length} candidates`);
+        logger?.debug?.(
+          `${TAG} [hybrid-vec] Vector search returned ${vecResults.length} candidates`,
+        );
         return vecResults.map((r) => ({
           id: r.record_id,
           session_key: r.session_key,
@@ -254,7 +281,11 @@ export async function executeConversationSearch(params: {
     strategy = "fts";
   } else {
     logger?.debug?.(`${TAG} Both search paths returned 0 results`);
-    return { results: [], total: 0, strategy: hasEmbedding ? "embedding" : "fts" };
+    return {
+      results: [],
+      total: 0,
+      strategy: hasEmbedding ? "embedding" : "fts",
+    };
   }
 
   // ── Merge results ──
@@ -273,7 +304,9 @@ export async function executeConversationSearch(params: {
   if (sessionFilter) {
     const preFilterCount = results.length;
     results = results.filter((r) => r.session_key === sessionFilter);
-    logger?.debug?.(`${TAG} After session filter "${sessionFilter}": ${results.length}/${preFilterCount}`);
+    logger?.debug?.(
+      `${TAG} After session filter "${sessionFilter}": ${results.length}/${preFilterCount}`,
+    );
   }
 
   // ── Trim to requested limit ──
@@ -281,7 +314,7 @@ export async function executeConversationSearch(params: {
 
   logger?.debug?.(
     `${TAG} RESULT (strategy=${strategy}): returning ${trimmed.length} messages ` +
-    `(scores: [${trimmed.map((r) => r.score.toFixed(3)).join(", ")}])`,
+      `(scores: [${trimmed.map((r) => r.score.toFixed(3)).join(", ")}])`,
   );
 
   return {
@@ -295,7 +328,9 @@ export async function executeConversationSearch(params: {
 // Tool response formatter
 // ============================
 
-export function formatConversationSearchResponse(result: ConversationSearchResult): string {
+export function formatConversationSearchResponse(
+  result: ConversationSearchResult,
+): string {
   if (result.message) {
     return result.message;
   }
@@ -303,16 +338,18 @@ export function formatConversationSearchResponse(result: ConversationSearchResul
     return "No matching conversation messages found.";
   }
 
-  const lines: string[] = [
-    `Found ${result.total} matching message(s):`,
-    "",
-  ];
+  const lines: string[] = [`Found ${result.total} matching message(s):`, ""];
 
   for (const item of result.results) {
-    const scoreStr = typeof item.score === "number" ? ` (score: ${item.score.toFixed(3)})` : "";
+    const scoreStr =
+      typeof item.score === "number"
+        ? ` (score: ${item.score.toFixed(3)})`
+        : "";
     const dateStr = item.recorded_at ? ` [${item.recorded_at}]` : "";
     lines.push(`---`);
-    lines.push(`**[${item.role}]** Session: ${item.session_key}${dateStr}${scoreStr}`);
+    lines.push(
+      `**[${item.role}]** Session: ${item.session_key}${dateStr}${scoreStr}`,
+    );
     lines.push("");
     lines.push(item.content);
     lines.push("");

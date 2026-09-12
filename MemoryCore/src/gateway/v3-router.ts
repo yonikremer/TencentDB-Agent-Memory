@@ -892,6 +892,11 @@ async function handleConversationAdd(
   }
 
   const embedding = deps.getEmbedding();
+  if (!embedding) {
+    // Unconfigured vectors are not a valid deployment: metadata-only writes
+    // would fake availability while recall silently degrades.
+    return errorEnvelope(503, "Embedding service not configured", requestId);
+  }
   const acceptedIds: string[] = [];
   const acceptedRecords: L0Record[] = [];
   const ingestBaseMs = Date.now();
@@ -919,25 +924,27 @@ async function handleConversationAdd(
         : recordedAtMs,
     };
 
-    let emb: Float32Array | undefined;
-    if (embedding) {
-      try {
-        emb = await embedding.embed(msg.content);
-      } catch (e) {
-        // Fail loud: a vector write that cannot be vectorized must never
-        // report success (quality over wrong sense of availability).
-        deps.logger.error(`[v3-router] L0 embedding failed, rejecting write`);
-        return errorEnvelope(
-          503,
-          `Embedding service unavailable: ${e instanceof Error ? e.message : String(e)}`,
-          requestId,
-        );
-      }
+    let emb: Float32Array;
+    try {
+      emb = await embedding.embed(msg.content);
+    } catch (e) {
+      // Fail loud: a vector write that cannot be vectorized must never
+      // report success (quality over wrong sense of availability).
+      deps.logger.error(`[v3-router] L0 embedding failed, rejecting write`);
+      return errorEnvelope(
+        503,
+        `Embedding service unavailable: ${e instanceof Error ? e.message : String(e)}`,
+        requestId,
+      );
     }
 
     const stored = await store.upsertL0(record, emb);
     if (!stored) {
-      return errorEnvelope(503, "Store unavailable: L0 write not persisted", requestId);
+      return errorEnvelope(
+        503,
+        "Store unavailable: L0 write not persisted",
+        requestId,
+      );
     }
     acceptedIds.push(id);
     acceptedRecords.push(record);
@@ -1191,6 +1198,9 @@ async function handleConversationSearch(
         // Missed sessionId: global search should not be restricted by default sessionId
       }
     : undefined;
+  if (!deps.getEmbedding()) {
+    return errorEnvelope(503, "Embedding service not configured", requestId);
+  }
   let result;
   try {
     result = await executeConversationSearch({
@@ -1420,24 +1430,29 @@ async function handleAtomicUpdate(
   };
 
   const embedding = deps.getEmbedding();
-  let emb: Float32Array | undefined;
-  if (embedding) {
-    try {
-      emb = await embedding.embed(content);
-    } catch (e) {
-      // Fail loud: never report an L1 update as stored when it has no vector.
-      deps.logger.error(`[v3-router] L1 embedding failed, rejecting update`);
-      return errorEnvelope(
-        503,
-        `Embedding service unavailable: ${e instanceof Error ? e.message : String(e)}`,
-        requestId,
-      );
-    }
+  if (!embedding) {
+    return errorEnvelope(503, "Embedding service not configured", requestId);
+  }
+  let emb: Float32Array;
+  try {
+    emb = await embedding.embed(content);
+  } catch (e) {
+    // Fail loud: never report an L1 update as stored when it has no vector.
+    deps.logger.error(`[v3-router] L1 embedding failed, rejecting update`);
+    return errorEnvelope(
+      503,
+      `Embedding service unavailable: ${e instanceof Error ? e.message : String(e)}`,
+      requestId,
+    );
   }
 
   const stored = await store.upsertL1(updated, emb);
   if (!stored) {
-    return errorEnvelope(503, "Store unavailable: L1 update not persisted", requestId);
+    return errorEnvelope(
+      503,
+      "Store unavailable: L1 update not persisted",
+      requestId,
+    );
   }
 
   // Audit: L1 update — use external request IdFields instead of record original value (per user decision)
@@ -1592,6 +1607,9 @@ async function handleAtomicSearch(
         // Missed sessionId: L1 recall should span session (agent dimension)
       }
     : undefined;
+  if (!deps.getEmbedding()) {
+    return errorEnvelope(503, "Embedding service not configured", requestId);
+  }
   let result;
   try {
     result = await executeMemorySearch({
