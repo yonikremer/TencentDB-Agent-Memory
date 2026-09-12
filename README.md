@@ -47,6 +47,9 @@ This repo is a fork of [Tencent/TencentDB-Agent-Memory](https://github.com/Tence
 | **Paths** | Linux assumptions | **Windows-safe** — `node:os`/`node:path` helpers, hardened traversal guards, 28 cross-platform tests |
 | **Setup** | Generic install | **Research-team guide** — 2-key split, sharing model, all-curl-tested team/wiki/skill commands + verify blocks; see [`docs/research-team-setup.md`](./docs/research-team-setup.md) |
 
+| **Wiki formats** | Markdown/text only | **Multi-format ingest** — pdf/docx/pptx/xlsx via docling sidecar, doc/xls/msg/vsdx/txt/csv/html/eml/md in-process, no LibreOffice |
+| **KS control** | Manual LLM binding | **Service bearer + fail-fast** — `KNOWLEDGE_AUTH_TOKEN` unlocks `/v3/internal/*` for Panel auto-provision; actionable error when the LLM endpoint is unconfigured |
+
 Full categorized list (env vars, routes, behaviors, verify commands): [`docs/fork-differences.md`](./docs/fork-differences.md). Chinese `*_CN.md` docs are frozen upstream snapshots — this fork documents in English only.
 
 # Installation

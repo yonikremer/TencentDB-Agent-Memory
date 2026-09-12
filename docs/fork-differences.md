@@ -5,7 +5,7 @@ maintained at [yonikremer/TencentDB-Agent-Memory](https://github.com/yonikremer/
 Upstream stays the source of truth for releases; this fork layers on operational hardening,
 Windows support, English i18n, and new features. Main branch: `feat/server_team` (see `AGENTS.md`).
 
-Fork point: upstream `feat/server_team` at `2ee2239`. To re-diff any time:
+Fork point: upstream `feat/server_team` at `2ee2239`; synced with `origin/feat/server_team` through the multi-format wiki merge (Sep 2026). To re-diff any time:
 
 ```bash
 git fetch upstream
@@ -51,6 +51,10 @@ this fork documents in English only.
   `TDAI_GATEWAY_REQUIRE_API_KEY` fail-closed opt-in; callbacks fail-closed; bridge reject helper;
   default-deny (404) on unknown routes.
 - **Unlimited user keys** per user (count limit removed).
+- Internal control-plane exception: `/v3/internal/*` additionally accepts a shared `KNOWLEDGE_AUTH_TOKEN`
+  Bearer (constant-time compare) so Panel automation with no end-user identity can run LLM-binding
+  auto-provision; unset or mismatch falls through to user-key verification (still fail-closed).
+  Set the same token in KS and Panel env (see `MemoryKnowledge/.env.example`).
 - Pinned by `v3-read-guards` tests (cross-user and cross-team denials) and allowlist tests.
 
 ## 4. Health and embedding failure semantics
@@ -148,6 +152,28 @@ this fork documents in English only.
   binding live path, OpenRouter defaults, file-key-wins env precedence), live vector search, boot
   contract plus live boot, Panel chat search and mine. Prettier-only commits carry no logic changes.
 
+## 13. Wiki: multi-format file ingest (docling + in-process)
+
+- Route per extension (`MemoryKnowledge/src/engines/wiki/convert.ts`): `pdf/docx/pptx/xlsx` via
+  **docling-serve sidecar** (async-first client, per-conversion reachability probe); `doc/xls/msg/vsdx`
+  plus `txt/csv/html/eml/md` **in-process pure-JS** — no LibreOffice anywhere. Anything else is
+  `unsupported`.
+- Sidecar wiring: compose runs `quay.io/docling-project/docling-serve:latest` (`DOCLING_HOST_PORT`,
+  default `5001`); KS points at it with `KNOWLEDGE_DOCLING_URL` (fallback `DOCLING_URL`, default
+  `http://localhost:5001`). Probe tries `GET /health`, falls back to `GET /v1/status/poll/test`.
+- Storage: one SourceFile renders to one RenderedMd (the only indexed form) with a recorded
+  SourceLink back to its source; raw quota helpers (`KNOWLEDGE_RAW_MAX_BYTES` default 100 MB/file,
+  `KNOWLEDGE_RAW_TOTAL_BYTES` default 50 GB). Vocabulary in `CONTEXT.md` (SourceFile/RenderedMd/
+  Conversion/SourceLink; OneNote out of scope).
+- Correctness: byte-parity `vsdx` port (direct-XML, tested against real `ECommerceTestFile.vsdx`)
+  plus real `doc/xls/msg` and Hebrew `docx/pdf` fixtures; self-starting docling integration tests.
+
+## 14. Knowledge control plane: LLM fail-fast
+
+- Unconfigured LLM endpoint used to fail late with cryptic `TypeError: Failed to parse URL from
+  /chat/completions` per source file. Now client creation throws an actionable error naming the
+  bearer/user-key requirement for `llm-binding/set` instead (covered by fail-fast guard tests).
+
 ## Verify a claim
 
 ```bash
@@ -155,4 +181,6 @@ git log --oneline 2ee2239..HEAD --reverse | grep -i -e v3-only -e tcvdb -e group
 git show e438c8d --stat   # v3 consolidation
 git show 613e2fc --stat   # sqlite-only
 git show be35ed8 --stat   # single identity plane
+git show 8491fed --stat   # multi-format ingest
+git show 2a1d0fc --stat   # internal service bearer
 ```

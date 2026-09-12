@@ -22,6 +22,8 @@ Divergence from upstream `feat/server_team` at `2ee2239`. Details: [`docs/fork-d
 - Dependency health reporting (LLM/embedding availability + last error)
 - Research-team setup guide (`docs/research-team-setup.md`: 2-key split, sharing model, verify blocks)
 - Windows dev launchers (`MemoryKnowledge/dev-start.local.mts`, `mcp-start.local.mts`)
+- Multi-format wiki ingest (pdf/docx/pptx/xlsx via docling-serve sidecar; doc/xls/msg/vsdx/txt/csv/html/eml/md in-process; `KNOWLEDGE_DOCLING_URL`; `CONTEXT.md` glossary)
+- Knowledge service bearer (`KNOWLEDGE_AUTH_TOKEN` for `/v3/internal/*` Panel auto-provision) and fail-fast error on unconfigured LLM endpoint
 
 ### Changed
 

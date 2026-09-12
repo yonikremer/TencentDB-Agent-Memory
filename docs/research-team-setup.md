@@ -339,6 +339,15 @@ curl -s -X POST -H "Content-Type: application/json" -H "$H" \
   $KS/v3/wiki/search -d '{"wiki_id":"'"$WIKI"'","query":"<a term>","limit":5}'
 ```
 
+> **Binary formats:** md goes through `raw/write` above, but the wiki also ingests binary
+> SourceFiles — pdf/docx/pptx/xlsx via the docling sidecar (compose starts it; standalone KS
+> needs `KNOWLEDGE_DOCLING_URL`), doc/xls/msg/vsdx/txt/csv/html/eml in-process. One file renders
+> to one indexed markdown (vocabulary: `CONTEXT.md`).
+>
+> **Panel auto-provision:** set the same `KNOWLEDGE_AUTH_TOKEN` in KS and Panel env so
+> `/v3/internal/*` LLM-binding auto-provision runs; without it those calls fall back to user-key
+> auth and automation 401s.
+
 ### 2.4 Share the wiki with the team (register → allocate → verify)
 
 A wiki is invisible to agents until it is a **team asset** bound to an agent.

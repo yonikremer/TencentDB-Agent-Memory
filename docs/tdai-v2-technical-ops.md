@@ -230,6 +230,10 @@ gateway, check `POST /v3/meta/groupy/status` → `healthy: true`. Read/query
   SQLite-only (no TCVDB); embedding misconfig/failure surfaces as **503** (never silent);
   health reports LLM/embedding availability + last error; full list in
   `docs/fork-differences.md`.
+- **Wiki ingest needs docling for office PDFs:** compose starts `docling-serve` (`DOCLING_HOST_PORT`,
+  default 5001); standalone KS needs `KNOWLEDGE_DOCLING_URL` or pdf/docx/pptx/xlsx conversions fail
+  their probe. `KNOWLEDGE_AUTH_TOKEN` must match between KS and Panel or `/v3/internal/*`
+  auto-provision 401s.
 
 ## 10. Branches & PRs (as of 2026-08-22)
 
