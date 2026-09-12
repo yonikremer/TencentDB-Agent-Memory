@@ -10,7 +10,7 @@ nothing except Claude Code + 4 env vars.
 ## 0. Key split
 
 | Key | Used by | Set where |
-|---|---|---|
+| --- | --- | --- |
 | KEY_A — ingest/memory LLM | Gateway memory extraction + Knowledge wiki ingest | `tdai-gateway.yaml` + KS `.env` |
 | own chat key per researcher (7) | Claude Code traffic, billed to each | Their own provider account, passthrough |
 | `user_key` per researcher (7) | Memory login + proxy auth (`x-api-key`), per-user audit | Gateway, handed out once (step 2.2) |
@@ -20,7 +20,7 @@ Researchers never see KEY_A. They bring their own chat key + the `user_key` you 
 ## 0.5 Sharing model (read this first)
 
 | Layer | Visibility | Lives on | Why |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Wiki (literature, docs) | **team-shared** | shared agent | one common ground — everyone recalls the same corpus |
 | Skills (playbooks) | **team-shared** | shared agent | same methods for all, improved once |
 | Chat memory (sessions, hypotheses) | **private per researcher** | own agent each | raw thinking stays theirs; precise recall, no cross-noise |
@@ -219,6 +219,7 @@ Expect `{"code":0,…"valid":true}`. `valid:false` = you copied the
 key wrong or created the user on a different instance id — re-create,
 do not hand out unverified keys (a bad key fails at the researcher's
 first chat, hardest place to debug).
+
 ```
 
 ### 2.3 Team + agents + task
@@ -520,7 +521,7 @@ project memories separate.
 Symptom table:
 
 | Sees | Cause | Fix |
-|---|---|---|
+| --- | --- | --- |
 | proxy `authentication_error` re `user_key` | `x-api-key` wrong | reissue step 2.2 key |
 | provider 401 / invalid API key | own chat key wrong | researcher fixes on their side |
 | OK chat but no memory ever | wrong team/agent/task picked in popup | re-pick, check binds (step 3 verify #3) |
@@ -633,6 +634,7 @@ curl -s -X POST -H "Content-Type: application/json" -H "$PH1" -H "$PH2" \
 ```
 
 Full API + trust model: [DESIGN.md](./org-hierarchy-sync/DESIGN.md) §7–§9.
+
 - Costs: watch KEY_A (ingest spikes per batch) vs KEY_B (chat tokens in
   proxy logs) separately.
 - Logs: gateway / KS / panel / `docker logs tdai-proxy` (`write-l0` =
