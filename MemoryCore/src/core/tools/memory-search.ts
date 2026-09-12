@@ -13,6 +13,7 @@
 import type { IMemoryStore, IsolationFilter, L1SearchResult } from "../store/types.js";
 import { buildFtsQuery } from "../store/sqlite.js";
 import type { EmbeddingService } from "../store/embedding.js";
+import { EmbeddingNotReadyError } from "../store/embedding.js";
 import type { Logger } from "../types.js";
 
 // ============================
@@ -249,6 +250,9 @@ export async function executeMemorySearch(params: {
           updated_at: r.timestamp_end,
         }));
       } catch (err) {
+        // Fail loud when the model is known-down; other legs keep their
+        // non-fatal fallback so transient blips do not kill recall.
+        if (err instanceof EmbeddingNotReadyError) throw err;
         logger?.warn?.(
           `${TAG} [hybrid-vec] Embedding search failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
         );

@@ -18,6 +18,7 @@ import { MetadataService } from "../metadata/service/metadata-service.js";
 import { parseConfig } from "../config.js";
 import { createStoreBundle } from "../core/store/factory.js";
 import type { EmbeddingService } from "../core/store/embedding.js";
+import { EmbeddingNotReadyError } from "../core/store/embedding.js";
 
 const INST = "test-dp-1";
 const ADMIN_KEY = "dp-admin-fake-key";
@@ -72,6 +73,7 @@ async function route(
   team: string,
   body: unknown,
   key: string = ADMIN_KEY,
+  overrides: { store?: unknown; embedding?: EmbeddingService | undefined } = {},
 ) {
   const seen: Array<{ status: number; body: any }> = [];
   const headers: Record<string, string> = {
@@ -90,8 +92,9 @@ async function route(
       seen.push({ status, body: b });
     }) as never,
     {
-      getStore: () => store,
-      getEmbedding: () => hashEmbedding,
+      getStore: () => (overrides.store ?? store),
+      getEmbedding: () =>
+        overrides.embedding !== undefined ? overrides.embedding : hashEmbedding,
       getStorage: () => undefined,
       getMetadataService: async (id: string) =>
         id === INST ? (svc as never) : undefined,
@@ -191,5 +194,62 @@ describe("L0 conversation round-trip (real sqlite store)", () => {
       });
       expect(JSON.stringify((q.body as any)?.data)).not.toContain(MARKER);
     }
+  });
+});
+
+// Fail loud: quality over wrong sense of availability. Any vector write
+// that cannot be vectorized (model down, store degraded) is a 503, never
+// a 200 with silently missing vectors.
+function throwingEmbedding(err: Error): EmbeddingService {
+  return {
+    embed: async () => { throw err; },
+    embedBatch: async () => { throw err; },
+    getDimensions: () => 8,
+    getProviderInfo: () => ({ provider: "test", model: "throwing" }),
+    isReady: () => false,
+    startWarmup: () => {},
+  };
+}
+
+describe("embedding failure is a 503, never silent success", () => {
+  const ADD = { session_id: SESSION, messages: [{ role: "user", content: "x" }] };
+
+  it("NotReady model on add -> 503", async () => {
+    const r = await route("/v3/conversation/add", TEAM_A, ADD, ADMIN_KEY, {
+      embedding: throwingEmbedding(new EmbeddingNotReadyError()),
+    });
+    expect(r.status).toBe(503);
+    expect((r.body as any)?.code).toBe(503);
+  });
+
+  it("generic embed error on add -> 503", async () => {
+    const r = await route("/v3/conversation/add", TEAM_A, ADD, ADMIN_KEY, {
+      embedding: throwingEmbedding(new Error("upstream timeout")),
+    });
+    expect(r.status).toBe(503);
+  });
+
+  it("store refusing persist -> 503", async () => {
+    const deadStore = new Proxy(store, {
+      get: (t, p) => (p === "upsertL0" ? async () => false : (t as any)[p]),
+    });
+    const r = await route("/v3/conversation/add", TEAM_A, ADD, ADMIN_KEY, { store: deadStore });
+    expect(r.status).toBe(503);
+  });
+
+  it("NotReady model on search -> 503 (no silent FTS-only downgrade)", async () => {
+    const r = await route(
+      "/v3/conversation/search",
+      TEAM_A,
+      { query: "x" },
+      ADMIN_KEY,
+      { embedding: throwingEmbedding(new EmbeddingNotReadyError()) },
+    );
+    expect(r.status).toBe(503);
+  });
+
+  it("no embedding service configured still writes metadata-only (explicit opt-out)", async () => {
+    const r = await route("/v3/conversation/add", TEAM_A, ADD, ADMIN_KEY, { embedding: undefined });
+    expect(r.status).not.toBe(503);
   });
 });

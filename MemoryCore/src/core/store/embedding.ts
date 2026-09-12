@@ -97,7 +97,8 @@ export interface EmbeddingService {
 /**
  * Error thrown when embed() / embedBatch() is called before the local
  * embedding model has finished downloading and loading.
- * Callers should catch this and fall back to keyword-only mode.
+ * Propagates as a 503 API error (quality over wrong sense of availability);
+ * data-plane write/search handlers map it explicitly, never swallow it.
  */
 export class EmbeddingNotReadyError extends Error {
   constructor(message?: string) {
