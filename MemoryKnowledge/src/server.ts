@@ -11,12 +11,13 @@ import { initTelemetry } from "./telemetry.js";
 initTelemetry();
 
 import { Hono } from "hono";
-import { serve } from "@hono/node-server";
-import { swaggerUI } from "@hono/swagger-ui";
 import { readFileSync } from "node:fs";
-import { wrapError } from "./api-helpers.js";
+import { timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
+import { serve } from "@hono/node-server";
+import { swaggerUI } from "@hono/swagger-ui";
+import { wrapError } from "./api-helpers.js";
 
 import { loadConfig } from "./config.js";
 import { createDb } from "./db/client.js";
@@ -72,8 +73,9 @@ export function createApp() {
   const api = new Hono();
   // Single identity plane: every /v3/* caller authenticates with x-tdai-user-key,
   // verified against Core's user table via {CORE_VERIFY_URL}/v3/meta/auth/verify.
-  // No service-level shared secret is accepted here. Health (/health) and docs
-  // (/docs, /openapi.json) stay public by design.
+  // Exception: /v3/internal/* additionally accepts the KNOWLEDGE_AUTH_TOKEN
+  // service bearer (control-plane automation has no end-user identity).
+  // Health (/health) and docs (/docs, /openapi.json) stay public by design.
   const verifyCache = new Map<string, { userId: string; exp: number }>();
   const VERIFY_TTL_MS = 60_000;
   if (config.coreVerifyUrl) {
@@ -86,6 +88,21 @@ export function createApp() {
     );
   }
   api.use("*", async (c, next) => {
+    // Control plane (/v3/internal/*): accept the shared service bearer so
+    // panel automation (no end-user identity) can provision LLM bindings.
+    // Unset token or mismatch falls through to user-key verification (fail closed).
+    if (
+      config.internalAuthToken &&
+      c.req.path.startsWith(`${config.apiPrefix}/internal/`)
+    ) {
+      // ponytail: constant-time compare, bearer is a shared secret
+      const actual = Buffer.from(c.req.header("authorization")?.trim() ?? "");
+      const expected = Buffer.from(`Bearer ${config.internalAuthToken}`);
+      if (actual.length === expected.length && timingSafeEqual(actual, expected)) {
+        await next();
+        return;
+      }
+    }
     const userKey = c.req.header("x-tdai-user-key")?.trim() ?? "";
     if (!userKey) {
       return c.json(wrapError(401, "x-tdai-user-key header is required"), 401);
