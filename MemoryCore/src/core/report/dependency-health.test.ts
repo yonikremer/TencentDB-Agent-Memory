@@ -48,8 +48,13 @@ describe("embeddingDependency mapping", () => {
 
   it("throwing isReady -> ready false (never throws out of health)", () => {
     const svc = {
-      isReady: () => { throw new Error("probe failed"); },
+      isReady: () => {
+        throw new Error("probe failed");
+      },
     };
-    expect(embeddingDependency(svc)).toMatchObject({ configured: true, ready: false });
+    expect(embeddingDependency(svc)).toMatchObject({
+      configured: true,
+      ready: false,
+    });
   });
 });

@@ -7,7 +7,11 @@
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { createHealthRoutes } from "../health.js";
-import { recordLlmError, lastLlmError, resetDependencyErrors } from "../../dependency-health.js";
+import {
+  recordLlmError,
+  lastLlmError,
+  resetDependencyErrors,
+} from "../../dependency-health.js";
 
 beforeEach(() => resetDependencyErrors());
 
@@ -17,14 +21,26 @@ describe("GET /health", () => {
     expect(res.status).toBe(200);
     const json = (await res.json()) as any;
     expect(json.status).toBe("ok");
-    expect(json.dependencies.llm).toMatchObject({ mode: "unknown", globalConfigured: false, bindings: 0 });
+    expect(json.dependencies.llm).toMatchObject({
+      mode: "unknown",
+      globalConfigured: false,
+      bindings: 0,
+    });
     expect(json.dependencies.llm.lastError).toBeNull();
   });
 
   it("reports mode, creds presence, bindings — never secrets", async () => {
-    const res = await createHealthRoutes({ llmMode: "custom", globalConfigured: true, bindingCount: 2 }).request("/health");
+    const res = await createHealthRoutes({
+      llmMode: "custom",
+      globalConfigured: true,
+      bindingCount: 2,
+    }).request("/health");
     const json = (await res.json()) as any;
-    expect(json.dependencies.llm).toMatchObject({ mode: "custom", globalConfigured: true, bindings: 2 });
+    expect(json.dependencies.llm).toMatchObject({
+      mode: "custom",
+      globalConfigured: true,
+      bindings: 2,
+    });
     expect(JSON.stringify(json)).not.toContain("sk-");
   });
 

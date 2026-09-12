@@ -932,7 +932,10 @@ async function handleConversationAdd(
       // Fail loud: a vector write that cannot be vectorized must never
       // report success (quality over wrong sense of availability).
       deps.logger.error(`[v3-router] L0 embedding failed, rejecting write`);
-      recordDependencyError("embedding", e instanceof Error ? e.message : String(e));
+      recordDependencyError(
+        "embedding",
+        e instanceof Error ? e.message : String(e),
+      );
       return errorEnvelope(
         503,
         `Embedding service unavailable: ${e instanceof Error ? e.message : String(e)}`,
@@ -1441,7 +1444,10 @@ async function handleAtomicUpdate(
   } catch (e) {
     // Fail loud: never report an L1 update as stored when it has no vector.
     deps.logger.error(`[v3-router] L1 embedding failed, rejecting update`);
-    recordDependencyError("embedding", e instanceof Error ? e.message : String(e));
+    recordDependencyError(
+      "embedding",
+      e instanceof Error ? e.message : String(e),
+    );
     return errorEnvelope(
       503,
       `Embedding service unavailable: ${e instanceof Error ? e.message : String(e)}`,
