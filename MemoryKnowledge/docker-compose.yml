@@ -30,6 +30,7 @@ services:
       KNOWLEDGE_CLICKHOUSE_FLUSH_THRESHOLD: ${KNOWLEDGE_CLICKHOUSE_FLUSH_THRESHOLD:-50}
       KNOWLEDGE_CLICKHOUSE_TTL_DAYS: ${KNOWLEDGE_CLICKHOUSE_TTL_DAYS:-90}
       KNOWLEDGE_CLICKHOUSE_REQUEST_TIMEOUT_MS: ${KNOWLEDGE_CLICKHOUSE_REQUEST_TIMEOUT_MS:-5000}
+      KNOWLEDGE_DOCLING_URL: ${KNOWLEDGE_DOCLING_URL:-http://docling:5001}
     restart: unless-stopped
     command:
       - --public-url=${PUBLIC_URL:?set PUBLIC_URL e.g. http://203.0.113.10:8421/v3}
@@ -45,6 +46,15 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+    depends_on:
+      docling:
+        condition: service_started
+
+  docling:
+    image: quay.io/docling-project/docling-serve:latest
+    ports:
+      - "${DOCLING_HOST_PORT:-5001}:5001"
+    restart: unless-stopped
 
 volumes:
   knowledge-data:
