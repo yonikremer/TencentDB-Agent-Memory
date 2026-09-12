@@ -3,7 +3,7 @@
 
 <img src="./assets/images/logo.png" alt="TencentDB Agent Memory" width="880" />
 
-### Agents remember. Humans innovate.
+### Agents remember. Humans innovate
 
 <a href="https://trendshift.io/repositories/29310?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-29310" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/29310" alt="TencentCloud%2FTencentDB-Agent-Memory | Trendshift" width="250" height="55"/></a>
 
@@ -38,6 +38,18 @@ This repo is a fork of [Tencent/TencentDB-Agent-Memory](https://github.com/Tence
 | **Language** | Mixed Chinese/English across UI, prompts, CLI, docs | **Fully English** — web UI (`MemoryPanel/web`), API docs, prompt corpus, CLI/shell output, comments, and configs translated; `INSTALL.md` / `CHANGELOG.md` in English (Chinese originals kept as `*_CN.md`). Reusable tooling lives in `scripts/zh-en/`. Chinese matcher examples in `ZH_EN_TRANSLATION_PLAN.md` are intentional test fixtures, not leftovers |
 | **Web UI theme** | Light only | **Dark mode** — header + login toggle, follows system default, persisted across sessions |
 | **Org sync** | Manual teams/memberships only | **groupy org-hierarchy sync** — HR structure mirrored into teams nightly (env-gated, off by default); share any asset to any org node via Panel/API; see [setup §7](./docs/research-team-setup.md#7-org-hierarchy-sync-groupy-optional) |
+| **API** | v1/v2/v3 routes side by side | **v3-only** — v1/v2 server routes, SDKs, and transports deleted; offload at `/v3/offload/*`; no dual-mount fallback |
+| **Storage** | SQLite or Tencent Vector DB | **SQLite-only** — TCVDB store/client/modules deleted; legacy `tcvdb` config degrades to SQLite with a warning; local BM25 + FTS5 recall |
+| **Auth** | Mixed per-plane checks | **Hardened single identity plane** — `x-tdai-user-key` verified in-process on every data plane (verified `user_id` overrides claims); Knowledge verifies via Core `auth/verify` fail-closed (`KNOWLEDGE_AUTH_DISABLED` bypass removed); skill `space_id` 403s, Meta read-path authz + 404 anti-oracle, Panel S2S callback secrets, Proxy SSRF guard, fail-closed callbacks, default-deny 404s, allowlist + `v3-read-guards` tests; unlimited user keys; `KNOWLEDGE_AUTH_TOKEN` service bearer for `/v3/internal/*` Panel automation |
+| **Health** | Basic liveness | **Dependency health** — LLM/embedding availability + last error; embedding failure returns 503, never silent success |
+| **Panel nav** | Client-side state only | **Deep-linkable URLs** — browser-history routing, canonical asset URLs, real 404s |
+| **SDKs** | Per-language drift | **Parity pass** — 12 cross-SDK bugs fixed; py 95 / ts 133 coverage suites |
+| **Paths** | Linux assumptions | **Windows-safe** — `node:os`/`node:path` helpers, hardened traversal guards, 28 cross-platform tests |
+| **Setup** | Generic install | **Research-team guide** — 2-key split, sharing model, all-curl-tested team/wiki/skill commands + verify blocks; see [`docs/research-team-setup.md`](./docs/research-team-setup.md) |
+| **Wiki formats** | Markdown/text only | **Multi-format ingest** — pdf/docx/pptx/xlsx via docling-serve sidecar (`KNOWLEDGE_DOCLING_URL`, compose-bundled), doc/xls/msg/vsdx/txt/csv/html/eml/md in-process pure-JS, no LibreOffice; one file renders to one indexed markdown with source-link + quotas (`CONTEXT.md` glossary) |
+| **KS control** | Manual LLM binding | **Service bearer + fail-fast** — `KNOWLEDGE_AUTH_TOKEN` unlocks `/v3/internal/*` for Panel auto-provision; actionable error when the LLM endpoint is unconfigured |
+
+Full categorized list (env vars, routes, behaviors, verify commands): [`docs/fork-differences.md`](./docs/fork-differences.md). Chinese `*_CN.md` docs are frozen upstream snapshots — this fork documents in English only.
 
 # Installation
 
@@ -145,7 +157,6 @@ Existing information → Reusable memory assets → Fewer turns → Less rework 
 - Two role layers: **global System Admin** manages users and teams (creating teams, adding members) and can also use Wiki, CodeGraph, Skill, and other asset management features; **Team-level roles** include Admin (team manager) and Member (regular member), responsible for asset collaboration and access control within a team. Asset ownership is tracked via Owner — the Owner automatically has management permissions for their assets.
 
 <img width="" src="assets/images/asset.png" alt="image.png" />
-
 
 ## Cold Start: Load the Save File, Then Get to Work
 
@@ -309,6 +320,7 @@ PersonaMem tests whether an Agent can correctly understand and apply user inform
 Agent Memory doesn't have a settled standard yet. Bug reports, documentation, benchmarks, new framework adapters, and more creative Memory Hub use cases are all welcome.
 
 ---
+
 ## Roadmap
 
 Current release is **v2.0.0**. Next up (**v2.0.1**): zero-config cold start, faster Wiki generation, user/team custom prompts, Skill export, and Codex (IDE Plan mode) support.
@@ -316,6 +328,7 @@ Current release is **v2.0.0**. Next up (**v2.0.1**): zero-config cold start, fas
 👉 See the full plan in [**ROADMAP.md**](./ROADMAP.md) (Chinese: [ROADMAP_CN.md](./ROADMAP_CN.md)).
 
 ---
+
 ## Acknowledgements
 
 TencentDB Agent Memory stands on the shoulders of the open-source community:
@@ -327,6 +340,7 @@ TencentDB Agent Memory stands on the shoulders of the open-source community:
 We are grateful to the authors and contributors of these projects.
 
 ---
+
 ## Community & Contributing
 
 We welcome contributions of all kinds — bug reports, feature suggestions, documentation fixes, benchmark reproductions, ecosystem integrations, or pull requests. Agent memory is far from settled, and we hope to build it together with the community.
@@ -359,7 +373,6 @@ We welcome contributions of all kinds — bug reports, feature suggestions, docu
 </a>
 
 </div>
-
 
 <table width="100%">
   <tr>

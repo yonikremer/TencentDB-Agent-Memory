@@ -43,7 +43,7 @@ by design.
 ## 2. Where every credential lives
 
 | Secret | Where | Used by | Notes |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `TDAI_USER_KEY` (`sk-mem-…`) | `~/.bashrc` (env) → read by pi-plugin at load | Pi → proxy auth | The **user's** API key from the panel (not admin). One per client. |
 | Lunaroute LLM key (`lr_…`) | `deploy/global-images/.env` (`PROXY_UPSTREAM_API_KEY`) | proxy → Lunaroute | The **real** LLM key. Only the proxy sees it. |
 | `MEMORY_CORE_GATEWAY_API_KEY` | `deploy/global-images/.env` (set to `local`) | proxy → memory-core internal calls | Local zero-config; not a real secret locally. |
@@ -68,7 +68,7 @@ export TDAI_MODEL="glm-5.2-vision"              # must match a proxy-forwarded m
 ```
 
 | Var | Required | What it does |
-|---|---|---|
+| --- | --- | --- |
 | `TDAI_USER_KEY` | **yes** | `Authorization: Bearer` for the proxy; identifies the user |
 | `TDAI_TEAM_ID` | **yes** | `x-team-id`; the workspace |
 | `TDAI_AGENT_ID` | **yes** | `x-agent-id`; the agent identity/memory to load |
@@ -86,7 +86,7 @@ export TDAI_MODEL="glm-5.2-vision"              # must match a proxy-forwarded m
 ## 4. Containers & ports
 
 | Container | Image | Port | Role |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `tdai-proxy` | `tdai-proxy:pi-dogfood` (locally built) | 8096 | The proxy Pi talks to. Session-init, injection, L0 capture. |
 | `tdai-memory-core` | `agentmemory/memory-core:latest` | 8420 | Kernel: auth, meta (teams/agents/tasks), L1/L2/L3, search. |
 | `tdai-memory-hub` | `agentmemory/memory-hub:latest` | 8125, 8424 | Session-init control plane + knowledge extraction. |
@@ -114,12 +114,14 @@ docker logs tdai-proxy --since 90s 2>&1 | grep "$SID" \
 ```
 
 **Pass criteria** (all must appear):
+
 - `preset hit team=… agent=… task=- → register directly` (or `task=<id>` if you sent one)
 - `→ initialized agent=…`
 - `hasAgentDetail=true` (injection ENABLED — this is the key one)
 - `tdai-recorder:write-l0 {…msgs:1}` (L0 captured)
 
 **Fail signatures:**
+
 - `skipping all injection` → session bypassed (was the PR #1129 bug; should be gone)
 - `fallback to form` / `pending_asset_confirm` → preset mismatch (unknown team/agent, or pre-#1131 task gate)
 - `state lost but conversation has history, skipping init` → a session that was in flight when the proxy restarted; by design, start a fresh session instead
@@ -162,7 +164,7 @@ Every turn the proxy runs `getOrRecover()` then `handleSessionInit()`. The
 logs tell you which path:
 
 | Log line | Meaning | Memory? |
-|---|---|---|
+| --- | --- | --- |
 | `L1 hit (terminal)` | cached, already initialized | ✅ injects |
 | `L2a hit` | recovered from storage after a restart | ✅ injects |
 | `preset identity present → defer to handleSessionInit` | headers carry identity; PR #1129 fix | ✅ → registers |
@@ -224,10 +226,19 @@ gateway, check `POST /v3/meta/groupy/status` → `healthy: true`. Read/query
   `team_id='default'` / `agent_id='default'` — no panel entity has those
   IDs, so invisible. Re-point when setup is complete.
 
+- **Fork ops deltas (yonikremer):** API is v3-only (no dual-mount fallback); storage is
+  SQLite-only (no TCVDB); embedding misconfig/failure surfaces as **503** (never silent);
+  health reports LLM/embedding availability + last error; full list in
+  `docs/fork-differences.md`.
+- **Wiki ingest needs docling for office PDFs:** compose starts `docling-serve` (`DOCLING_HOST_PORT`,
+  default 5001); standalone KS needs `KNOWLEDGE_DOCLING_URL` or pdf/docx/pptx/xlsx conversions fail
+  their probe. `KNOWLEDGE_AUTH_TOKEN` must match between KS and Panel or `/v3/internal/*`
+  auto-provision 401s.
+
 ## 10. Branches & PRs (as of 2026-08-22)
 
 | PR | Branch | Base | What |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | #1126 | `feat/pi-adapter-pr` | `feat/server_team` | First-class Pi agent adapter (plugin + proxy profile + docs) |
 | #1129 | `fix/session-recover-preset-identity` | `feat/server_team` | Header-identity agents get memory on a cache miss |
 | #1131 | `feat/task-optional-memory` | `feat/server_team` | Task-optional memory — register from team+agent |
@@ -279,7 +290,7 @@ harness's tools and can't fire anywhere else.
 ### Side by side
 
 | | TDAI Skill asset | Pi skill |
-|---|---|---|
+| --- | --- | --- |
 | Lives in | memory-core DB, bound to an agent's loadout | a `SKILL.md` file in a git repo |
 | Activated by | recall (vector/keyword) → injected as system-prompt text at session init | trigger matching in the harness (`triggers:` + description) |
 | Nature | remembered knowledge / how-to playbook | active behavioral workflow that drives tool calls |
