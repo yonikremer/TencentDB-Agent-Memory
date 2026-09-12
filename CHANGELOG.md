@@ -9,6 +9,37 @@ Cover all open-source modules in the repository: `MemoryCore` / `MemoryPanel` / 
 
 ---
 
+## [Unreleased — yonikremer fork]
+
+Divergence from upstream `feat/server_team` at `2ee2239`. Details: [`docs/fork-differences.md`](./docs/fork-differences.md).
+
+### Added
+
+- Retrieval-augmented wiki ingest (on by default; `KNOWLEDGE_WIKI_RETRIEVAL_*` knobs)
+- Groupy org-hierarchy sync (off by default; `GROUPY_*` env; `POST /v3/meta/groupy/status`)
+- Panel dark mode (header + login toggle, system default, persisted)
+- Deep-linkable panel navigation (browser-history URLs, real 404s)
+- Dependency health reporting (LLM/embedding availability + last error)
+- Research-team setup guide (`docs/research-team-setup.md`: 2-key split, sharing model, verify blocks)
+- Windows dev launchers (`MemoryKnowledge/dev-start.local.mts`, `mcp-start.local.mts`)
+
+### Changed
+
+- API consolidated on **v3** (v1/v2 routes, SDKs, transports deleted; offload at `/v3/offload/*`)
+- Storage is **SQLite-only** (TCVDB deleted; legacy config degrades with warning)
+- Single identity plane (`x-tdai-user-key` verified in-process; Knowledge via Core `auth/verify` fail-closed; unlimited keys)
+- Embedding failure returns **503**, never silent success
+- Whole repo in English (UI, prompts, CLI, docs, configs; tooling in `scripts/zh-en/`)
+- Cross-platform path handling (Windows-safe; hardened traversal guards)
+- SDK parity: 12 cross-SDK bugs fixed (py 95 / ts 133 coverage suites)
+- `secret-scan.sh` renamed `secret-leak-check.sh`; `better-sqlite3` to `^13.0.3`
+
+### Fixed
+
+- Wiki raw write creates parent dirs (nested paths no longer `ENOENT`)
+- Knowledge self-start guard (port `:8421` binds under `tsx`)
+- Wiki `resolveRawPath`/page refs use path separators (raw writes work on Windows)
+
 ## [2.0.1] — 2026-08-25
 
 ### 🚀 Support more Agent clients

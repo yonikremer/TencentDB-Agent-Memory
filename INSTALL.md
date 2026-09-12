@@ -10,6 +10,11 @@ This document covers three installation modes:
 2. **Memory Hub only**: lightweight deploy when Memory Core is already running.
 3. **Using Proxy with Claude Code**: point a coding agent at the proxy.
 
+> **Fork notes (yonikremer):** API is **v3-only** (no `/v1`/`/v2` fallback — point clients at `/v3`);
+> storage is **SQLite-only** (no TCVDB to provision; legacy `tcvdb` config is ignored with a warning);
+> paths are Windows-safe. Full divergence list: [`docs/fork-differences.md`](./docs/fork-differences.md).
+> Team onboarding (multi-user keys, sharing model): [`docs/research-team-setup.md`](./docs/research-team-setup.md).
+
 ---
 
 ## Full three-in-one stack: Memory Core + Memory Hub + Proxy (recommended)
@@ -74,7 +79,7 @@ org structure in the panel and (b) pick them from within an agent session.
 > **⚠️ This section uses Claude Code as an example.** If you're using a different agent, jump to its doc directly:
 >
 > | Agent | Docs |
-> |-------|------|
+> | ------- | ------ |
 > | CodeBuddy | [`agents/codebuddy/`](./agents/codebuddy/) |
 > | WorkBuddy | [`agents/workbuddy/`](./agents/workbuddy/) |
 > | Codex | [`agents/codex/`](./agents/codex/) |
@@ -277,7 +282,7 @@ Open [http://localhost:8125](http://localhost:8125).
 The Proxy supports 9 agent clients. **Full setup instructions, adaptation details, and FAQs** for each agent are in the [`agents/`](./agents/) directory:
 
 | Agent | Config method | Docs |
-|-------|---------------|------|
+| ------- | --------------- | ------ |
 | **Claude Code** | env vars or `~/.claude/settings.json` | [`agents/claude-code/`](./agents/claude-code/) |
 | **CodeBuddy** | `~/.codebuddy/models.json` | [`agents/codebuddy/`](./agents/codebuddy/) |
 | **WorkBuddy** | `~/.workbuddy/models.json` | [`agents/workbuddy/`](./agents/workbuddy/) |
@@ -323,7 +328,7 @@ http://<proxy-host>:<port>/pi/<spaceId>/v1
 Injected automatically by the `pi-plugin` extension:
 
 | Header | Source |
-|---|---|
+| --- | --- |
 | `Authorization: Bearer` | `TDAI_USER_KEY` (the user's API key, not the admin/gateway key) |
 | `x-team-id` / `x-agent-id` | env vars (static per host) |
 | `x-task-id` | `TDAI_TASK_ID` — **optional**. Omit for broad recall across the agent's memories; set to narrow recall to a task. A stale/unknown `task_id` is dropped (not a hard mismatch), so it never blocks registration. (See [`Known limitation: x-task-id`](#known-limitation-x-task-id) for the header preselect agents that still require it.) |
