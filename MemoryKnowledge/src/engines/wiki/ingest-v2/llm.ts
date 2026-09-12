@@ -203,7 +203,8 @@ export function createLlmClient(config: NormalizedLlmConfig): LlmClient {
                         }
                         return text;
                   } catch (err) {
-                        const message = err instanceof Error ? err.message : String(err);
+                        const message =
+                              err instanceof Error ? err.message : String(err);
                         log.error(`LLM call failed [${label}]`, {
                               ms: Date.now() - startMs,
                               error: message,
