@@ -40,14 +40,13 @@ This repo is a fork of [Tencent/TencentDB-Agent-Memory](https://github.com/Tence
 | **Org sync** | Manual teams/memberships only | **groupy org-hierarchy sync** — HR structure mirrored into teams nightly (env-gated, off by default); share any asset to any org node via Panel/API; see [setup §7](./docs/research-team-setup.md#7-org-hierarchy-sync-groupy-optional) |
 | **API** | v1/v2/v3 routes side by side | **v3-only** — v1/v2 server routes, SDKs, and transports deleted; offload at `/v3/offload/*`; no dual-mount fallback |
 | **Storage** | SQLite or Tencent Vector DB | **SQLite-only** — TCVDB store/client/modules deleted; legacy `tcvdb` config degrades to SQLite with a warning; local BM25 + FTS5 recall |
-| **Auth** | Mixed per-plane checks | **Single identity plane** — `x-tdai-user-key` verified in-process everywhere; Knowledge verifies via Core `auth/verify` fail-closed; unlimited user keys |
+| **Auth** | Mixed per-plane checks | **Hardened single identity plane** — `x-tdai-user-key` verified in-process on every data plane (verified `user_id` overrides claims); Knowledge verifies via Core `auth/verify` fail-closed (`KNOWLEDGE_AUTH_DISABLED` bypass removed); skill `space_id` 403s, Meta read-path authz + 404 anti-oracle, Panel S2S callback secrets, Proxy SSRF guard, fail-closed callbacks, default-deny 404s, allowlist + `v3-read-guards` tests; unlimited user keys; `KNOWLEDGE_AUTH_TOKEN` service bearer for `/v3/internal/*` Panel automation |
 | **Health** | Basic liveness | **Dependency health** — LLM/embedding availability + last error; embedding failure returns 503, never silent success |
 | **Panel nav** | Client-side state only | **Deep-linkable URLs** — browser-history routing, canonical asset URLs, real 404s |
 | **SDKs** | Per-language drift | **Parity pass** — 12 cross-SDK bugs fixed; py 95 / ts 133 coverage suites |
 | **Paths** | Linux assumptions | **Windows-safe** — `node:os`/`node:path` helpers, hardened traversal guards, 28 cross-platform tests |
 | **Setup** | Generic install | **Research-team guide** — 2-key split, sharing model, all-curl-tested team/wiki/skill commands + verify blocks; see [`docs/research-team-setup.md`](./docs/research-team-setup.md) |
-
-| **Wiki formats** | Markdown/text only | **Multi-format ingest** — pdf/docx/pptx/xlsx via docling sidecar, doc/xls/msg/vsdx/txt/csv/html/eml/md in-process, no LibreOffice |
+| **Wiki formats** | Markdown/text only | **Multi-format ingest** — pdf/docx/pptx/xlsx via docling-serve sidecar (`KNOWLEDGE_DOCLING_URL`, compose-bundled), doc/xls/msg/vsdx/txt/csv/html/eml/md in-process pure-JS, no LibreOffice; one file renders to one indexed markdown with source-link + quotas (`CONTEXT.md` glossary) |
 | **KS control** | Manual LLM binding | **Service bearer + fail-fast** — `KNOWLEDGE_AUTH_TOKEN` unlocks `/v3/internal/*` for Panel auto-provision; actionable error when the LLM endpoint is unconfigured |
 
 Full categorized list (env vars, routes, behaviors, verify commands): [`docs/fork-differences.md`](./docs/fork-differences.md). Chinese `*_CN.md` docs are frozen upstream snapshots — this fork documents in English only.
